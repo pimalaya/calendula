@@ -1,0 +1,69 @@
+[package]
+name = "calendula"
+description = "CLI to manage calendars"
+version = "0.1.0"
+authors = ["soywod <clement.douin@posteo.net>"]
+edition = "2021"
+license = "AGPL-3.0-only"
+categories = ["command-line-utilities"]
+keywords = ["cli", "contact", "calendar", "caldav", "webdav"]
+homepage = "https://pimalaya.org"
+documentation = "https://github.com/pimalaya/calendula"
+repository = "https://github.com/pimalaya/calendula"
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = ["caldav", "vdir", "command", "rustls-ring"]
+
+# Caldav support without TLS (blocking)
+#
+caldav = ["dep:io-stream", "dep:http", "dep:secrecy", "io-calendar/caldav"]
+
+# TLS
+#
+native-tls = ["pimalaya-toolbox/native-tls"]
+rustls-aws = ["pimalaya-toolbox/rustls-aws"]
+rustls-ring = ["pimalaya-toolbox/rustls-ring"]
+
+# Vdir support (blocking)
+# See <https://vdirsyncer.pimutils.org/en/stable/vdir.html>
+#
+vdir = ["dep:io-fs", "io-calendar/vdir"]
+
+command = ["pimalaya-toolbox/command"]
+keyring = ["pimalaya-toolbox/keyring"]
+
+# Wizard to help you configure accounts interactively
+# WIP: not ready, do not use!
+#
+# wizard = []
+
+# Bring external libs to the build
+#
+vendored = ["pimalaya-toolbox/vendored"]
+
+[build-dependencies]
+pimalaya-toolbox = { version = "0.0.2", default-features = false, features = ["build"] }
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.4", features = ["derive", "wrap_help"] }
+clap_complete = "4.4"
+clap_mangen = "0.2"
+comfy-table = "7.1"
+crossterm = { version = "0.29", features = ["serde"] }
+env_logger = "0.11"
+http = { version = "1", optional = true }
+io-calendar = { version = "0.0.1", default-features = false }
+io-fs = { version = "0.0.1", default-features = false, features = ["std"], optional = true }
+io-stream = { version = "0.0.2", default-features = false, features = ["std"], optional = true }
+log = "0.4"
+pimalaya-toolbox = { version = "0.0.2", default-features = false, features = ["config", "prompt", "secret", "stream", "terminal"] }
+secrecy = { version = "0.10", features = ["serde"], optional = true }
+serde = { version = "1", features = ["derive"] }
+
+[patch.crates-io]
+io-fs.path = "../fs"
+io-calendar.path = "../calendar"

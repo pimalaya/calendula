@@ -1,0 +1,78 @@
+################################################################
+# Documented configuration sample                              #
+################################################################
+
+[accounts.example]
+
+# When the `--account` argument is missing, use this account as the
+# default one.
+#
+default = true
+
+################################################################
+# Vdir section                                                 #
+################################################################
+#
+# The Vdir addressbook home directory, which should contain all your
+# addressbooks.
+#
+vdir.home-dir = "/tmp/posteo"
+
+################################################################
+# Caldav section                                              #
+################################################################
+#
+# Configuration of addressbooks relying on the Caldav protocol, as
+# defined in [RFC6352].
+#
+# [RFC6352]: https://datatracker.ietf.org/doc/html/rfc6352
+
+# There is 3 ways to find a Caldav addressbook home URI:
+#
+# 1. By using HTTP discovery, as defined in the Well Known RFC8615
+# 2. By using the root Caldav server URI
+# 3. By using directy the Caldav addressbook home set URI
+#
+# The first method is the slowest because it requires a couple of HTTP
+# requests to get the addressbook home URI, but it the safest because
+# the URI should never change.
+#
+# The third method is the fastest because it requires only one single
+# HTTP request, but it is the least safe because URI can change
+# anytime.
+#
+# The second method can be a good compromise between speed and safety.
+
+# To discover the Caldav addressbook home URI, only the host name is
+# required.
+#
+caldav.discover.host = "example.org" 
+#caldav.discover.port = 443
+#caldav.discover.scheme = "https"
+
+# The root Caldav server URI, which should contain all the users'
+# addressbooks.
+#
+#caldav.server-uri = "https://caldav.example.org"
+
+# The Caldav addressbook home URI, which should contain all your
+# addressbooks.
+#
+#caldav.home-uri = "https://caldav.example.org/principals"
+
+# The plain authentication method (not safe).
+#
+#caldav.auth = "plain"
+
+# The Basic access authentication method.
+#
+caldav.auth.basic.username = "username"
+caldav.auth.basic.password.command = ["pass", "show", "example"]
+#caldav.auth.basic.password.keyring = "example-basic"
+#caldav.auth.basic.password.raw = "password"
+
+# The Bearer token authorization method, mainly for OAuth 2.0 usage.
+#
+#caldav.auth.bearer.command = ["ortie", "token", "show"]
+#caldav.auth.bearer.keyring = "example-bearer" 
+#caldav.auth.bearer.raw = "oauth2-token" 
