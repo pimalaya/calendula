@@ -40,7 +40,7 @@ pub struct ListCalendarsTableConfig {
 
 impl ListCalendarsTableConfig {
     pub fn preset(&self) -> &str {
-        self.preset.as_deref().unwrap_or(presets::ASCII_MARKDOWN)
+        self.preset.as_deref().unwrap_or(presets::UTF8_FULL)
     }
 
     pub fn id_color(&self) -> comfy_table::Color {
@@ -48,11 +48,11 @@ impl ListCalendarsTableConfig {
     }
 
     pub fn name_color(&self) -> comfy_table::Color {
-        map_color(self.name_color.unwrap_or(Color::Reset))
+        map_color(self.name_color.unwrap_or(Color::Green))
     }
 
     pub fn desc_color(&self) -> comfy_table::Color {
-        map_color(self.name_color.unwrap_or(Color::Green))
+        map_color(self.desc_color.unwrap_or(Color::Reset))
     }
 }
 

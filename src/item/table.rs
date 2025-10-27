@@ -16,11 +16,11 @@
 // License along with this program. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use std::{collections::HashSet, fmt};
+use std::{borrow::Cow, collections::HashSet, fmt};
 
 use comfy_table::{presets, Cell, ContentArrangement, Row, Table};
 use crossterm::style::Color;
-use io_calendar::item::CalendarItem;
+use io_calendar::item::{CalendarItem, ICalendarProperty, ICalendarValue};
 use serde::{ser::Serializer, Deserialize, Serialize};
 
 use crate::table::map_color;
@@ -30,7 +30,9 @@ use crate::table::map_color;
 pub struct ListItemsTableConfig {
     pub preset: Option<String>,
     pub id_color: Option<Color>,
-    pub version_color: Option<Color>,
+    pub desc_color: Option<Color>,
+    pub components_color: Option<Color>,
+    pub date_color: Option<Color>,
     pub properties: Option<Vec<String>>,
 }
 
@@ -43,8 +45,16 @@ impl ListItemsTableConfig {
         map_color(self.id_color.unwrap_or(Color::Red))
     }
 
+    pub fn desc_color(&self) -> comfy_table::Color {
+        map_color(self.id_color.unwrap_or(Color::Green))
+    }
+
     pub fn components_color(&self) -> comfy_table::Color {
-        map_color(self.version_color.unwrap_or(Color::Blue))
+        map_color(self.components_color.unwrap_or(Color::Blue))
+    }
+
+    pub fn date_color(&self) -> comfy_table::Color {
+        map_color(self.components_color.unwrap_or(Color::Yellow))
     }
 }
 
@@ -70,8 +80,18 @@ impl ItemsTable {
         self
     }
 
-    pub fn with_some_version_color(mut self, color: Option<Color>) -> Self {
-        self.config.version_color = color;
+    pub fn with_some_desc_color(mut self, color: Option<Color>) -> Self {
+        self.config.desc_color = color;
+        self
+    }
+
+    pub fn with_some_components_color(mut self, color: Option<Color>) -> Self {
+        self.config.components_color = color;
+        self
+    }
+
+    pub fn with_some_date_color(mut self, color: Option<Color>) -> Self {
+        self.config.date_color = color;
         self
     }
 }
@@ -80,13 +100,47 @@ impl fmt::Display for ItemsTable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut table = Table::new();
 
-        let headers = vec![String::from("ID"), String::from("COMPONENTS")];
+        let headers = vec![
+            String::from("ID"),
+            String::from("DESC"),
+            String::from("COMPONENTS"),
+            String::from("DATE"),
+        ];
+
+        let mut items: Vec<_> = self.items.iter().collect();
+
+        items.sort_by(|a, b| {
+            let mut dta = None;
+            let mut dtb = None;
+
+            for component in a.components() {
+                if let Some(prop) = component.property(&ICalendarProperty::Dtstamp) {
+                    for value in &prop.values {
+                        if let ICalendarValue::PartialDateTime(pdt) = value {
+                            dta = Some(pdt.to_date_time_with_tz(Default::default()).unwrap());
+                        }
+                    }
+                }
+            }
+
+            for component in b.components() {
+                if let Some(prop) = component.property(&ICalendarProperty::Dtstamp) {
+                    for value in &prop.values {
+                        if let ICalendarValue::PartialDateTime(pdt) = value {
+                            dtb = Some(pdt.to_date_time_with_tz(Default::default()).unwrap());
+                        }
+                    }
+                }
+            }
+
+            dtb.cmp(&dta)
+        });
 
         table
             .load_preset(self.config.preset())
             .set_content_arrangement(ContentArrangement::DynamicFullWidth)
             .set_header(Row::from(headers))
-            .add_rows(self.items.iter().map(|item| {
+            .add_rows(items.iter().map(|item| {
                 let mut row = Row::new();
                 // row.max_height(1);
 
@@ -95,13 +149,50 @@ impl fmt::Display for ItemsTable {
                 let mut glue = "";
                 let mut types = String::new();
 
+                let mut summary = None;
+                let mut desc = None;
+                let mut dt = None;
+
                 for component in item.components() {
+                    if let Some(prop) = component.property(&ICalendarProperty::Summary) {
+                        for value in &prop.values {
+                            if let ICalendarValue::Text(value) = value {
+                                summary = Some(Cow::Borrowed(value));
+                            }
+                        }
+                    }
+
+                    if let Some(prop) = component.property(&ICalendarProperty::Description) {
+                        for value in &prop.values {
+                            if let ICalendarValue::Text(value) = value {
+                                desc = Some(Cow::Borrowed(value));
+                            }
+                        }
+                    }
+
+                    if let Some(prop) = component.property(&ICalendarProperty::Dtstamp) {
+                        for value in &prop.values {
+                            if let ICalendarValue::PartialDateTime(pdt) = value {
+                                dt = Some(
+                                    pdt.to_date_time_with_tz(Default::default())
+                                        .unwrap()
+                                        .to_rfc3339()
+                                        .to_string(),
+                                );
+                            }
+                        }
+                    }
+
                     types.push_str(glue);
                     types.push_str(component.component_type.as_str());
                     glue = ", ";
                 }
 
+                let summary = summary.or(desc).unwrap_or_default();
+
+                row.add_cell(Cell::new(&summary).fg(self.config.desc_color()));
                 row.add_cell(Cell::new(&types).fg(self.config.components_color()));
+                row.add_cell(Cell::new(&dt.unwrap_or_default()).fg(self.config.date_color()));
 
                 row
             }));
