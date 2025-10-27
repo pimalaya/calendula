@@ -31,8 +31,8 @@ use crate::{account::Account, client::Client};
 
 /// Create a new item.
 ///
-/// This command allows you to add a new vItem to the given
-/// addressbook.
+/// This command allows you to add a new iCalendar to the given
+/// calendar.
 #[derive(Debug, Parser)]
 pub struct CreateItemCommand {
     /// The identifier of the calendar where the iCalendar should be
@@ -46,8 +46,8 @@ impl CreateItemCommand {
         let mut client = Client::new(&account)?;
 
         let uid = CalendarItem::new_uuid();
-        let path = temp_dir().join(format!("{uid}.vcf"));
-        let tpl = format!(include_str!("./create.vcf"), uid);
+        let path = temp_dir().join(format!("{uid}.ics"));
+        let tpl = include_str!("./create.ics");
         fs::write(&path, tpl)?;
 
         let args = env::var("EDITOR")?;
@@ -62,7 +62,7 @@ impl CreateItemCommand {
 
         if !edition.success() {
             let code = edition.code();
-            bail!("error while editing vItem: error code {code:?}");
+            bail!("error while editing iCalendar: error code {code:?}");
         }
 
         let content = fs::read_to_string(&path)?

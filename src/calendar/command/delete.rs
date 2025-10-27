@@ -42,7 +42,7 @@ impl DeleteCalendarCommand {
     pub fn execute(self, printer: &mut impl Printer, account: Account) -> Result<()> {
         if !self.yes {
             let confirm = "Do you really want to delete this calendar";
-            let confirm = format!("{confirm}? All contacts will be definitely deleted.");
+            let confirm = format!("{confirm}? All calendar items will be definitely deleted.");
 
             if !prompt::bool(confirm, false)? {
                 exit(0);

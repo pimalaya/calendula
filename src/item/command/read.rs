@@ -24,11 +24,11 @@ use crate::{account::Account, client::Client};
 
 /// Read the content of a item.
 ///
-/// This command allows you to read the content of a vItem, from the
-/// given addressbook.
+/// This command allows you to read the content of an iCalendar, from
+/// the given calendar.
 #[derive(Debug, Parser)]
 pub struct ReadItemCommand {
-    /// The identifier of the addressbook where the vItem should be
+    /// The identifier of the calendar where the iCalendar should be
     /// read from.
     #[arg(name = "CALENDAR-ID")]
     pub calendar_id: String,

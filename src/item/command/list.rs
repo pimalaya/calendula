@@ -24,10 +24,10 @@ use crate::{account::Account, client::Client, item::table::ItemsTable};
 
 /// List all items.
 ///
-/// This command allows you to list vItems from a given addressbook.
+/// This command allows you to list iCalendars from a given calendar.
 #[derive(Debug, Parser)]
 pub struct ListItemsCommand {
-    /// The identifier of the Caldav addressbook to list vItems from.
+    /// The identifier of the CalDAV calendar to list iCalendars from.
     #[arg(name = "CALENDAR-ID")]
     pub calendar_id: String,
 }

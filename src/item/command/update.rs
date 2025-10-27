@@ -31,15 +31,15 @@ use crate::{account::Account, client::Client};
 
 /// Update a item.
 ///
-/// This command allows you to update a vItem from an addressbook.
+/// This command allows you to update a iCalendar from an calendar.
 #[derive(Debug, Parser)]
 pub struct UpdateItemCommand {
-    /// The identifier of the addressbook where the iCal should be
+    /// The identifier of the calendar where the iCalendar should be
     /// updated from.
     #[arg(name = "CALENDAR-ID")]
     pub calendar_id: String,
 
-    /// The identifier of the iCal to update.
+    /// The identifier of the iCalendar to update.
     #[arg(name = "ITEM-ID")]
     pub item_id: String,
 }
@@ -65,7 +65,7 @@ impl UpdateItemCommand {
 
         if !edition.success() {
             let code = edition.code();
-            bail!("error while editing vItem: error code {code:?}");
+            bail!("error while editing iCalendar: error code {code:?}");
         }
 
         let content = fs::read_to_string(&path)?
@@ -78,7 +78,6 @@ impl UpdateItemCommand {
             ical: CalendarItem::parse(content).context("cannot parse iCal")?,
         };
 
-        println!("pre update");
         client.update_item(item)?;
 
         printer.out("Item successfully updated")

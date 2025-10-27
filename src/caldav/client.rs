@@ -268,7 +268,9 @@ impl<'a> CaldavClient<'a> {
         loop {
             match create.resume(arg.take()) {
                 SendResult::Ok(_) => break Ok(()),
-                SendResult::Err(err) => return Err(anyhow!(err).context("Delete calendar error")),
+                SendResult::Err(err) => {
+                    return Err(anyhow!(err).context("Create calendar item error"))
+                }
                 SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
             }
         }
@@ -281,7 +283,9 @@ impl<'a> CaldavClient<'a> {
         loop {
             match list.resume(arg.take()) {
                 SendResult::Ok(ok) => break Ok(ok.body),
-                SendResult::Err(err) => return Err(anyhow!(err).context("Delete calendar error")),
+                SendResult::Err(err) => {
+                    return Err(anyhow!(err).context("List calendar items error"))
+                }
                 SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
             }
         }
@@ -298,7 +302,9 @@ impl<'a> CaldavClient<'a> {
         loop {
             match read.resume(arg.take()) {
                 SendResult::Ok(ok) => break Ok(ok.body),
-                SendResult::Err(err) => return Err(anyhow!(err).context("Delete calendar error")),
+                SendResult::Err(err) => {
+                    return Err(anyhow!(err).context("Read calendar item error"))
+                }
                 SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
             }
         }
@@ -311,7 +317,9 @@ impl<'a> CaldavClient<'a> {
         loop {
             match update.resume(arg.take()) {
                 SendResult::Ok(_) => break Ok(()),
-                SendResult::Err(err) => return Err(anyhow!(err).context("Delete calendar error")),
+                SendResult::Err(err) => {
+                    return Err(anyhow!(err).context("Update calendar item error"))
+                }
                 SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
             }
         }
@@ -328,7 +336,9 @@ impl<'a> CaldavClient<'a> {
         loop {
             match delete.resume(arg.take()) {
                 SendResult::Ok(_) => break Ok(()),
-                SendResult::Err(err) => return Err(anyhow!(err).context("Delete calendar error")),
+                SendResult::Err(err) => {
+                    return Err(anyhow!(err).context("Delete calendar item error"))
+                }
                 SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
             }
         }

@@ -27,17 +27,17 @@ use pimalaya_toolbox::terminal::{
 
 use crate::{account::Account, client::Client};
 
-/// Delete a item.
+/// Delete a calendar item.
 ///
-/// This command allows you to delete a vItem from an addressbook.
+/// This command allows you to delete a iCalendar from a calendar.
 #[derive(Debug, Parser)]
 pub struct DeleteItemCommand {
-    /// The identifier of the addressbook where the vItem should be
+    /// The identifier of the calendar where the iCalendar should be
     /// deleted from.
-    #[arg(name = "ADDRESSBOOK-ID")]
-    pub addressbook_id: String,
+    #[arg(name = "CALENDAR-ID")]
+    pub calendar_id: String,
 
-    /// The identifier of the vItem to delete.
+    /// The identifier of the iCalendar to delete.
     #[arg(name = "ITEM-ID")]
     pub id: String,
 
@@ -48,7 +48,7 @@ pub struct DeleteItemCommand {
 impl DeleteItemCommand {
     pub fn execute(self, printer: &mut impl Printer, account: Account) -> Result<()> {
         if !self.yes {
-            let confirm = "Do you really want to delete this item?";
+            let confirm = "Do you really want to delete this calendar item?";
 
             if !prompt::bool(confirm, false)? {
                 process::exit(0);
@@ -56,7 +56,7 @@ impl DeleteItemCommand {
         };
 
         let mut client = Client::new(&account)?;
-        client.delete_item(self.addressbook_id, self.id)?;
+        client.delete_item(self.calendar_id, self.id)?;
         printer.out(Message::new("Item successfully deleted"))
     }
 }

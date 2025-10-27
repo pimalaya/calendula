@@ -13,29 +13,29 @@ default = true
 # Vdir section                                                 #
 ################################################################
 #
-# The Vdir addressbook home directory, which should contain all your
-# addressbooks.
+# The Vdir calendar home directory, which should contain all your
+# calendars.
 #
 vdir.home-dir = "/tmp/posteo"
 
 ################################################################
-# Caldav section                                              #
+# CalDAV section                                              #
 ################################################################
 #
-# Configuration of addressbooks relying on the Caldav protocol, as
-# defined in [RFC6352].
+# Configuration of calendars relying on the CalDAV protocol, as
+# defined in [RFC4791].
 #
-# [RFC6352]: https://datatracker.ietf.org/doc/html/rfc6352
+# [RFC4791]: https://datatracker.ietf.org/doc/html/rfc4791
 
-# There is 3 ways to find a Caldav addressbook home URI:
+# There is 3 ways to find a CalDAV calendar home URI:
 #
 # 1. By using HTTP discovery, as defined in the Well Known RFC8615
-# 2. By using the root Caldav server URI
-# 3. By using directy the Caldav addressbook home set URI
+# 2. By using the root CalDAV server URI
+# 3. By using directy the CalDAV calendar home set URI
 #
 # The first method is the slowest because it requires a couple of HTTP
-# requests to get the addressbook home URI, but it the safest because
-# the URI should never change.
+# requests to get the calendar home URI, but it the safest because the
+# URI should never change.
 #
 # The third method is the fastest because it requires only one single
 # HTTP request, but it is the least safe because URI can change
@@ -43,20 +43,20 @@ vdir.home-dir = "/tmp/posteo"
 #
 # The second method can be a good compromise between speed and safety.
 
-# To discover the Caldav addressbook home URI, only the host name is
+# To discover the CalDAV calendar home URI, only the host name is
 # required.
 #
 caldav.discover.host = "example.org" 
 #caldav.discover.port = 443
 #caldav.discover.scheme = "https"
 
-# The root Caldav server URI, which should contain all the users'
-# addressbooks.
+# The root CalDAV server URI, which should contain all the users'
+# calendars.
 #
 #caldav.server-uri = "https://caldav.example.org"
 
-# The Caldav addressbook home URI, which should contain all your
-# addressbooks.
+# The CalDAV calendar home URI, which should contain all your
+# calendars.
 #
 #caldav.home-uri = "https://caldav.example.org/principals"
 

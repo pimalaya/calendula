@@ -1,4 +1,4 @@
-# 📇 Calendula [![Matrix](https://img.shields.io/matrix/pimalaya:matrix.org?color=success&label=chat)](https://matrix.to/#/#pimalaya:matrix.org)
+# 📅 Calendula [![Matrix](https://img.shields.io/matrix/pimalaya:matrix.org?color=success&label=chat)](https://matrix.to/#/#pimalaya:matrix.org)
 
 CLI to manage calendars
 
@@ -6,9 +6,9 @@ CLI to manage calendars
 
 - [Features](#features)
 - [Usage](#usage)
-  - [List addressbooks](#list-addressbooks)
-  - [List cards](#list-cards)
-  - [Edit card](#edit-card)
+  - [List calendars](#list-calendars)
+  - [List calendar items](#list-calendar-items)
+  - [Edit calendar item](#edit-calendar-item)
 - [Installation](#installation)
 - [Configuration](#configuration)
   - [Google](#google)
@@ -32,58 +32,79 @@ CLI to manage calendars
 
 ## Usage
 
-### List addressbooks
+### List calendars
 
 ```
-$ calendula addressbooks list
+$ calendula calendars list
 
-| ID      | NAME                | DESC | COLOR |
-|---------|---------------------|------|-------|
-| default | default addressbook |      |       |
+┌─────────┬───────────────┬──────┬───────┐
+│ ID      ┆ NAME          ┆ DESC ┆ COLOR │
+╞═════════╪═══════════════╪══════╪═══════╡
+│ default ┆ Clément DOUIN ┆      ┆       │
+└─────────┴───────────────┴──────┴───────┘
 ```
 
-### List cards
+### List calendar items
 
 ```
-$ calendula card list default
+$ calendula items list default
 
-| ID                                              | VERSION   | FN           | EMAIL                   | TEL             |
-|-------------------------------------------------|-----------|--------------|-------------------------|-----------------|
-| pimp_X3Xwu-58rVRwlbUeiptAUMyVK3HkJ45jJt3PjZaE7g | 3.0       | Forrest Gump | forrestgump@example.com | (404) 555-1212  |
-| 62196d36-65cb-4a6b-b107-f3d8dc8d8b62            | 3.0       | Jean Dupont  | jean.dupont@example.com | +1234 56789     |
+┌─────────────────────────────────────────┬──────────────────────┬─────────────────────────────────────────┬───────────────────────────┐
+│ ID                                      ┆ DESC                 ┆ COMPONENTS                              ┆ DATE                      │
+╞═════════════════════════════════════════╪══════════════════════╪═════════════════════════════════════════╪═══════════════════════════╡
+│ 289e89c0-b351-4bc3-a7a4-4ababca26161    ┆ Appeler Didier       ┆ VCALENDAR, VEVENT, VALARM, VTIMEZONE,   ┆ 2025-10-12T18:20:36+00:00 │
+│                                         ┆                      ┆ STANDARD, DAYLIGHT                      ┆                           │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
+│ 005ca92b-211f-4c7e-8c18-0a3644ec8792    ┆ Garage               ┆ VCALENDAR, VEVENT, VALARM, VTIMEZONE,   ┆ 2025-10-07T13:54:57+00:00 │
+│                                         ┆                      ┆ STANDARD, DAYLIGHT                      ┆                           │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
+│ 9045759c-1752-45e2-a9ba-d0faa72d6750    ┆ Charlie              ┆ VCALENDAR, VEVENT, VALARM, VTIMEZONE,   ┆ 2025-10-07T13:54:57+00:00 │
+│                                         ┆                      ┆ STANDARD, DAYLIGHT                      ┆                           │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
+│ 5a90ec56-d5f6-4e03-b143-3c992e472e16    ┆ Ball-trap            ┆ VCALENDAR, VEVENT, VALARM, VTIMEZONE,   ┆ 2025-10-07T13:54:57+00:00 │
+│                                         ┆                      ┆ STANDARD, DAYLIGHT                      ┆                           │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
+│ 6df73dd4-aae7-437d-8438-6f052774d77a    ┆ Garage Dacia         ┆ VCALENDAR, VEVENT, VALARM, VTIMEZONE,   ┆ 2025-10-02T09:22:05+00:00 │
+│                                         ┆                      ┆ STANDARD, DAYLIGHT                      ┆                           │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
+│ 9de2158d-15ca-447d-b7cd-5e3e432d140d    ┆ Garage               ┆ VCALENDAR, VEVENT, VALARM, VTIMEZONE,   ┆ 2025-10-02T09:22:05+00:00 │
+│                                         ┆                      ┆ STANDARD, DAYLIGHT                      ┆                           │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
+│ 942db423-edcf-4ddb-a5e5-dac5b079ab3d    ┆ Garage Fiat          ┆ VCALENDAR, VEVENT, VALARM, VTIMEZONE,   ┆ 2025-10-02T09:22:05+00:00 │
+│                                         ┆                      ┆ STANDARD, DAYLIGHT                      ┆                           │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
+│ 02405656-00a3-4242-a7c2-0e668d39ca8e    ┆ Sage femme           ┆ VCALENDAR, VEVENT, VALARM, VTIMEZONE,   ┆ 2025-09-20T13:15:59+00:00 │
+│                                         ┆                      ┆ STANDARD, DAYLIGHT                      ┆                           │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
+│ 236b94a6-ee38-4b3e-a434-a4fd24d9c987    ┆ Internet             ┆ VCALENDAR, VEVENT, VALARM, VTIMEZONE,   ┆ 2025-09-20T13:11:56+00:00 │
+│                                         ┆                      ┆ STANDARD, DAYLIGHT                      ┆                           │
+└─────────────────────────────────────────┴──────────────────────┴─────────────────────────────────────────┴───────────────────────────┘
 ```
 
-### Edit card
+### Edit calendar item
 
 ```
-$ calendula card update default 62196d36-65cb-4a6b-b107-f3d8dc8d8b62
+$ calendula item update default 62196d36-65cb-4a6b-b107-f3d8dc8d8b62
 ```
 
-You text editor opens with the content of your vCard:
+You text editor opens with the content of your iCalendar:
 
 ```
-BEGIN:VCARD
-VERSION:3.0
-N:Gump;Forrest
-FN:Forrest Gump
-ORG:Bubba Gump Shrimp Co.
-TITLE:Shrimp Man
-PHOTO;VALUE=URL;TYPE=GIF:http://www.example.com/dir_photos/my_photo.gif
-TEL;TYPE=WORK;VOICE:(111) 555-1212
-TEL;TYPE=HOME;VOICE:(404) 555-1212
-ADR;TYPE=WORK:;;100 Waters Edge;Baytown;LA;30314;United States of America
-LABEL;TYPE=WORK:100 Waters Edge\nBaytown, LA 30314\nUnited States of America
-ADR;TYPE=HOME:;;42 Plantation St.;Baytown;LA;30314;United States of America
-LABEL;TYPE=HOME:42 Plantation St.\nBaytown, LA 30314\nUnited States of America
-EMAIL;TYPE=PREF,INTERNET:forrestgump@example.com
-REV:20080424T195243Z
-END:VCARD
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//hacksw/handcal//NONSGML v1.0//EN
+BEGIN:VEVENT
+DTSTART:19970714T170000Z
+DTEND:19970715T035900Z
+SUMMARY:Fête à la Bastille
+END:VEVENT
+END:VCALENDAR
 ```
 
 Once edition done, you should see the following message:
 
 ```
-Card successfully updated
+Item successfully updated
 ```
 
 ## Installation
@@ -172,35 +193,32 @@ The wizard is not yet available (it should come soon, see [#7](https://github.co
 
 ### Google
 
-Google Contacts requires OAuth 2.0. The first step is to configure an OAuth 2.0 token manager like [Ortie](https://github.com/pimalaya/ortie#google):
+Google Calendar requires OAuth 2.0. The first step is to configure an OAuth 2.0 token manager like [Ortie](https://github.com/pimalaya/ortie#google), with the calendar scope `https://www.googleapis.com/auth/calendar`:
 
 ```toml
 caldav.auth.bearer.command = ["ortie", "token", "show"]
-caldav.discover.host = "www.googleapis.com"
-caldav.discover.method = "PROPFIND"
 ```
 
-Discovery is the recommended way to go, but it is slow. If you want faster calls you can "hardcode" the server URI and/or the home URI, at your own risk:
+Google Calendar does not propose discovery service, nor server URI. You need to directly use the following home URI:
 
 ```toml
-caldav.server-uri = "https://www.googleapis.com/caldav/v1/principals"
-caldav.home-uri = "https://www.googleapis.com/caldav/v1/principals/your.email@gmail.com/lists"
+caldav.home-uri = "https://apidata.googleusercontent.com/caldav/v2/your.email@gmail.com"
 ```
 
 ### Apple
 
-Apple Contacts does not propose discovery service, the only way is to use their server URI combined with basic authentication:
+Apple Calendars does not propose discovery service. The only way is to use their server URI combined with basic authentication:
 
 ```toml
-caldav.server-uri = "https://contacts.icloud.com"
-caldav.auth.basic.username = "your.email@example.com"
-caldav.auth.basic.password.raw = "p@$$w0rd"
+caldav.server-uri = "https://calendars.icloud.com"
+caldav.auth.basic.username = "your.email@icloud.com"
+caldav.auth.basic.password.raw = "your.password"
 ```
 
 If you check attentively the `--trace` logs, you should see the home URI. It is not recommended to use it directly, but it can make the CLI definitely faster. It should look like this:
 
 ```toml
-caldav.home-uri = "https://p156-contacts.icloud.com:443/17170244959/caldavhome/"
+caldav.home-uri = "https://p156-caldav.icloud.com:443/17170244959/calendars/"
 ```
 
 ### Microsoft
@@ -214,14 +232,14 @@ Posteo proposes a discovery service, combined with basic authentication:
 ```toml
 caldav.discover.host = "posteo.de"
 caldav.auth.basic.username = "your.email"
-caldav.auth.basic.password.raw = "p@$$w0rd"
+caldav.auth.basic.password.raw = "your.password"
 ```
 
 Discovery is the recommended way to go, but it is slow. If you want faster calls you can "hardcode" the server URI and/or the home URI, at your own risk:
 
 ```toml
 caldav.server-uri = "https://posteo.de:8843"
-caldav.home-uri = "https://posteo.de:8843/addressbooks/your.email/"
+caldav.home-uri = "https://posteo.de:8843/calendars/your.email/"
 ```
 
 ## FAQ

@@ -6,7 +6,7 @@ authors = ["soywod <clement.douin@posteo.net>"]
 edition = "2021"
 license = "AGPL-3.0-or-later"
 categories = ["command-line-utilities"]
-keywords = ["cli", "contact", "calendar", "caldav", "webdav"]
+keywords = ["cli", "calendar", "caldav", "vdir", "ical"]
 homepage = "https://pimalaya.org"
 documentation = "https://github.com/pimalaya/calendula"
 repository = "https://github.com/pimalaya/calendula"
@@ -63,7 +63,3 @@ log = "0.4"
 pimalaya-toolbox = { version = "0.0.2", default-features = false, features = ["config", "prompt", "secret", "stream", "terminal"] }
 secrecy = { version = "0.10", features = ["serde"], optional = true }
 serde = { version = "1", features = ["derive"] }
-
-[patch.crates-io]
-io-fs.path = "../fs"
-io-calendar.path = "../calendar"
