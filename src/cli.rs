@@ -32,7 +32,10 @@ use pimalaya_toolbox::{
     },
 };
 
-use crate::{calendar::command::CalendarSubcommand, config::Config, item::command::ItemSubcommand};
+use crate::{
+    calendar::command::CalendarSubcommand, config::Config, event::command::EventSubcommand,
+    item::command::ItemSubcommand,
+};
 
 #[derive(Parser, Debug)]
 #[command(name = env!("CARGO_PKG_NAME"))]
@@ -58,6 +61,8 @@ pub enum Calendula {
     Calendars(CalendarSubcommand),
     #[command(arg_required_else_help = true, subcommand)]
     Items(ItemSubcommand),
+    #[command(arg_required_else_help = true, subcommand)]
+    Events(EventSubcommand),
     #[command(arg_required_else_help = true, alias = "mans")]
     Manuals(ManualCommand),
     #[command(arg_required_else_help = true)]
@@ -78,6 +83,11 @@ impl Calendula {
                 cmd.execute(printer, account)
             }
             Self::Items(cmd) => {
+                let config = Config::from_paths_or_default(config_paths)?;
+                let (_, account) = config.get_account(account_name)?;
+                cmd.execute(printer, account)
+            }
+            Self::Events(cmd) => {
                 let config = Config::from_paths_or_default(config_paths)?;
                 let (_, account) = config.get_account(account_name)?;
                 cmd.execute(printer, account)

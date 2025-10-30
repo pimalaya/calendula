@@ -49,6 +49,7 @@ pimalaya-toolbox = { version = "0.0.2", default-features = false, features = ["b
 
 [dependencies]
 anyhow = "1"
+chrono = "0.4"
 clap = { version = "4.4", features = ["derive", "wrap_help"] }
 clap_complete = "4.4"
 clap_mangen = "0.2"
@@ -63,3 +64,6 @@ log = "0.4"
 pimalaya-toolbox = { version = "0.0.2", default-features = false, features = ["config", "prompt", "secret", "stream", "terminal"] }
 secrecy = { version = "0.10", features = ["serde"], optional = true }
 serde = { version = "1", features = ["derive"] }
+
+[patch.crates-io]
+io-calendar.git = "https://github.com/pimalaya/io-calendar"

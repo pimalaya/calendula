@@ -365,6 +365,7 @@ name = "calendula"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "clap_complete",
  "clap_mangen",
@@ -1322,8 +1323,7 @@ dependencies = [
 [[package]]
 name = "io-calendar"
 version = "0.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a21daa6c7159ae2c92e03dd005c20e6e28a33c8f0eaa22e114f3fcc369b3543d"
+source = "git+https://github.com/pimalaya/io-calendar#1adf2b30386d5950ca11b62c5a8d8a4367d2741e"
 dependencies = [
  "base64",
  "calcard",

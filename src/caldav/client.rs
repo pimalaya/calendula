@@ -42,7 +42,7 @@ use io_calendar::{
         request::set_uri_path,
     },
     calendar::Calendar,
-    item::CalendarItem,
+    item::{CalendarItem, ICalendarComponentType},
 };
 use io_stream::runtimes::std::handle;
 use pimalaya_toolbox::stream::Stream;
@@ -277,7 +277,26 @@ impl<'a> CaldavClient<'a> {
     }
 
     pub fn list_items(&mut self, calendar_id: impl AsRef<str>) -> Result<HashSet<CalendarItem>> {
-        let mut list = ListCalendarItems::new(&self.config, calendar_id);
+        let mut list = ListCalendarItems::new(&self.config, calendar_id, None);
+        let mut arg = None;
+
+        loop {
+            match list.resume(arg.take()) {
+                SendResult::Ok(ok) => break Ok(ok.body),
+                SendResult::Err(err) => {
+                    return Err(anyhow!(err).context("List calendar items error"))
+                }
+                SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
+            }
+        }
+    }
+
+    pub fn list_events(&mut self, calendar_id: impl AsRef<str>) -> Result<HashSet<CalendarItem>> {
+        let mut list = ListCalendarItems::new(
+            &self.config,
+            calendar_id,
+            Some(ICalendarComponentType::VEvent),
+        );
         let mut arg = None;
 
         loop {

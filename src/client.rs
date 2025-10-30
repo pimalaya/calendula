@@ -82,6 +82,16 @@ impl<'a> Client<'a> {
         }
     }
 
+    pub fn list_events(&mut self, calendar_id: impl AsRef<str>) -> Result<HashSet<CalendarItem>> {
+        match self {
+            #[cfg(feature = "caldav")]
+            Self::Caldav(client) => client.list_events(calendar_id),
+            #[cfg(feature = "vdir")]
+            Self::Vdir(client) => client.list_items(calendar_id),
+            Self::None => bail!("client not defined"),
+        }
+    }
+
     pub fn update_calendar(&mut self, calendar: Calendar) -> Result<()> {
         match self {
             Self::None => bail!("Missing calendar backend"),

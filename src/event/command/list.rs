@@ -16,20 +16,28 @@
 // License along with this program. If not, see
 // <https://www.gnu.org/licenses/>.
 
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-#![doc = include_str!("../README.md")]
+use anyhow::Result;
+use clap::Parser;
+use pimalaya_toolbox::terminal::printer::Printer;
 
-pub mod account;
-#[cfg(feature = "caldav")]
-pub mod caldav;
-pub mod calendar;
-pub mod cli;
-mod client;
-pub mod config;
-pub mod event;
-pub mod item;
-pub mod table;
-#[cfg(feature = "vdir")]
-pub mod vdir;
-// #[cfg(feature = "wizard")]
-// pub mod wizard;
+use crate::{account::Account, client::Client, event::table::EventsTable};
+
+/// List all events.
+///
+/// This command allows you to list iCalendars from a given calendar.
+#[derive(Debug, Parser)]
+pub struct ListEventsCommand {
+    /// The identifier of the CalDAV calendar to list iCalendars from.
+    #[arg(name = "CALENDAR-ID")]
+    pub calendar_id: String,
+}
+
+impl ListEventsCommand {
+    pub fn execute(self, printer: &mut impl Printer, account: Account) -> Result<()> {
+        let mut client = Client::new(&account)?;
+
+        let events = client.list_events(self.calendar_id)?;
+        let table = EventsTable::from(events);
+        printer.out(table)
+    }
+}

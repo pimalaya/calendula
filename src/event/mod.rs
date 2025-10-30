@@ -16,20 +16,5 @@
 // License along with this program. If not, see
 // <https://www.gnu.org/licenses/>.
 
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-#![doc = include_str!("../README.md")]
-
-pub mod account;
-#[cfg(feature = "caldav")]
-pub mod caldav;
-pub mod calendar;
-pub mod cli;
-mod client;
-pub mod config;
-pub mod event;
-pub mod item;
+pub mod command;
 pub mod table;
-#[cfg(feature = "vdir")]
-pub mod vdir;
-// #[cfg(feature = "wizard")]
-// pub mod wizard;
