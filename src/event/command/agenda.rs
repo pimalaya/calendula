@@ -16,12 +16,20 @@
 // License along with this program. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use anyhow::Result;
-use chrono::{Datelike, Local};
-use clap::Parser;
-use pimalaya_toolbox::terminal::printer::Printer;
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    fmt,
+};
 
-use crate::account::Account;
+use anyhow::{bail, Result};
+use chrono::{Datelike, Local, NaiveDateTime};
+use clap::Parser;
+use io_calendar::item::{CalendarItem, ICalendarComponentType, ICalendarProperty, ICalendarValue};
+use pimalaya_toolbox::terminal::printer::Printer;
+use serde::{Serialize, Serializer};
+
+use crate::{account::Account, client::Client};
 
 const DAYS_IN_WEEK: usize = 7;
 const MAXDAYS: usize = 42;
@@ -35,61 +43,93 @@ const NUMBER_MISSING_DAYS: i32 = 11;
 const YDAY_AFTER_MISSING: i32 = 258;
 const DEFAULT_REFORM_YEAR: i32 = 1752;
 
-/// List all events.
+/// Display a calendar view alla cal.
 ///
-/// This command allows you to list iCalendars from a given calendar.
+/// This command allows you to display a calendar/agenda view like
+/// does the Unix cal tool.
 #[derive(Debug, Parser)]
 pub struct AgendaCommand {
-    /// The identifier of the CalDAV calendar to list iCalendars from.
+    /// The identifier of the CalDAV calendar to display agenda from.
     #[arg(name = "CALENDAR-ID")]
     calendar_id: String,
 
+    /// Show the calendar at the given date.
     #[arg(name = "DATE")]
-    date: Vec<String>,
+    date_args: Vec<String>,
 
+    /// Display single month output.
     #[arg(short = '1', long)]
     one: bool,
 
+    /// Display three months spanning the date.
     #[arg(short = '3', long)]
     three: bool,
 
+    /// Display number of months, starting from the month containing
+    /// the date.
     #[arg(short = 'n', long)]
     months: Option<u32>,
 
+    /// Display months spanning the date.
     #[arg(short = 'S', long)]
     span: bool,
 
+    /// Display Sunday as the first day of the week.
     #[arg(short = 's', long)]
     sunday: bool,
 
+    /// Display Monday as the first day of the week.
     #[arg(short = 'm', long)]
     monday: bool,
 
+    /// Use day-of-year numbering for all calendars. These are also
+    /// called ordinal days. Ordinal days range from 1 to 366. This
+    /// option does not switch from the Gregorian to the Julian
+    /// calendar system, that is controlled by the --reform option.
     #[arg(short = 'j', long)]
     julian: bool,
 
+    /// This option sets the adoption date of the Gregorian calendar
+    /// reform. Calendar dates previous to reform use the Julian
+    /// calendar system. Calendar dates after reform use the Gregorian
+    /// calendar system.
     #[arg(long)]
     reform: Option<String>,
 
+    /// Display the proleptic Gregorian calendar exclusively. This
+    /// option does not affect week numbers and the first day of the
+    /// week. See --reform below.
     #[arg(long)]
     iso: bool,
 
+    /// Display a calendar for the whole year.
     #[arg(short = 'y', long)]
     year: bool,
 
+    /// Display a calendar for the next twelve months.
     #[arg(short = 'Y', long)]
     twelve: bool,
 
+    /// Display week numbers in the calendar according to the US or
+    /// ISO-8601 format. If a number is specified, the requested week
+    /// in the desired or current year will be printed and its number
+    /// highlighted. The number may be ignored if month is also
+    /// specified.
     #[arg(short = 'w', long)]
     week: bool,
 
+    /// Display using a vertical layout (aka ncal(1) mode).
     #[arg(short = 'v', long)]
     vertical: bool,
 }
 
 impl AgendaCommand {
-    pub fn execute(self, _printer: &mut impl Printer, _account: Account) -> Result<()> {
+    pub fn execute(self, printer: &mut impl Printer, account: Account) -> Result<()> {
         let now = Local::now();
+
+        let mut client = Client::new(&account)?;
+        let all_events = client.list_events(self.calendar_id)?;
+        let events = HashMap::with_capacity(all_events.len());
 
         let mut ctl = CalControl {
             reform_year: DEFAULT_REFORM_YEAR,
@@ -111,6 +151,8 @@ impl AgendaCommand {
                 year: 0,
                 start_month: 0,
             },
+            all_events,
+            events,
         };
 
         // Reform year
@@ -154,7 +196,6 @@ impl AgendaCommand {
         ctl.julian = self.julian;
         ctl.vertical = self.vertical;
 
-        // Week numbers (ONLY affects display, not logic)
         if self.week {
             ctl.weektype = if ctl.weekstart == 1 { 0x100 } else { 0x200 };
             ctl.week_width = ctl.day_width * DAYS_IN_WEEK + WNUM_LEN - 1;
@@ -162,56 +203,47 @@ impl AgendaCommand {
             ctl.week_width = ctl.day_width * DAYS_IN_WEEK - 1;
         }
 
-        // Parse date arguments
-        #[allow(unused_assignments)]
-        let (mut req_day, mut req_month, mut req_year) = (0, 0, 0);
         let mut yflag = self.year;
         let yflag_cap = self.twelve;
 
-        match self.date.len() {
+        match self.date_args.len() {
             3 => {
                 // day month year
-                req_day = self.date[0].parse().unwrap_or(1);
-                req_month = parse_month(&self.date[1]);
-                req_year = self.date[2].parse().unwrap_or(now.year());
-                let dm = DAYS_IN_MONTH[leap_year(&ctl, req_year)][req_month];
-                if req_day > dm as i32 {
-                    eprintln!("illegal day value: use 1-{}", dm);
-                    std::process::exit(1);
+                ctl.req.day = self.date_args[0].parse().unwrap_or(1);
+                ctl.req.month = parse_month(&self.date_args[1]);
+                ctl.req.year = self.date_args[2].parse().unwrap_or(now.year());
+                let dm = DAYS_IN_MONTH[leap_year(&ctl, ctl.req.year)][ctl.req.month];
+                if ctl.req.day > dm as i32 {
+                    bail!("Illegal day value: use 1-{dm}");
                 }
-                req_day = day_in_year(&ctl, req_day, req_month, req_year);
+                ctl.req.day = day_in_year(&ctl, ctl.req.day, ctl.req.month, ctl.req.year);
             }
             2 => {
                 // month year
-                req_month = parse_month(&self.date[0]);
-                req_year = self.date[1].parse().unwrap_or(now.year());
+                ctl.req.month = parse_month(&self.date_args[0]);
+                ctl.req.year = self.date_args[1].parse().unwrap_or(now.year());
             }
             1 => {
-                // year only - show whole year
-                req_year = self.date[0].parse().unwrap_or(now.year());
-                if req_year < 1 {
-                    eprintln!("illegal year value: use positive integer");
-                    std::process::exit(1);
+                // year only: show whole year
+                ctl.req.year = self.date_args[0].parse().unwrap_or(now.year());
+                if ctl.req.year < 1 {
+                    bail!("Illegal year value: use positive integer");
                 }
-                if req_year == now.year() {
-                    req_day = now.ordinal() as i32;
+                if ctl.req.year == now.year() {
+                    ctl.req.day = now.ordinal() as i32;
                 }
-                req_month = now.month() as usize;
+                ctl.req.month = now.month() as usize;
                 if ctl.num_months == 0 {
                     yflag = true;
                 }
             }
             _ => {
                 // no arguments - current month
-                req_day = now.ordinal() as i32;
-                req_month = now.month() as usize;
-                req_year = now.year();
+                ctl.req.day = now.ordinal() as i32;
+                ctl.req.month = now.month() as usize;
+                ctl.req.year = now.year();
             }
         }
-
-        ctl.req.day = req_day;
-        ctl.req.month = req_month;
-        ctl.req.year = req_year;
 
         if yflag || yflag_cap {
             ctl.gutter_width = 3;
@@ -241,12 +273,12 @@ impl AgendaCommand {
         headers_init(&mut ctl);
 
         if yflag || yflag_cap {
-            yearly(&ctl);
+            yearly(printer, &mut ctl)
         } else {
-            monthly(&ctl);
-        }
+            monthly(printer, &mut ctl)
+        }?;
 
-        Ok(())
+        printer.out(Agenda::from(ctl.events))
     }
 }
 
@@ -266,6 +298,8 @@ struct CalControl {
     header_hint: bool,
     vertical: bool,
     req: CalRequest,
+    all_events: HashSet<CalendarItem>,
+    events: HashMap<NaiveDateTime, String>,
 }
 
 #[derive(Clone)]
@@ -490,16 +524,23 @@ fn cal_fill_month(month: &mut CalMonth, ctl: &CalControl) {
     }
 }
 
-fn center(s: &str, width: usize, sep: usize) {
+fn center(printer: &mut impl Printer, s: &str, width: usize, sep: usize) -> Result<()> {
     let len = s.len();
     let pad = if width > len { (width - len) / 2 } else { 0 };
-    print!("{}{}{}", " ".repeat(pad), s, " ".repeat(width - len - pad));
+    printer.log(" ".repeat(pad))?;
+    printer.log(s)?;
+    printer.log(" ".repeat(width - len - pad))?;
     if sep > 0 {
-        print!("{}", " ".repeat(sep));
+        printer.log(" ".repeat(sep))?;
     }
+    Ok(())
 }
 
-fn cal_output_header(months: &[CalMonth], ctl: &CalControl) {
+fn cal_output_header(
+    printer: &mut impl Printer,
+    months: &[CalMonth],
+    ctl: &CalControl,
+) -> Result<()> {
     for (i, m) in months.iter().enumerate() {
         let out = if ctl.header_hint || ctl.header_year {
             format!("{}", FULL_MONTH[m.month - 1])
@@ -507,6 +548,7 @@ fn cal_output_header(months: &[CalMonth], ctl: &CalControl) {
             format!("{} {}", FULL_MONTH[m.month - 1], m.year)
         };
         center(
+            printer,
             &out,
             ctl.week_width,
             if i < months.len() - 1 {
@@ -514,13 +556,14 @@ fn cal_output_header(months: &[CalMonth], ctl: &CalControl) {
             } else {
                 0
             },
-        );
+        )?;
     }
-    println!();
+    printer.log("\n")?;
 
     if ctl.header_hint && !ctl.header_year {
         for (i, m) in months.iter().enumerate() {
             center(
+                printer,
                 &format!("{}", m.year),
                 ctl.week_width,
                 if i < months.len() - 1 {
@@ -528,36 +571,41 @@ fn cal_output_header(months: &[CalMonth], ctl: &CalControl) {
                 } else {
                     0
                 },
-            );
+            )?;
         }
-        println!();
+        printer.log("\n")?;
     }
 
     for (i, _) in months.iter().enumerate() {
         if ctl.weektype != 0 {
             if ctl.julian {
-                print!("{}", " ".repeat(ctl.day_width - 1));
+                printer.log(" ".repeat(ctl.day_width - 1))?;
             } else {
-                print!("   ");
+                printer.log("   ")?;
             }
         }
 
         for d in 0..DAYS_IN_WEEK {
             let wd = (d + ctl.weekstart) % DAYS_IN_WEEK;
             if d > 0 {
-                print!(" ");
+                printer.log(" ")?;
             }
-            print!("{:>2}", WEEKDAYS[wd]);
+            printer.log(format!("{:>2}", WEEKDAYS[wd]))?;
         }
 
         if i < months.len() - 1 {
-            print!("{}", " ".repeat(ctl.gutter_width));
+            printer.log(" ".repeat(ctl.gutter_width))?;
         }
     }
-    println!();
+
+    printer.log("\n")
 }
 
-fn cal_output_months(months: &[CalMonth], ctl: &CalControl) {
+fn cal_output_months<'a>(
+    printer: &mut impl Printer,
+    months: &[CalMonth],
+    ctl: &mut CalControl,
+) -> Result<()> {
     let today = Local::now();
 
     for week_line in 0..(MAXDAYS / DAYS_IN_WEEK) {
@@ -573,10 +621,11 @@ fn cal_output_months(months: &[CalMonth], ctl: &CalControl) {
 
             if ctl.weektype != 0 {
                 if m.weeks[week_line] > 0 {
-                    print!("{:2}", m.weeks[week_line]);
+                    printer.log(format!("{:2}", m.weeks[week_line]))?;
                 } else {
-                    print!("  ");
+                    printer.log("  ")?;
                 }
+                printer.log(" ")?;
             }
 
             let mut skip = if ctl.weektype != 0 {
@@ -594,18 +643,101 @@ fn cal_output_months(months: &[CalMonth], ctl: &CalControl) {
                         && m.year == today.year()
                         && day == today.day() as i32;
 
+                    let (y, m, d) = if ctl.julian {
+                        // Convert julian day to actual date
+                        let mut julian_day = day;
+                        let leap = leap_year(ctl, m.year);
+                        let mut month_idx = 1;
+                        while month_idx <= 12 && julian_day > DAYS_IN_MONTH[leap][month_idx] as i32
+                        {
+                            julian_day -= DAYS_IN_MONTH[leap][month_idx] as i32;
+                            month_idx += 1;
+                        }
+                        (m.year, month_idx as u32, julian_day as u32)
+                    } else {
+                        (m.year, m.month as u32, day as u32)
+                    };
+
+                    let mut has_event = false;
+
+                    for item in &ctl.all_events {
+                        for component in item.components() {
+                            if component.component_type != ICalendarComponentType::VEvent {
+                                continue;
+                            }
+
+                            if let Some(prop) = component.property(&ICalendarProperty::Dtstart) {
+                                for value in &prop.values {
+                                    if let ICalendarValue::PartialDateTime(pdt) = value {
+                                        if pdt.year != Some(y as u16) {
+                                            continue;
+                                        }
+
+                                        if pdt.month != Some(m as u8) {
+                                            continue;
+                                        }
+
+                                        if pdt.day != Some(d as u8) {
+                                            continue;
+                                        }
+
+                                        has_event = true;
+                                        let mut summary = None;
+                                        let mut desc = None;
+
+                                        if let Some(prop) =
+                                            component.property(&ICalendarProperty::Summary)
+                                        {
+                                            for value in &prop.values {
+                                                if let ICalendarValue::Text(value) = value {
+                                                    summary = Some(Cow::Borrowed(value));
+                                                }
+                                            }
+                                        }
+
+                                        if let Some(prop) =
+                                            component.property(&ICalendarProperty::Description)
+                                        {
+                                            for value in &prop.values {
+                                                if let ICalendarValue::Text(value) = value {
+                                                    desc = Some(Cow::Borrowed(value));
+                                                }
+                                            }
+                                        }
+
+                                        let summary_or_desc =
+                                            summary.or(desc).unwrap_or_default().into_owned();
+
+                                        if let Some(dt) = pdt.to_date_time() {
+                                            ctl.events.insert(dt.date_time, summary_or_desc);
+                                        }
+
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     if reqday == day || is_today {
-                        print!(
+                        printer.log(format!(
                             "{}\x1b[7m{:width$}\x1b[0m",
                             " ".repeat(skip - if ctl.julian { 3 } else { 2 }),
                             day,
+                            width = if ctl.julian { 3 } else { 2 },
+                        ))?;
+                    } else if has_event {
+                        printer.log(format!(
+                            "{}\x1b[44m{:width$}\x1b[0m",
+                            " ".repeat(skip - if ctl.julian { 3 } else { 2 }),
+                            day,
                             width = if ctl.julian { 3 } else { 2 }
-                        );
+                        ))?;
                     } else {
-                        print!("{:width$}", day, width = skip);
+                        printer.log(format!("{:width$}", day, width = skip))?;
                     }
                 } else {
-                    print!("{}", " ".repeat(skip));
+                    printer.log(" ".repeat(skip))?;
                 }
 
                 if skip < ctl.day_width {
@@ -614,15 +746,21 @@ fn cal_output_months(months: &[CalMonth], ctl: &CalControl) {
             }
 
             if mi < months.len() - 1 {
-                print!("{}", " ".repeat(ctl.gutter_width));
+                printer.log(" ".repeat(ctl.gutter_width))?;
             }
         }
-        println!();
+        printer.log("\n")?;
     }
+
+    Ok(())
 }
 
-fn cal_vert_output_header(months: &[CalMonth], ctl: &CalControl) {
-    print!("{}", " ".repeat(ctl.day_width + 1));
+fn cal_vert_output_header(
+    printer: &mut impl Printer,
+    months: &[CalMonth],
+    ctl: &CalControl,
+) -> Result<()> {
+    printer.log(" ".repeat(ctl.day_width + 1))?;
 
     let month_width = ctl.day_width * (MAXDAYS / DAYS_IN_WEEK);
 
@@ -632,31 +770,41 @@ fn cal_vert_output_header(months: &[CalMonth], ctl: &CalControl) {
         } else {
             format!("{} {}", FULL_MONTH[m.month - 1], m.year)
         };
-        print!("{:<width$}", out, width = month_width);
+        printer.log(format!("{:<width$}", out, width = month_width))?;
         if i < months.len() - 1 {
-            print!("{}", " ".repeat(ctl.gutter_width));
+            printer.log(" ".repeat(ctl.gutter_width))?;
         }
     }
-    println!();
+    printer.log("\n")?;
 
     if ctl.header_hint && !ctl.header_year {
-        print!("{}", " ".repeat(ctl.day_width + 1));
+        printer.log(" ".repeat(ctl.day_width + 1))?;
         for (i, m) in months.iter().enumerate() {
-            print!("{:<width$}", m.year, width = month_width);
+            printer.log(format!("{:<width$}", m.year, width = month_width))?;
             if i < months.len() - 1 {
-                print!("{}", " ".repeat(ctl.gutter_width));
+                printer.log(" ".repeat(ctl.gutter_width))?;
             }
         }
-        println!();
+        printer.log("\n")?;
     }
+
+    Ok(())
 }
 
-fn cal_vert_output_months(months: &[CalMonth], ctl: &CalControl) {
+fn cal_vert_output_months(
+    printer: &mut impl Printer,
+    months: &[CalMonth],
+    ctl: &CalControl,
+) -> Result<()> {
     let today = Local::now();
 
     for i in 0..DAYS_IN_WEEK {
         let wd = (i + ctl.weekstart) % DAYS_IN_WEEK;
-        print!("{:<width$}", WEEKDAYS[wd], width = ctl.day_width - 1);
+        printer.log(format!(
+            "{:<width$}",
+            WEEKDAYS[wd],
+            width = ctl.day_width - 1
+        ))?;
 
         for (mi, m) in months.iter().enumerate() {
             let mut reqday = 0;
@@ -678,53 +826,107 @@ fn cal_vert_output_months(months: &[CalMonth], ctl: &CalControl) {
                         && m.year == today.year()
                         && day == today.day() as i32;
 
+                    let (y, m, d) = if ctl.julian {
+                        // Convert julian day to actual date
+                        let mut julian_day = day;
+                        let leap = leap_year(ctl, m.year);
+                        let mut month_idx = 1;
+                        while month_idx <= 12 && julian_day > DAYS_IN_MONTH[leap][month_idx] as i32
+                        {
+                            julian_day -= DAYS_IN_MONTH[leap][month_idx] as i32;
+                            month_idx += 1;
+                        }
+                        (m.year, month_idx as u32, julian_day as u32)
+                    } else {
+                        (m.year, m.month as u32, day as u32)
+                    };
+
+                    let has_event = ctl.all_events.iter().any(|item| {
+                        for component in item.components() {
+                            if component.component_type != ICalendarComponentType::VEvent {
+                                continue;
+                            }
+
+                            if let Some(prop) = component.property(&ICalendarProperty::Dtstart) {
+                                for value in &prop.values {
+                                    if let ICalendarValue::PartialDateTime(pdt) = value {
+                                        if pdt.year != Some(y as u16) {
+                                            continue;
+                                        }
+
+                                        if pdt.month != Some(m as u8) {
+                                            continue;
+                                        }
+
+                                        if pdt.day != Some(d as u8) {
+                                            continue;
+                                        }
+
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+
+                        false
+                    });
+
                     if reqday == day || is_today {
-                        print!(
+                        printer.log(format!(
                             "{}\x1b[7m{:width$}\x1b[0m",
                             " ".repeat(skip - if ctl.julian { 3 } else { 2 }),
                             day,
-                            width = if ctl.julian { 3 } else { 2 }
-                        );
+                            width = if ctl.julian { 3 } else { 2 },
+                        ))?;
+                    } else if has_event {
+                        printer.log(format!(
+                            "{}\x1b[44m{:width$}\x1b[0m",
+                            " ".repeat(skip - if ctl.julian { 3 } else { 2 }),
+                            day,
+                            width = if ctl.julian { 3 } else { 2 },
+                        ))?;
                     } else {
-                        print!("{:width$}", day, width = skip);
+                        printer.log(format!("{:width$}", day, width = skip))?;
                     }
                 } else {
-                    print!("{}", " ".repeat(skip));
+                    printer.log(" ".repeat(skip))?;
                 }
                 skip = ctl.day_width;
             }
 
             if mi < months.len() - 1 {
-                print!("{}", " ".repeat(ctl.gutter_width));
+                printer.log(" ".repeat(ctl.gutter_width))?;
             }
         }
-        println!();
+        printer.log("\n")?;
     }
 
     if ctl.weektype != 0 {
-        print!("{}", " ".repeat(ctl.day_width - 1));
+        printer.log(" ".repeat(ctl.day_width - 1))?;
         for (mi, m) in months.iter().enumerate() {
             for week in 0..(MAXDAYS / DAYS_IN_WEEK) {
                 if m.weeks[week] > 0 {
-                    print!(
+                    printer.log(format!(
                         "{:width$}",
                         m.weeks[week],
                         width = if ctl.julian { 3 } else { 2 }
-                    );
+                    ))?;
                 } else {
-                    print!("{}", " ".repeat(if ctl.julian { 3 } else { 2 }));
+                    printer.log(" ".repeat(if ctl.julian { 3 } else { 2 }))?;
                 }
-                print!(" ");
+                printer.log(" ")?;
             }
             if mi < months.len() - 1 {
-                print!("{}", " ".repeat(ctl.gutter_width - 1));
+                printer.log(" ".repeat(ctl.gutter_width - 1))?;
             }
         }
-        println!();
+        printer.log("\n")?;
     }
+
+    Ok(())
 }
 
-fn monthly(ctl: &CalControl) {
+fn monthly(printer: &mut impl Printer, ctl: &mut CalControl) -> Result<()> {
     let mut month = if ctl.req.start_month > 0 {
         ctl.req.start_month
     } else {
@@ -778,23 +980,55 @@ fn monthly(ctl: &CalControl) {
 
         if ctl.vertical {
             if i > 0 {
-                println!();
+                printer.log("\n")?;
             }
-            cal_vert_output_header(&ms, ctl);
-            cal_vert_output_months(&ms, ctl);
+            cal_vert_output_header(printer, &ms, ctl)?;
+            cal_vert_output_months(printer, &ms, ctl)?;
         } else {
-            cal_output_header(&ms, ctl);
-            cal_output_months(&ms, ctl);
+            cal_output_header(printer, &ms, ctl)?;
+            cal_output_months(printer, &ms, ctl)?;
         }
     }
+
+    Ok(())
 }
 
-fn yearly(ctl: &CalControl) {
+fn yearly(printer: &mut impl Printer, ctl: &mut CalControl) -> Result<()> {
     if ctl.header_year {
         let year_width =
             ctl.months_in_row * ctl.week_width + (ctl.months_in_row - 1) * ctl.gutter_width;
-        center(&format!("{}", ctl.req.year), year_width, 0);
-        println!("\n");
+        center(printer, &format!("{}", ctl.req.year), year_width, 0)?;
+        printer.log("\n")?;
     }
-    monthly(ctl);
+    monthly(printer, ctl)
+}
+
+pub struct Agenda(HashMap<NaiveDateTime, String>);
+
+impl fmt::Display for Agenda {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut events: Vec<_> = self.0.iter().collect();
+        events.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        for (date, desc) in events {
+            write!(f, "{}: {desc}\n", date.format("%b, %d"))?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Serialize for Agenda {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl From<HashMap<NaiveDateTime, String>> for Agenda {
+    fn from(events: HashMap<NaiveDateTime, String>) -> Self {
+        Self(events)
+    }
 }
