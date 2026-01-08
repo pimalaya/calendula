@@ -1011,7 +1011,7 @@ impl fmt::Display for Agenda {
         events.sort_by(|(a, _), (b, _)| a.cmp(b));
 
         for (date, desc) in events {
-            write!(f, "{}: {desc}\n", date.format("%b, %d"))?;
+            write!(f, "{} — {desc}\n", date.format("%b %d, %R"))?;
         }
 
         Ok(())
