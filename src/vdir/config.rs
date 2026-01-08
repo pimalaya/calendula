@@ -1,6 +1,6 @@
 // This file is part of Calendula, a CLI to manage calendars.
 //
-// Copyright (C) 2025 soywod <clement.douin@posteo.net>
+// Copyright (C) 2025-2026 soywod <clement.douin@posteo.net>
 //
 // This program is free software: you can redistribute it and/or
 // modify it under the terms of the GNU Affero General Public License
