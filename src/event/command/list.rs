@@ -16,8 +16,8 @@
 // License along with this program. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use anyhow::Result;
-use chrono::NaiveDate;
+use anyhow::{bail, Result};
+use chrono::{Days, NaiveDate};
 use clap::Parser;
 use io_calendar::caldav::TimeRange;
 use pimalaya_toolbox::terminal::printer::Printer;
@@ -38,7 +38,7 @@ pub struct ListEventsCommand {
     #[arg(long)]
     pub from: Option<NaiveDate>,
 
-    /// End date for filtering events (exclusive, format: YYYY-MM-DD).
+    /// End date for filtering events (inclusive, format: YYYY-MM-DD).
     #[arg(long)]
     pub to: Option<NaiveDate>,
 }
@@ -47,12 +47,22 @@ impl ListEventsCommand {
     pub fn execute(self, printer: &mut impl Printer, account: Account) -> Result<()> {
         let mut client = Client::new(&account)?;
 
+        let fmt = |d: NaiveDate| format!("{}T000000Z", d.format("%Y%m%d"));
+
         let time_range = match (self.from, self.to) {
             (None, None) => None,
-            (from, to) => Some(TimeRange {
-                start: from.map(|d| format!("{}T000000Z", d.format("%Y%m%d"))),
-                end: to.map(|d| format!("{}T000000Z", d.format("%Y%m%d"))),
-            }),
+            (from, to) => {
+                // --to is inclusive: shift to the next day for the CalDAV end bound
+                let end = to.map(|d| d.checked_add_days(Days::new(1)).unwrap_or(d));
+                let tr = TimeRange::new(
+                    from.map(|d| fmt(d)).as_deref(),
+                    end.map(|d| fmt(d)).as_deref(),
+                );
+                match tr {
+                    Some(tr) => Some(tr),
+                    None => bail!("invalid date format for --from/--to"),
+                }
+            }
         };
 
         let events = match &time_range {
