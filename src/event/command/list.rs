@@ -16,8 +16,10 @@
 // License along with this program. If not, see
 // <https://www.gnu.org/licenses/>.
 
-use anyhow::Result;
+use anyhow::{bail, Result};
+use chrono::{Days, NaiveDate};
 use clap::Parser;
+use io_calendar::caldav::TimeRange;
 use pimalaya_toolbox::terminal::printer::Printer;
 
 use crate::{account::Account, client::Client, event::table::EventsTable};
@@ -25,18 +27,49 @@ use crate::{account::Account, client::Client, event::table::EventsTable};
 /// List all events.
 ///
 /// This command allows you to list iCalendars from a given calendar.
+/// Use --from and --to to filter events by date range (server-side).
 #[derive(Debug, Parser)]
 pub struct ListEventsCommand {
     /// The identifier of the CalDAV calendar to list iCalendars from.
     #[arg(name = "CALENDAR-ID")]
     pub calendar_id: String,
+
+    /// Start date for filtering events (inclusive, format: YYYY-MM-DD).
+    #[arg(long)]
+    pub from: Option<NaiveDate>,
+
+    /// End date for filtering events (inclusive, format: YYYY-MM-DD).
+    #[arg(long)]
+    pub to: Option<NaiveDate>,
 }
 
 impl ListEventsCommand {
     pub fn execute(self, printer: &mut impl Printer, account: Account) -> Result<()> {
         let mut client = Client::new(&account)?;
 
-        let events = client.list_events(self.calendar_id)?;
+        let fmt = |d: NaiveDate| format!("{}T000000Z", d.format("%Y%m%d"));
+
+        let time_range = match (self.from, self.to) {
+            (None, None) => None,
+            (from, to) => {
+                // --to is inclusive: shift to the next day for the CalDAV end bound
+                let end = to.map(|d| d.checked_add_days(Days::new(1)).unwrap_or(d));
+                let tr = TimeRange::new(
+                    from.map(|d| fmt(d)).as_deref(),
+                    end.map(|d| fmt(d)).as_deref(),
+                );
+                match tr {
+                    Some(tr) => Some(tr),
+                    None => bail!("invalid date format for --from/--to"),
+                }
+            }
+        };
+
+        let events = match &time_range {
+            Some(tr) => client.list_events_in_range(&self.calendar_id, tr)?,
+            None => client.list_events(&self.calendar_id)?,
+        };
+
         let table = EventsTable::from(events);
         printer.out(table)
     }

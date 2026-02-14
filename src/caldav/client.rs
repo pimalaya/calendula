@@ -41,6 +41,7 @@ use io_calendar::{
         },
         request::set_uri_path,
     },
+    caldav::TimeRange,
     calendar::Calendar,
     item::{CalendarItem, ICalendarComponentType},
 };
@@ -304,6 +305,30 @@ impl<'a> CaldavClient<'a> {
                 SendResult::Ok(ok) => break Ok(ok.body),
                 SendResult::Err(err) => {
                     return Err(anyhow!(err).context("List calendar items error"))
+                }
+                SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
+            }
+        }
+    }
+
+    pub fn list_events_in_range(
+        &mut self,
+        calendar_id: impl AsRef<str>,
+        time_range: &TimeRange,
+    ) -> Result<HashSet<CalendarItem>> {
+        let mut list = ListCalendarItems::with_time_range(
+            &self.config,
+            calendar_id,
+            Some(ICalendarComponentType::VEvent),
+            Some(time_range),
+        );
+        let mut arg = None;
+
+        loop {
+            match list.resume(arg.take()) {
+                SendResult::Ok(ok) => break Ok(ok.body),
+                SendResult::Err(err) => {
+                    return Err(anyhow!(err).context("List calendar events in range error"))
                 }
                 SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
             }
