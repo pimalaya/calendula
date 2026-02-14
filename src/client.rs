@@ -19,11 +19,7 @@
 use std::collections::HashSet;
 
 use anyhow::{anyhow, bail, Result};
-use io_calendar::{
-    caldav::coroutines::list_items::TimeRange,
-    calendar::Calendar,
-    item::CalendarItem,
-};
+use io_calendar::{caldav::TimeRange, calendar::Calendar, item::CalendarItem};
 
 use crate::account::Account;
 #[cfg(feature = "caldav")]
@@ -105,7 +101,10 @@ impl<'a> Client<'a> {
             #[cfg(feature = "caldav")]
             Self::Caldav(client) => client.list_events_in_range(calendar_id, time_range),
             #[cfg(feature = "vdir")]
-            Self::Vdir(client) => client.list_items(calendar_id), // vdir doesn't support server-side filtering
+            Self::Vdir(client) => {
+                log::warn!("vdir backend does not support date filtering, showing all events");
+                client.list_items(calendar_id)
+            }
             Self::None => bail!("client not defined"),
         }
     }

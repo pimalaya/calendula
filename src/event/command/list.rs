@@ -19,7 +19,7 @@
 use anyhow::Result;
 use chrono::NaiveDate;
 use clap::Parser;
-use io_calendar::caldav::coroutines::list_items::TimeRange;
+use io_calendar::caldav::TimeRange;
 use pimalaya_toolbox::terminal::printer::Printer;
 
 use crate::{account::Account, client::Client, event::table::EventsTable};
@@ -48,19 +48,11 @@ impl ListEventsCommand {
         let mut client = Client::new(&account)?;
 
         let time_range = match (self.from, self.to) {
-            (Some(from), Some(to)) => Some(TimeRange {
-                start: format!("{}T000000Z", from.format("%Y%m%d")),
-                end: format!("{}T000000Z", to.format("%Y%m%d")),
-            }),
-            (Some(from), None) => Some(TimeRange {
-                start: format!("{}T000000Z", from.format("%Y%m%d")),
-                end: "99991231T235959Z".to_string(),
-            }),
-            (None, Some(to)) => Some(TimeRange {
-                start: "19700101T000000Z".to_string(),
-                end: format!("{}T000000Z", to.format("%Y%m%d")),
-            }),
             (None, None) => None,
+            (from, to) => Some(TimeRange {
+                start: from.map(|d| format!("{}T000000Z", d.format("%Y%m%d"))),
+                end: to.map(|d| format!("{}T000000Z", d.format("%Y%m%d"))),
+            }),
         };
 
         let events = match &time_range {

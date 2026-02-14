@@ -32,7 +32,7 @@ use io_calendar::{
             delete_item::DeleteCalendarItem,
             follow_redirects::FollowRedirectsResult,
             list_calendars::ListCalendars,
-            list_items::{ListCalendarItems, TimeRange},
+            list_items::ListCalendarItems,
             read_item::ReadCalendarItem,
             send::SendResult,
             update_calendar::UpdateCalendar,
@@ -41,6 +41,7 @@ use io_calendar::{
         },
         request::set_uri_path,
     },
+    caldav::TimeRange,
     calendar::Calendar,
     item::{CalendarItem, ICalendarComponentType},
 };
