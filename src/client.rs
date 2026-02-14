@@ -19,7 +19,11 @@
 use std::collections::HashSet;
 
 use anyhow::{anyhow, bail, Result};
-use io_calendar::{calendar::Calendar, item::CalendarItem};
+use io_calendar::{
+    caldav::coroutines::list_items::TimeRange,
+    calendar::Calendar,
+    item::CalendarItem,
+};
 
 use crate::account::Account;
 #[cfg(feature = "caldav")]
@@ -88,6 +92,20 @@ impl<'a> Client<'a> {
             Self::Caldav(client) => client.list_events(calendar_id),
             #[cfg(feature = "vdir")]
             Self::Vdir(client) => client.list_items(calendar_id),
+            Self::None => bail!("client not defined"),
+        }
+    }
+
+    pub fn list_events_in_range(
+        &mut self,
+        calendar_id: impl AsRef<str>,
+        time_range: &TimeRange,
+    ) -> Result<HashSet<CalendarItem>> {
+        match self {
+            #[cfg(feature = "caldav")]
+            Self::Caldav(client) => client.list_events_in_range(calendar_id, time_range),
+            #[cfg(feature = "vdir")]
+            Self::Vdir(client) => client.list_items(calendar_id), // vdir doesn't support server-side filtering
             Self::None => bail!("client not defined"),
         }
     }
