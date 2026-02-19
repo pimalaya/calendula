@@ -1259,7 +1259,7 @@ dependencies = [
 [[package]]
 name = "io-calendar"
 version = "0.0.1"
-source = "git+https://github.com/pimalaya/io-calendar#1adf2b30386d5950ca11b62c5a8d8a4367d2741e"
+source = "git+https://github.com/junior-ricon/io-calendar?branch=feat%2Ftime-range-filter#7ad86e93b8afa74d578862845b764ceaa78ba0ed"
 dependencies = [
  "base64",
  "calcard",
