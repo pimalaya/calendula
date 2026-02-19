@@ -66,5 +66,4 @@ secrecy = { version = "0.10", features = ["serde"], optional = true }
 serde = { version = "1", features = ["derive"] }
 
 [patch.crates-io]
-io-calendar.git = "https://github.com/junior-ricon/io-calendar"
-io-calendar.branch = "feat/time-range-filter"
+io-calendar.git = "https://github.com/pimalaya/io-calendar"
