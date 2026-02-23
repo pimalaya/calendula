@@ -216,7 +216,7 @@ impl<'a> CaldavClient<'a> {
         loop {
             match create.resume(arg.take()) {
                 SendResult::Ok(_) => break Ok(()),
-                SendResult::Err(err) => return Err(anyhow!(err).context("Creat calendar error")),
+                SendResult::Err(err) => return Err(anyhow!(err).context("Create calendar error")),
                 SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
             }
         }
