@@ -19,6 +19,7 @@
 use std::{
     env::{self, temp_dir},
     fs,
+    io::{self, IsTerminal, Read},
     process::{Command, Stdio},
 };
 
@@ -29,10 +30,11 @@ use pimalaya_toolbox::terminal::printer::Printer;
 
 use crate::{account::Account, client::Client};
 
-/// Create a new item.
+/// Create a new event.
 ///
-/// This command allows you to add a new iCalendar to the given
-/// calendar.
+/// This command allows you to add a new iCalendar event to the given
+/// calendar. When stdin is not a terminal, reads iCalendar content
+/// from stdin. Otherwise, opens $EDITOR with a template.
 #[derive(Debug, Parser)]
 pub struct CreateItemCommand {
     /// The identifier of the calendar where the iCalendar should be
@@ -45,29 +47,38 @@ impl CreateItemCommand {
     pub fn execute(self, printer: &mut impl Printer, account: Account) -> Result<()> {
         let mut client = Client::new(&account)?;
 
-        let uid = CalendarItem::new_uuid();
-        let path = temp_dir().join(format!("{uid}.ics"));
-        let tpl = include_str!("./create.ics");
-        fs::write(&path, tpl)?;
+        let content = if !io::stdin().is_terminal() {
+            let mut buf = String::new();
+            io::stdin()
+                .read_to_string(&mut buf)
+                .context("cannot read iCalendar from stdin")?;
+            buf
+        } else {
+            let uid = CalendarItem::new_uuid();
+            let path = temp_dir().join(format!("{uid}.ics"));
+            let tpl = include_str!("./create.ics");
+            fs::write(&path, tpl)?;
 
-        let args = env::var("EDITOR")?;
-        let mut args = args.split_whitespace();
-        let editor = args.next().unwrap();
-        let edition = Command::new(editor)
-            .args(args)
-            .arg(&path)
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status()?;
+            let args = env::var("EDITOR")
+                .context("$EDITOR is not set; set it or pipe iCalendar content via stdin")?;
+            let mut args = args.split_whitespace();
+            let editor = args.next().unwrap();
+            let edition = Command::new(editor)
+                .args(args)
+                .arg(&path)
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .status()?;
 
-        if !edition.success() {
-            let code = edition.code();
-            bail!("error while editing iCalendar: error code {code:?}");
-        }
+            if !edition.success() {
+                let code = edition.code();
+                bail!("error while editing iCalendar: error code {code:?}");
+            }
 
-        let content = fs::read_to_string(&path)?
-            .replace('\r', "")
-            .replace('\n', "\r\n");
+            fs::read_to_string(&path)?
+        };
+
+        let content = content.replace('\r', "").replace('\n', "\r\n");
 
         let item = CalendarItem {
             id: CalendarItem::new_uuid().to_string(),

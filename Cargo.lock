@@ -1259,7 +1259,6 @@ dependencies = [
 [[package]]
 name = "io-calendar"
 version = "0.0.1"
-source = "git+https://github.com/pimalaya/io-calendar#1adf2b30386d5950ca11b62c5a8d8a4367d2741e"
 dependencies = [
  "base64",
  "calcard",
