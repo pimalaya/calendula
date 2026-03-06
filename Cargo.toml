@@ -66,4 +66,4 @@ secrecy = { version = "0.10", features = ["serde"], optional = true }
 serde = { version = "1", features = ["derive"] }
 
 [patch.crates-io]
-io-calendar.git = "https://github.com/pimalaya/io-calendar"
+io-calendar.path = "/Users/meir/develop/zogadi/io-calendar"
