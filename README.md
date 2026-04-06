@@ -34,7 +34,7 @@ CLI to manage calendars
 
 ### List calendars
 
-```
+```sh
 $ calendula calendars list
 
 ┌─────────┬───────────────┬──────┬───────┐
@@ -46,7 +46,7 @@ $ calendula calendars list
 
 ### List calendar items
 
-```
+```sh
 $ calendula items list default
 
 ┌─────────────────────────────────────────┬──────────────────────┬─────────────────────────────────────────┬───────────────────────────┐
@@ -83,13 +83,13 @@ $ calendula items list default
 
 ### Edit calendar item
 
-```
+```sh
 $ calendula item update default 62196d36-65cb-4a6b-b107-f3d8dc8d8b62
 ```
 
 You text editor opens with the content of your iCalendar:
 
-```
+```sh
 BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//hacksw/handcal//NONSGML v1.0//EN
@@ -103,7 +103,7 @@ END:VCALENDAR
 
 Once edition done, you should see the following message:
 
-```
+```text
 Item successfully updated
 ```
 
@@ -115,13 +115,13 @@ Calendula CLI can be installed with the installer:
 
 *As root:*
 
-```
+```sh
 curl -sSL https://raw.githubusercontent.com/pimalaya/calendula/master/install.sh | sudo sh
 ```
 
 *As a regular user:*
 
-```
+```sh
 curl -sSL https://raw.githubusercontent.com/pimalaya/calendula/master/install.sh | PREFIX=~/.local sh
 ```
 
@@ -133,19 +133,19 @@ If you want a more up-to-date version than the latest release, check out the [re
 
 Calendula CLI can be installed with [cargo](https://doc.rust-lang.org/cargo/):
 
-```
+```sh
 cargo install calendula
 ```
 
 *With only Vdir support:*
 
-```
+```sh
 cargo install calendula --no-default-features --features vdir
 ```
 
 You can also use the git repository for a more up-to-date (but less stable) version:
 
-```
+```sh
 cargo install --locked --git https://github.com/pimalaya/calendula.git
 ```
 
@@ -153,37 +153,37 @@ cargo install --locked --git https://github.com/pimalaya/calendula.git
 
 Calendula CLI can be installed with [Nix](https://serokell.io/blog/what-is-nix):
 
-```
+```sh
 nix-env -i calendula
 ```
 
 You can also use the git repository for a more up-to-date (but less stable) version:
 
-```
+```sh
 nix-env -if https://github.com/pimalaya/calendula/archive/master.tar.gz
 ```
 
 *Or, from within the source tree checkout:*
 
-```
+```sh
 nix-env -if .
 ```
 
 If you have the [Flakes](https://nixos.wiki/wiki/Flakes) feature enabled:
 
-```
+```sh
 nix profile install calendula
 ```
 
 *Or, from within the source tree checkout:*
 
-```
+```sh
 nix profile install
 ```
 
 *You can also run Calendula directly without installing it:*
 
-```
+```sh
 nix run calendula
 ```
 
