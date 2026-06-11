@@ -1,9 +1,19 @@
 [sources]
-unknown-registry = "deny"
+allow-git = ["https://github.com/nlnetlabs/domain"]
+allow-org.github = ["pimalaya"]
 unknown-git = "deny"
+unknown-registry = "deny"
 
 [licenses]
-allow = ["Apache-2.0", "BSD-3-Clause", "MIT", "Unicode-3.0"]
-
-[licenses.private]
-ignore = true
+allow = [
+  "0BSD",
+  "Apache-2.0 WITH LLVM-exception",
+  "Apache-2.0",
+  "BSD-3-Clause",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Zlib",
+]

@@ -73,7 +73,7 @@ rustPlatform.buildRustPackage rec {
     mainProgram = "calendula";
     homepage = "https://github.com/pimalaya/calendula";
     changelog = "https://github.com/pimalaya/calendula/blob/v${version}/CHANGELOG.md";
-    license = lib.licenses.agpl3Plus;
+    license = with lib.licenses; [ mit asl20 ];
     maintainers = with lib.maintainers; [
       soywod
     ];

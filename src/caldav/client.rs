@@ -1,365 +1,140 @@
-// This file is part of Calendula, a CLI to manage calendars.
-//
-// Copyright (C) 2025-2026 soywod <clement.douin@posteo.net>
-//
-// This program is free software: you can redistribute it and/or
-// modify it under the terms of the GNU Affero General Public License
-// as published by the Free Software Foundation, either version 3 of
-// the License, or (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful, but
-// WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-// Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public
-// License along with this program. If not, see
-// <https://www.gnu.org/licenses/>.
+//! Calendula wrapper around [`io_webdav::client::WebdavClientStd`].
+//!
+//! Builds a connected CalDAV client from a [`CaldavConfig`] block:
+//! resolves the server URI from one of the three configured paths
+//! (server-uri, discover.host, or home-uri), opens the TCP/TLS
+//! connection via pimalaya-stream, then optionally walks the RFC 6764
+//! well-known + RFC 5397 principal + RFC 4791 calendar-home-set
+//! discovery chain.
 
-use std::{borrow::Cow, collections::HashSet};
-
-use anyhow::{anyhow, Result};
-use http::Uri;
-
-use io_calendar::{
-    caldav::{
-        coroutines::{
-            calendar_home_set::CalendarHomeSet,
-            create_calendar::CreateCalendar,
-            create_item::CreateCalendarItem,
-            current_user_principal::CurrentUserPrincipal,
-            delete_calendar::DeleteCalendar,
-            delete_item::DeleteCalendarItem,
-            follow_redirects::FollowRedirectsResult,
-            list_calendars::ListCalendars,
-            list_items::ListCalendarItems,
-            read_item::ReadCalendarItem,
-            send::SendResult,
-            update_calendar::UpdateCalendar,
-            update_item::UpdateCalendarItem,
-            well_known::{WellKnown, WellKnownResult},
-        },
-        request::set_uri_path,
-    },
-    calendar::Calendar,
-    item::{CalendarItem, ICalendarComponentType},
+use std::{
+    ops::{Deref, DerefMut},
+    path::PathBuf,
 };
-use io_stream::runtimes::std::handle;
-use pimalaya_toolbox::stream::Stream;
 
-use super::config::CaldavConfig;
+use anyhow::{Result, anyhow};
+use io_http::{rfc6750::bearer::HttpAuthBearer, rfc7617::basic::HttpAuthBasic};
+use io_webdav::{client::WebdavClientStd, rfc4918::WebdavAuth};
+use pimalaya_config::toml::TomlConfig;
+use pimalaya_stream::tls::Tls;
+use pimconf::rfc6764::{client::DiscoveryWebdavClientStd, types::DavService};
+use secrecy::ExposeSecret;
+use url::Url;
 
-#[derive(Debug)]
-pub struct CaldavClient<'a> {
-    config: io_calendar::caldav::config::CaldavConfig<'a>,
-    stream: Stream,
+use crate::{
+    account::context::Account,
+    cli::load_or_wizard,
+    config::{CaldavAuthConfig, CaldavConfig},
+};
+
+const DEFAULT_RESOLVER: &str = "tcp://1.1.1.1:53";
+
+pub struct CaldavClient {
+    inner: WebdavClientStd,
+    pub account: Account,
 }
 
-impl<'a> CaldavClient<'a> {
-    pub fn new(config: &'a CaldavConfig) -> Result<Self> {
-        let tls = &config.tls;
-
-        if let Some(uri) = &config.home_uri {
-            let stream = Stream::connect(uri, tls)?;
-            return Self::from_home_uri(config, stream, Cow::Borrowed(uri));
-        };
-
-        if let Some(uri) = &config.server_uri {
-            let stream = Stream::connect(&uri, tls)?;
-            return Self::from_server_uri(config, stream, uri.clone());
-        }
-
-        if let Some(discover) = &config.discover {
-            let hostname = if let Some(port) = discover.port {
-                Cow::from(format!("{}:{port}", discover.host))
-            } else {
-                Cow::from(&discover.host)
-            };
-
-            let scheme = match &discover.scheme {
-                Some(scheme) => Cow::from(scheme),
-                None => Cow::from("https"),
-            };
-
-            let uri: Uri = format!("{scheme}://{hostname}/.well-known/caldav")
-                .parse()
-                .unwrap();
-
-            let mut stream = Stream::connect(&uri, tls)?;
-
-            let remote_config = io_calendar::caldav::config::CaldavConfig {
-                uri: Cow::Borrowed(&uri),
-                auth: TryFrom::try_from(&config.auth)?,
-            };
-
-            let mut well_known = WellKnown::new(&remote_config, discover.method.clone());
-            let mut arg = None;
-
-            let ok = loop {
-                match well_known.resume(arg.take()) {
-                    WellKnownResult::Ok(ok) => break ok,
-                    WellKnownResult::Err(err) => {
-                        return Err(anyhow!(err).context("Discover Caldav server error"));
-                    }
-                    WellKnownResult::Io(io) => arg = Some(handle(&mut stream, io)?),
-                }
-            };
-
-            if !ok.keep_alive {
-                stream = Stream::connect(&ok.uri, tls)?;
-            }
-
-            return Self::from_server_uri(config, stream, ok.uri);
-        }
-
-        let ctx = "Cannot discover Caldav home URI";
-        let err = "Missing one of `discover`, `server-uri` or `home-uri` config option";
-        Err(anyhow!(err).context(ctx))
+impl CaldavClient {
+    pub fn new(inner: WebdavClientStd, account: Account) -> Self {
+        Self { inner, account }
     }
+}
 
-    fn from_home_uri(config: &'a CaldavConfig, stream: Stream, uri: Cow<'a, Uri>) -> Result<Self> {
-        let auth = TryFrom::try_from(&config.auth)?;
-        let config = io_calendar::caldav::config::CaldavConfig { uri, auth };
-        let client = Self { config, stream };
+impl Deref for CaldavClient {
+    type Target = WebdavClientStd;
 
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl DerefMut for CaldavClient {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+/// Opens a connected CalDAV client and walks the discovery chain so its
+/// caches are populated, following whichever of the three config routes
+/// is set:
+///
+/// 1. `home`: pre-resolved calendar home set; no discovery runs.
+/// 2. `server`: principal + calendar-home-set discovery start from the
+///    given context root.
+/// 3. `discover`: a bare domain resolved to a context root through
+///    pimconf (RFC 6764 SRV + `.well-known`) before that walk.
+pub fn connect_and_resolve(config: &CaldavConfig) -> Result<WebdavClientStd> {
+    let auth = build_auth(&config.auth)?;
+    let tls = build_tls(config);
+
+    if let Some(home) = &config.home {
+        let mut client = WebdavClientStd::connect(home, &tls, auth)?;
+        client.calendar_home_set = Some(home.clone());
         return Ok(client);
     }
 
-    fn from_server_uri(config: &'a CaldavConfig, mut stream: Stream, mut uri: Uri) -> Result<Self> {
-        let tls = &config.tls;
-
-        let remote_config = io_calendar::caldav::config::CaldavConfig {
-            uri: Cow::Borrowed(&uri),
-            auth: TryFrom::try_from(&config.auth)?,
-        };
-
-        let mut principal = CurrentUserPrincipal::new(&remote_config);
-        let mut arg = None;
-
-        let ok = loop {
-            match principal.resume(arg.take()) {
-                FollowRedirectsResult::Ok(ok) => break ok,
-                FollowRedirectsResult::Err(err) => {
-                    return Err(anyhow!(err).context("Get current user principal error"))
-                }
-                FollowRedirectsResult::Io(io) => arg = Some(handle(&mut stream, io)?),
-                FollowRedirectsResult::Reset(new_uri) => {
-                    uri = new_uri;
-                    stream = Stream::connect(&uri, tls)?;
-                }
-            }
-        };
-
-        let mut same_scheme = true;
-        let mut same_authority = true;
-
-        if let Some(discovered_uri) = ok.body {
-            uri = if let Some(auth) = discovered_uri.authority() {
-                same_authority = uri.authority() == Some(auth);
-                same_scheme = uri.scheme() == discovered_uri.scheme();
-                discovered_uri
-            } else {
-                set_uri_path(uri, discovered_uri.path())
-            };
+    let server = match &config.server {
+        Some(server) => server.clone(),
+        None => {
+            let domain = config
+                .discover
+                .as_ref()
+                .ok_or_else(|| anyhow!("CalDAV config needs `server`, `home`, or `discover`"))?;
+            resolve_server(domain, &tls)?
         }
+    };
 
-        if !ok.keep_alive || !same_scheme || !same_authority {
-            stream = Stream::connect(&uri, tls)?;
+    let mut client = WebdavClientStd::connect(&server, &tls, auth)?;
+    client.calendar_home_set()?;
+
+    Ok(client)
+}
+
+/// Resolves a bare domain to a CalDAV context root via pimconf
+/// (RFC 6764 SRV + `.well-known`), reusing `tls` for the `.well-known`
+/// probe.
+fn resolve_server(domain: &str, tls: &Tls) -> Result<Url> {
+    let resolver = Url::parse(DEFAULT_RESOLVER).expect("DEFAULT_RESOLVER must be a valid URL");
+    let mut client = DiscoveryWebdavClientStd::new(resolver).with_tls(tls.clone());
+    let server = client.resolve(domain, DavService::Caldav)?;
+    Ok(server)
+}
+
+fn build_tls(config: &CaldavConfig) -> Tls {
+    let mut tls: Tls = config.tls.clone().into();
+    tls.rustls.alpn = vec!["http/1.1".into()];
+    tls
+}
+
+fn build_auth(config: &CaldavAuthConfig) -> Result<WebdavAuth> {
+    Ok(match config {
+        CaldavAuthConfig::None => WebdavAuth::None,
+        CaldavAuthConfig::Basic { username, password } => WebdavAuth::Basic(HttpAuthBasic {
+            username: username.clone(),
+            password: password.clone().get()?,
+        }),
+        CaldavAuthConfig::Bearer { token } => {
+            let token = token.clone().get()?;
+            WebdavAuth::Bearer(HttpAuthBearer::new(token.expose_secret()))
         }
+    })
+}
 
-        let remote_config = io_calendar::caldav::config::CaldavConfig {
-            uri: Cow::Borrowed(&uri),
-            auth: TryFrom::try_from(&config.auth)?,
-        };
-
-        let mut home = CalendarHomeSet::new(&remote_config);
-        let mut arg = None;
-
-        let ok = loop {
-            match home.resume(arg.take()) {
-                FollowRedirectsResult::Ok(ok) => break ok,
-                FollowRedirectsResult::Err(err) => {
-                    return Err(anyhow!(err).context("Get calendar home set error"));
-                }
-                FollowRedirectsResult::Io(io) => arg = Some(handle(&mut stream, io)?),
-                FollowRedirectsResult::Reset(new_uri) => {
-                    uri = new_uri;
-                    stream = Stream::connect(&uri, tls)?;
-                }
-            }
-        };
-
-        let mut same_scheme = true;
-        let mut same_authority = true;
-
-        if let Some(discovered_uri) = ok.body {
-            uri = if let Some(auth) = discovered_uri.authority() {
-                same_authority = uri.authority() == Some(auth);
-                same_scheme = uri.scheme() == discovered_uri.scheme();
-                discovered_uri
-            } else {
-                set_uri_path(uri, discovered_uri.path())
-            };
-        }
-
-        if !ok.keep_alive || !same_scheme || !same_authority {
-            stream = Stream::connect(&uri, tls)?;
-        }
-
-        Self::from_home_uri(config, stream, Cow::Owned(uri))
-    }
-
-    pub fn create_calendar(&mut self, calendar: Calendar) -> Result<()> {
-        let mut create = CreateCalendar::new(&self.config, calendar);
-        let mut arg = None;
-
-        loop {
-            match create.resume(arg.take()) {
-                SendResult::Ok(_) => break Ok(()),
-                SendResult::Err(err) => return Err(anyhow!(err).context("Creat calendar error")),
-                SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
-            }
-        }
-    }
-
-    pub fn list_calendars(&mut self) -> Result<HashSet<Calendar>> {
-        let mut list = ListCalendars::new(&self.config);
-        let mut arg = None;
-
-        loop {
-            match list.resume(arg.take()) {
-                SendResult::Ok(ok) => break Ok(ok.body),
-                SendResult::Err(err) => return Err(anyhow!(err).context("List calendars error")),
-                SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
-            }
-        }
-    }
-
-    pub fn update_calendar(&mut self, calendar: Calendar) -> Result<()> {
-        let mut update = UpdateCalendar::new(&self.config, calendar);
-        let mut arg = None;
-
-        loop {
-            match update.resume(arg.take()) {
-                SendResult::Ok(ok) => break Ok(ok.body),
-                SendResult::Err(err) => return Err(anyhow!(err).context("Update calendar error")),
-                SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
-            }
-        }
-    }
-
-    pub fn delete_calendar(&mut self, id: impl AsRef<str>) -> Result<()> {
-        let mut delete = DeleteCalendar::new(&self.config, id);
-        let mut arg = None;
-
-        loop {
-            match delete.resume(arg.take()) {
-                SendResult::Ok(_) => break Ok(()),
-                SendResult::Err(err) => return Err(anyhow!(err).context("Delete calendar error")),
-                SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
-            }
-        }
-    }
-
-    pub fn create_item(&mut self, item: CalendarItem) -> Result<()> {
-        let mut create = CreateCalendarItem::new(&self.config, item);
-        let mut arg = None;
-
-        loop {
-            match create.resume(arg.take()) {
-                SendResult::Ok(_) => break Ok(()),
-                SendResult::Err(err) => {
-                    return Err(anyhow!(err).context("Create calendar item error"))
-                }
-                SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
-            }
-        }
-    }
-
-    pub fn list_items(&mut self, calendar_id: impl AsRef<str>) -> Result<HashSet<CalendarItem>> {
-        let mut list = ListCalendarItems::new(&self.config, calendar_id, None);
-        let mut arg = None;
-
-        loop {
-            match list.resume(arg.take()) {
-                SendResult::Ok(ok) => break Ok(ok.body),
-                SendResult::Err(err) => {
-                    return Err(anyhow!(err).context("List calendar items error"))
-                }
-                SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
-            }
-        }
-    }
-
-    pub fn list_events(&mut self, calendar_id: impl AsRef<str>) -> Result<HashSet<CalendarItem>> {
-        let mut list = ListCalendarItems::new(
-            &self.config,
-            calendar_id,
-            Some(ICalendarComponentType::VEvent),
-        );
-        let mut arg = None;
-
-        loop {
-            match list.resume(arg.take()) {
-                SendResult::Ok(ok) => break Ok(ok.body),
-                SendResult::Err(err) => {
-                    return Err(anyhow!(err).context("List calendar items error"))
-                }
-                SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
-            }
-        }
-    }
-
-    pub fn read_item(
-        &mut self,
-        calendar_id: impl AsRef<str>,
-        item_id: impl AsRef<str>,
-    ) -> Result<CalendarItem> {
-        let mut read = ReadCalendarItem::new(&self.config, calendar_id, item_id);
-        let mut arg = None;
-
-        loop {
-            match read.resume(arg.take()) {
-                SendResult::Ok(ok) => break Ok(ok.body),
-                SendResult::Err(err) => {
-                    return Err(anyhow!(err).context("Read calendar item error"))
-                }
-                SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
-            }
-        }
-    }
-
-    pub fn update_item(&mut self, item: CalendarItem) -> Result<()> {
-        let mut update = UpdateCalendarItem::new(&self.config, item);
-        let mut arg = None;
-
-        loop {
-            match update.resume(arg.take()) {
-                SendResult::Ok(_) => break Ok(()),
-                SendResult::Err(err) => {
-                    return Err(anyhow!(err).context("Update calendar item error"))
-                }
-                SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
-            }
-        }
-    }
-
-    pub fn delete_item(
-        &mut self,
-        calendar_id: impl AsRef<str>,
-        item_id: impl AsRef<str>,
-    ) -> Result<()> {
-        let mut delete = DeleteCalendarItem::new(&self.config, calendar_id, item_id);
-        let mut arg = None;
-
-        loop {
-            match delete.resume(arg.take()) {
-                SendResult::Ok(_) => break Ok(()),
-                SendResult::Err(err) => {
-                    return Err(anyhow!(err).context("Delete calendar item error"))
-                }
-                SendResult::Io(io) => arg = Some(handle(&mut self.stream, io)?),
-            }
-        }
-    }
+/// Loads the configuration, picks the active account, then opens the
+/// CalDAV client. Bails when the account has no `[caldav]` block.
+pub fn build_caldav_client(
+    config_paths: &[PathBuf],
+    account_name: Option<&str>,
+) -> Result<CaldavClient> {
+    let mut config = load_or_wizard(config_paths)?;
+    let (name, mut ac) = config
+        .take_account(account_name)?
+        .ok_or_else(|| anyhow!("Cannot find account"))?;
+    let caldav_config = ac
+        .caldav
+        .take()
+        .ok_or_else(|| anyhow!("CalDAV config is missing for account `{name}`"))?;
+    let account = Account::from(config).merge(Account::from(ac));
+    let inner = connect_and_resolve(&caldav_config)?;
+    Ok(CaldavClient::new(inner, account))
 }

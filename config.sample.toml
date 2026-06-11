@@ -1,78 +1,134 @@
-################################################################
-# Documented configuration sample                              #
-################################################################
+# ================================================================================
+# `calendula` configuration file.
+#
+# Loaded from the first valid path among:
+#   - $XDG_CONFIG_HOME/calendula/config.toml
+#   - $HOME/.config/calendula/config.toml
+#   - $HOME/.calendularc
+#
+# Override with `calendula -c <PATH>` or `CALENDULA_CONFIG=<PATH>`. Multiple paths
+# can be passed at once, separated by `:`; the first one is the base and the
+# rest are deep-merged on top of it.
+#
+# Run `calendula` once with no config file to launch the wizard, which prompts
+# for an account name, lets you pick a backend, then walks you through the vdir
+# or CalDAV setup (CalDAV also asks for an email and tests the connection
+# before saving). `calendula account configure --account <name>` can be used
+# afterwards to edit (or add) an account through the same wizard.
+# ================================================================================
+
+# --------------------------------------------------------------------------------
+# Global config
+# --------------------------------------------------------------------------------
+
+# https://docs.rs/comfy-table/latest/comfy_table/presets/index.html
+#table.preset = "││──╞═╪╡┆    ┬┴┌┐└┘"
+
+# https://docs.rs/comfy-table/latest/comfy_table/enum.ContentArrangement.html
+#table.arrangement = "dynamic"
+#table.arrangement = "dynamic-full-width"
+#table.arrangement = "disabled"
+
+# Calendar id used by `event` and `item` commands (and `calendar update`)
+# when their `-k/--calendar` flag is omitted.
+#calendar.default = "personal"
+
+# Default page size for `events list`. The `-s/--page-size` CLI flag wins
+# when passed; otherwise the merged account/global value wins; otherwise
+# the hard fallback is 25.
+#event.list.page-size = 50
+
+# Default page size for `items list`, resolved the same way.
+#item.list.page-size = 50
+
+# --------------------------------------------------------------------------------
+# Table rendering — calendars list
+# --------------------------------------------------------------------------------
+
+#calendar.list.table.id-color = "red"
+#calendar.list.table.name-color = "green"
+#calendar.list.table.description-color = "reset"
+#calendar.list.table.color-color = "reset"
+
+# --------------------------------------------------------------------------------
+# Table rendering — events list
+# --------------------------------------------------------------------------------
+
+#event.list.table.id-color = "red"
+#event.list.table.summary-color = "green"
+#event.list.table.start-color = "dark-yellow"
+#event.list.table.end-color = "dark-yellow"
+
+# --------------------------------------------------------------------------------
+# Table rendering — items list
+# --------------------------------------------------------------------------------
+
+#item.list.table.id-color = "red"
+#item.list.table.etag-color = "reset"
+#item.list.table.size-color = "reset"
+
+# --------------------------------------------------------------------------------
+# Table rendering — account list
+# --------------------------------------------------------------------------------
+
+#account.list.table.name-color = "green"
+#account.list.table.backends-color = "blue"
+#account.list.table.default-color = "reset"
+
+# --------------------------------------------------------------------------------
+# Accounts
+# --------------------------------------------------------------------------------
 
 [accounts.example]
 
-# When the `--account` argument is missing, use this account as the
-# default one.
-#
+# When `--account` is missing, use this account as the default one.
 default = true
 
-################################################################
-# Vdir section                                                 #
-################################################################
+# --------------------------------------------------------------------------------
+# Vdir backend
 #
-# The Vdir calendar home directory, which should contain all your
-# calendars.
-#
-vdir.home-dir = "/tmp/posteo"
+# Local calendar collections stored on disk; see
+# <https://vdirsyncer.pimutils.org/en/stable/vdir.html>. Each immediate
+# subdirectory of `home-dir` is one calendar.
+# --------------------------------------------------------------------------------
 
-################################################################
-# CalDAV section                                              #
-################################################################
-#
-# Configuration of calendars relying on the CalDAV protocol, as
-# defined in [RFC4791].
-#
-# [RFC4791]: https://datatracker.ietf.org/doc/html/rfc4791
+vdir.home-dir = "~/.local/share/vdirsyncer/calendars"
 
-# There is 3 ways to find a CalDAV calendar home URI:
+# --------------------------------------------------------------------------------
+# CalDAV backend
 #
-# 1. By using HTTP discovery, as defined in the Well Known RFC8615
-# 2. By using the root CalDAV server URI
-# 3. By using directy the CalDAV calendar home set URI
+# The calendar home set is resolved from the first of these that is set, in
+# order of precedence:
 #
-# The first method is the slowest because it requires a couple of HTTP
-# requests to get the calendar home URI, but it the safest because the
-# URI should never change.
+# 1. `caldav.home`: pre-resolved calendar home set URL; every discovery step is
+#    skipped. Fastest, least safe.
+# 2. `caldav.server`: principal + home-set discovery start from the given
+#    context root. Skips domain resolution.
+# 3. `caldav.discover`: a bare domain resolved to a server URL at runtime via
+#    pimconf (RFC 6764 SRV + `.well-known`), then principal + home-set
+#    discovery. Convenient but adds DNS + HTTP round-trips on every run.
 #
-# The third method is the fastest because it requires only one single
-# HTTP request, but it is the least safe because URI can change
-# anytime.
-#
-# The second method can be a good compromise between speed and safety.
+# The wizard records both `discover` and `server`: `server` wins, and `discover`
+# stays as a fallback to re-resolve from.
+# --------------------------------------------------------------------------------
 
-# To discover the CalDAV calendar home URI, only the host name is
-# required.
-#
-caldav.discover.host = "example.org" 
-#caldav.discover.port = 443
-#caldav.discover.scheme = "https"
+caldav.discover = "example.org"
+caldav.server = "https://caldav.example.org/dav/calendars"
+#caldav.home = "https://caldav.example.org/dav/calendars/user/me/default"
 
-# The root CalDAV server URI, which should contain all the users'
-# calendars.
-#
-#caldav.server-uri = "https://caldav.example.org"
-
-# The CalDAV calendar home URI, which should contain all your
-# calendars.
-#
-#caldav.home-uri = "https://caldav.example.org/principals"
-
-# The plain authentication method (not safe).
-#
-#caldav.auth = "plain"
-
-# The Basic access authentication method.
-#
+# Basic authentication (RFC 7617). A `command` secret is a shell command line
+# (string, run through the platform shell) or a program + args list; a `raw`
+# secret is stored in plaintext.
 caldav.auth.basic.username = "username"
-caldav.auth.basic.password.command = ["pass", "show", "example"]
-#caldav.auth.basic.password.keyring = "example-basic"
+caldav.auth.basic.password.command = "pass show example"
+#caldav.auth.basic.password.command = ["pass", "show", "example"]
 #caldav.auth.basic.password.raw = "password"
 
-# The Bearer token authorization method, mainly for OAuth 2.0 usage.
-#
-#caldav.auth.bearer.command = ["ortie", "token", "show"]
-#caldav.auth.bearer.keyring = "example-bearer" 
-#caldav.auth.bearer.raw = "oauth2-token" 
+# Bearer authentication (RFC 6750), mainly for OAuth 2.0.
+#caldav.auth.bearer.token.command = "ortie token show"
+#caldav.auth.bearer.token.raw = "oauth2-token"
+
+# TLS configuration.
+#caldav.tls.provider = "rustls"
+#caldav.tls.rustls.crypto = "ring"
+#caldav.tls.cert = "/etc/ssl/certs/ca-certificates.crt"

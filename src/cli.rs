@@ -1,40 +1,31 @@
-// This file is part of Calendula, a CLI to manage calendars.
-//
-// Copyright (C) 2025-2026 soywod <clement.douin@posteo.net>
-//
-// This program is free software: you can redistribute it and/or
-// modify it under the terms of the GNU Affero General Public License
-// as published by the Free Software Foundation, either version 3 of
-// the License, or (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful, but
-// WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-// Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public
-// License along with this program. If not, see
-// <https://www.gnu.org/licenses/>.
-
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
-use pimalaya_toolbox::{
-    config::TomlConfig,
-    long_version,
-    terminal::{
-        clap::{
-            args::{AccountArg, ConfigPathsArg, JsonFlag, LogFlags},
-            commands::{CompletionCommand, ManualCommand},
-        },
-        printer::Printer,
+use pimalaya_cli::{
+    clap::{
+        args::{AccountFlag, JsonFlag, LogFlags},
+        commands::{CompletionCommand, ManualCommand},
+        parsers::path_parser,
     },
+    long_version,
+    printer::Printer,
 };
+use pimalaya_config::toml::TomlConfig;
 
+#[cfg(feature = "caldav")]
+use crate::caldav::{cli::CaldavCommand, client::build_caldav_client};
+#[cfg(feature = "vdir")]
+use crate::vdir::{cli::VdirCommand, client::build_vdir_client};
 use crate::{
-    calendar::command::CalendarSubcommand, config::Config, event::command::EventSubcommand,
-    item::command::ItemSubcommand,
+    account::cli::AccountCommand,
+    backend::Backend,
+    config::Config,
+    shared::{
+        calendars::cli::CalendarCommand, client::CalendarClient, events::cli::EventCommand,
+        items::cli::ItemCommand,
+    },
+    wizard,
 };
 
 #[derive(Parser, Debug)]
@@ -42,58 +33,137 @@ use crate::{
 #[command(author, version, about)]
 #[command(long_version = long_version!())]
 #[command(propagate_version = true, infer_subcommands = true)]
-pub struct Cli {
+pub struct CalendulaCli {
     #[command(subcommand)]
-    pub command: Calendula,
+    pub command: CalendulaCommand,
+
+    /// Override the default configuration file path.
+    ///
+    /// The given paths are shell-expanded then canonicalized (if
+    /// applicable). If the first path does not point to a valid file,
+    /// the wizard will propose to assist you in the creation of the
+    /// configuration file. Other paths are merged with the first one,
+    /// which allows you to separate your public config from your
+    /// private(s) one(s). Multiple paths can also be provided by
+    /// delimiting them with `:` (like `$PATH` in a POSIX shell).
+    #[arg(short, long = "config", global = true, env = "CALENDULA_CONFIG")]
+    #[arg(value_name = "PATH", value_parser = path_parser, value_delimiter = ':')]
+    pub config_paths: Vec<PathBuf>,
     #[command(flatten)]
-    pub config: ConfigPathsArg,
-    #[command(flatten)]
-    pub account: AccountArg,
+    pub account: AccountFlag,
+    /// Force a specific backend for cross-protocol commands.
+    ///
+    /// Only consumed by the shared commands (`calendar`, `event`,
+    /// `item`); the protocol-specific subcommands (`vdir`, `caldav`)
+    /// ignore it and always use their own backend.
+    ///
+    /// Possible values: `auto` (default), `vdir`, `caldav`. With
+    /// `auto`, the shared command picks the first configured backend
+    /// it supports (vdir wins over caldav); with an explicit value, it
+    /// uses only that backend (and bails if the account has no
+    /// matching config block).
+    #[arg(short, long, global = true, default_value_t)]
+    pub backend: Backend,
     #[command(flatten)]
     pub json: JsonFlag,
     #[command(flatten)]
     pub log: LogFlags,
 }
 
-#[derive(Subcommand, Debug)]
-pub enum Calendula {
-    #[command(arg_required_else_help = true, subcommand)]
-    Calendars(CalendarSubcommand),
-    #[command(arg_required_else_help = true, subcommand)]
-    Items(ItemSubcommand),
-    #[command(arg_required_else_help = true, subcommand)]
-    Events(EventSubcommand),
-    #[command(arg_required_else_help = true, alias = "mans")]
-    Manuals(ManualCommand),
-    #[command(arg_required_else_help = true)]
+#[derive(Debug, Subcommand)]
+pub enum CalendulaCommand {
+    // --- Shared API
+    //
+    #[command(subcommand, visible_alias = "cal", alias = "calendars")]
+    Calendar(CalendarCommand),
+    #[command(subcommand, alias = "events")]
+    Event(EventCommand),
+    #[command(subcommand, alias = "items")]
+    Item(ItemCommand),
+
+    // --- Protocol-specific APIs
+    //
+    #[cfg(feature = "caldav")]
+    #[command(subcommand)]
+    Caldav(CaldavCommand),
+    #[cfg(feature = "vdir")]
+    #[command(subcommand)]
+    Vdir(VdirCommand),
+
+    // --- Meta
+    //
+    #[command(subcommand)]
+    Account(AccountCommand),
     Completions(CompletionCommand),
+    Manuals(ManualCommand),
 }
 
-impl Calendula {
+/// Loads `Config` from the merged `config_paths` or, when no file
+/// exists, runs the wizard to bootstrap one at the target path. Used
+/// by every `build_*_client` helper to get a populated `Config` before
+/// the per-backend client opens its connection.
+pub fn load_or_wizard(config_paths: &[PathBuf]) -> Result<Config> {
+    match Config::from_paths_or_default(config_paths)? {
+        Some(config) => Ok(config),
+        None => wizard::discover::run_or_exit(&Config::target_path(config_paths)?),
+    }
+}
+
+impl CalendulaCommand {
     pub fn execute(
         self,
         printer: &mut impl Printer,
         config_paths: &[PathBuf],
         account_name: Option<&str>,
+        backend: Backend,
     ) -> Result<()> {
+        let configs = || {
+            let mut config = load_or_wizard(config_paths)?;
+
+            let Some((_, account_config)) = config.take_account(account_name)? else {
+                bail!("Cannot find default account; use --account or set account.default = true")
+            };
+
+            Ok((config, account_config))
+        };
+
         match self {
-            Self::Calendars(cmd) => {
-                let config = Config::from_paths_or_default(config_paths)?;
-                let (_, account) = config.get_account(account_name)?;
-                cmd.execute(printer, account)
+            // --- Shared API
+            //
+            Self::Calendar(cmd) => {
+                let (config, account_config) = configs()?;
+                let client = CalendarClient::new(config, account_config, backend)?;
+                cmd.execute(printer, client)
             }
-            Self::Items(cmd) => {
-                let config = Config::from_paths_or_default(config_paths)?;
-                let (_, account) = config.get_account(account_name)?;
-                cmd.execute(printer, account)
+            Self::Event(cmd) => {
+                let (config, account_config) = configs()?;
+                let client = CalendarClient::new(config, account_config, backend)?;
+                cmd.execute(printer, client)
             }
-            Self::Events(cmd) => {
-                let config = Config::from_paths_or_default(config_paths)?;
-                let (_, account) = config.get_account(account_name)?;
-                cmd.execute(printer, account)
+            Self::Item(cmd) => {
+                let (config, account_config) = configs()?;
+                let client = CalendarClient::new(config, account_config, backend)?;
+                cmd.execute(printer, client)
             }
-            Self::Manuals(cmd) => cmd.execute(printer, Cli::command()),
-            Self::Completions(cmd) => cmd.execute(printer, Cli::command()),
+
+            // --- Protocol-specific APIs
+            //
+            #[cfg(feature = "caldav")]
+            Self::Caldav(cmd) => {
+                let client = build_caldav_client(config_paths, account_name)?;
+                cmd.execute(printer, client)
+            }
+            #[cfg(feature = "vdir")]
+            Self::Vdir(cmd) => {
+                let client = build_vdir_client(config_paths, account_name)?;
+                cmd.execute(printer, client)
+            }
+
+            // --- Meta
+            //
+            Self::Account(cmd) => cmd.execute(printer, config_paths, account_name, backend),
+            Self::Completions(cmd) => cmd.execute(printer, CalendulaCli::command()),
+            Self::Manuals(cmd) => cmd.execute(printer, CalendulaCli::command()),
         }
     }
 }

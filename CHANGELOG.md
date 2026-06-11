@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Documented each command's JSON output shape as the last paragraph of its `--help` text, slimmed the README Usage section down to a pointer to `calendula --help`, and added an `ARCHITECTURE.md` describing the crate's design.
+- Extracted the `-k/--calendar CALENDAR-ID` flag into a shared argument reused across the whole shared API; `calendar update` now takes it (replacing its positional id, with the usual `calendar.default` fallback) and `calendar delete` takes it as a mandatory flag that never falls back.
+- Switched `account configure` from a positional account name to the global `-a/--account` flag, for consistency with the rest of the CLI; without it, the default account is edited.
+- Included the affected calendar/collection id in every `calendar`, `caldav` and `vdir` success message.
+- Made the parent calendar of every `event` and `item` command an optional `-k/--calendar CALENDAR-ID` flag instead of a positional argument; when omitted it falls back to the new `calendar.default` config, otherwise the command bails.
+- Changed `event create`/`event update` and `item create`/`item update` to take their iCalendar as a trailing positional `ICAL` argument (a path, raw iCalendar contents, or `-` for stdin) instead of reading only from stdin, matching `tcal edit`.
+- Migrated to the new pimalaya-cli / pimalaya-config / pimalaya-stream stack and adopted the Himalaya v2 CLI structure (shared/ + vdir/ + caldav/).
+- Wired the shared commands onto io-calendar 0.0.3's enum `CalendarClientStd`, built from the active backend via its `From` impls instead of the previous multi-slot builder.
+- Renamed the item types to `CalendarItem` / `CalendarItemKind` and switched item parsing to `CalendarItem::as_ical`.
+- Dropped the removed `io-webdav/rfc4791` feature gate (the module is now unconditional) and built the CalDAV auth from io-http's `HttpAuthBasic` / `HttpAuthBearer`.
+- Renamed the shared subcommands to the singular `calendar`, `event`, and `item` to match Himalaya; the plural `calendars` / `events` / `items` forms stay as hidden aliases.
+- Renamed the remote backend from `webdav` to `caldav` across the public surface: the `caldav` cargo feature, the `calendula caldav` subcommand, and the `[caldav]` config block. Only the underlying io-webdav dependency keeps the WebDAV name.
+- Relicensed from AGPL-3.0-only to dual MIT OR Apache-2.0, matching Himalaya.
+
 ## [0.1.0] - 2025-10-27
 
 ### Added
