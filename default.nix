@@ -1,31 +1,30 @@
 {
+  nixpkgs ? <nixpkgs>,
   pimalaya ? import (fetchTarball "https://github.com/pimalaya/nix/archive/master.tar.gz"),
   ...
 }@args:
 
-let
-  package = {
+pimalaya.mkDefault (
+  {
     src = ./.;
-    version = "0.1.0";
+    version = "0.2.0";
     mkPackage = (
       {
         lib,
         pkgs,
+        buildPackages,
         rustPlatform,
         defaultFeatures,
         features,
       }:
-
       pkgs.callPackage ./package.nix {
-        inherit lib rustPlatform;
-        apple-sdk = pkgs.apple-sdk;
+        inherit lib rustPlatform buildPackages;
         installShellCompletions = false;
         installManPages = false;
-        withNoDefaultFeatures = !defaultFeatures;
-        withFeatures = lib.splitString "," features;
+        buildNoDefaultFeatures = !defaultFeatures;
+        buildFeatures = lib.splitString "," features;
       }
     );
-  };
-in
-
-pimalaya.mkDefault (package // removeAttrs args [ "pimalaya" ])
+  }
+  // removeAttrs args [ "pimalaya" ]
+)
