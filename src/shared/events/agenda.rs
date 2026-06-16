@@ -114,7 +114,7 @@ impl EventAgendaCommand {
         let now = Local::now();
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
-        let items = client.list_items(&calendar_id, None, None)?;
+        let items = client.list_items(&calendar_id, None, None, None)?;
         let all_events: Vec<ICalendar> = items.iter().filter_map(|item| item.as_ical()).collect();
 
         let mut ctl = CalControl {

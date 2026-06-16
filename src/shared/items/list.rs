@@ -37,7 +37,7 @@ impl ItemListCommand {
         let page_size = self
             .page_size
             .or(Some(client.account.items_list_page_size()));
-        let items = client.list_items(&calendar_id, self.page, page_size)?;
+        let items = client.list_items(&calendar_id, self.page, page_size, None)?;
 
         let table = Items {
             preset: client.account.table_preset().to_string(),

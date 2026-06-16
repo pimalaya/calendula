@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `--from` / `--to` date-range filtering to `event list` (YYYY-MM-DD, both inclusive). The range is pushed server-side on CalDAV and applied client-side on vdir, via the new `TimeRange` option on io-calendar's `list_items`; a range also lifts the default page-size cap so every match is returned.
+
 ### Changed
 
 - Documented each command's JSON output shape as the last paragraph of its `--help` text, slimmed the README Usage section down to a pointer to `calendula --help`, and added an `ARCHITECTURE.md` describing the crate's design.

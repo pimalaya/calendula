@@ -956,7 +956,7 @@ dependencies = [
 [[package]]
 name = "io-calendar"
 version = "0.0.3"
-source = "git+https://github.com/pimalaya/io-calendar#665fbcb391dd77c32ef54f1d3708f5f620bbe59f"
+source = "git+https://github.com/pimalaya/io-calendar#2273983d7c2caa099e7ab45913f3cba14494efca"
 dependencies = [
  "calcard",
  "getrandom 0.4.2",
