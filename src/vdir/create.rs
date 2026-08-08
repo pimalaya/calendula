@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use io_vdir::{collection::Collection, path::VdirPath};
+use io_vdir::{collection::VdirCollection, path::VdirPath};
 use pimalaya_cli::printer::{Message, Printer};
 
 use crate::vdir::client::VdirClient;
@@ -33,7 +33,7 @@ pub struct VdirCollectionCreateCommand {
 impl VdirCollectionCreateCommand {
     pub fn execute(self, printer: &mut impl Printer, client: VdirClient) -> Result<()> {
         let path = VdirPath::new(client.root().as_str()).join(&self.id);
-        let collection = Collection {
+        let collection = VdirCollection {
             path,
             display_name: self.display_name,
             description: self.description,

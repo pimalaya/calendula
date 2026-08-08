@@ -1,8 +1,19 @@
-use std::{collections::HashMap, fs, path::Path, path::PathBuf};
+//! The TOML configuration schema.
+//!
+//! A configuration is a top-level block of rendering options plus one
+//! `[accounts.<name>]` block per account, each carrying an optional
+//! sub-block per backend. The global block is folded under the selected
+//! account at load time, so a value set once at the top applies
+//! everywhere it is not overridden.
+//!
+//! `deny_unknown_fields` is set on the leaf blocks but deliberately not
+//! on [`Config`] and [`AccountConfig`], so a future TUI reading the same
+//! file can add its own sections without breaking this one.
 
-use anyhow::{Context, Result};
-use comfy_table::ContentArrangement;
+use std::{collections::HashMap, path::PathBuf};
+
 use crossterm::style::Color;
+use pimalaya_cli::table::ContentArrangement;
 use pimalaya_config::toml::TomlConfig;
 #[cfg(feature = "caldav")]
 use pimalaya_config::{secret::Secret, toml::shell_expanded_string};
@@ -54,26 +65,6 @@ impl TomlConfig for Config {
     }
 }
 
-impl Config {
-    /// Serializes `self` to TOML and writes it to `path`, creating
-    /// any missing parent directories. Used by the wizard to persist
-    /// a freshly-built configuration.
-    pub fn write(&self, path: &Path) -> Result<()> {
-        let toml = toml::to_string_pretty(self).context("Serialize TOML config error")?;
-
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!("Create TOML config parent `{}` error", parent.display())
-            })?;
-        }
-
-        fs::write(path, toml)
-            .with_context(|| format!("Write TOML config `{}` error", path.display()))?;
-
-        Ok(())
-    }
-}
-
 /// Account configuration.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -93,6 +84,8 @@ pub struct AccountConfig {
 
     #[cfg(feature = "vdir")]
     pub vdir: Option<VdirConfig>,
+    #[cfg(feature = "pimdir")]
+    pub pimdir: Option<PimdirConfig>,
     #[cfg(feature = "caldav")]
     pub caldav: Option<CaldavConfig>,
 }
@@ -229,37 +222,64 @@ impl From<TableArrangementConfig> for ContentArrangement {
     }
 }
 
-/// Vdir backend configuration.
+/// vdir backend configuration.
 #[cfg(feature = "vdir")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct VdirConfig {
-    /// Filesystem path of the vdir collection root (the directory
-    /// containing per-calendar subdirectories).
+    /// Filesystem path of the vdir home: the directory holding one
+    /// subdirectory per calendar. Shell-expanded before use, so `~`
+    /// and environment variables both work.
     pub home_dir: PathBuf,
 }
 
-/// CalDAV (CalDAV) backend configuration.
+/// pimdir backend configuration.
+///
+/// A pimdir store is an offline cache a sync engine fills, not a
+/// server: calendula reads what the store holds and stages its writes
+/// for the next sync to push.
+#[cfg(feature = "pimdir")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct PimdirConfig {
+    /// The store directory, holding the SQLite index and the blob
+    /// tree. Shell-expanded before use.
+    pub root: PathBuf,
+    /// The replica source name this client opens the store as.
+    ///
+    /// Reads are source-independent, but a staged write is attributed
+    /// to this source, so for a change to propagate it must match the
+    /// source the sync engine drives for this device. Usually left
+    /// unset: a store synced as a single source is opened as that
+    /// source. Set it only to disambiguate a store synced from two.
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
+/// CalDAV backend configuration.
+///
+/// Locating the calendar home-set takes exactly one of three routes,
+/// from most to least discovery: `discover` resolves a bare domain,
+/// `server` names the context root to walk from, and `home` pins the
+/// home-set outright.
 #[cfg(feature = "caldav")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CaldavConfig {
-    /// Bare domain resolved to a server URL via RFC 6764 (SRV +
-    /// `.well-known`) by pimconf. Convenient but adds DNS + HTTP
-    /// round-trips on every run; prefer `server` once it is known.
+    /// Bare domain resolved to a context root through RFC 6764 SRV
+    /// records and the `.well-known` path. Convenient, but it costs
+    /// DNS and HTTP round-trips on every run; prefer `server` once the
+    /// answer is known.
     pub discover: Option<String>,
-
-    /// DAV context root. Principal + calendar-home-set discovery start
-    /// from this URL; the `.well-known` step is skipped.
+    /// DAV context root. Principal and calendar-home-set discovery
+    /// start here, skipping the `.well-known` step.
     pub server: Option<url::Url>,
-
-    /// Pre-resolved calendar home-set URL. Skips every discovery step.
+    /// Pre-resolved calendar home-set URL, skipping every discovery
+    /// step.
     pub home: Option<url::Url>,
-
     /// TLS configuration.
     #[serde(default)]
     pub tls: TlsConfig,
-
     /// Authentication configuration.
     pub auth: CaldavAuthConfig,
 }
@@ -269,13 +289,23 @@ pub struct CaldavConfig {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum CaldavAuthConfig {
+    /// No credentials, for a server that asks for none.
     None,
+    /// HTTP Basic (RFC 7617), the usual username and password, often
+    /// an app password.
     Basic {
+        /// The login to present.
         #[serde(deserialize_with = "shell_expanded_string")]
         username: String,
+        /// The password, read from the configuration or from the
+        /// standard output of a command.
         password: Secret,
     },
+    /// HTTP Bearer (RFC 6750), a provider-issued API token.
     Bearer {
+        /// The token, read from the configuration or from the standard
+        /// output of a command. An OAuth 2.0 token broker is a command
+        /// like any other.
         token: Secret,
     },
 }

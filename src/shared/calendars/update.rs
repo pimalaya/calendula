@@ -1,9 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
-use io_calendar::calendar::CalendarDiff;
 use pimalaya_cli::printer::{Message, Printer};
 
-use crate::shared::{arg::CalendarIdArg, client::CalendarClient};
+use crate::shared::{arg::CalendarIdArg, calendars::CalendarDiff, client::CalendarClient};
 
 /// Update a calendar's mutable properties.
 ///

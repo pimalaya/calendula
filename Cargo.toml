@@ -1,29 +1,25 @@
 [package]
 name = "calendula"
 description = "CLI to manage calendars"
-version = "0.2.0-alpha.1"
-authors = ["soywod <clement.douin@posteo.net>"]
-rust-version = "1.87"
+version = "0.1.0"
+authors = ["Clément DOUIN (soywod) <clement.douin@posteo.net>"]
+rust-version = "1.88"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 categories = ["command-line-utilities"]
 keywords = ["cli", "calendar", "caldav", "vdir", "ical"]
 homepage = "https://pimalaya.org"
-documentation = "https://github.com/pimalaya/calendula"
 repository = "https://github.com/pimalaya/calendula"
 
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
-
 [features]
-default = ["caldav", "vdir", "rustls-ring"]
-caldav = ["io-calendar/webdav"]
-vdir = ["io-calendar/vdir"]
-native-tls = ["pimalaya-stream/native-tls", "pimconf/native-tls", "io-webdav/native-tls", "io-calendar/native-tls"]
-rustls-aws = ["pimalaya-stream/rustls-aws", "pimconf/rustls-aws", "io-webdav/rustls-aws", "io-calendar/rustls-aws"]
-rustls-ring = ["pimalaya-stream/rustls-ring", "pimconf/rustls-ring", "io-webdav/rustls-ring", "io-calendar/rustls-ring"]
-vendored = ["pimalaya-stream/vendored", "io-webdav/vendored"]
+default = ["rustls-ring", "caldav", "vdir", "pimdir"]
+caldav = ["dep:io-webdav", "dep:io-http", "dep:secrecy"]
+vdir = ["dep:io-vdir"]
+pimdir = ["dep:io-pimdir", "dep:io-replica"]
+native-tls = ["pimalaya-stream/native-tls", "io-pim-discovery/native-tls", "io-webdav?/native-tls"]
+rustls-aws = ["pimalaya-stream/rustls-aws", "io-pim-discovery/rustls-aws", "io-webdav?/rustls-aws"]
+rustls-ring = ["pimalaya-stream/rustls-ring", "io-pim-discovery/rustls-ring", "io-webdav?/rustls-ring"]
+vendored = ["pimalaya-stream/vendored", "io-webdav?/vendored"]
 
 [profile.release]
 lto = "fat"
@@ -32,42 +28,34 @@ strip = "symbols"
 panic = "abort"
 
 [build-dependencies]
-pimalaya-cli = { version = "0.0.1", default-features = false, features = ["build"] }
+pimalaya-cli = { version = "0.2", default-features = false, features = ["build"] }
 
 [dependencies]
 anyhow = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4.4", features = ["derive", "env", "wrap_help"] }
-clap_complete = "4.4"
-clap_mangen = "0.3"
-comfy-table = "7"
 crossterm = { version = "0.29", default-features = false, features = ["serde"] }
 dirs = "6"
-env_logger = "0.11"
 humansize = "2"
-io-calendar = { version = "0.0.3", default-features = false, features = ["client", "parser", "serde"] }
-io-http = { version = "0.1", default-features = false }
-io-vdir = { version = "0.0.3", default-features = false, features = ["client", "parser", "serde"] }
-io-webdav = { version = "0.0.1", default-features = false, features = ["client"] }
+ical-rs = { version = "0.1", default-features = false, features = ["parser"] }
+io-http = { version = "0.3", default-features = false, optional = true }
+io-pim-discovery = { version = "0.5", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "stream"] }
+io-pimdir = { version = "0.2", default-features = false, features = ["client"], optional = true }
+io-replica = { version = "0.3", default-features = false, optional = true }
+io-vdir = { version = "0.1", default-features = false, features = ["client", "serde"], optional = true }
+io-webdav = { version = "0.1", default-features = false, features = ["client"], optional = true }
 log = "0.4"
-open = "5"
-percent-encoding = "2"
-pimalaya-cli = { version = "0.0.1", default-features = false, features = ["terminal", "table", "prompt", "wizard", "spinner", "caldav"] }
-pimalaya-config = { version = "0.0.1", default-features = false, features = ["toml", "secret"] }
-pimalaya-stream = { version = "0.0.1", default-features = false, features = ["std"] }
-pimconf = { version = "0.1.0", default-features = false, features = ["pacc", "autoconfig", "rfc6186", "rfc6764", "client"] }
-secrecy = "0.10"
+pimalaya-cli = { version = "0.2", default-features = false, features = ["terminal", "table", "prompt", "spinner", "wizard", "caldav"] }
+pimalaya-config = { version = "0.1", default-features = false, features = ["toml", "secret"] }
+pimalaya-stream = { version = "0.1", default-features = false, features = ["std"] }
+secrecy = { version = "0.10", optional = true }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 shellexpand = "3.1"
-toml = "0.8"
 url = { version = "2.5", features = ["serde"] }
 
 [patch.crates-io]
-domain = { git = "https://github.com/nlnetlabs/domain", rev = "b30087125c13e71010d9783a1bcdd9eb9fa3f336" }
-io-calendar.git = "https://github.com/pimalaya/io-calendar"
-io-http.git = "https://github.com/pimalaya/io-http"
-io-vdir.git = "https://github.com/pimalaya/io-vdir"
+io-pimdir.git = "https://github.com/pimalaya/io-pimdir"
+io-replica.git = "https://github.com/pimalaya/io-replica"
 io-webdav.git = "https://github.com/pimalaya/io-webdav"
 pimalaya-cli.git = "https://github.com/pimalaya/cli"
-pimalaya-config.git = "https://github.com/pimalaya/config"
-pimconf.git = "https://github.com/pimalaya/pimconf"

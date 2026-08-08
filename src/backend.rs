@@ -1,37 +1,50 @@
+//! The `--backend` selector.
+
 use std::{fmt, str::FromStr};
 
 use anyhow::{Error, bail};
 use clap::Parser;
 
-/// Selects which backend a cross-protocol command should target.
+/// Selects which backend a cross-protocol command targets.
 ///
-/// `Auto` lets the command pick the first configured-and-supported
-/// backend in its own priority order (vdir wins over caldav when both
-/// are configured). The named variants pin the command to that
-/// backend; the command bails if it cannot be served (config missing,
-/// or the operation has no arm for that backend).
+/// [`Auto`](Self::Auto) picks the first configured-and-compiled backend
+/// in calendula's own priority order (vdir, then pimdir, then CalDAV),
+/// so a local store is preferred over a network round-trip. A named
+/// variant pins the command to that backend and bails when the account
+/// carries no matching configuration block.
 ///
-/// The protocol-specific subcommands (`vdir`, `caldav`) ignore this
-/// arg entirely.
+/// The protocol-specific subcommands ignore this flag entirely: each
+/// already names its backend.
 #[derive(Clone, Copy, Debug, Default, Parser, PartialEq, Eq)]
 pub enum Backend {
+    /// The first configured backend, in calendula's priority order.
     #[default]
     Auto,
+    /// CalDAV only.
     #[cfg(feature = "caldav")]
     Caldav,
+    /// The local pimdir store only.
+    #[cfg(feature = "pimdir")]
+    Pimdir,
+    /// The local vdir home only.
     #[cfg(feature = "vdir")]
     Vdir,
 }
 
-#[allow(unused)]
 impl Backend {
-    /// Whether the CalDAV arm of a shared command is allowed to run.
+    /// Whether the CalDAV arm of a shared command may run.
     #[cfg(feature = "caldav")]
     pub fn allows_caldav(self) -> bool {
         matches!(self, Self::Auto | Self::Caldav)
     }
 
-    /// Whether the vdir arm of a shared command is allowed to run.
+    /// Whether the pimdir arm of a shared command may run.
+    #[cfg(feature = "pimdir")]
+    pub fn allows_pimdir(self) -> bool {
+        matches!(self, Self::Auto | Self::Pimdir)
+    }
+
+    /// Whether the vdir arm of a shared command may run.
     #[cfg(feature = "vdir")]
     pub fn allows_vdir(self) -> bool {
         matches!(self, Self::Auto | Self::Vdir)
@@ -46,9 +59,11 @@ impl FromStr for Backend {
             "auto" => Ok(Self::Auto),
             #[cfg(feature = "caldav")]
             "caldav" => Ok(Self::Caldav),
+            #[cfg(feature = "pimdir")]
+            "pimdir" => Ok(Self::Pimdir),
             #[cfg(feature = "vdir")]
             "vdir" => Ok(Self::Vdir),
-            backend => bail!("Invalid backend {backend}"),
+            backend => bail!("Invalid backend `{backend}`"),
         }
     }
 }
@@ -59,8 +74,44 @@ impl fmt::Display for Backend {
             Self::Auto => write!(f, "auto"),
             #[cfg(feature = "caldav")]
             Self::Caldav => write!(f, "caldav"),
+            #[cfg(feature = "pimdir")]
+            Self::Pimdir => write!(f, "pimdir"),
             #[cfg(feature = "vdir")]
             Self::Vdir => write!(f, "vdir"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_named_backend_round_trips_through_its_wire_spelling() {
+        for backend in [
+            Backend::Auto,
+            #[cfg(feature = "caldav")]
+            Backend::Caldav,
+            #[cfg(feature = "pimdir")]
+            Backend::Pimdir,
+            #[cfg(feature = "vdir")]
+            Backend::Vdir,
+        ] {
+            let spelling = backend.to_string();
+            assert_eq!(Backend::from_str(&spelling).unwrap(), backend);
+        }
+    }
+
+    #[test]
+    fn auto_allows_every_arm_and_a_named_backend_allows_only_its_own() {
+        #[cfg(feature = "vdir")]
+        {
+            assert!(Backend::Auto.allows_vdir());
+            assert!(Backend::Vdir.allows_vdir());
+            #[cfg(feature = "caldav")]
+            assert!(!Backend::Vdir.allows_caldav());
+        }
+
+        assert!(Backend::from_str("nonsense").is_err());
     }
 }

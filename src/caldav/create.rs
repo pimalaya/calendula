@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use io_webdav::rfc4791::calendar::Calendar;
+use io_webdav::rfc4791::calendar::CaldavCalendar;
 use pimalaya_cli::printer::{Message, Printer};
 
 use crate::caldav::client::CaldavClient;
@@ -25,17 +25,29 @@ pub struct CaldavCalendarCreateCommand {
     /// Hex color (`#RRGGBB`).
     #[arg(long, value_name = "HEX")]
     pub color: Option<String>,
+
+    /// Component kinds the calendar accepts (RFC 4791 5.2.3), such as
+    /// VEVENT or VTODO. Repeat the flag for several. A server fixes
+    /// this at creation and refuses to change it afterwards.
+    #[arg(long = "component", value_name = "KIND")]
+    pub components: Vec<String>,
+
+    /// Default time zone, as a whole VTIMEZONE block.
+    #[arg(long, value_name = "VTIMEZONE")]
+    pub tz: Option<String>,
 }
 
 impl CaldavCalendarCreateCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CaldavClient) -> Result<()> {
-        let calendar = Calendar {
+        let calendar = CaldavCalendar {
             id: self.id.clone(),
             display_name: self.display_name,
             description: self.description,
             color: self.color,
+            components: self.components.into_iter().collect(),
+            tz: self.tz,
             ctag: None,
-            tz: None,
+            sync_token: None,
         };
 
         client.create_calendar(&calendar)?;

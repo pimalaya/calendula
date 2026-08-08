@@ -8,6 +8,7 @@ CLI to manage calendars.
 ## Table of contents
 
 - [Features](#features)
+- [RFC coverage](#rfc-coverage)
 - [Installation](#installation)
   - [Pre-built binary](#pre-built-binary)
   - [Cargo](#cargo)
@@ -20,32 +21,55 @@ CLI to manage calendars.
   - [Fastmail](#fastmail)
   - [Proton](#proton)
   - [Posteo](#posteo)
+  - [Local calendars](#local-calendars)
 - [Usage](#usage)
-- [License](#license)
 - [AI disclosure](#ai-disclosure)
-- [Contributing](CONTRIBUTING.md)
+- [License](#license)
 - [Social](#social)
+- [Contributing](#contributing)
 - [Sponsoring](#sponsoring)
 
 ## Features
 
-- Shared API mapping `calendars`, `events` and `items` to the active backend
-- Protocol-specific APIs exposing each backend's full surface (`calendula vdir/caldav`)
-- Remote backend: **CalDAV** (RFC 4791)
-- Local (filesystem) backend: **vdir** [specs](https://vdirsyncer.pimutils.org/en/stable/vdir.html)
-- ncal-style `event agenda` view highlighting days that carry a VEVENT
-- HTTP auth support: basic, bearer
-- TLS support:
-  - [Rustls](https://crates.io/crates/rustls) with ring crypto
+- **Shared API**: `calendar`, `event` and `item` work the same whichever backend serves the account.
+- **Protocol-specific APIs**: `caldav`, `pimdir` and `vdir` each expose what only that backend has.
+- **CalDAV**: talk to any standard calendar server, with basic or bearer authentication.
+- **vdir**: read and write a local [vdir](https://vdirsyncer.pimutils.org/en/stable/vdir.html) home, one directory per calendar.
+- **pimdir**: read and stage writes against a local [pimdir](https://github.com/pimalaya/pimdir) store, the offline cache a sync engine fills.
+- **Agenda view**: `event agenda` draws a cal(1)-style grid marking the days that carry an event.
+- **Discovery**: an email address is enough to find a provider's server, through SRV records, `.well-known` and the provider configuration documents.
+- **Interactive wizard**: bare `calendula` discovers an account, tests it, and prints a ready-to-save configuration.
+- **Multi-account**: one TOML file, one block per account, several files deep-merged when you want secrets apart.
+- **JSON output**: every command switches to JSON with `--json`, for scripts and other tools.
+- Full standard, blocking client with **TLS** support:
+  - [Rustls](https://crates.io/crates/rustls) with ring crypto (requires `rustls-ring` feature, enabled by default)
   - [Rustls](https://crates.io/crates/rustls) with aws crypto (requires `rustls-aws` feature)
   - [Native TLS](https://crates.io/crates/native-tls) (requires `native-tls` feature)
-- Discovery support:
-  - `.well-known/caldav` [rfc6764](https://datatracker.ietf.org/doc/html/rfc6764)
-  - Current-user-principal [rfc5397](https://datatracker.ietf.org/doc/html/rfc5397)
-  - Calendar-home-set [rfc4791](https://datatracker.ietf.org/doc/html/rfc4791)
-- TOML configuration with multi-account support
-- Interactive wizard on first run
-- JSON output via `--json`
+
+> [!TIP]
+> Each backend sits behind its own cargo feature (`caldav`, `vdir`, `pimdir`), all enabled by default. Build with `--no-default-features` and pick the ones you need.
+
+## RFC coverage
+
+| RFC    | What is covered                                                                              |
+|--------|----------------------------------------------------------------------------------------------|
+| [4791] | CalDAV: calendar collections, calendar object resources, and the `calendar-query` REPORT with its time-range filter |
+| [4918] | WebDAV: the `PROPFIND`, `PROPPATCH`, `MKCOL`, `GET`, `PUT` and `DELETE` methods CalDAV builds on |
+| [5397] | Current-user-principal, the first step of the CalDAV discovery walk                           |
+| [5545] | iCalendar: parsing and editing the event, to-do and journal components a calendar holds       |
+| [6764] | CalDAV service discovery: the `_caldav` and `_caldavs` SRV records, and `.well-known/caldav`  |
+| [6578] | Collection synchronization, whose sync token a CalDAV calendar listing reports                |
+| [7617] | HTTP Basic authentication                                                                     |
+| [6750] | HTTP Bearer authentication, for a provider-issued or broker-refreshed API token               |
+
+[4791]: https://www.rfc-editor.org/rfc/rfc4791
+[4918]: https://www.rfc-editor.org/rfc/rfc4918
+[5397]: https://www.rfc-editor.org/rfc/rfc5397
+[5545]: https://www.rfc-editor.org/rfc/rfc5545
+[6578]: https://www.rfc-editor.org/rfc/rfc6578
+[6750]: https://www.rfc-editor.org/rfc/rfc6750
+[6764]: https://www.rfc-editor.org/rfc/rfc6764
+[7617]: https://www.rfc-editor.org/rfc/rfc7617
 
 ## Installation
 
@@ -76,12 +100,12 @@ For a more up-to-date version than the latest release, check out the [releases](
 cargo install --locked --git https://github.com/pimalaya/calendula.git
 ```
 
-With only vdir support:
+With only the local backends, and no network code at all:
 
 ```sh
 cargo install --locked --git https://github.com/pimalaya/calendula.git \
   --no-default-features \
-  --features vdir,rustls-ring
+  --features vdir,pimdir,rustls-ring
 ```
 
 ### Nix
@@ -114,11 +138,15 @@ The configuration is loaded from the first existing path among:
 - `$HOME/.config/calendula/config.toml`
 - `$HOME/.calendularc`
 
-Override with `calendula -c <PATH>`. Multiple paths can be passed at once, separated by `:`; the first is the base and the rest are deep-merged on top.
+Override the path with `calendula -c <PATH>` or `CALENDULA_CONFIG=<PATH>`. Multiple paths can be passed at once, separated by `:`; the first is the base and the rest are deep-merged on top, which is how a public configuration and a private one stay separate files. The full field reference lives in [config.sample.toml](./config.sample.toml).
 
-Run `calendula` once with no config file to launch the wizard. The wizard prompts for an account name, lets you pick a backend, then walks you through the vdir or CalDAV setup (CalDAV also asks for an email and tests the connection before saving). To edit (or add) an account later, use `calendula account configure --account <name>`.
+Run `calendula` with no command to launch the wizard. It asks one question, taking an email address, a server URL, or a local folder path, and the shape of what you type decides the rest. An address is discovered: every reachable server is offered, and picking one prompts only its credentials. A URL is taken as the CalDAV context root, which is how a self-hosted server publishing no SRV record gets configured. A folder is detected as a vdir home or a pimdir store.
 
-A documented sample lives at [config.sample.toml](./config.sample.toml).
+The wizard tests the account before showing you anything, then prints a ready-to-save configuration. Redirect it to keep it, or let the wizard save it for you:
+
+```sh
+calendula > ~/.config/calendula/config.toml
+```
 
 ### Apple
 
@@ -190,9 +218,53 @@ caldav.auth.basic.password.raw = "***"
 calendar.default = "default"
 ```
 
+### Local calendars
+
+No server is involved, so nothing needs discovering. Point calendula at a directory and it works offline.
+
+A [vdir](https://vdirsyncer.pimutils.org/en/stable/vdir.html) home is one directory per calendar, holding one `.ics` file per item. This is what vdirsyncer writes, and what most local tools read:
+
+```toml
+[accounts.local]
+vdir.home-dir = "~/.local/share/vdirsyncer/calendars"
+calendar.default = "personal"
+```
+
+A [pimdir](https://github.com/pimalaya/pimdir) store is the offline cache a sync engine fills: a SQLite index plus content-addressed bodies, shared with the other Pimalaya clients reading the same store. It is a cache, not a server, so calendars come from the sync and the collection verbs refuse here. Writes are staged for the next sync to push:
+
+```toml
+[accounts.cached]
+pimdir.root = "~/.local/state/neverest/example"
+# Usually left unset: a store synced as a single source is opened as it.
+#pimdir.source = "caldav"
+```
+
+Run `calendula pimdir status` to see which source your writes are attributed to and how much of each calendar is downloaded. An item that is listed but not downloaded reads as "body not fetched" until a sync hydrates it.
+
 ## Usage
 
 Run `calendula --help` for the full command tree, and `calendula <command> --help` for any subcommand's arguments and its JSON output shape (printed when the global `--json` flag is set).
+
+A few real command lines:
+
+```sh
+calendula calendar list
+calendula event list --calendar personal --from 2026-08-01 --to 2026-08-31
+calendula event agenda -3
+calendula item read --calendar personal event-1.ics
+calendula pimdir status
+```
+
+## AI disclosure
+
+This project is developed with AI assistance. This section documents how, so users and downstream packagers can make informed decisions.
+
+- **Tools**: Claude Code (Anthropic), invoked locally with a persistent project-scoped memory and a small set of repo-specific rules.
+- **Used for**: Refactors, mechanical multi-file edits, boilerplate (feature gates, error enums, derive macros, trait impls), test scaffolding, doc polish, exploratory design conversations.
+- **Not used for**: Engineering, critical code, git manipulation (commit, merge, rebase…), real-world tests.
+- **Verification**: Every AI-assisted change is read, compiled, tested, and formatted before commit (`nix develop --command cargo check / cargo test / cargo fmt`). Behavioural correctness is verified against the relevant RFC or upstream spec, not assumed from the model output. Tests are never adjusted to fit AI-generated code; the code is adjusted to fit correct behaviour.
+- **Limitations**: AI models occasionally produce code that compiles and passes tests but is subtly wrong: off-by-one errors, missed edge cases, plausible but nonexistent APIs, stale RFC references. The verification workflow catches most of this; it does not catch all of it. Bug reports are welcome and taken seriously.
+- **Last reviewed**: 08/08/2026
 
 ## License
 
@@ -203,22 +275,15 @@ This project is licensed under either of:
 
 at your option.
 
-## AI disclosure
-
-This project is developed with AI assistance. This section documents how, so users and downstream packagers can make informed decisions.
-
-- **Tools**: Claude Code (Anthropic), Opus 4.8, invoked locally with a persistent project-scoped memory and a small set of repo-specific rules.
-- **Used for**: Refactors, mechanical multi-file edits, boilerplate (feature gates, error enums, derive macros, trait impls), test scaffolding, doc polish, exploratory design conversations.
-- **Not used for**: Engineering, critical code, git manipulation (commit, merge, rebase…), real-world tests.
-- **Verification**: Every AI-assisted change is read, compiled, tested, and formatted before commit (`nix develop --command cargo check / cargo test / cargo fmt`). Behavioural correctness is verified against the relevant RFC or upstream spec, not assumed from the model output. Tests are never adjusted to fit AI-generated code; the code is adjusted to fit correct behaviour.
-- **Limitations**: AI models occasionally produce code that compiles and passes tests but is subtly wrong: off-by-one errors, missed edge cases, plausible but nonexistent APIs, stale RFC references. The verification workflow catches most of this; it does not catch all of it. Bug reports are welcome and taken seriously.
-- **Last reviewed**: 16/06/2026
-
 ## Social
 
 - Chat on [Matrix](https://matrix.to/#/#pimalaya:matrix.org)
 - News on [Mastodon](https://fosstodon.org/@pimalaya) or [RSS](https://fosstodon.org/@pimalaya.rss)
 - Mail at [pimalaya.org@posteo.net](mailto:pimalaya.org@posteo.net)
+
+## Contributing
+
+Contributions are welcome: start with [CONTRIBUTING.md](./CONTRIBUTING.md), which opens with the Pimalaya-wide guides to read first.
 
 ## Sponsoring
 

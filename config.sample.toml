@@ -10,11 +10,11 @@
 # can be passed at once, separated by `:`; the first one is the base and the
 # rest are deep-merged on top of it.
 #
-# Run `calendula` once with no config file to launch the wizard, which prompts
-# for an account name, lets you pick a backend, then walks you through the vdir
-# or CalDAV setup (CalDAV also asks for an email and tests the connection
-# before saving). `calendula account configure --account <name>` can be used
-# afterwards to edit (or add) an account through the same wizard.
+# Run `calendula` with no command to launch the wizard. It asks one question,
+# taking an email address, a server URL or a local folder path, discovers what
+# it can, tests the account, then prints a ready-to-save configuration on
+# stdout. It writes nothing on its own: redirect it, or let it save the file
+# for you when it asks.
 # ================================================================================
 
 # --------------------------------------------------------------------------------
@@ -42,7 +42,7 @@
 #item.list.page-size = 50
 
 # --------------------------------------------------------------------------------
-# Table rendering — calendars list
+# Table rendering: calendars list
 # --------------------------------------------------------------------------------
 
 #calendar.list.table.id-color = "red"
@@ -51,7 +51,7 @@
 #calendar.list.table.color-color = "reset"
 
 # --------------------------------------------------------------------------------
-# Table rendering — events list
+# Table rendering: events list
 # --------------------------------------------------------------------------------
 
 #event.list.table.id-color = "red"
@@ -60,7 +60,7 @@
 #event.list.table.end-color = "dark-yellow"
 
 # --------------------------------------------------------------------------------
-# Table rendering — items list
+# Table rendering: items list
 # --------------------------------------------------------------------------------
 
 #item.list.table.id-color = "red"
@@ -68,7 +68,7 @@
 #item.list.table.size-color = "reset"
 
 # --------------------------------------------------------------------------------
-# Table rendering — account list
+# Table rendering: account list
 # --------------------------------------------------------------------------------
 
 #account.list.table.name-color = "green"
@@ -85,14 +85,45 @@
 default = true
 
 # --------------------------------------------------------------------------------
-# Vdir backend
+# Backend selection
+#
+# An account may carry several backend blocks. The shared commands (`calendar`,
+# `event`, `item`) use the first configured one in calendula's priority order:
+# vdir, then pimdir, then caldav, so a local read is preferred to a network
+# round-trip. Pass `-b/--backend <name>` to pin one instead. The
+# protocol-specific commands (`caldav`, `pimdir`, `vdir`) always use their own.
+# --------------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------------
+# vdir backend
 #
 # Local calendar collections stored on disk; see
 # <https://vdirsyncer.pimutils.org/en/stable/vdir.html>. Each immediate
-# subdirectory of `home-dir` is one calendar.
+# subdirectory of `home-dir` is one calendar. Paths are shell-expanded, so `~`
+# and environment variables both work.
 # --------------------------------------------------------------------------------
 
 vdir.home-dir = "~/.local/share/vdirsyncer/calendars"
+
+# --------------------------------------------------------------------------------
+# pimdir backend
+#
+# A local pimdir store: an offline cache (a SQLite index plus content-addressed
+# blobs) that a sync engine fills; see <https://github.com/pimalaya/pimdir>.
+#
+# It is a cache, not a server. Calendars come from whatever the sync mirrors, so
+# the collection verbs (`calendar create/update/delete`) refuse here. An item
+# the sync has listed but not downloaded still shows up, and reading it reports
+# "body not fetched" rather than failing. `calendula pimdir status` shows how
+# much of each calendar is downloaded.
+#
+# Writes are staged for the next sync to push, attributed to `source`. Leave it
+# unset: a store synced as a single source (the ordinary one-device case) is
+# opened as that source. Set it only to disambiguate a store synced from two.
+# --------------------------------------------------------------------------------
+
+#pimdir.root = "~/.local/state/neverest/example"
+#pimdir.source = "caldav"
 
 # --------------------------------------------------------------------------------
 # CalDAV backend
@@ -104,15 +135,15 @@ vdir.home-dir = "~/.local/share/vdirsyncer/calendars"
 #    skipped. Fastest, least safe.
 # 2. `caldav.server`: principal + home-set discovery start from the given
 #    context root. Skips domain resolution.
-# 3. `caldav.discover`: a bare domain resolved to a server URL at runtime via
-#    pimconf (RFC 6764 SRV + `.well-known`), then principal + home-set
+# 3. `caldav.discover`: a bare domain resolved to a server URL at runtime
+#    through RFC 6764 SRV records and `.well-known`, then principal + home-set
 #    discovery. Convenient but adds DNS + HTTP round-trips on every run.
 #
-# The wizard records both `discover` and `server`: `server` wins, and `discover`
-# stays as a fallback to re-resolve from.
+# The wizard records `server`: discovery already ran once, so pinning what it
+# found spares every later run those round-trips.
 # --------------------------------------------------------------------------------
 
-caldav.discover = "example.org"
+#caldav.discover = "example.org"
 caldav.server = "https://caldav.example.org/dav/calendars"
 #caldav.home = "https://caldav.example.org/dav/calendars/user/me/default"
 

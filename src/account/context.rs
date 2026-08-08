@@ -8,13 +8,16 @@
 use std::{env::temp_dir, path::PathBuf};
 
 use anyhow::{Result, bail};
-use comfy_table::{Color as TableColor, ContentArrangement, presets};
 use crossterm::style::Color;
 use dirs::download_dir;
+use pimalaya_cli::table::{Color as TableColor, ContentArrangement, TableStyle};
 
-use crate::config::{
-    AccountConfig, CalendarListTableConfig, Config, EventListTableConfig, ItemListTableConfig,
-    TableArrangementConfig,
+use crate::{
+    config::{
+        AccountConfig, CalendarListTableConfig, Config, EventListTableConfig, ItemListTableConfig,
+        TableArrangementConfig,
+    },
+    shared::table::{DEFAULT_PRESET, style_from_preset},
 };
 
 const DEFAULT_LIST_PAGE_SIZE: u32 = 25;
@@ -71,11 +74,9 @@ impl Account {
             .unwrap_or_else(temp_dir)
     }
 
-    /// Effective `comfy_table` preset string.
-    pub fn table_preset(&self) -> &str {
-        self.table_preset
-            .as_deref()
-            .unwrap_or(presets::UTF8_FULL_CONDENSED)
+    /// Effective table style, mapped from the configured preset string.
+    pub fn table_style(&self) -> TableStyle {
+        style_from_preset(self.table_preset.as_deref().unwrap_or(DEFAULT_PRESET))
     }
 
     /// Effective `comfy_table` content arrangement.

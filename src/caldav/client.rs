@@ -1,11 +1,10 @@
-//! Calendula wrapper around [`io_webdav::client::WebdavClientStd`].
+//! calendula wrapper around [`io_webdav`]'s std client.
 //!
-//! Builds a connected CalDAV client from a [`CaldavConfig`] block:
-//! resolves the server URI from one of the three configured paths
-//! (server-uri, discover.host, or home-uri), opens the TCP/TLS
-//! connection via pimalaya-stream, then optionally walks the RFC 6764
-//! well-known + RFC 5397 principal + RFC 4791 calendar-home-set
-//! discovery chain.
+//! Builds a connected CalDAV client from a [`CaldavConfig`]: resolves
+//! the calendar home-set through whichever of the three configured
+//! routes is set, opens the TCP or TLS connection through
+//! pimalaya-stream, and leaves the client's discovery caches populated
+//! so a command runs no extra round-trip.
 
 use std::{
     ops::{Deref, DerefMut},
@@ -14,27 +13,35 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use io_http::{rfc6750::bearer::HttpAuthBearer, rfc7617::basic::HttpAuthBasic};
+use io_pim_discovery::{
+    rfc6764::{client::DiscoveryWebdavClientStd, service::DiscoveryDavService},
+    shared::dns::system_resolver,
+};
 use io_webdav::{client::WebdavClientStd, rfc4918::WebdavAuth};
 use pimalaya_config::toml::TomlConfig;
 use pimalaya_stream::tls::Tls;
-use pimconf::rfc6764::{client::DiscoveryWebdavClientStd, types::DavService};
 use secrecy::ExposeSecret;
 use url::Url;
 
 use crate::{
     account::context::Account,
-    cli::load_or_wizard,
+    cli::load_config,
     config::{CaldavAuthConfig, CaldavConfig},
 };
 
+/// DNS-over-TCP resolver used when no system resolver is found:
+/// Cloudflare's `1.1.1.1`.
 const DEFAULT_RESOLVER: &str = "tcp://1.1.1.1:53";
 
+/// A connected CalDAV client bundled with the merged runtime
+/// [`Account`], for the protocol-specific subcommands.
 pub struct CaldavClient {
     inner: WebdavClientStd,
     pub account: Account,
 }
 
 impl CaldavClient {
+    /// Wraps an already-connected client.
     pub fn new(inner: WebdavClientStd, account: Account) -> Self {
         Self { inner, account }
     }
@@ -54,15 +61,14 @@ impl DerefMut for CaldavClient {
     }
 }
 
-/// Opens a connected CalDAV client and walks the discovery chain so its
-/// caches are populated, following whichever of the three config routes
-/// is set:
+/// Opens a connected CalDAV client and walks the discovery chain,
+/// following whichever of the three configured routes is set:
 ///
-/// 1. `home`: pre-resolved calendar home set; no discovery runs.
-/// 2. `server`: principal + calendar-home-set discovery start from the
-///    given context root.
-/// 3. `discover`: a bare domain resolved to a context root through
-///    pimconf (RFC 6764 SRV + `.well-known`) before that walk.
+/// 1. `home` pins the calendar home-set, so no discovery runs;
+/// 2. `server` names the context root the principal and home-set walk
+///    starts from;
+/// 3. `discover` resolves a bare domain to that context root first,
+///    through RFC 6764 SRV records and the `.well-known` path.
 pub fn connect_and_resolve(config: &CaldavConfig) -> Result<WebdavClientStd> {
     let auth = build_auth(&config.auth)?;
     let tls = build_tls(config);
@@ -79,7 +85,7 @@ pub fn connect_and_resolve(config: &CaldavConfig) -> Result<WebdavClientStd> {
             let domain = config
                 .discover
                 .as_ref()
-                .ok_or_else(|| anyhow!("CalDAV config needs `server`, `home`, or `discover`"))?;
+                .ok_or_else(|| anyhow!("CalDAV config needs `discover`, `server` or `home`"))?;
             resolve_server(domain, &tls)?
         }
     };
@@ -90,22 +96,35 @@ pub fn connect_and_resolve(config: &CaldavConfig) -> Result<WebdavClientStd> {
     Ok(client)
 }
 
-/// Resolves a bare domain to a CalDAV context root via pimconf
-/// (RFC 6764 SRV + `.well-known`), reusing `tls` for the `.well-known`
-/// probe.
+/// Resolves a bare domain to a CalDAV context root through RFC 6764,
+/// reusing `tls` for the `.well-known` probe.
 fn resolve_server(domain: &str, tls: &Tls) -> Result<Url> {
-    let resolver = Url::parse(DEFAULT_RESOLVER).expect("DEFAULT_RESOLVER must be a valid URL");
-    let mut client = DiscoveryWebdavClientStd::new(resolver).with_tls(tls.clone());
-    let server = client.resolve(domain, DavService::Caldav)?;
-    Ok(server)
+    let mut client = DiscoveryWebdavClientStd::new(resolver()).with_tls(tls.clone());
+    Ok(client.resolve(domain, DiscoveryDavService::Caldav)?)
 }
 
+/// The resolver discovery queries: the system one, so the domain is not
+/// leaked to a third party, falling back to the Cloudflare default on
+/// hosts exposing none.
+pub fn resolver() -> Url {
+    system_resolver().unwrap_or_else(|| {
+        DEFAULT_RESOLVER
+            .parse()
+            .expect("DEFAULT_RESOLVER must be a valid URL")
+    })
+}
+
+/// The TLS profile CalDAV connects with. WebDAV speaks HTTP/1.1 only,
+/// so the ALPN list pins it rather than letting a server negotiate
+/// HTTP/2.
 fn build_tls(config: &CaldavConfig) -> Tls {
     let mut tls: Tls = config.tls.clone().into();
     tls.rustls.alpn = vec!["http/1.1".into()];
     tls
 }
 
+/// Resolves the configured credentials into the wire auth io-webdav
+/// sends. A secret backed by a command is run here, at first use.
 fn build_auth(config: &CaldavAuthConfig) -> Result<WebdavAuth> {
     Ok(match config {
         CaldavAuthConfig::None => WebdavAuth::None,
@@ -121,20 +140,23 @@ fn build_auth(config: &CaldavAuthConfig) -> Result<WebdavAuth> {
 }
 
 /// Loads the configuration, picks the active account, then opens the
-/// CalDAV client. Bails when the account has no `[caldav]` block.
+/// CalDAV client. Bails when the account carries no `[caldav]` block.
 pub fn build_caldav_client(
     config_paths: &[PathBuf],
     account_name: Option<&str>,
 ) -> Result<CaldavClient> {
-    let mut config = load_or_wizard(config_paths)?;
-    let (name, mut ac) = config
+    let mut config = load_config(config_paths)?;
+    let (name, mut account_config) = config
         .take_account(account_name)?
         .ok_or_else(|| anyhow!("Cannot find account"))?;
-    let caldav_config = ac
+
+    let caldav_config = account_config
         .caldav
         .take()
-        .ok_or_else(|| anyhow!("CalDAV config is missing for account `{name}`"))?;
-    let account = Account::from(config).merge(Account::from(ac));
+        .ok_or_else(|| anyhow!("CalDAV configuration is missing for account `{name}`"))?;
+
+    let account = Account::from(config).merge(Account::from(account_config));
     let inner = connect_and_resolve(&caldav_config)?;
+
     Ok(CaldavClient::new(inner, account))
 }

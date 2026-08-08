@@ -4,3 +4,4 @@ pub mod client;
 pub mod events;
 pub mod ical;
 pub mod items;
+pub mod table;

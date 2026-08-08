@@ -2,9 +2,9 @@ use std::fmt;
 
 use anyhow::Result;
 use clap::Parser;
-use comfy_table::{Cell, Color, Row, Table};
-use io_vdir::collection::Collection;
+use io_vdir::collection::VdirCollection;
 use pimalaya_cli::printer::Printer;
+use pimalaya_cli::table::{Cell, Color, Row, Table, TableStyle};
 use serde::Serialize;
 
 use crate::vdir::client::VdirClient;
@@ -20,7 +20,7 @@ impl VdirCollectionListCommand {
         let collections = client.list_collections()?;
 
         let table = CollectionsTable {
-            preset: client.account.table_preset().to_string(),
+            style: client.account.table_style(),
             name_color: client.account.calendars_list_table_name_color(),
             rows: collections.into_iter().map(CollectionRow::from).collect(),
         };
@@ -32,7 +32,7 @@ impl VdirCollectionListCommand {
 #[derive(Clone, Debug, Serialize)]
 pub struct CollectionsTable {
     #[serde(skip)]
-    pub preset: String,
+    pub style: TableStyle,
     #[serde(skip)]
     pub name_color: Color,
     #[serde(rename = "collections")]
@@ -44,7 +44,7 @@ impl fmt::Display for CollectionsTable {
         let mut table = Table::new();
 
         table
-            .load_preset(&self.preset)
+            .load_style(self.style)
             .set_header(Row::from([
                 Cell::new("ID"),
                 Cell::new("NAME"),
@@ -75,8 +75,8 @@ pub struct CollectionRow {
     pub path: String,
 }
 
-impl From<Collection> for CollectionRow {
-    fn from(collection: Collection) -> Self {
+impl From<VdirCollection> for CollectionRow {
+    fn from(collection: VdirCollection) -> Self {
         Self {
             id: collection.id().to_owned(),
             display_name: collection.display_name.clone(),

@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     collections::HashMap,
     fmt::{self, Write},
 };
@@ -7,13 +6,10 @@ use std::{
 use anyhow::{Result, bail};
 use chrono::{Datelike, Local, NaiveDateTime};
 use clap::Parser;
-use io_calendar::calcard::icalendar::{
-    ICalendar, ICalendarComponentType, ICalendarProperty, ICalendarValue,
-};
 use pimalaya_cli::printer::Printer;
 use serde::{Serialize, Serializer};
 
-use crate::shared::{arg::CalendarIdArg, client::CalendarClient};
+use crate::shared::{arg::CalendarIdArg, client::CalendarClient, events::Event};
 
 const DAYS_IN_WEEK: usize = 7;
 const MAXDAYS: usize = 42;
@@ -115,7 +111,7 @@ impl EventAgendaCommand {
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         let items = client.list_items(&calendar_id, None, None, None)?;
-        let all_events: Vec<ICalendar> = items.iter().filter_map(|item| item.as_ical()).collect();
+        let all_events: Vec<Event> = items.iter().flat_map(Event::project).collect();
 
         let mut ctl = CalControl {
             reform_year: DEFAULT_REFORM_YEAR,
@@ -289,7 +285,7 @@ struct CalControl {
     header_hint: bool,
     vertical: bool,
     req: CalRequest,
-    all_events: Vec<ICalendar>,
+    all_events: Vec<Event>,
     events: HashMap<NaiveDateTime, String>,
 }
 
@@ -813,66 +809,24 @@ fn cal_vert_output_months(
     Ok(())
 }
 
-/// Walks every parsed VEVENT in `ctl.all_events` looking for a DTSTART
-/// matching `(y, m, d)`; when found, records the SUMMARY (falling back
-/// to DESCRIPTION) into `ctl.events` and returns true.
+/// Marks the day `(y, m, d)` when any projected event starts on it,
+/// recording each such event's label into `ctl.events` so the JSON
+/// output carries them beside the grid.
 fn collect_events(ctl: &mut CalControl, y: i32, m: u32, d: u32) -> bool {
-    let mut has_event = false;
+    let starting: Vec<(NaiveDateTime, String)> = ctl
+        .all_events
+        .iter()
+        .filter_map(|event| {
+            let start = event.start_at()?;
+            let on_day = start.year() == y && start.month() == m && start.day() == d;
+            on_day.then(|| (start, event.label().to_owned()))
+        })
+        .collect();
 
-    for ical in &ctl.all_events {
-        for component in &ical.components {
-            if component.component_type != ICalendarComponentType::VEvent {
-                continue;
-            }
-
-            let Some(prop) = component.property(&ICalendarProperty::Dtstart) else {
-                continue;
-            };
-
-            for value in &prop.values {
-                let ICalendarValue::PartialDateTime(pdt) = value else {
-                    continue;
-                };
-
-                if pdt.year != Some(y as u16) {
-                    continue;
-                }
-                if pdt.month != Some(m as u8) {
-                    continue;
-                }
-                if pdt.day != Some(d as u8) {
-                    continue;
-                }
-
-                has_event = true;
-
-                let summary = component
-                    .property(&ICalendarProperty::Summary)
-                    .and_then(|p| p.values.iter().find_map(text_value));
-                let desc = component
-                    .property(&ICalendarProperty::Description)
-                    .and_then(|p| p.values.iter().find_map(text_value));
-
-                let summary_or_desc = summary.or(desc).unwrap_or_default().into_owned();
-
-                if let Some(dt) = pdt.to_date_time() {
-                    ctl.events.insert(dt.date_time, summary_or_desc);
-                }
-
-                break;
-            }
-        }
-    }
+    let has_event = !starting.is_empty();
+    ctl.events.extend(starting);
 
     has_event
-}
-
-fn text_value(value: &ICalendarValue) -> Option<Cow<'_, str>> {
-    if let ICalendarValue::Text(text) = value {
-        Some(Cow::Borrowed(text))
-    } else {
-        None
-    }
 }
 
 fn monthly(grid: &mut String, ctl: &mut CalControl) -> fmt::Result {

@@ -2,14 +2,18 @@ use std::fmt;
 
 use anyhow::Result;
 use clap::Parser;
-use comfy_table::{Cell, Color, ContentArrangement, Row, Table};
-use io_calendar::item::CalendarItem;
-use pimalaya_cli::printer::Printer;
+use pimalaya_cli::{
+    printer::Printer,
+    table::{Cell, Color, ContentArrangement, Row, Table, TableStyle},
+};
 use serde::Serialize;
 
-use crate::shared::{arg::CalendarIdArg, client::CalendarClient};
+use crate::shared::{arg::CalendarIdArg, client::CalendarClient, items::CalendarItem};
 
-/// Shared API to list iCalendar items for a calendar.
+/// List the raw iCalendar items of a calendar.
+///
+/// Every component kind is listed, VEVENT included; use `event list`
+/// for the events-only view with its summary and time columns.
 ///
 /// JSON output: `{"items": [{"id", "calendar-id", "etag",
 /// "contents"}]}`.
@@ -39,8 +43,8 @@ impl ItemListCommand {
             .or(Some(client.account.items_list_page_size()));
         let items = client.list_items(&calendar_id, self.page, page_size, None)?;
 
-        let table = Items {
-            preset: client.account.table_preset().to_string(),
+        printer.out(Items {
+            style: client.account.table_style(),
             arrangement: client.account.table_arrangement(),
             max_width: self.max_width,
             colors: ItemColors {
@@ -49,12 +53,11 @@ impl ItemListCommand {
                 size: client.account.items_list_table_size_color(),
             },
             items,
-        };
-
-        printer.out(table)
+        })
     }
 }
 
+/// The per-column colors an item listing renders with.
 #[derive(Clone, Copy, Debug)]
 struct ItemColors {
     id: Color,
@@ -62,10 +65,11 @@ struct ItemColors {
     size: Color,
 }
 
+/// The rendered item listing.
 #[derive(Clone, Debug, Serialize)]
 pub struct Items {
     #[serde(skip)]
-    pub preset: String,
+    pub style: TableStyle,
     #[serde(skip)]
     pub arrangement: ContentArrangement,
     #[serde(skip)]
@@ -80,7 +84,7 @@ impl fmt::Display for Items {
         let mut table = Table::new();
 
         table
-            .load_preset(&self.preset)
+            .load_style(self.style)
             .set_content_arrangement(self.arrangement.clone())
             .set_header(Row::from(vec![
                 Cell::new("ID"),
@@ -92,13 +96,7 @@ impl fmt::Display for Items {
                 row.max_height(1);
                 row.add_cell(Cell::new(&item.id).fg(self.colors.id));
                 row.add_cell(Cell::new(item.etag.as_deref().unwrap_or("")).fg(self.colors.etag));
-                row.add_cell(
-                    Cell::new(humansize::format_size(
-                        item.contents.len() as u64,
-                        humansize::BINARY,
-                    ))
-                    .fg(self.colors.size),
-                );
+                row.add_cell(Cell::new(size_of(item)).fg(self.colors.size));
                 row
             }));
 
@@ -109,4 +107,15 @@ impl fmt::Display for Items {
         writeln!(f)?;
         writeln!(f, "{table}")
     }
+}
+
+/// The size column: the item's octets, or a dash when the backend
+/// listed the item without a local body (a pimdir cache that has not
+/// downloaded it yet).
+fn size_of(item: &CalendarItem) -> String {
+    if item.contents.is_empty() {
+        return String::from("-");
+    }
+
+    humansize::format_size(item.contents.len() as u64, humansize::BINARY)
 }
