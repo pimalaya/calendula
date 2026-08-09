@@ -1012,8 +1012,7 @@ dependencies = [
 [[package]]
 name = "io-vdir"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f0318b88eda66a13f8221e5be685320c74dbc0b4dfd41e75c34fc3cbf094491"
+source = "git+https://github.com/pimalaya/io-vdir#59efc3022b5cee75683fb4cbd726c3c752bb5e68"
 dependencies = [
  "getrandom 0.4.3",
  "log",

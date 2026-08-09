@@ -13,4 +13,4 @@ jobs:
     secrets: inherit
     with:
       project: calendula
-      nixpkgs: staging-next
+      nixpkgs: nixos-25.11
