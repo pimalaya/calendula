@@ -42,5 +42,8 @@ When discovery yields no supported configuration for the given input, the wizard
 ### Requirement: Local backend auto-detected
 A typed folder path or `file://` URL SHALL configure a local backend, auto-detecting the kind from on-disk markers: a pimdir index file or blob directory means pimdir, a directory holding at least one collection (a subdirectory carrying an `.ics` file or a vdir metadata marker) means vdir. pimdir SHALL be tested first, since a store also holds subdirectories and testing vdir first would misread every store as a home. The wizard SHALL prompt vdir-against-pimdir only when both backends are compiled in and detection is inconclusive, which an empty directory is.
 
+### Requirement: The wizard covers the discoverable backends only
+The wizard SHALL configure CalDAV, vdir and pimdir. gcal is out: it needs no discovery and its token broker story is the user's to settle, so a Google account is written by hand from the sample configuration. A build carrying none of the three wizard-capable backends SHALL compile without the wizard and say so by name when bare `calendula` runs, rather than offering an empty flow.
+
 ### Requirement: The wizard does not serve a running command
 A command finding no configuration SHALL fail with a message pointing at the wizard, not run it. The wizard prints a document rather than writing one, so it cannot hand a configuration back to a command already underway.

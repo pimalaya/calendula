@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a shared command family per iCalendar component kind: `todo` (VTODO) and `journal` (VJOURNAL) join `event` (VEVENT), each with `list`, `read`, `create`, `update` and `delete`.
+
+  A todo listing renders the summary, due date, status, priority and completion percentage a task list is read by; a journal listing renders the summary, date and status of a dated note. They are views over the same items, so they add no backend operation, and `item` stays the raw unfiltered one. `--from` / `--to` narrow them, applied after parsing rather than pushed down: a server-side range filter is defined against a component's start and end, which a todo and a journal entry do not both carry. VFREEBUSY and VTIMEZONE get no family, the first being the answer to a query and the second the definition of the zones the others reference.
+
+- Added the `gcal` command family, covering the half of the Calendar API that iCalendar cannot express: `calendars` (the richer listing, with the access role, the primary flag, the time zone and the default reminders), `acl` (`list`, `create`, `update`, `delete`), `free-busy`, `instances`, `move`, `quick-add`, `colors` and `settings`.
+
+  Push channels are deliberately absent: a channel delivers to an HTTPS endpoint the caller must host, which a CLI has not. So are `calendars.clear` and `transferOwnership`, both irreversible.
+
+- Added the `gcal` backend: calendula over the Google Calendar API v3, through [io-gcal](https://github.com/pimalaya/io-gcal).
+
+  Google is reachable over CalDAV only in a crippled form (bearer tokens only, `MKCALENDAR` refused, an off-spec discovery entry point), so a Google account was read-mostly and calendar creation impossible. The native backend sits behind a `gcal` cargo feature and an `[accounts.<name>.gcal]` block carrying a bearer `auth.token` secret, which an OAuth 2.0 token broker fills like any other command. Calendars can now be created, updated and deleted, a date range is pushed down as `timeMin` / `timeMax`, a listing walks `nextPageToken` only as far as the requested page, and an update honours `if_match` through `If-Match`.
+
+  Google stores a JSON event and exposes no per-event iCalendar representation, so the backend synthesizes the document of record and re-projects it on write: fields with a well-defined iCalendar slot are managed both ways, Google-only fields survive an update untouched, provider-scoped ones are minted as read-only `X-GOOGLE-*` properties, and every remaining line is stashed verbatim in `extendedProperties.private`. Only VEVENT projects: a VTODO or VJOURNAL is refused by name, since Google models neither.
+
+  Google returns a boundary as an absolute instant plus the calendar's display zone, so only the offset decides the instant and the zone is carried over from the server copy on update. That keeps a zoned recurring series expanding where it did, rather than falling back to UTC and drifting by an hour after a daylight-saving change.
+
+- `calendar create` now reports the identifier the backend assigned rather than the one asked for. They differ only on Google, which mints its own, and the reported id is the one later commands address the calendar by.
+
 - Added the `pimdir` backend: calendula over a local [pimdir](https://github.com/pimalaya/pimdir) store, the offline cache a sync engine fills.
 
   It sits behind a `pimdir` cargo feature and a `[accounts.<name>.pimdir]` block carrying a `root` and an optional `source`. Reads are availability-aware: an item the sync listed but has not downloaded still shows in a listing, and reading it reports "body not fetched" rather than failing. Writes are staged io-replica mutations the next sync pushes, attributed to `source` and refused outright on a store never synced as it. Calendars come from the sync, so `calendar create`, `update` and `delete` refuse here.
@@ -17,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `--from` / `--to` date-range filtering to `event list` (YYYY-MM-DD, both inclusive). CalDAV pushes it server-side as an RFC 4791 `time-range` filter; the local backends apply it after parsing, and pimdir answers it from the stored summary when the body is not local. A range also lifts the default page-size cap, so every match is returned.
 
-- Added the `-b/--backend` flag selecting which backend the shared commands target. The default, `auto`, takes the first configured one in calendula's priority order (vdir, pimdir, caldav).
+- Added the `-b/--backend` flag selecting which backend the shared commands target. The default, `auto`, takes the first configured one in calendula's priority order (vdir, pimdir, caldav, gcal).
 
 - Adopted the [Cairn](https://github.com/pimalaya/cairn) convention: cairn/spec holds the living specification (backends, commands, config, wizard, packaging), cairn/changes the proposals, cairn/log the dated history.
 

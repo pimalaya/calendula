@@ -1,14 +1,14 @@
 //! Cross-protocol [`CalendarClient`] for the shared subcommands
 //! (`calendar`, `event`, `item`).
 //!
-//! One variant per compiled-in backend (vdir, CalDAV, pimdir); a value
-//! always holds exactly one, picked from the account configuration by
-//! the `--backend` flag. Each shared-API method dispatches to the
-//! active backend's matching method, and the per-backend glue lives in
-//! that protocol module's backend submodule.
+//! One variant per compiled-in backend (vdir, pimdir, CalDAV, gcal); a
+//! value always holds exactly one, picked from the account
+//! configuration by the `--backend` flag. Each shared-API method
+//! dispatches to the active backend's matching method, and the
+//! per-backend glue lives in that protocol module's backend submodule.
 //!
 //! The shared surface is a strict least-common-denominator: an
-//! operation only appears here when all three backends can serve it.
+//! operation only appears here when every backend can serve it.
 //! Anything narrower belongs to a protocol-specific subcommand.
 
 use anyhow::{Result, bail};
@@ -39,13 +39,16 @@ enum BackendClient {
     Caldav(Box<crate::caldav::backend::CaldavBackend>),
     #[cfg(feature = "pimdir")]
     Pimdir(Box<crate::pimdir::backend::PimdirBackend>),
+    #[cfg(feature = "gcal")]
+    Gcal(Box<crate::gcal::backend::GcalBackend>),
 }
 
 impl CalendarClient {
     /// Builds the client from the account configuration: the first
     /// configured backend allowed by `backend` wins, in calendula's
-    /// priority order (vdir, then pimdir, then CalDAV, so a local store
-    /// is preferred over a network round-trip).
+    /// priority order (vdir, pimdir, CalDAV, gcal), so a local store is
+    /// preferred over a network round-trip and a protocol-standard
+    /// server over a vendor API.
     pub fn new(
         config: Config,
         #[allow(unused_mut)] mut account_config: AccountConfig,
@@ -83,6 +86,16 @@ impl CalendarClient {
             inner = Some(BackendClient::Caldav(Box::new(client)));
         }
 
+        #[cfg(feature = "gcal")]
+        if inner.is_none()
+            && backend.allows_gcal()
+            && let Some(gcal_config) = account_config.gcal.take()
+        {
+            use crate::gcal::backend::GcalBackend;
+            let client = GcalBackend::new(gcal_config)?;
+            inner = Some(BackendClient::Gcal(Box::new(client)));
+        }
+
         let Some(inner) = inner else {
             bail!("No backend matching `{backend}` is configured for this account");
         };
@@ -101,18 +114,24 @@ impl CalendarClient {
             BackendClient::Caldav(client) => client.list_calendars(),
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.list_calendars(),
+            #[cfg(feature = "gcal")]
+            BackendClient::Gcal(client) => client.list_calendars(),
         }
     }
 
     /// Creates a calendar under `id`, carrying `name` and optionally a
     /// description and a color.
+    ///
+    /// Returns the identifier the backend actually assigned, which is
+    /// `id` everywhere the backend lets the caller name a collection,
+    /// and a server-minted one where it does not.
     pub fn create_calendar(
         &mut self,
         id: &str,
         name: &str,
         description: Option<&str>,
         color: Option<&str>,
-    ) -> Result<()> {
+    ) -> Result<String> {
         match &mut self.inner {
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => client.create_calendar(id, name, description, color),
@@ -120,6 +139,8 @@ impl CalendarClient {
             BackendClient::Caldav(client) => client.create_calendar(id, name, description, color),
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.create_calendar(id, name, description, color),
+            #[cfg(feature = "gcal")]
+            BackendClient::Gcal(client) => client.create_calendar(id, name, description, color),
         }
     }
 
@@ -133,6 +154,8 @@ impl CalendarClient {
             BackendClient::Caldav(client) => client.update_calendar(id, patch),
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.update_calendar(id, patch),
+            #[cfg(feature = "gcal")]
+            BackendClient::Gcal(client) => client.update_calendar(id, patch),
         }
     }
 
@@ -145,6 +168,8 @@ impl CalendarClient {
             BackendClient::Caldav(client) => client.delete_calendar(id),
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.delete_calendar(id),
+            #[cfg(feature = "gcal")]
+            BackendClient::Gcal(client) => client.delete_calendar(id),
         }
     }
 
@@ -152,8 +177,9 @@ impl CalendarClient {
     /// `range`. `page` is 1-indexed and defaults to the first page;
     /// `page_size = None` returns the whole window.
     ///
-    /// CalDAV pushes `range` server-side as a `time-range` filter; the
-    /// local backends parse each item and filter after the fact.
+    /// The server-backed backends push `range` down (CalDAV as a
+    /// `time-range` filter, gcal as `timeMin` / `timeMax`); the local
+    /// backends parse each item and filter after the fact.
     pub fn list_items(
         &mut self,
         calendar_id: &str,
@@ -168,6 +194,8 @@ impl CalendarClient {
             BackendClient::Caldav(client) => client.list_items(calendar_id, page, page_size, range),
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.list_items(calendar_id, page, page_size, range),
+            #[cfg(feature = "gcal")]
+            BackendClient::Gcal(client) => client.list_items(calendar_id, page, page_size, range),
         }
     }
 
@@ -180,6 +208,8 @@ impl CalendarClient {
             BackendClient::Caldav(client) => client.get_item(calendar_id, item_id),
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.get_item(calendar_id, item_id),
+            #[cfg(feature = "gcal")]
+            BackendClient::Gcal(client) => client.get_item(calendar_id, item_id),
         }
     }
 
@@ -193,6 +223,8 @@ impl CalendarClient {
             BackendClient::Caldav(client) => client.create_item(calendar_id, contents),
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.create_item(calendar_id, contents),
+            #[cfg(feature = "gcal")]
+            BackendClient::Gcal(client) => client.create_item(calendar_id, contents),
         }
     }
 
@@ -221,6 +253,10 @@ impl CalendarClient {
             BackendClient::Pimdir(client) => {
                 client.update_item(calendar_id, item_id, contents, if_match)
             }
+            #[cfg(feature = "gcal")]
+            BackendClient::Gcal(client) => {
+                client.update_item(calendar_id, item_id, contents, if_match)
+            }
         }
     }
 
@@ -233,6 +269,8 @@ impl CalendarClient {
             BackendClient::Caldav(client) => client.delete_item(calendar_id, item_id),
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.delete_item(calendar_id, item_id),
+            #[cfg(feature = "gcal")]
+            BackendClient::Gcal(client) => client.delete_item(calendar_id, item_id),
         }
     }
 }

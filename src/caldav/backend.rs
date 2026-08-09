@@ -54,7 +54,7 @@ impl CaldavBackend {
         name: &str,
         description: Option<&str>,
         color: Option<&str>,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let calendar = CaldavCalendar {
             id: id.to_owned(),
             display_name: Some(name.to_owned()),
@@ -64,7 +64,7 @@ impl CaldavBackend {
         };
 
         self.client.create_calendar(&calendar)?;
-        Ok(())
+        Ok(id.to_owned())
     }
 
     /// Rewrites a calendar's properties through PROPPATCH, reading the

@@ -14,9 +14,11 @@ use std::{collections::HashMap, path::PathBuf};
 
 use crossterm::style::Color;
 use pimalaya_cli::table::ContentArrangement;
+#[cfg(any(feature = "caldav", feature = "gcal"))]
+use pimalaya_config::secret::Secret;
 use pimalaya_config::toml::TomlConfig;
 #[cfg(feature = "caldav")]
-use pimalaya_config::{secret::Secret, toml::shell_expanded_string};
+use pimalaya_config::toml::shell_expanded_string;
 use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider};
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +38,10 @@ pub struct Config {
     pub calendar: CalendarConfig,
     #[serde(default)]
     pub event: EventConfig,
+    #[serde(default)]
+    pub todo: TodoConfig,
+    #[serde(default)]
+    pub journal: JournalConfig,
     #[serde(default)]
     pub item: ItemConfig,
     /// `account list` rendering options (global only).
@@ -80,6 +86,10 @@ pub struct AccountConfig {
     #[serde(default)]
     pub event: EventConfig,
     #[serde(default)]
+    pub todo: TodoConfig,
+    #[serde(default)]
+    pub journal: JournalConfig,
+    #[serde(default)]
     pub item: ItemConfig,
 
     #[cfg(feature = "vdir")]
@@ -88,6 +98,8 @@ pub struct AccountConfig {
     pub pimdir: Option<PimdirConfig>,
     #[cfg(feature = "caldav")]
     pub caldav: Option<CaldavConfig>,
+    #[cfg(feature = "gcal")]
+    pub gcal: Option<GcalConfig>,
 }
 
 /// Calendar-level options.
@@ -142,6 +154,57 @@ pub struct EventListTableConfig {
     pub summary_color: Option<Color>,
     pub start_color: Option<Color>,
     pub end_color: Option<Color>,
+}
+
+/// Todo-level rendering options.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct TodoConfig {
+    #[serde(default)]
+    pub list: TodoListConfig,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct TodoListConfig {
+    /// Default `-s/--page-size` value for `todos list`.
+    pub page_size: Option<u32>,
+    #[serde(default)]
+    pub table: TodoListTableConfig,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct TodoListTableConfig {
+    pub id_color: Option<Color>,
+    pub summary_color: Option<Color>,
+    pub due_color: Option<Color>,
+    pub status_color: Option<Color>,
+}
+
+/// Journal-level rendering options.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct JournalConfig {
+    #[serde(default)]
+    pub list: JournalListConfig,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct JournalListConfig {
+    /// Default `-s/--page-size` value for `journals list`.
+    pub page_size: Option<u32>,
+    #[serde(default)]
+    pub table: JournalListTableConfig,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct JournalListTableConfig {
+    pub id_color: Option<Color>,
+    pub summary_color: Option<Color>,
+    pub start_color: Option<Color>,
 }
 
 /// Item-level rendering options.
@@ -308,6 +371,39 @@ pub enum CaldavAuthConfig {
         /// like any other.
         token: Secret,
     },
+}
+
+/// Google Calendar backend configuration.
+///
+/// The API endpoint is fixed, so there is nothing to discover and no
+/// server to name: a token and a TLS profile are the whole block.
+#[cfg(feature = "gcal")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct GcalConfig {
+    /// TLS configuration.
+    #[serde(default)]
+    pub tls: TlsConfig,
+    /// Authentication configuration.
+    pub auth: GcalAuthConfig,
+}
+
+/// Google Calendar authentication configuration.
+///
+/// A struct rather than an enumeration of kinds: the Calendar API
+/// accepts an OAuth 2.0 bearer token and nothing else, so there is
+/// nothing to choose between. It still nests under `auth`, so every
+/// backend across the Pimalaya CLIs spells its credentials the same
+/// way.
+#[cfg(feature = "gcal")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct GcalAuthConfig {
+    /// The token, read from the configuration or from the standard
+    /// output of a command. Google expires an access token within the
+    /// hour, so a token broker is the usual answer, and a broker is a
+    /// command like any other.
+    pub token: Secret,
 }
 
 /// SSL/TLS configuration.

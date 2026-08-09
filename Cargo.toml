@@ -3,8 +3,8 @@ name = "calendula"
 description = "CLI to manage calendars"
 version = "0.1.0"
 authors = ["Clément DOUIN (soywod) <clement.douin@posteo.net>"]
-rust-version = "1.88"
 edition = "2024"
+rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 categories = ["command-line-utilities"]
 keywords = ["cli", "calendar", "caldav", "vdir", "ical"]
@@ -12,14 +12,15 @@ homepage = "https://pimalaya.org"
 repository = "https://github.com/pimalaya/calendula"
 
 [features]
-default = ["rustls-ring", "caldav", "vdir", "pimdir"]
+default = ["rustls-ring", "caldav", "gcal", "vdir", "pimdir"]
 caldav = ["dep:io-webdav", "dep:io-http", "dep:secrecy"]
+gcal = ["dep:io-gcal", "dep:secrecy"]
 vdir = ["dep:io-vdir"]
 pimdir = ["dep:io-pimdir", "dep:io-replica"]
-native-tls = ["pimalaya-stream/native-tls", "io-pim-discovery/native-tls", "io-webdav?/native-tls"]
-rustls-aws = ["pimalaya-stream/rustls-aws", "io-pim-discovery/rustls-aws", "io-webdav?/rustls-aws"]
-rustls-ring = ["pimalaya-stream/rustls-ring", "io-pim-discovery/rustls-ring", "io-webdav?/rustls-ring"]
-vendored = ["pimalaya-stream/vendored", "io-webdav?/vendored"]
+native-tls = ["pimalaya-stream/native-tls", "io-pim-discovery/native-tls", "io-webdav?/native-tls", "io-gcal?/native-tls"]
+rustls-aws = ["pimalaya-stream/rustls-aws", "io-pim-discovery/rustls-aws", "io-webdav?/rustls-aws", "io-gcal?/rustls-aws"]
+rustls-ring = ["pimalaya-stream/rustls-ring", "io-pim-discovery/rustls-ring", "io-webdav?/rustls-ring", "io-gcal?/rustls-ring"]
+vendored = ["pimalaya-stream/vendored", "io-webdav?/vendored", "io-gcal?/vendored"]
 
 [profile.release]
 lto = "fat"
@@ -38,6 +39,7 @@ crossterm = { version = "0.29", default-features = false, features = ["serde"] }
 dirs = "6"
 humansize = "2"
 ical-rs = { version = "0.1", default-features = false, features = ["parser"] }
+io-gcal = { version = "0.1", default-features = false, features = ["client"], optional = true }
 io-http = { version = "0.3", default-features = false, optional = true }
 io-pim-discovery = { version = "0.5", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "stream"] }
 io-pimdir = { version = "0.2", default-features = false, features = ["client"], optional = true }
@@ -55,7 +57,9 @@ shellexpand = "3.1"
 url = { version = "2.5", features = ["serde"] }
 
 [patch.crates-io]
+io-gcal.git = "https://github.com/pimalaya/io-gcal"
 io-pimdir.git = "https://github.com/pimalaya/io-pimdir"
 io-replica.git = "https://github.com/pimalaya/io-replica"
+io-vdir.git = "https://github.com/pimalaya/io-vdir"
 io-webdav.git = "https://github.com/pimalaya/io-webdav"
 pimalaya-cli.git = "https://github.com/pimalaya/cli"

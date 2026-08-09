@@ -18,7 +18,7 @@ use crate::{
 /// Loads the configuration, picks the active account, then exercises
 /// every backend the `--backend` flag allows: a local backend is
 /// checked against the filesystem, CalDAV by opening the connection and
-/// resolving the calendar home-set.
+/// resolving the calendar home-set, gcal by listing the calendars.
 ///
 /// JSON output: `{"account", "backends": [{"backend", "ok", "error"}]}`.
 #[derive(Debug, Parser)]
@@ -84,10 +84,19 @@ pub fn check_account(
         checks.push(BackendCheck::from("caldav", check_caldav(config)));
     }
 
+    #[cfg(feature = "gcal")]
+    if backend.allows_gcal()
+        && let Some(config) = account_config.gcal.clone()
+    {
+        checks.push(BackendCheck::from("gcal", check_gcal(config)));
+    }
+
     checks
 }
 
-/// Whether every checked backend answered.
+/// Whether every checked backend answered. Only the wizard asks, so it
+/// compiles with the backends the wizard configures.
+#[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
 pub fn all_ok(checks: &[BackendCheck]) -> bool {
     !checks.is_empty() && checks.iter().all(|check| check.ok)
 }
@@ -125,6 +134,15 @@ fn check_pimdir(config: crate::config::PimdirConfig) -> Result<()> {
 #[cfg(feature = "caldav")]
 fn check_caldav(config: crate::config::CaldavConfig) -> Result<()> {
     crate::caldav::client::connect_and_resolve(&config)?;
+    Ok(())
+}
+
+/// Listing the calendars is the check: it resolves the token secret,
+/// opens the TLS connection and exercises the authorization in one go,
+/// which a bare connect would not.
+#[cfg(feature = "gcal")]
+fn check_gcal(config: crate::config::GcalConfig) -> Result<()> {
+    crate::gcal::backend::GcalBackend::new(config)?.list_calendars()?;
     Ok(())
 }
 

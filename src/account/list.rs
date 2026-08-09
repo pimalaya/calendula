@@ -108,6 +108,11 @@ impl AccountRow {
             backends.push("caldav");
         }
 
+        #[cfg(feature = "gcal")]
+        if account.gcal.is_some() {
+            backends.push("gcal");
+        }
+
         Self {
             name: name.to_owned(),
             default: account.default,

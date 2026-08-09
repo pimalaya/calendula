@@ -113,7 +113,7 @@ impl PimdirBackend {
         _name: &str,
         _description: Option<&str>,
         _color: Option<&str>,
-    ) -> Result<()> {
+    ) -> Result<String> {
         bail!(unsupported("create"))
     }
 

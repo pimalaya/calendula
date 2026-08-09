@@ -17,19 +17,22 @@ use pimalaya_config::toml::TomlConfig;
 
 #[cfg(feature = "caldav")]
 use crate::caldav::{cli::CaldavCommand, client::build_caldav_client};
+#[cfg(feature = "gcal")]
+use crate::gcal::{cli::GcalCommand, client::build_gcal_client};
 #[cfg(feature = "pimdir")]
 use crate::pimdir::{backend::PimdirBackend, cli::PimdirCommand};
 #[cfg(feature = "vdir")]
 use crate::vdir::{cli::VdirCommand, client::build_vdir_client};
+#[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+use crate::wizard;
 use crate::{
     account::cli::AccountCommand,
     backend::Backend,
     config::Config,
     shared::{
         calendars::cli::CalendarCommand, client::CalendarClient, events::cli::EventCommand,
-        items::cli::ItemCommand,
+        items::cli::ItemCommand, journals::cli::JournalCommand, todos::cli::TodoCommand,
     },
-    wizard,
 };
 
 #[derive(Parser, Debug)]
@@ -61,9 +64,9 @@ pub struct CalendulaCli {
     /// backend and ignore it.
     ///
     /// With `auto`, the first configured backend wins, in calendula's
-    /// priority order (vdir, then pimdir, then caldav). With an
-    /// explicit value, only that backend is used, and the command bails
-    /// when the account carries no matching block.
+    /// priority order (vdir, pimdir, caldav, gcal). With an explicit
+    /// value, only that backend is used, and the command bails when the
+    /// account carries no matching block.
     #[arg(short, long, global = true, default_value_t)]
     pub backend: Backend,
     #[command(flatten)]
@@ -81,12 +84,19 @@ pub enum CalendulaCommand {
     Calendar(CalendarCommand),
     #[command(subcommand, alias = "events")]
     Event(EventCommand),
+    #[command(subcommand, alias = "todos")]
+    Todo(TodoCommand),
+    #[command(subcommand, alias = "journals")]
+    Journal(JournalCommand),
     #[command(subcommand, alias = "items")]
     Item(ItemCommand),
 
     #[cfg(feature = "caldav")]
     #[command(subcommand)]
     Caldav(CaldavCommand),
+    #[cfg(feature = "gcal")]
+    #[command(subcommand)]
+    Gcal(GcalCommand),
     #[cfg(feature = "pimdir")]
     #[command(subcommand)]
     Pimdir(PimdirCommand),
@@ -150,6 +160,20 @@ impl CalendulaCommand {
                     CalendarClient::new(config, account_config, backend)?,
                 )
             }
+            Self::Todo(cmd) => {
+                let (config, account_config) = configs()?;
+                cmd.execute(
+                    printer,
+                    CalendarClient::new(config, account_config, backend)?,
+                )
+            }
+            Self::Journal(cmd) => {
+                let (config, account_config) = configs()?;
+                cmd.execute(
+                    printer,
+                    CalendarClient::new(config, account_config, backend)?,
+                )
+            }
             Self::Item(cmd) => {
                 let (config, account_config) = configs()?;
                 cmd.execute(
@@ -162,6 +186,8 @@ impl CalendulaCommand {
             Self::Caldav(cmd) => {
                 cmd.execute(printer, build_caldav_client(config_paths, account_name)?)
             }
+            #[cfg(feature = "gcal")]
+            Self::Gcal(cmd) => cmd.execute(printer, build_gcal_client(config_paths, account_name)?),
             #[cfg(feature = "pimdir")]
             Self::Pimdir(cmd) => {
                 cmd.execute(printer, PimdirBackend::build(config_paths, account_name)?)
@@ -178,6 +204,10 @@ impl CalendulaCommand {
 
 /// Runs the parsed CLI: a subcommand, or the wizard when none was
 /// given.
+///
+/// The wizard configures the discoverable backends (CalDAV, vdir,
+/// pimdir); a build carrying none of them has nothing to walk the user
+/// through, and says so rather than offering an empty flow.
 pub fn execute(cli: CalendulaCli, printer: &mut impl Printer) -> Result<()> {
     match cli.command {
         Some(command) => command.execute(
@@ -186,6 +216,12 @@ pub fn execute(cli: CalendulaCli, printer: &mut impl Printer) -> Result<()> {
             cli.account.name.as_deref(),
             cli.backend,
         ),
+        #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
         None => wizard::discover::run(printer),
+        #[cfg(not(any(feature = "caldav", feature = "vdir", feature = "pimdir")))]
+        None => bail!(
+            "This build carries no wizard-capable backend; write a configuration by hand, \
+             starting from config.sample.toml"
+        ),
     }
 }

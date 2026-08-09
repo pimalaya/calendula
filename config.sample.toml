@@ -38,6 +38,10 @@
 # the hard fallback is 25.
 #event.list.page-size = 50
 
+# Default page size for `todos list` and `journals list`, resolved the same way.
+#todo.list.page-size = 50
+#journal.list.page-size = 50
+
 # Default page size for `items list`, resolved the same way.
 #item.list.page-size = 50
 
@@ -58,6 +62,23 @@
 #event.list.table.summary-color = "green"
 #event.list.table.start-color = "dark-yellow"
 #event.list.table.end-color = "dark-yellow"
+
+# --------------------------------------------------------------------------------
+# Table rendering: todos list
+# --------------------------------------------------------------------------------
+
+#todo.list.table.id-color = "red"
+#todo.list.table.summary-color = "green"
+#todo.list.table.due-color = "dark-yellow"
+#todo.list.table.status-color = "reset"
+
+# --------------------------------------------------------------------------------
+# Table rendering: journals list
+# --------------------------------------------------------------------------------
+
+#journal.list.table.id-color = "red"
+#journal.list.table.summary-color = "green"
+#journal.list.table.start-color = "dark-yellow"
 
 # --------------------------------------------------------------------------------
 # Table rendering: items list
@@ -89,9 +110,10 @@ default = true
 #
 # An account may carry several backend blocks. The shared commands (`calendar`,
 # `event`, `item`) use the first configured one in calendula's priority order:
-# vdir, then pimdir, then caldav, so a local read is preferred to a network
-# round-trip. Pass `-b/--backend <name>` to pin one instead. The
-# protocol-specific commands (`caldav`, `pimdir`, `vdir`) always use their own.
+# vdir, pimdir, caldav, gcal, so a local read is preferred to a network
+# round-trip and a protocol-standard server to a vendor API. Pass
+# `-b/--backend <name>` to pin one instead. The protocol-specific commands
+# (`caldav`, `pimdir`, `vdir`) always use their own.
 # --------------------------------------------------------------------------------
 
 # --------------------------------------------------------------------------------
@@ -163,3 +185,36 @@ caldav.auth.basic.password.command = "pass show example"
 #caldav.tls.provider = "rustls"
 #caldav.tls.rustls.crypto = "ring"
 #caldav.tls.cert = "/etc/ssl/certs/ca-certificates.crt"
+
+# --------------------------------------------------------------------------------
+# Google Calendar backend
+#
+# The Calendar API v3, which Google offers in full where its CalDAV bridge is
+# crippled: calendars can be created, updated and deleted, and a date range is
+# narrowed server-side. There is nothing to discover, so the block is a token
+# and a TLS profile.
+#
+# Google stores events as JSON and exposes no iCalendar representation of one,
+# so calendula synthesizes it: what has a well-defined iCalendar slot is
+# managed both ways, Google-only fields survive an update untouched, and every
+# remaining property is stashed verbatim server-side so it round-trips. Only
+# events project; a VTODO or VJOURNAL is refused, since Google models neither.
+#
+# Calendar ids are the ones `calendula calendar list` shows: your email address
+# for the primary calendar, a `...@group.calendar.google.com` value for a
+# secondary one. Google mints the id of a calendar it creates, so the id passed
+# to `calendar create` is reported back rather than honoured.
+#
+# An access token expires within the hour, so a token written here is useless by
+# the second run: point `command` at a broker such as Ortie.
+# --------------------------------------------------------------------------------
+
+# Bearer authentication (RFC 6750), the only kind the Calendar API takes.
+#gcal.auth.token.command = "ortie token show"
+#gcal.auth.token.command = ["ortie", "token", "show"]
+#gcal.auth.token.raw = "oauth2-token"
+
+# TLS configuration.
+#gcal.tls.provider = "rustls"
+#gcal.tls.rustls.crypto = "ring"
+#gcal.tls.cert = "/etc/ssl/certs/ca-certificates.crt"

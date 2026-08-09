@@ -62,7 +62,7 @@ impl VdirBackend {
         name: &str,
         description: Option<&str>,
         color: Option<&str>,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let collection = VdirCollection {
             path: self.path(id),
             display_name: Some(name.to_owned()),
@@ -71,7 +71,7 @@ impl VdirBackend {
         };
 
         self.client.create_collection(collection)?;
-        Ok(())
+        Ok(id.to_owned())
     }
 
     /// Rewrites the metadata markers of a collection, reading the

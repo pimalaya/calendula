@@ -87,8 +87,11 @@ impl CalendarTimeRange {
     /// on the leading `YYYYMMDD`, which is enough for a day window and
     /// keeps the CLI out of time-zone resolution.
     ///
-    /// Only the local backends need it: CalDAV asks the server.
-    #[cfg(any(feature = "vdir", feature = "pimdir"))]
+    /// The local backends need it to filter a listing, and so do the
+    /// `todo` and `journal` families whatever the backend: a
+    /// server-side range filter is defined against a component's start
+    /// and end (RFC 4791 9.9), which a todo and a journal entry do not
+    /// both carry.
     pub fn contains(&self, stamp: &str) -> bool {
         let day = &stamp[..stamp.len().min(8)];
 
@@ -159,7 +162,6 @@ mod tests {
         assert!(CalendarTimeRange::from_days(Some(from), Some(to)).is_err());
     }
 
-    #[cfg(any(feature = "vdir", feature = "pimdir"))]
     #[test]
     fn containment_covers_both_bounds_and_both_stamp_shapes() {
         let range = CalendarTimeRange {

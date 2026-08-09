@@ -31,9 +31,11 @@ CLI to manage calendars.
 
 ## Features
 
-- **Shared API**: `calendar`, `event` and `item` work the same whichever backend serves the account.
-- **Protocol-specific APIs**: `caldav`, `pimdir` and `vdir` each expose what only that backend has.
+- **Shared API**: `calendar`, `event`, `todo`, `journal` and `item` work the same whichever backend serves the account.
+- **One family per component kind**: `event` (VEVENT), `todo` (VTODO) and `journal` (VJOURNAL) each render the columns their kind is read by; `item` keeps the raw, unfiltered view.
+- **Protocol-specific APIs**: `caldav`, `gcal`, `pimdir` and `vdir` each expose what only that backend has.
 - **CalDAV**: talk to any standard calendar server, with basic or bearer authentication.
+- **Google Calendar**: the native API v3, where Google's CalDAV bridge is crippled, with the iCalendar document synthesized both ways. `gcal` adds sharing, free/busy, recurrence expansion and quick add.
 - **vdir**: read and write a local [vdir](https://vdirsyncer.pimutils.org/en/stable/vdir.html) home, one directory per calendar.
 - **pimdir**: read and stage writes against a local [pimdir](https://github.com/pimalaya/pimdir) store, the offline cache a sync engine fills.
 - **Agenda view**: `event agenda` draws a cal(1)-style grid marking the days that carry an event.
@@ -47,7 +49,7 @@ CLI to manage calendars.
   - [Native TLS](https://crates.io/crates/native-tls) (requires `native-tls` feature)
 
 > [!TIP]
-> Each backend sits behind its own cargo feature (`caldav`, `vdir`, `pimdir`), all enabled by default. Build with `--no-default-features` and pick the ones you need.
+> Each backend sits behind its own cargo feature (`caldav`, `gcal`, `vdir`, `pimdir`), all enabled by default. Build with `--no-default-features` and pick the ones you need.
 
 ## RFC coverage
 
@@ -167,9 +169,21 @@ calendar.default = "home"
 
 ### Google
 
-Google exposes calendars via CalDAV, but only behind [OAuth 2.0](https://developers.google.com/workspace/calendar/caldav/v2/guide). Once set up, you can use any tool to manage token refreshing (for example using [Ortie](https://github.com/pimalaya/ortie)).
+Use the `gcal` backend, which speaks the [Calendar API v3](https://developers.google.com/workspace/calendar/api/v3/reference) directly. Both routes need [OAuth 2.0](https://developers.google.com/workspace/calendar/caldav/v2/guide), and an access token expires within the hour, so point the token at a broker such as [Ortie](https://github.com/pimalaya/ortie) rather than pasting one in.
 
-Google's CalDAV layout is non-standard: each calendar lives at `https://apidata.googleusercontent.com/caldav/v2/<CALENDAR-ID>/events`, and it does not enumerate the home-set the way `caldav discover` expects. So set `caldav.home` to the base URL and make the calendar id the `<CALENDAR-ID>/events` segment. `<CALENDAR-ID>` is your email for the primary calendar, or the `...@group.calendar.google.com` value from Google Calendar's *Settings and sharing > Integrate calendar > Calendar ID* for secondary ones.
+```toml
+[accounts.example]
+gcal.auth.token.command = ["ortie", "token", "show"]
+
+# Your email address for the primary calendar, or a
+# "...@group.calendar.google.com" value for a secondary one. Run
+# `calendula calendar list` to read them.
+calendar.default = "example@gmail.com"
+```
+
+Google stores events as JSON and exposes no iCalendar representation of one, so calendula synthesizes the document you read and re-projects what you write. Properties with a well-defined iCalendar slot are authoritative in both directions; Google-only fields (the event colour, the guest permissions, working-location and out-of-office blocks) survive an update untouched; provider-scoped ones surface as read-only `X-GOOGLE-*` properties; and everything else is stashed verbatim on the server so it round-trips instead of being dropped on the next write. Only events project: a VTODO or VJOURNAL is refused by name, since Google models neither.
+
+Google is also reachable over CalDAV, but only in a crippled form: bearer tokens are the sole authentication, `MKCALENDAR` is refused outright, and the discovery entry point is off-spec, so each calendar has to be addressed by hand and none can be created. If you want it anyway, set `caldav.home` to the base URL and make the calendar id the `<CALENDAR-ID>/events` segment:
 
 ```toml
 [accounts.example]
@@ -251,8 +265,12 @@ A few real command lines:
 calendula calendar list
 calendula event list --calendar personal --from 2026-08-01 --to 2026-08-31
 calendula event agenda -3
+calendula todo list --calendar tasks
+calendula journal list --calendar notes
 calendula item read --calendar personal event-1.ics
 calendula pimdir status
+calendula gcal free-busy --from 2026-08-10 --to 2026-08-14
+calendula gcal quick-add "Lunch with Ada tomorrow at noon"
 ```
 
 ## AI disclosure

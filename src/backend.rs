@@ -8,10 +8,11 @@ use clap::Parser;
 /// Selects which backend a cross-protocol command targets.
 ///
 /// [`Auto`](Self::Auto) picks the first configured-and-compiled backend
-/// in calendula's own priority order (vdir, then pimdir, then CalDAV),
-/// so a local store is preferred over a network round-trip. A named
-/// variant pins the command to that backend and bails when the account
-/// carries no matching configuration block.
+/// in calendula's own priority order (vdir, pimdir, CalDAV, gcal), so a
+/// local store is preferred over a network round-trip and a
+/// protocol-standard server over a vendor API. A named variant pins the
+/// command to that backend and bails when the account carries no
+/// matching configuration block.
 ///
 /// The protocol-specific subcommands ignore this flag entirely: each
 /// already names its backend.
@@ -23,6 +24,9 @@ pub enum Backend {
     /// CalDAV only.
     #[cfg(feature = "caldav")]
     Caldav,
+    /// The Google Calendar API only.
+    #[cfg(feature = "gcal")]
+    Gcal,
     /// The local pimdir store only.
     #[cfg(feature = "pimdir")]
     Pimdir,
@@ -36,6 +40,12 @@ impl Backend {
     #[cfg(feature = "caldav")]
     pub fn allows_caldav(self) -> bool {
         matches!(self, Self::Auto | Self::Caldav)
+    }
+
+    /// Whether the gcal arm of a shared command may run.
+    #[cfg(feature = "gcal")]
+    pub fn allows_gcal(self) -> bool {
+        matches!(self, Self::Auto | Self::Gcal)
     }
 
     /// Whether the pimdir arm of a shared command may run.
@@ -59,6 +69,8 @@ impl FromStr for Backend {
             "auto" => Ok(Self::Auto),
             #[cfg(feature = "caldav")]
             "caldav" => Ok(Self::Caldav),
+            #[cfg(feature = "gcal")]
+            "gcal" => Ok(Self::Gcal),
             #[cfg(feature = "pimdir")]
             "pimdir" => Ok(Self::Pimdir),
             #[cfg(feature = "vdir")]
@@ -74,6 +86,8 @@ impl fmt::Display for Backend {
             Self::Auto => write!(f, "auto"),
             #[cfg(feature = "caldav")]
             Self::Caldav => write!(f, "caldav"),
+            #[cfg(feature = "gcal")]
+            Self::Gcal => write!(f, "gcal"),
             #[cfg(feature = "pimdir")]
             Self::Pimdir => write!(f, "pimdir"),
             #[cfg(feature = "vdir")]
@@ -92,6 +106,8 @@ mod tests {
             Backend::Auto,
             #[cfg(feature = "caldav")]
             Backend::Caldav,
+            #[cfg(feature = "gcal")]
+            Backend::Gcal,
             #[cfg(feature = "pimdir")]
             Backend::Pimdir,
             #[cfg(feature = "vdir")]
