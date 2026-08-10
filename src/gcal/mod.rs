@@ -23,3 +23,4 @@ pub mod project;
 pub mod quick_add;
 pub mod render;
 pub mod settings;
+pub mod timezone;

@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Google returns a boundary as an absolute instant plus the calendar's display zone, so only the offset decides the instant and the zone is carried over from the server copy on update. That keeps a zoned recurring series expanding where it did, rather than falling back to UTC and drifting by an hour after a daylight-saving change.
 
+  A boundary anchored in a named zone carries the VTIMEZONE it references, minted from the zone name Google sends, so an item stands on its own as an .ics file. The Calendar API carries the IANA name and nothing behind it, so the `gcal` feature carries a time zone database of its own.
+
 - `calendar create` now reports the identifier the backend assigned rather than the one asked for. They differ only on Google, which mints its own, and the reported id is the one later commands address the calendar by.
 
 - Added the `pimdir` backend: calendula over a local [pimdir](https://github.com/pimalaya/pimdir) store, the offline cache a sync engine fills.

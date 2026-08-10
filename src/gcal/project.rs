@@ -23,10 +23,10 @@
 //! itself, so an incoming CREATED or LAST-MODIFIED is consumed rather
 //! than written.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Result, anyhow, bail};
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use ical::{
     param::IcalParam,
     prop::{IcalProp, IcalPropKind, IcalPropName},
@@ -36,7 +36,7 @@ use ical::{
         cst::{IcalCst, IcalItem},
         line::IcalLine,
         param::{cn::CN, cutype::CUTYPE, partstat::PARTSTAT, role::ROLE, tzid::TZID, value::VALUE},
-        prop::{action::ACTION, trigger::TRIGGER},
+        prop::{action::ACTION, trigger::TRIGGER, tzid::TZID as TZID_PROP},
     },
     value::{IcalValue, datetime::IcalDateTime, integer::IcalInteger, text::IcalText},
 };
@@ -45,6 +45,8 @@ use io_gcal::v3::rest::events::{
     GcalEventExtendedProperties, GcalEventPerson, GcalEventReminder, GcalEventReminderMethod,
     GcalEventReminders, GcalEventStatus, GcalEventTransparency, GcalEventVisibility,
 };
+
+use crate::gcal::timezone;
 
 /// Product identifier the synthesized document carries.
 const PRODID: &str = "-//Pimalaya//calendula//EN";
@@ -191,11 +193,100 @@ pub fn to_ical(event: &GcalEvent) -> String {
     let document = splice_before(calendar.to_string(), "END:VEVENT", &lines);
     let document = splice_before(document, "END:VEVENT", &alarms(event));
 
-    splice_before(
+    let document = splice_before(
         document,
         "END:VCALENDAR",
         &stashed(event, CALENDAR_STASH_PREFIX),
-    )
+    );
+
+    // NOTE: RFC 5545 3.2.19 makes every TZID the finished document
+    // names owe a VTIMEZONE, and Google carries none: its resource
+    // holds the zone name alone. The definitions are minted last, once
+    // the recurrence lines and the stash have had their say, since a
+    // TZID reaches the document through those too.
+    let anchor = anchor(event);
+    let definitions: Vec<String> = undefined_zones(&document)
+        .iter()
+        .filter_map(|zone| timezone::vtimezone(zone, anchor))
+        .flat_map(|definition| raw_component(&definition))
+        .collect();
+
+    // NOTE: ahead of the VEVENT rather than at the end of the envelope,
+    // which is where Google's own CalDAV frontend puts it: a reader
+    // taking the document a line at a time then meets a definition
+    // before the property leaning on it.
+    splice_before(document, "BEGIN:VEVENT", &definitions)
+}
+
+/// Every zone the document names in a TZID parameter without defining
+/// it in a VTIMEZONE of its own.
+fn undefined_zones(document: &str) -> BTreeSet<String> {
+    let mut referenced = BTreeSet::new();
+    let mut defined = BTreeSet::new();
+
+    for line in unfolded(document) {
+        if let Some(zone) = line.strip_prefix("TZID:") {
+            defined.insert(zone.trim().to_string());
+            continue;
+        }
+
+        // NOTE: only the parameter section names a zone. Searching the
+        // whole line would let a SUMMARY that happens to read `TZID=`
+        // conjure a component out of free text.
+        let params = line.split(':').next().unwrap_or(&line);
+
+        let Some(start) = params.find("TZID=") else {
+            continue;
+        };
+
+        let zone = &params[start + "TZID=".len()..];
+        let end = zone.find(';').unwrap_or(zone.len());
+        referenced.insert(zone[..end].trim_matches('"').to_string());
+    }
+
+    referenced.difference(&defined).cloned().collect()
+}
+
+/// The document's logical lines, RFC 5545 3.1 folds resolved.
+///
+/// A folded line is one line split across several physical ones, so
+/// reading the physical ones would see a zone name cut in half and miss
+/// the reference entirely.
+fn unfolded(document: &str) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+
+    for line in document.lines() {
+        let line = line.trim_end_matches('\r');
+        let continuation = line.strip_prefix([' ', '\t']);
+
+        match (continuation, lines.last_mut()) {
+            (Some(rest), Some(last)) => last.push_str(rest),
+            _ => lines.push(line.to_string()),
+        }
+    }
+
+    lines
+}
+
+/// The instant an event's zones are described around: the day its start
+/// falls on, in Unix seconds.
+///
+/// Only the era matters, not the exact moment, since it selects which
+/// observances were in force and those change on the scale of years.
+/// The date alone is therefore read, and read as UTC, which cannot be
+/// off by more than a day. An event with no start at all is refused on
+/// write, so the epoch it falls back to never reaches a server.
+fn anchor(event: &GcalEvent) -> i64 {
+    let boundary = event
+        .start
+        .as_ref()
+        .and_then(|boundary| boundary.date_time.as_deref().or(boundary.date.as_deref()));
+
+    boundary
+        .and_then(|stamp| stamp.get(..10))
+        .and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok())
+        .and_then(|date| date.and_hms_opt(0, 0, 0))
+        .map_or(0, |naive| naive.and_utc().timestamp())
 }
 
 /// Projects an iCalendar document back onto an io-gcal event.
@@ -406,8 +497,14 @@ fn take_vevent<'a>(
 }
 
 /// The calendar-level remainder: every property and component of the
-/// VCALENDAR envelope the projection does not rewrite itself, VTIMEZONE
-/// above all, since dropping it would leave a TZID reference dangling.
+/// VCALENDAR envelope the projection does not rewrite itself.
+///
+/// A VTIMEZONE naming a zone the database knows is rewritten on every
+/// read and so is left out, which matters more here than elsewhere: a
+/// zone definition runs to a dozen lines or more, and stashing one
+/// would spend a chunk of the extended-property budget on bytes the
+/// projection can mint for free. One naming a zone it does not know is
+/// kept verbatim, since nothing could rebuild it.
 fn calendar_remainder(calendar: &IcalCst<'_>) -> Vec<String> {
     let mut remainder = Vec::new();
 
@@ -418,12 +515,25 @@ fn calendar_remainder(calendar: &IcalCst<'_>) -> Vec<String> {
             }
             IcalItem::Prop(_) => {}
             IcalItem::Component(child) if is_named(child, "VEVENT") => {}
+            IcalItem::Component(child) if is_known_zone(child) => {}
             IcalItem::Component(child) => remainder.extend(raw_component(child)),
             IcalItem::Opaque(bytes) => remainder.push(String::from_utf8_lossy(bytes).into_owned()),
         }
     }
 
     remainder
+}
+
+/// Whether a component is a VTIMEZONE the projection can mint again
+/// from its TZID alone.
+fn is_known_zone(component: &IcalCst<'_>) -> bool {
+    if !is_named(component, "VTIMEZONE") {
+        return false;
+    }
+
+    component
+        .prop::<TZID_PROP>()
+        .is_some_and(|tzid| timezone::is_known(&tzid.0))
 }
 
 /// Whether a calendar-level property is one the projection rewrites on
@@ -1038,7 +1148,7 @@ fn splice_before(document: String, marker: &str, lines: &[String]) -> String {
 }
 
 /// An empty component with its BEGIN / END envelope.
-fn component(name: &'static str) -> IcalCst<'static> {
+pub(super) fn component(name: &'static str) -> IcalCst<'static> {
     IcalCst {
         begin: Some(IcalLine::text("BEGIN", name)),
         items: Vec::new(),
@@ -1061,13 +1171,18 @@ fn is_named(component: &IcalCst<'_>, name: &str) -> bool {
     component_name(component).eq_ignore_ascii_case(name)
 }
 
-/// A canonical text property.
-fn text_prop(kind: IcalPropKind, value: String) -> IcalProp<'static> {
+/// A property under a canonical name, carrying no parameter.
+pub(super) fn prop(kind: IcalPropKind, value: IcalValue<'static>) -> IcalProp<'static> {
     IcalProp {
         name: IcalPropName::Kind(kind),
         params: Vec::new(),
-        value: IcalValue::Text(IcalText(value.into())),
+        value,
     }
+}
+
+/// A canonical text property.
+pub(super) fn text_prop(kind: IcalPropKind, value: String) -> IcalProp<'static> {
+    prop(kind, IcalValue::Text(IcalText(value.into())))
 }
 
 /// A text property under a name outside the iCalendar vocabulary, which
@@ -1082,11 +1197,7 @@ fn unknown_text_prop(name: &'static str, value: &str) -> IcalProp<'static> {
 
 /// A UTC date-time property.
 fn stamp_prop(kind: IcalPropKind, stamp: String) -> IcalProp<'static> {
-    IcalProp {
-        name: IcalPropName::Kind(kind),
-        params: Vec::new(),
-        value: IcalValue::DateTime(IcalDateTime(stamp.into())),
-    }
+    prop(kind, IcalValue::DateTime(IcalDateTime(stamp.into())))
 }
 
 /// The decoded text of a property line, escapes resolved.
@@ -1271,6 +1382,158 @@ mod tests {
             to_event(ical.as_bytes()).unwrap().extended_properties,
             event.extended_properties
         );
+    }
+
+    /// A UTC-stamped event references no zone and so owes none, where
+    /// an event as Google returns one written in its own web UI, a wall
+    /// time under an IANA name with no stash to splice back, owes the
+    /// definition and now carries it.
+    #[test]
+    fn a_named_zone_arrives_with_the_definition_it_references() {
+        assert!(!to_ical(&event()).contains("BEGIN:VTIMEZONE"));
+
+        let zoned = GcalEvent {
+            ical_uid: Some(String::from("google-made@google.com")),
+            start: Some(GcalEventDateTime {
+                date_time: Some(String::from("2024-07-14T12:00:00-04:00")),
+                time_zone: Some(String::from("America/New_York")),
+                ..Default::default()
+            }),
+            end: Some(GcalEventDateTime {
+                date_time: Some(String::from("2024-07-14T13:00:00-04:00")),
+                time_zone: Some(String::from("America/New_York")),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let ical = to_ical(&zoned);
+        assert!(ical.contains("DTSTART;TZID=America/New_York:20240714T120000\r\n"));
+        assert!(ical.contains("TZID:America/New_York\r\n"), "{ical}");
+
+        // NOTE: the definition leads the event that references it, and
+        // one zone named by both boundaries is defined once.
+        assert!(ical.find("BEGIN:VTIMEZONE").unwrap() < ical.find("BEGIN:VEVENT").unwrap());
+        assert_eq!(ical.matches("BEGIN:VTIMEZONE").count(), 1);
+    }
+
+    /// A TZID reaches the document through more than the boundaries:
+    /// an EXDATE, an RDATE or a RECURRENCE-ID carries one too, and
+    /// those ride the stash rather than the projection. Collecting only
+    /// the zones the boundaries named would leave those dangling, since
+    /// their definition is no longer stashed either.
+    #[test]
+    fn a_zone_named_by_a_stashed_line_is_defined_too() {
+        let raw = CALENDAR.replace(
+            "BEGIN:VEVENT\r\n",
+            concat!(
+                "BEGIN:VTIMEZONE\r\n",
+                "TZID:Europe/Paris\r\n",
+                "BEGIN:STANDARD\r\n",
+                "DTSTART:19701025T030000\r\n",
+                "TZOFFSETFROM:+0200\r\n",
+                "TZOFFSETTO:+0100\r\n",
+                "END:STANDARD\r\n",
+                "END:VTIMEZONE\r\n",
+                "BEGIN:VEVENT\r\n",
+                "EXDATE;TZID=Europe/Paris:20260821T110000\r\n",
+            ),
+        );
+
+        // The boundaries are UTC-stamped, so only the EXDATE names a
+        // zone, and it names one through the stash.
+        let event = to_event(raw.as_bytes()).unwrap();
+        let ical = to_ical(&event);
+
+        assert!(ical.contains("EXDATE;TZID=Europe/Paris:"), "{ical}");
+        assert!(ical.contains("TZID:Europe/Paris\r\n"), "{ical}");
+    }
+
+    /// A folded line is one logical line split across several physical
+    /// ones, so a zone name can straddle the break. Reading the
+    /// physical lines would see half a name and miss the reference.
+    #[test]
+    fn a_zone_named_across_a_fold_is_still_seen() {
+        let folded = concat!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//X//EN\r\n",
+            "BEGIN:VEVENT\r\nUID:folded@example.org\r\n",
+            "DTSTAMP:20260101T000000Z\r\n",
+            "DTSTART:20260814T090000Z\r\nDTEND:20260814T100000Z\r\n",
+            "RECURRENCE-ID;TZID=Europe/\r\n Paris:20260814T110000\r\n",
+            "END:VEVENT\r\nEND:VCALENDAR\r\n",
+        );
+
+        let event = to_event(folded.as_bytes()).unwrap();
+        assert!(to_ical(&event).contains("TZID:Europe/Paris\r\n"));
+    }
+
+    /// An IANA name the database knows costs no extended property,
+    /// since the projection mints the definition again on every read.
+    /// A zone of its own invention could never be rebuilt, so it rides
+    /// the stash and comes back verbatim.
+    #[test]
+    fn a_definition_is_stashed_only_when_nothing_could_rebuild_it() {
+        let known = CALENDAR.replace(
+            "BEGIN:VEVENT\r\n",
+            concat!(
+                "BEGIN:VTIMEZONE\r\n",
+                "TZID:America/New_York\r\n",
+                "BEGIN:STANDARD\r\n",
+                "DTSTART:20071104T020000\r\n",
+                "TZOFFSETFROM:-0400\r\n",
+                "TZOFFSETTO:-0500\r\n",
+                "END:STANDARD\r\n",
+                "END:VTIMEZONE\r\n",
+                "BEGIN:VEVENT\r\n",
+            ),
+        );
+
+        let event = to_event(known.as_bytes()).unwrap();
+        let private = &event.extended_properties.as_ref().unwrap().private;
+        let stashed = private[&format!("{CALENDAR_STASH_PREFIX}0")].clone();
+        assert_eq!(stashed, "X-WR-CALNAME:Work");
+
+        let custom = known.replace("America/New_York", "Custom/Zone");
+        let event = to_event(custom.as_bytes()).unwrap();
+        let private = &event.extended_properties.as_ref().unwrap().private;
+        let stashed = private[&format!("{CALENDAR_STASH_PREFIX}0")].clone();
+        assert!(stashed.contains("TZID:Custom/Zone"), "{stashed}");
+        assert!(to_ical(&event).contains("TZID:Custom/Zone\r\n"));
+    }
+
+    /// What an event stashed before the projection minted zones of its
+    /// own still holds: a definition under a name the database knows.
+    /// Rebuilding alongside it would leave the document with two
+    /// VTIMEZONE under one TZID.
+    #[test]
+    fn a_stashed_definition_is_not_doubled_by_a_minted_one() {
+        let event = GcalEvent {
+            start: Some(GcalEventDateTime {
+                date_time: Some(String::from("2024-07-14T12:00:00+02:00")),
+                time_zone: Some(String::from("Europe/Paris")),
+                ..Default::default()
+            }),
+            extended_properties: Some(GcalEventExtendedProperties {
+                private: BTreeMap::from([(
+                    format!("{CALENDAR_STASH_PREFIX}0"),
+                    String::from(concat!(
+                        "BEGIN:VTIMEZONE\n",
+                        "TZID:Europe/Paris\n",
+                        "BEGIN:STANDARD\n",
+                        "DTSTART:19701025T030000\n",
+                        "TZOFFSETFROM:+0200\n",
+                        "TZOFFSETTO:+0100\n",
+                        "END:STANDARD\n",
+                        "END:VTIMEZONE",
+                    )),
+                )]),
+                shared: BTreeMap::new(),
+            }),
+            ..Default::default()
+        };
+
+        let ical = to_ical(&event);
+        assert_eq!(ical.matches("TZID:Europe/Paris").count(), 1, "{ical}");
     }
 
     #[test]

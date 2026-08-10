@@ -12,6 +12,8 @@ The crate SHALL ship a binary only, with no library target. Its architecture doc
 ### Requirement: One cargo feature per backend
 Each backend SHALL sit behind its own cargo feature (`caldav`, `gcal`, `vdir`, `pimdir`), pulling its io-* crates through `dep:`. A build SHALL compile at least one of them; a build with none is not a supported configuration, since the product would have nothing to talk to.
 
+`gcal` SHALL additionally pull the time zone database its projection mints definitions from, so a build without that backend pays neither the dependency nor its embedded data.
+
 ### Requirement: TLS providers are orthogonal
 `rustls-ring` (the default), `rustls-aws` and `native-tls` SHALL each select a pimalaya-stream provider and forward it to every network dependency, weakly where that dependency is optional. `vendored` SHALL forward the same way.
 
