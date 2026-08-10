@@ -14,7 +14,7 @@ repository = "https://github.com/pimalaya/calendula"
 [features]
 default = ["rustls-ring", "caldav", "gcal", "vdir", "pimdir"]
 caldav = ["dep:io-webdav", "dep:io-http", "dep:secrecy"]
-gcal = ["dep:io-gcal", "dep:secrecy"]
+gcal = ["dep:io-gcal", "dep:jiff", "dep:secrecy"]
 vdir = ["dep:io-vdir"]
 pimdir = ["dep:io-pimdir", "dep:io-replica"]
 native-tls = ["pimalaya-stream/native-tls", "io-pim-discovery/native-tls", "io-webdav?/native-tls", "io-gcal?/native-tls"]
@@ -40,6 +40,12 @@ dirs = "6"
 humansize = "2"
 ical-rs = { version = "0.1", default-features = false, features = ["parser"] }
 io-gcal = { version = "0.1", default-features = false, features = ["client"], optional = true }
+# Time zone database, for synthesizing the VTIMEZONE a gcal item's TZID
+# references: the Calendar API returns a zone name and never an expansion.
+# Already in the tree transitively (io-pim-discovery -> domain -> jiff), so
+# this adds no crate to the build graph; and the bundled database is pulled
+# only on windows/wasm, elsewhere jiff reads the system zoneinfo.
+jiff = { version = "0.2", optional = true }
 io-http = { version = "0.3", default-features = false, optional = true }
 io-pim-discovery = { version = "0.5", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "stream"] }
 io-pimdir = { version = "0.2", default-features = false, features = ["client"], optional = true }

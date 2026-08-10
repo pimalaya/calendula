@@ -23,8 +23,9 @@
 //! itself, so an incoming CREATED or LAST-MODIFIED is consumed rather
 //! than written.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use super::vtimezone;
 use anyhow::{Result, anyhow, bail};
 use chrono::{DateTime, SecondsFormat, Utc};
 use ical::{
@@ -45,6 +46,7 @@ use io_gcal::v3::rest::events::{
     GcalEventExtendedProperties, GcalEventPerson, GcalEventReminder, GcalEventReminderMethod,
     GcalEventReminders, GcalEventStatus, GcalEventTransparency, GcalEventVisibility,
 };
+use jiff::{Timestamp, civil, tz::Offset};
 
 /// Product identifier the synthesized document carries.
 const PRODID: &str = "-//Pimalaya//calendula//EN";
@@ -191,11 +193,84 @@ pub fn to_ical(event: &GcalEvent) -> String {
     let document = splice_before(calendar.to_string(), "END:VEVENT", &lines);
     let document = splice_before(document, "END:VEVENT", &alarms(event));
 
-    splice_before(
+    let document = splice_before(
         document,
         "END:VCALENDAR",
         &stashed(event, CALENDAR_STASH_PREFIX),
-    )
+    );
+
+    // The stash carries the VTIMEZONE of an event calendula itself
+    // wrote. One created in Google's own interface has no stash, and
+    // the API names its zone without ever expanding it, so the
+    // definition has to be synthesized or the TZID would refer to
+    // nothing.
+    let anchor = anchor(event);
+    let synthesized: Vec<String> = undefined_zones(&document)
+        .iter()
+        .filter_map(|zone| vtimezone::vtimezone(zone, anchor))
+        .flatten()
+        .collect();
+
+    // Ahead of the VEVENT rather than at the end of the envelope, which
+    // is where Google's own CalDAV bridge puts it: a reader taking the
+    // document a line at a time then has the definition before the
+    // property that leans on it.
+    splice_before(document, "BEGIN:VEVENT", &synthesized)
+}
+
+/// Every zone the document names in a TZID parameter without defining
+/// it in a VTIMEZONE of its own.
+fn undefined_zones(document: &str) -> BTreeSet<String> {
+    let mut referenced = BTreeSet::new();
+    let mut defined = BTreeSet::new();
+
+    for line in document.lines() {
+        let line = line.trim_end_matches('\r');
+
+        if let Some(zone) = line.strip_prefix("TZID:") {
+            defined.insert(zone.to_string());
+            continue;
+        }
+
+        // Only the parameter section names a zone. Searching the whole
+        // line would let a SUMMARY that happens to read `TZID=` conjure
+        // a component out of free text.
+        let params = line.find(':').map_or(line, |end| &line[..end]);
+
+        let Some(index) = params.find("TZID=") else {
+            continue;
+        };
+
+        let zone = &line[index + "TZID=".len()..];
+        let end = zone.find([':', ';']).unwrap_or(zone.len());
+        referenced.insert(zone[..end].trim_matches('"').to_string());
+    }
+
+    referenced.difference(&defined).cloned().collect()
+}
+
+/// The instant the event's zones should be described around.
+///
+/// Only the era matters, not the exact moment: it selects which
+/// observances were in force, and those change on the scale of years.
+/// The date alone is therefore read, and read as UTC, which cannot be
+/// off by more than a day.
+fn anchor(event: &GcalEvent) -> Timestamp {
+    let boundary = event
+        .start
+        .as_ref()
+        .and_then(|boundary| boundary.date_time.as_deref().or(boundary.date.as_deref()));
+
+    let parsed = boundary
+        .and_then(|stamp| stamp.get(..10))
+        .and_then(|date| date.parse::<civil::Date>().ok())
+        .and_then(|date| {
+            Offset::UTC
+                .to_timestamp(date.to_datetime(civil::Time::MIN))
+                .ok()
+        });
+
+    parsed.unwrap_or(Timestamp::UNIX_EPOCH)
 }
 
 /// Projects an iCalendar document back onto an io-gcal event.
@@ -1240,6 +1315,44 @@ mod tests {
         let floating = CALENDAR.replace("DTSTART:20260814T090000Z", "DTSTART:20260814T090000");
         let err = to_event(floating.as_bytes()).unwrap_err().to_string();
         assert!(err.contains("DTSTART"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn a_zoned_boundary_defines_the_zone_it_names() {
+        // An event created in Google's own web UI never passed through
+        // `to_event`, so no calendar stash exists to supply the
+        // VTIMEZONE its TZID references. The projection is the only
+        // thing that can define the zone, and RFC 5545 3.2.19 requires
+        // it be defined within the same iCalendar object.
+        let event = GcalEvent {
+            ical_uid: Some(String::from("native@example.org")),
+            start: Some(GcalEventDateTime {
+                date_time: Some(String::from("2026-08-14T09:00:00")),
+                time_zone: Some(String::from("Europe/Paris")),
+                ..Default::default()
+            }),
+            end: Some(GcalEventDateTime {
+                date_time: Some(String::from("2026-08-14T10:00:00")),
+                time_zone: Some(String::from("Europe/Paris")),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let ical = to_ical(&event);
+
+        assert!(
+            ical.contains("DTSTART;TZID=Europe/Paris:20260814T090000\r\n"),
+            "expected a zoned boundary in:\n{ical}"
+        );
+        assert!(
+            ical.contains("BEGIN:VTIMEZONE"),
+            "TZID=Europe/Paris is referenced but no VTIMEZONE defines it:\n{ical}"
+        );
+        assert!(
+            ical.contains("TZID:Europe/Paris"),
+            "the VTIMEZONE does not define the zone the boundary names:\n{ical}"
+        );
     }
 
     #[test]
