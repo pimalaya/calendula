@@ -10,13 +10,17 @@ Items the gcal backend produced referenced a time zone by TZID and carried no VT
 
 ## What landed
 
-[src/gcal/timezone.rs](../../src/gcal/timezone.rs) projects an IANA name onto the component it denotes, reading tzdb through tz-rs, around an anchor the caller supplies.
+[src/gcal/timezone.rs](../../src/gcal/timezone.rs) projects an IANA name onto the component it denotes, reading jiff's bundled database, around an anchor the caller supplies.
 
-Which half of the record answers depends on where that anchor lands. A TZif record stops where its closing POSIX rule takes over (America/New_York's last transition is March 2007), so an anchor past that point is described by `TimeZoneRef::extra_rule()` and an earlier one by the transitions bracketing it. Either way the result is a standard and daylight pair, each with its two offsets, a DTSTART on an occurrence of its own rule, and a yearly RRULE. On the rule path `RuleDay::MonthWeekDay` becomes `BYMONTH` and `BYDAY` directly, POSIX's fifth week becoming iCalendar's `-1`; on the transition path the rule is stated only where the next two transitions of the same kind agree on month, week of the month, weekday and local time, and a dated onset stands alone otherwise.
+The observances are the transitions bracketing that anchor, one of each kind, found through jiff's `preceding` and `following` iterators, which answer alike whether the era falls inside the recorded transitions or in the POSIX rule that closes them. Each carries its two offsets, its abbreviation, and a DTSTART on the transition itself. A yearly RRULE is stated only where the next two transitions of the same kind agree on month, week of the month, weekday and local time; a dated onset stands alone otherwise, which is what keeps a defunct rule from being asserted as a live one.
 
 [src/gcal/project.rs](../../src/gcal/project.rs) reads the zones off the finished document rather than off the boundaries, folds resolved and only the parameter section of each line consulted, then splices one definition per undefined zone ahead of the VEVENT. The anchor is the day the event starts.
 
-The observance DTSTART needed no offset arithmetic: RFC 5545 3.6.5 states it in the local time before its transition, and both a POSIX rule and a recorded transition give it the same way.
+The observance DTSTART needed no offset arithmetic: RFC 5545 3.6.5 states it in the local time before its transition, which is the offset the transition replaced, and jiff hands that over directly.
+
+**The database is bundled deliberately.** jiff reads the host's `/usr/share/zoneinfo` under its default features, which would make the document of record depend on the machine that produced it: two hosts with different tzdata emitting different bytes for one event, and a container without zoneinfo emitting none at all and silently restoring the bug. The `gcal` feature therefore declares `default-features = false` and turns on `tzdb-bundle-always`. jiff itself was already compiled through io-pim-discovery and domain, so the cost is one crate, jiff-tzdb, and it is pulled only when `gcal` is.
+
+**One subtlety cost a debugging pass.** The offset in force before a transition is read a moment earlier, and a nanosecond is not enough: a lookup against the recorded transitions resolves at second granularity, so a sub-second step lands inside the transition's own second and answers with the offset it installed rather than the one it replaced. Every historical observance then had `TZOFFSETFROM` equal to `TZOFFSETTO`, was discarded as no change at all, and Europe/Paris in 1975 produced no component whatsoever. A whole-second step fixes it, and no zone shifts twice within a second.
 
 ## What the fix pulled with it
 
@@ -26,19 +30,23 @@ The observance DTSTART needed no offset arithmetic: RFC 5545 3.6.5 states it in 
 
 **One era is emitted, and it is the item's own.** A zone's full history runs to hundreds of transitions and would be repeated on every item. A first cut emitted the rule currently in force, which is what Google's CalDAV frontend serves, but that reads an hour out for an item predating the rule: the United States moved its onsets in 2007, so a 2004 item in the weeks between the old and new dates resolves wrong. Anchoring the description on the item's start costs one extra code path and removes the whole class.
 
-**A settled zone is described as settled.** Reading raw transitions revives rules a zone has abandoned: Hong Kong last shifted in 1979, and an item from today would otherwise carry that summer time. A zone whose nearest shift is more than two years from the anchor states the single offset in force instead. The rule path never had this problem, since Hong Kong's closing rule is fixed, so the guard exists for the transition path alone.
+**A settled zone is described as settled.** Reading transitions revives rules a zone has abandoned: Hong Kong last shifted in 1979, and an item from today would otherwise carry that summer time. A zone whose nearest shift is more than two years from the anchor states the single offset in force instead.
 
 **The stack now carries a time zone database, and the instant rule did not move.** The projection spec justified projecting a `Z`-stamped boundary as a UTC stamp partly on there being no database to derive a wall time with. That clause is gone, and the requirement stands on its own ground: the stamp already answers the question about the instant. Minting a definition answers a question about the zone. Having the second does not license the first.
 
 ## How it is verified
 
-The strong test does not read this module's output as text. It generates a zone, parses it back, and resolves civil times through ical-rs's own resolver, which works from the observances alone and shares no code with the generator. The offset it reports is compared against what tzdb puts in force at the instant that civil time then names: 864 samples across twelve zones and six years spanning half a century, covering both hemispheres, a half-hour shift (Lord Howe), a quarter-hour offset (Chatham), last-week rules, zones that never shift, and the years either side of the 2007 United States rule change. The two local times that are not one instant are pinned separately: 2024-03-10T02:30 in New York comes back as a gap, 2024-11-03T01:30 as a fold, neither of which a bare TZID could express.
+The strong test does not read this module's output as text. It generates a zone, parses it back, and resolves civil times through ical-rs's own resolver, which works from the observances alone and shares no code with the generator. The offset it reports is compared against what the database puts in force at the instant that civil time then names: 864 samples across twelve zones and six years spanning half a century, covering both hemispheres, a half-hour shift (Lord Howe), a quarter-hour offset (Chatham), last-week rules, zones that never shift, and the years either side of the 2007 United States rule change. The two local times that are not one instant are pinned separately: 2024-03-10T02:30 in New York comes back as a gap, 2024-11-03T01:30 as a fold, neither of which a bare TZID could express.
 
 ## What came from the community patch
 
-A patch on the issue proposed the same fix on a different footing, and four of its ideas are in what landed: reading the undefined zones off the finished document, anchoring the description on the item, guarding a settled zone, and restricting the TZID scan to the parameter section of a line. The first of those is the one that mattered most, since it exposed a real defect in the first cut rather than merely improving on it.
+A patch on the issue proposed the same fix on a different footing, and five of its ideas are in what landed: jiff as the database, reading the undefined zones off the finished document, anchoring the description on the item, guarding a settled zone, and restricting the TZID scan to the parameter section of a line. The second is the one that mattered most, since it exposed a real defect in the first cut rather than merely improving on it.
 
-Two parts of that patch were not taken. It read the host's zoneinfo through jiff, which makes the document of record depend on the machine that produced it (two hosts with different tzdata emit different bytes for one event, and a container without zoneinfo emits none at all and silently reinstates the bug); an embedded database keeps the projection deterministic. It also left `calendar_remainder` untouched, so its synthesized definitions were stashed on the next write, and the component then came back through the stash after `END:VEVENT` instead of before it, losing both the budget and the ordering the patch had argued for.
+Its jiff configuration was not taken. It relied on the host's zoneinfo, which the bundle replaces for the reasons above; the crate itself was the right call and the first implementation, on tzdb and tz-rs, was replaced by it.
+
+One part was not taken at all. The patch left `calendar_remainder` untouched, so its synthesized definitions were stashed on the next write, and the component then came back through the stash after `END:VEVENT` instead of before it, losing both the extended-property budget and the ordering the patch had argued for.
+
+Two defects in the patch are worth recording, since anyone revisiting it will meet them. It read the offset before a transition one nanosecond earlier, which is inside the transition's own second and therefore answers with the wrong offset on any historical observance. And its `undefined_zones` walked physical lines, so a zone name straddling an RFC 5545 3.1 fold is read in half and its reference missed.
 
 ## Capabilities moved
 

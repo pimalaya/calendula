@@ -14,7 +14,7 @@ repository = "https://github.com/pimalaya/calendula"
 [features]
 default = ["rustls-ring", "caldav", "gcal", "vdir", "pimdir"]
 caldav = ["dep:io-webdav", "dep:io-http", "dep:secrecy"]
-gcal = ["dep:io-gcal", "dep:secrecy", "dep:tz-rs", "dep:tzdb"]
+gcal = ["dep:io-gcal", "dep:jiff", "dep:secrecy", "jiff/tzdb-bundle-always"]
 vdir = ["dep:io-vdir"]
 pimdir = ["dep:io-pimdir", "dep:io-replica"]
 native-tls = ["pimalaya-stream/native-tls", "io-pim-discovery/native-tls", "io-webdav?/native-tls", "io-gcal?/native-tls"]
@@ -46,6 +46,7 @@ io-pimdir = { version = "0.2", default-features = false, features = ["client"], 
 io-replica = { version = "0.3", default-features = false, optional = true }
 io-vdir = { version = "0.1", default-features = false, features = ["client", "serde"], optional = true }
 io-webdav = { version = "0.1", default-features = false, features = ["client"], optional = true }
+jiff = { version = "0.2", default-features = false, features = ["std"], optional = true }
 log = "0.4"
 pimalaya-cli = { version = "0.2", default-features = false, features = ["terminal", "table", "prompt", "spinner", "wizard", "caldav"] }
 pimalaya-config = { version = "0.1", default-features = false, features = ["toml", "secret"] }
@@ -54,8 +55,6 @@ secrecy = { version = "0.10", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 shellexpand = "3.1"
-tz-rs = { version = "0.7", default-features = false, optional = true }
-tzdb = { version = "0.7", default-features = false, optional = true }
 url = { version = "2.5", features = ["serde"] }
 
 [patch.crates-io]

@@ -33,8 +33,10 @@ A definition the projection can mint again from its name is no longer stashed on
 
 ## Dependency
 
-[tzdb](https://crates.io/crates/tzdb) with [tz-rs](https://crates.io/crates/tz-rs), behind the `gcal` feature, both released.
+[jiff](https://crates.io/crates/jiff) with `tzdb-bundle-always`, behind the `gcal` feature.
 
-chrono-tz is the obvious candidate and the wrong one: its public API exposes offset lookup at an instant and no transition list, so a VTIMEZONE would have to be reverse-engineered by sampling offsets day by day and emitted as a bounded window of RDATEs, which runs out exactly where a recurring series needs it. tz-rs exposes `TimeZoneRef::extra_rule()`, and its `RuleDay::MonthWeekDay` is month, week and weekday, which is an RRULE already.
+chrono-tz is the obvious candidate and the wrong one: its public API exposes offset lookup at an instant and no transition list, so a VTIMEZONE would have to be reverse-engineered by sampling offsets day by day and emitted as a bounded window of RDATEs, which runs out exactly where a recurring series needs it. tzdb with tz-rs does expose transitions and was the first implementation, but it costs three crates and rests on a parser released twice in two years. jiff is already compiled in the tree through io-pim-discovery and domain, so declaring it adds one crate, [jiff-tzdb](https://crates.io/crates/jiff-tzdb); its `preceding` and `following` iterators answer the whole question directly; and it is among the most actively maintained crates in the ecosystem.
+
+The bundled database is the point, not an accident. jiff prefers the host's copy under `tzdb-zoneinfo`, which is right for an application asking what time it is locally and wrong for a document of record: two machines reading one account would emit different bytes for one event, and a container carrying no zoneinfo would emit none at all and silently restore the bug. `default-features = false` with the bundle turned on keeps the output a function of the release alone.
 
 The database does not belong in ical-rs. Its timezone module resolves offsets from the observances travelling inside the calendar, advertising in its own header that it does so with no time zone database and no new dependency, and that promise is worth keeping. If tcal or another consumer needs the same step, extract it then.
