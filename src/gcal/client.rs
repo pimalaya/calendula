@@ -13,6 +13,7 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use io_gcal::v3::client::{GcalClientStd, GcalClientStdConnectOptions};
+use pimalaya_cli::printer::Printer;
 use pimalaya_config::toml::TomlConfig;
 use pimalaya_stream::tls::Tls;
 use secrecy::ExposeSecret;
@@ -50,10 +51,11 @@ impl DerefMut for GcalClient {
 /// Loads the configuration, picks the active account, then opens the
 /// Calendar client. Bails when the account carries no `[gcal]` block.
 pub fn build_gcal_client(
+    printer: &mut impl Printer,
     config_paths: &[PathBuf],
     account_name: Option<&str>,
 ) -> Result<GcalClient> {
-    let mut config = load_config(config_paths)?;
+    let mut config = load_config(printer, config_paths)?;
     let (name, mut account_config) = config
         .take_account(account_name)?
         .ok_or_else(|| anyhow!("Cannot find account"))?;

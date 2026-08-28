@@ -139,13 +139,17 @@ vdir.home-dir = "~/.local/share/vdirsyncer/calendars"
 # "body not fetched" rather than failing. `calendula pimdir status` shows how
 # much of each calendar is downloaded.
 #
-# Writes are staged for the next sync to push, attributed to `source`. Leave it
-# unset: a store synced as a single source (the ordinary one-device case) is
-# opened as that source. Set it only to disambiguate a store synced from two.
+# Writes are staged: one action appended to the store's queue, which the sync
+# applies and pushes on its next run. calendula never owns the store, so a
+# listing runs beside a sync instead of locking it out.
+#
+# `account` names the account the sync groups these collections under. Leave it
+# unset: a store synced by one account is read as that one. Set it only for a
+# store several accounts share, where guessing would show the wrong calendars.
 # --------------------------------------------------------------------------------
 
 #pimdir.root = "~/.local/state/neverest/example"
-#pimdir.source = "caldav"
+#pimdir.account = "personal"
 
 # --------------------------------------------------------------------------------
 # CalDAV backend

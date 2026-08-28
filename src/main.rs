@@ -97,11 +97,16 @@
 //! sub-block per backend, and the global block is folded under the
 //! selected account.
 //!
-//! Bare `calendula` runs the wizard ([`wizard::discover`]). One prompt
-//! takes an address, a server URL or a folder path, and its shape
-//! orients the flow. The wizard writes nothing on its own: it prints a
-//! ready-to-save TOML document on stdout, and offers to save it when
-//! stdout is a terminal, so a redirect keeps working.
+//! `calendula configure` runs the wizard ([`wizard::discover`] builds
+//! the account, [`wizard::configure`] places it). One prompt takes an
+//! address, a server URL or a folder path, and its shape orients the
+//! flow. The account is saved to a configuration that does not exist,
+//! appended to one that does, or printed when stdout is redirected.
+//!
+//! The wizard is also offered where nothing can happen without a
+//! configuration: a bare `calendula` finding none, and a command needing
+//! an account finding none. A bare `calendula` finding one prints the
+//! help instead.
 //!
 //! ## Output
 //!
@@ -129,11 +134,21 @@ mod vdir;
 #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
 mod wizard;
 
-use anyhow::Result;
-use clap::Parser;
-use pimalaya_cli::{error::ErrorReport, log::Logger, printer::StdoutPrinter};
+use std::{
+    io::{IsTerminal, stdin},
+    path::PathBuf,
+};
 
-use crate::cli::CalendulaCli;
+use anyhow::Result;
+use clap::{CommandFactory, Parser};
+use pimalaya_cli::{
+    error::ErrorReport,
+    log::Logger,
+    printer::{Printer, StdoutPrinter},
+};
+use pimalaya_config::toml::TomlConfig;
+
+use crate::{cli::CalendulaCli, config::Config};
 
 fn main() {
     let cli = CalendulaCli::parse();
@@ -144,5 +159,47 @@ fn main() {
 
 fn run(cli: CalendulaCli, printer: &mut StdoutPrinter) -> Result<()> {
     Logger::try_init(&cli.log)?;
-    cli::execute(cli, printer)
+
+    let config_paths = cli.config_paths.as_ref();
+    let account = cli.account.name.as_deref();
+    let backend = cli.backend;
+
+    let Some(command) = cli.command else {
+        return meet_bare_invocation(printer, config_paths, account.is_some());
+    };
+
+    command.execute(printer, config_paths, account, backend)
+}
+
+/// Meets a bare `calendula`, which is where a newcomer lands.
+///
+/// A missing configuration raises the offer, and everything else gets
+/// the help: an existing configuration, a script, a JSON caller, and
+/// `--account`, which names an account to act on and so reads as a
+/// half-typed command rather than a first run. A file that exists but
+/// fails to parse counts as a configuration, so the offer never proposes
+/// to write over a broken one.
+fn meet_bare_invocation(
+    printer: &mut StdoutPrinter,
+    config_paths: &[PathBuf],
+    named_account: bool,
+) -> Result<()> {
+    let configured = Config::from_paths_or_default(config_paths)
+        .ok()
+        .flatten()
+        .is_some();
+
+    if !configured && !named_account && !printer.is_json() && stdin().is_terminal() {
+        let path = Config::target_path(config_paths)?;
+
+        // NOTE: nothing to run after the offer, so a declined one falls
+        // back to the help; the wizard says what to run next when it ran.
+        if cli::offer_configuration(printer, config_paths, &path)? {
+            return Ok(());
+        }
+    }
+
+    CalendulaCli::command().print_help()?;
+
+    Ok(())
 }

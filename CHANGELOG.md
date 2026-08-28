@@ -33,13 +33,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added the `pimdir` backend: calendula over a local [pimdir](https://github.com/pimalaya/pimdir) store, the offline cache a sync engine fills.
 
-  It sits behind a `pimdir` cargo feature and a `[accounts.<name>.pimdir]` block carrying a `root` and an optional `source`. Reads are availability-aware: an item the sync listed but has not downloaded still shows in a listing, and reading it reports "body not fetched" rather than failing. Writes are staged io-replica mutations the next sync pushes, attributed to `source` and refused outright on a store never synced as it. Calendars come from the sync, so `calendar create`, `update` and `delete` refuse here.
+  It sits behind a `pimdir` cargo feature and a `[accounts.<name>.pimdir]` block carrying a `root` and an optional `account`. Reads are availability-aware: an item the sync listed but has not downloaded still shows in a listing, and reading it reports "body not fetched" rather than failing. Calendars come from the sync, so `calendar create`, `update` and `delete` refuse here.
 
-  An item's summary follows the pimdir SPEC Annex A.3 `text/calendar` convention: the resource's UID, its component, its location, DTSTART carried verbatim beside the TZID naming its zone and the value type saying whether it has a time at all, DTEND, DUE, whether the item recurs and, when the rule is bounded, its UNTIL, which brackets the series so a range read drops it without expanding an occurrence. A reader with a time zone database re-derives an instant in its own zone without fetching the body, instead of trusting one the writer resolved. The item is summarised from the master of a recurrence set, the component carrying no RECURRENCE-ID, rather than from whichever component the resource happens to list first.
+  calendula takes the two roles the format gives a consumer of a store it does not own (pimdir SPEC 8): it reads through the lock-free reader, so a listing runs beside a sync instead of locking it out, and it writes through the enqueue-only producer, appending one queue action per write for the sync to apply and push. The reader folds the pending queue over its reads, so a staged edit or deletion shows straight away; a staged creation has no public id until the sync applies it, and is counted rather than listed.
 
-  The companion sort key is the one resolved projection: DTSTART for an event or a journal entry, DUE then DTSTART for a to-do, which need not carry a start at all. A zoned start resolves through the VTIMEZONE the document carries, taking the earlier offset of an ambiguous local time and the offset after a nonexistent one; a zone the document leaves undefined, a date-only value and a floating one are read on the wall clock, which is a convention rather than a fact but keeps the item near its place in a listing.
+  An item's link id, `v: 1` summary and body hash come from io-pimdir's own derivations, so an item calendula stages and the same item arriving through a sync are one item rather than two. The summary is the pimdir SPEC Annex A.3 `text/calendar` convention: the resource's UID, its component, its location, DTSTART carried verbatim beside the TZID naming its zone and the value type saying whether it has a time at all, DTEND, DUE, whether the item recurs and, when the rule is bounded, its UNTIL, which brackets the series so a range read drops it without expanding an occurrence. calendula reads it to answer a date question on an item whose body is not local.
 
-- Added `pimdir status`, reporting the source writes are attributed to, every source the store has been synced as, and how many of each calendar's items carry a local body.
+  A listing comes back in the store's own calendar order, the sort key ascending, which is a resolved start. A staged action carries no key: the format leaves it to the sync that pushes the write, and a producer deriving one would order an item the connector is about to reorder.
+
+  A calendar may hold two resources whose bodies carry one UID, which RFC 4791 4.1 forbids and servers do not always enforce, and both list: the store keys them apart (pimdir SPEC 9) and draws each its own public id, so an item is addressed by that id and never by the identity its body states. The two copies need not be the same event, so neither is hidden behind the other.
+
+- Added `pimdir status`, reporting the account being read, every account the store groups collections under, how many of each calendar's items carry a local body, and how many creations are queued for the next sync.
+
+- Added `event agenda`, a cal(1)-style grid marking the days that carry an event, listed underneath by start.
+
+  Every event starting at one instant is rendered, ordered by label then by item id, under a single time column, so two meetings at 09:00 read as two lines. The `--json` payload maps each start datetime to the list of the labels starting at it, carrying the same multiplicity.
 
 - Added `--from` / `--to` date-range filtering to `event list` (YYYY-MM-DD, both inclusive). CalDAV pushes it server-side as an RFC 4791 `time-range` filter; the local backends apply it after parsing, and pimdir answers it from the stored summary when the body is not local. A range also lifts the default page-size cap, so every match is returned.
 
@@ -48,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adopted the [Cairn](https://github.com/pimalaya/cairn) convention: cairn/spec holds the living specification (backends, commands, config, wizard, packaging), cairn/changes the proposals, cairn/log the dated history.
 
 ### Changed
+
+- `--config` now reaches the wizard. It was passed to every subcommand and dropped on the one path where a user is most likely to pass it, so a wizard run under `--config <path>` neither read nor wrote that path.
 
 - **BREAKING**: renamed `completions` and `manuals` to `completion` and `manual`, the plural staying as a hidden alias. The `gcal` commands mirroring a Calendar API resource keep that API's spelling (`calendars`, `instances`, `colors`, `settings`) and gained hidden singular aliases.
 
@@ -59,11 +69,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Bumped pimalaya-stream to 0.2, whose only change here is the removal of its SASL module: this crate uses the TLS options and the blocking stream, neither of which moved.
 
-- **BREAKING** Rewrote the wizard on the Himalaya model, and made bare `calendula` run it.
+- **BREAKING** Rewrote the wizard on the Himalaya model, as `calendula configure` (alias `wizard`).
 
-  One prompt now takes an email address, a server URL or a local folder path, and its shape orients the rest: an address runs bounded parallel discovery and each reachable server becomes one entry, a URL is taken as the CalDAV context root, a folder is detected as a vdir home or a pimdir store. The account name is derived from the input rather than prompted, the account is tested before anything is emitted, and the result is printed as a TOML document on stdout, saved to a file only when stdout is a terminal and you ask. It no longer writes to disk on its own, and no longer runs implicitly when a command finds no configuration.
+  One prompt now takes an email address, a server URL or a local folder path, and its shape orients the rest: an address runs bounded parallel discovery and each reachable server becomes one entry, a URL is taken as the CalDAV context root, a folder is detected as a vdir home or a pimdir store. The account name is derived from the input rather than prompted, and the account is tested before anything is emitted.
 
-- **BREAKING** Removed `account configure`. It wrote to disk, which the new printing wizard does not, and Himalaya has no equivalent. Run `calendula` to generate an account and merge it into your configuration.
+  It runs when you ask for it, and it is offered where nothing can happen without a configuration: a bare `calendula` finding none, and a command needing an account finding none. A bare `calendula` finding one prints the help, as does one carrying `--account`, and the offer is skipped in JSON mode and whenever stdin is not a terminal. The generated account is saved to a configuration file that does not exist yet, appended as plain text to one that does so comments and formatting survive, or printed; its name is suffixed until free, and it claims the default only when no account already does.
+
+- **BREAKING** Removed `account configure`, replaced by the top-level `calendula configure`, which is where Himalaya and Cardamum put theirs.
 
 - **BREAKING** Dropped the io-calendar dependency and moved the cross-protocol layer into calendula, following the cardamum precedent: the shared types and the backend dispatcher are the product's own, with one adapter per protocol. io-calendar is frozen and still pinned io-vdir 0.0.3 and io-webdav 0.0.1, so nothing below it could move while it stayed.
 

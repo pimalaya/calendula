@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     fmt::{self, Write},
 };
 
@@ -7,7 +7,7 @@ use anyhow::{Result, bail};
 use chrono::{Datelike, Local, NaiveDateTime};
 use clap::Parser;
 use pimalaya_cli::printer::Printer;
-use serde::{Serialize, Serializer};
+use serde::{Serialize, Serializer, ser::SerializeMap};
 
 use crate::shared::{arg::CalendarIdArg, client::CalendarClient, event::Event};
 
@@ -28,8 +28,8 @@ const DEFAULT_REFORM_YEAR: i32 = 1752;
 /// This command allows you to display a calendar/agenda view like
 /// does the Unix cal tool.
 ///
-/// JSON output: an object mapping each event's start datetime to its
-/// summary.
+/// JSON output: an object mapping each start datetime to the labels of
+/// every event starting at it.
 #[derive(Debug, Parser)]
 pub struct EventAgendaCommand {
     #[command(flatten)]
@@ -134,7 +134,7 @@ impl EventAgendaCommand {
                 start_month: 0,
             },
             all_events,
-            events: HashMap::new(),
+            events: BTreeMap::new(),
         };
 
         // Reform year
@@ -262,10 +262,7 @@ impl EventAgendaCommand {
             monthly(&mut grid, &mut ctl)?;
         }
 
-        printer.out(Agenda {
-            grid,
-            events: ctl.events,
-        })
+        printer.out(Agenda::new(grid, ctl.events))
     }
 }
 
@@ -286,7 +283,7 @@ struct CalControl {
     vertical: bool,
     req: CalRequest,
     all_events: Vec<Event>,
-    events: HashMap<NaiveDateTime, String>,
+    events: BTreeMap<NaiveDateTime, Vec<AgendaEvent>>,
 }
 
 #[derive(Clone)]
@@ -810,21 +807,35 @@ fn cal_vert_output_months(
 }
 
 /// Marks the day `(y, m, d)` when any projected event starts on it,
-/// recording each such event's label into `ctl.events` so the JSON
-/// output carries them beside the grid.
+/// recording every such event into `ctl.events` so the rendering
+/// carries them beside the grid.
+///
+/// An instant holds all the events starting at it rather than the last
+/// one seen: two unrelated meetings at 09:00 are two meetings, and so
+/// are two resources a collection holds under one `UID`.
 fn collect_events(ctl: &mut CalControl, y: i32, m: u32, d: u32) -> bool {
-    let starting: Vec<(NaiveDateTime, String)> = ctl
+    let starting: Vec<(NaiveDateTime, AgendaEvent)> = ctl
         .all_events
         .iter()
         .filter_map(|event| {
             let start = event.start_at()?;
             let on_day = start.year() == y && start.month() == m && start.day() == d;
-            on_day.then(|| (start, event.label().to_owned()))
+            on_day.then(|| {
+                let collected = AgendaEvent {
+                    id: event.id.clone(),
+                    label: event.label().to_owned(),
+                };
+
+                (start, collected)
+            })
         })
         .collect();
 
     let has_event = !starting.is_empty();
-    ctl.events.extend(starting);
+
+    for (start, event) in starting {
+        ctl.events.entry(start).or_default().push(event);
+    }
 
     has_event
 }
@@ -906,22 +917,61 @@ fn yearly(grid: &mut String, ctl: &mut CalControl) -> fmt::Result {
     monthly(grid, ctl)
 }
 
-/// JSON-compatible agenda output: the rendered ncal-style grid plus
-/// every VEVENT collected while painting the grid, keyed by DTSTART.
+/// One event the agenda collected while painting the grid.
+#[derive(Clone)]
+struct AgendaEvent {
+    /// The id of the item the event was projected from, which is what
+    /// addresses it: two resources of one calendar may carry one `UID`
+    /// and are told apart by their ids alone.
+    id: String,
+    /// What the agenda prints for the event: its summary, falling back
+    /// to its description.
+    label: String,
+}
+
+/// The agenda output: the rendered ncal-style grid plus every VEVENT
+/// collected while painting it, grouped by DTSTART.
+///
+/// An instant holds every event starting at it, so a calendar holding
+/// two meetings at 09:00 renders two lines and reports two labels.
 pub struct Agenda {
     grid: String,
-    events: HashMap<NaiveDateTime, String>,
+    events: BTreeMap<NaiveDateTime, Vec<AgendaEvent>>,
+}
+
+impl Agenda {
+    /// Takes the grid and the collected events, ordering the events at
+    /// one instant by label then by item id.
+    ///
+    /// The order is total and stable, so the same calendar renders the
+    /// same way twice: the label alone leaves two copies of one event
+    /// tied, and the id breaks that tie.
+    fn new(grid: String, mut events: BTreeMap<NaiveDateTime, Vec<AgendaEvent>>) -> Self {
+        for at_instant in events.values_mut() {
+            at_instant.sort_by(|a, b| a.label.cmp(&b.label).then_with(|| a.id.cmp(&b.id)));
+        }
+
+        Self { grid, events }
+    }
 }
 
 impl fmt::Display for Agenda {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.grid)?;
 
-        let mut events: Vec<_> = self.events.iter().collect();
-        events.sort_by_key(|(date, _)| *date);
+        for (date, events) in &self.events {
+            // The instant is printed once and the events line up under
+            // it, so a duplicated pair reads as two events rather than
+            // as two rows that happen to repeat a time.
+            let stamp = date.format("%b %d, %R").to_string();
+            let padding = " ".repeat(stamp.len() + 2);
 
-        for (date, desc) in events {
-            writeln!(f, "{}: {desc}", date.format("%b %d, %R"))?;
+            for (nth, event) in events.iter().enumerate() {
+                match nth {
+                    0 => writeln!(f, "{stamp}: {}", event.label)?,
+                    _ => writeln!(f, "{padding}{}", event.label)?,
+                }
+            }
         }
 
         Ok(())
@@ -933,6 +983,102 @@ impl Serialize for Agenda {
     where
         S: Serializer,
     {
-        self.events.serialize(serializer)
+        let mut map = serializer.serialize_map(Some(self.events.len()))?;
+
+        for (date, events) in &self.events {
+            let labels: Vec<&str> = events.iter().map(|event| event.label.as_str()).collect();
+            map.serialize_entry(date, &labels)?;
+        }
+
+        map.end()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::NaiveDate;
+
+    use super::*;
+
+    fn instant(hour: u32) -> NaiveDateTime {
+        NaiveDate::from_ymd_opt(2026, 8, 14)
+            .unwrap()
+            .and_hms_opt(hour, 0, 0)
+            .unwrap()
+    }
+
+    fn agenda(collected: Vec<(NaiveDateTime, &str, &str)>) -> Agenda {
+        let mut events: BTreeMap<NaiveDateTime, Vec<AgendaEvent>> = BTreeMap::new();
+
+        for (start, id, label) in collected {
+            let event = AgendaEvent {
+                id: id.into(),
+                label: label.into(),
+            };
+
+            events.entry(start).or_default().push(event);
+        }
+
+        Agenda::new(String::new(), events)
+    }
+
+    #[test]
+    fn two_events_at_one_instant_both_render_under_one_time() {
+        let agenda = agenda(vec![
+            (instant(9), "1", "Pre demo woonies"),
+            (instant(9), "2", "Pre demo MINIS"),
+            (instant(8), "3", "Breakfast"),
+        ]);
+
+        assert_eq!(
+            agenda.to_string(),
+            concat!(
+                "Aug 14, 08:00: Breakfast\n",
+                "Aug 14, 09:00: Pre demo MINIS\n",
+                "               Pre demo woonies\n",
+            )
+        );
+    }
+
+    #[test]
+    fn two_events_at_one_instant_both_reach_the_json_payload() {
+        let agenda = agenda(vec![
+            (instant(9), "1", "Pre demo woonies"),
+            (instant(9), "2", "Pre demo MINIS"),
+        ]);
+
+        assert_eq!(
+            serde_json::to_string(&agenda).unwrap(),
+            r#"{"2026-08-14T09:00:00":["Pre demo MINIS","Pre demo woonies"]}"#
+        );
+    }
+
+    /// Two copies of one event carry one label, so the label alone
+    /// leaves them tied and the item id is what orders them.
+    #[test]
+    fn two_events_sharing_a_label_are_ordered_by_their_ids() {
+        let agenda = agenda(vec![
+            (instant(9), "2", "Stand-up"),
+            (instant(9), "1", "Stand-up"),
+        ]);
+        let ids: Vec<&str> = agenda.events[&instant(9)]
+            .iter()
+            .map(|event| event.id.as_str())
+            .collect();
+
+        assert_eq!(ids, ["1", "2"]);
+    }
+
+    /// A lone event prints the line it always printed; only its JSON
+    /// value became a list.
+    #[test]
+    fn a_lone_event_renders_as_one_line() {
+        let agenda = agenda(vec![(instant(9), "1", "Stand-up")]);
+
+        assert_eq!(agenda.to_string(), "Aug 14, 09:00: Stand-up\n");
+        assert_eq!(
+            serde_json::to_string(&agenda).unwrap(),
+            r#"{"2026-08-14T09:00:00":["Stand-up"]}"#
+        );
     }
 }

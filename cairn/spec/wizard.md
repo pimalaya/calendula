@@ -6,7 +6,14 @@ status: current
 
 # Wizard
 
-Bare `calendula` (no subcommand) runs the interactive configuration wizard. It discovers an account and prints it as a ready-to-save TOML fragment on stdout, writing nothing on its own. Prompts render on stderr, so redirecting stdout into a configuration file works directly.
+`calendula configure` (alias `wizard`) runs the interactive wizard. It discovers one account, tests it, then saves it, appends it to the configuration already there, or prints it. Prompts render on stderr, so redirecting stdout into a configuration file works directly.
+
+### Requirement: The wizard runs when asked, or when nothing is configured
+The wizard SHALL run from `calendula configure`, and from an offer raised only where nothing can happen without a configuration: a bare `calendula` finding none, and a command needing an account finding none. A bare `calendula` finding one SHALL print the help instead, and so SHALL one carrying `--account`, which names an account to act on and reads as a half-typed command rather than a first run. A file that exists but fails to parse counts as a configuration, so the offer never proposes to write over a broken one.
+
+The offer SHALL be skipped in JSON mode and whenever stdin is not a terminal, neither a script nor a JSON consumer being able to answer a prompt: both get the help or the ordinary failure. A command whose offer was declined or skipped SHALL fail naming the path it looked at and `calendula configure`.
+
+The offer is a hook rather than a gate: the wizard may print the account instead of writing it, so having run it proves nothing, and the caller SHALL look the configuration up again before carrying on.
 
 ### Requirement: Input orients the flow
 A single prompt SHALL accept an email address (or a bare domain), a `scheme://` server URL, or a local folder path. An email or bare domain runs io-pim-discovery's parallel discovery; a server URL names the CalDAV context root outright; a folder is a local vdir home or pimdir store. The wizard SHALL NOT ask which backend to configure, and SHALL NOT prompt for an endpoint field it could derive.
@@ -26,15 +33,21 @@ The discovery list SHALL show one entry per distinct context root, folding the c
 calendula runs no OAuth 2.0 grant itself, so OAuth SHALL NOT be a standalone list entry. It folds into the API-token credential prompt, which offers the OS keyrings (for a token the user generated) and the OAuth token brokers (Ortie, pizauth, oama) together, the brokers appearing only when the service advertises OAuth.
 
 ### Requirement: Account name derived, not prompted
-The wizard SHALL NOT prompt for an account name. It derives one from the input (the domain's first label, or the folder name) and uses it as the `[accounts.<name>]` table key; the user renames it by editing that key. The generated account SHALL be left non-default, so merging the fragment into a configuration that already has a default does not hijack it.
+The wizard SHALL NOT prompt for an account name. It derives one from the input (the domain's first label, or the folder name) and uses it as the `[accounts.<name>]` table key; the user renames it by editing that key. A name the configuration already holds SHALL be suffixed until it is free, two `[accounts.<name>]` tables making the whole document fail to parse and taking the working accounts down with it.
+
+The generated account SHALL claim the default only when no account already does, since two `default = true` would make the account every command picks depend on map ordering.
 
 ### Requirement: Connection tested before printing
 The account SHALL be tested before the fragment is printed, so a bad credential or endpoint stops the wizard instead of yielding a configuration that cannot connect. The test is the same one `account check` runs. Its failure SHALL name each backend that failed and why.
 
-### Requirement: Printed, and saved only on a terminal
-The generated configuration SHALL be printed as a TOML document on stdout in JSON mode and whenever stdout is redirected, so `calendula > config.toml` and any script keep working. Only when writing to a terminal SHALL the wizard offer to save it to a file, defaulting to the platform configuration path, refusing to clobber an existing file without confirmation, and falling back to printing so the generated document is never lost.
+### Requirement: Saved, appended, or printed
+The generated account SHALL be printed as a TOML document on stdout in JSON mode and whenever stdout is redirected, so `calendula configure > config.toml` and any script keep working. `configure` SHALL refuse outright when stdin is not a terminal, there being no way to answer its prompts.
 
-The printed fragment is compact: only the `[accounts.<name>]` table stays a section header, other tables flatten into dotted keys, and empty tables and defaulted values are dropped.
+On a terminal the target is `--config` when one was given, else the platform configuration path. A target that does not exist SHALL be offered as a file to create; one that does SHALL be offered as a block to append, so the accounts already there survive. Appending SHALL be a plain text append rather than a re-serialization, so comments, ordering and hand-written formatting come out untouched. A declined offer SHALL fall back to printing, so the generated document is never lost.
+
+What was written SHALL be reported: the path, the account name, and how to reach it when it did not claim the default, the name never having been asked for.
+
+The rendered account is compact: only the `[accounts.<name>]` table stays a section header, other tables flatten into dotted keys, and empty tables and defaulted values are dropped. Its groups read in a fixed order, the endpoint first within each, since alphabetical order would file a server under the credential authenticating against it.
 
 ### Requirement: Stop when nothing is discovered
 When discovery yields no supported configuration for the given input, the wizard SHALL stop with a message saying so, inviting the user to pass their server URL directly or to write the account by hand from the documented sample (linked). It SHALL NOT prompt for a server field it could not discover, and SHALL NOT emit a partial account.
@@ -43,7 +56,7 @@ When discovery yields no supported configuration for the given input, the wizard
 A typed folder path or `file://` URL SHALL configure a local backend, auto-detecting the kind from on-disk markers: a pimdir index file or blob directory means pimdir, a directory holding at least one collection (a subdirectory carrying an `.ics` file or a vdir metadata marker) means vdir. pimdir SHALL be tested first, since a store also holds subdirectories and testing vdir first would misread every store as a home. The wizard SHALL prompt vdir-against-pimdir only when both backends are compiled in and detection is inconclusive, which an empty directory is.
 
 ### Requirement: The wizard covers the discoverable backends only
-The wizard SHALL configure CalDAV, vdir and pimdir. gcal is out: it needs no discovery and its token broker story is the user's to settle, so a Google account is written by hand from the sample configuration. A build carrying none of the three wizard-capable backends SHALL compile without the wizard and say so by name when bare `calendula` runs, rather than offering an empty flow.
+The wizard SHALL configure CalDAV, vdir and pimdir. gcal is out: it needs no discovery and its token broker story is the user's to settle, so a Google account is written by hand from the sample configuration.
 
-### Requirement: The wizard does not serve a running command
-A command finding no configuration SHALL fail with a message pointing at the wizard, not run it. The wizard prints a document rather than writing one, so it cannot hand a configuration back to a command already underway.
+### Requirement: The welcome introduces the wizard only where it was not asked for
+The offer SHALL be preceded by a welcome naming what calendula is, the configuration path that is missing, the sample documenting every field, and `calendula configure` for later. `configure` typed by name SHALL skip it, whoever typed it knowing what it does. It renders on stderr, so a redirected stdout holds the document alone.

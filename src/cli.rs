@@ -1,9 +1,14 @@
 //! The command tree and its single dispatch point.
 
-use std::path::PathBuf;
+use std::{
+    io::{IsTerminal, stdin},
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
+#[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+use pimalaya_cli::prompt;
 use pimalaya_cli::{
     clap::{
         args::{AccountFlag, JsonFlag, LogFlags},
@@ -24,11 +29,12 @@ use crate::pimdir::{backend::PimdirBackend, cli::PimdirCommand};
 #[cfg(feature = "vdir")]
 use crate::vdir::{cli::VdirCommand, client::build_vdir_client};
 #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
-use crate::wizard;
+#[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+use crate::wizard::{self, configure::ConfigureCommand};
 use crate::{
     account::cli::AccountCommand,
     backend::Backend,
-    config::Config,
+    config::{AccountConfig, CONFIG_SAMPLE_URL, Config},
     shared::{
         calendar::cli::CalendarCommand, client::CalendarClient, event::cli::EventCommand,
         item::cli::ItemCommand, journal::cli::JournalCommand, todo::cli::TodoCommand,
@@ -104,6 +110,10 @@ pub enum CalendulaCommand {
     #[command(subcommand)]
     Vdir(VdirCommand),
 
+    /// Configure an account interactively.
+    #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+    #[command(visible_alias = "wizard")]
+    Configure(ConfigureCommand),
     #[command(subcommand)]
     Account(AccountCommand),
     #[command(alias = "completions")]
@@ -112,21 +122,96 @@ pub enum CalendulaCommand {
     Manual(ManualCommand),
 }
 
+/// The global config and the active account's, for a shared command.
+///
+/// A free function rather than a closure, so the printer it needs for
+/// the offer is borrowed for the length of the call rather than for the
+/// length of the dispatch.
+fn configs(
+    printer: &mut impl Printer,
+    config_paths: &[PathBuf],
+    account_name: Option<&str>,
+) -> Result<(Config, AccountConfig)> {
+    let mut config = load_config(printer, config_paths)?;
+
+    let Some((_, account_config)) = config.take_account(account_name)? else {
+        bail!("Cannot find default account; use --account or set `default = true`")
+    };
+
+    Ok((config, account_config))
+}
+
 /// Loads the configuration from the merged `config_paths`, or explains
 /// how to get one.
 ///
-/// Unlike the previous behaviour, a missing configuration is an error
-/// rather than an implicit wizard run: the wizard prints a document
-/// instead of writing one, so it cannot serve a command that is already
-/// underway. Bare `calendula` runs it.
-pub fn load_config(config_paths: &[PathBuf]) -> Result<Config> {
+/// A missing configuration raises the offer rather than an error, and
+/// the command carries on either way: the wizard may print the account
+/// instead of writing it, so having run it proves nothing, and the
+/// lookup is repeated before failing the ordinary way.
+pub fn load_config(printer: &mut impl Printer, config_paths: &[PathBuf]) -> Result<Config> {
+    if let Some(config) = Config::from_paths_or_default(config_paths)? {
+        return Ok(config);
+    }
+
+    let path = Config::target_path(config_paths)?;
+
+    // NOTE: a cron job cannot answer a prompt and a JSON consumer wants
+    // a failure it can read, so both skip the offer.
+    if !printer.is_json() && stdin().is_terminal() {
+        offer_configuration(printer, config_paths, &path)?;
+    }
+
     match Config::from_paths_or_default(config_paths)? {
         Some(config) => Ok(config),
         None => bail!(
-            "No configuration found. Run `calendula` with no command to generate one \
-             with the wizard, or write one by hand."
+            "No configuration found at {}, run `calendula configure` to generate one \
+             or write it by hand: {CONFIG_SAMPLE_URL}",
+            path.display(),
         ),
     }
+}
+
+/// Welcomes, then offers to generate a first configuration. Returns
+/// whether the wizard ran.
+///
+/// Raised from the two places nothing can happen without a
+/// configuration: a bare invocation, and a command needing an account.
+/// It is a hook rather than a gate, so what happens after a declined
+/// offer is the caller's business.
+#[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+pub fn offer_configuration(
+    printer: &mut impl Printer,
+    config_paths: &[PathBuf],
+    path: &Path,
+) -> Result<bool> {
+    wizard::configure::print_welcome(path);
+
+    if !prompt::bool("Create a configuration with a default account?", true)? {
+        return Ok(false);
+    }
+
+    ConfigureCommand.execute(printer, config_paths)?;
+
+    Ok(true)
+}
+
+/// A build carrying no wizard-capable backend has nothing to walk the
+/// user through, so it says so by name rather than offering an empty
+/// flow.
+#[cfg(not(any(feature = "caldav", feature = "vdir", feature = "pimdir")))]
+pub fn offer_configuration(
+    _printer: &mut impl Printer,
+    _config_paths: &[PathBuf],
+    _path: &Path,
+) -> Result<bool> {
+    eprintln!();
+    eprintln!(
+        "This build carries no wizard-capable backend (caldav, vdir, pimdir); \
+         write a configuration by hand, starting from config.sample.toml"
+    );
+    eprintln!();
+
+    Ok(false)
 }
 
 impl CalendulaCommand {
@@ -137,47 +222,37 @@ impl CalendulaCommand {
         account_name: Option<&str>,
         backend: Backend,
     ) -> Result<()> {
-        let configs = || {
-            let mut config = load_config(config_paths)?;
-
-            let Some((_, account_config)) = config.take_account(account_name)? else {
-                bail!("Cannot find default account; use --account or set `default = true`")
-            };
-
-            Ok((config, account_config))
-        };
-
         match self {
             Self::Calendar(cmd) => {
-                let (config, account_config) = configs()?;
+                let (config, account_config) = configs(printer, config_paths, account_name)?;
                 cmd.execute(
                     printer,
                     CalendarClient::new(config, account_config, backend)?,
                 )
             }
             Self::Event(cmd) => {
-                let (config, account_config) = configs()?;
+                let (config, account_config) = configs(printer, config_paths, account_name)?;
                 cmd.execute(
                     printer,
                     CalendarClient::new(config, account_config, backend)?,
                 )
             }
             Self::Todo(cmd) => {
-                let (config, account_config) = configs()?;
+                let (config, account_config) = configs(printer, config_paths, account_name)?;
                 cmd.execute(
                     printer,
                     CalendarClient::new(config, account_config, backend)?,
                 )
             }
             Self::Journal(cmd) => {
-                let (config, account_config) = configs()?;
+                let (config, account_config) = configs(printer, config_paths, account_name)?;
                 cmd.execute(
                     printer,
                     CalendarClient::new(config, account_config, backend)?,
                 )
             }
             Self::Item(cmd) => {
-                let (config, account_config) = configs()?;
+                let (config, account_config) = configs(printer, config_paths, account_name)?;
                 cmd.execute(
                     printer,
                     CalendarClient::new(config, account_config, backend)?,
@@ -186,44 +261,30 @@ impl CalendulaCommand {
 
             #[cfg(feature = "caldav")]
             Self::Caldav(cmd) => {
-                cmd.execute(printer, build_caldav_client(config_paths, account_name)?)
+                let client = build_caldav_client(printer, config_paths, account_name)?;
+                cmd.execute(printer, client)
             }
             #[cfg(feature = "gcal")]
-            Self::Gcal(cmd) => cmd.execute(printer, build_gcal_client(config_paths, account_name)?),
+            Self::Gcal(cmd) => {
+                let client = build_gcal_client(printer, config_paths, account_name)?;
+                cmd.execute(printer, client)
+            }
             #[cfg(feature = "pimdir")]
             Self::Pimdir(cmd) => {
-                cmd.execute(printer, PimdirBackend::build(config_paths, account_name)?)
+                let backend = PimdirBackend::build(printer, config_paths, account_name)?;
+                cmd.execute(printer, backend)
             }
             #[cfg(feature = "vdir")]
-            Self::Vdir(cmd) => cmd.execute(printer, build_vdir_client(config_paths, account_name)?),
+            Self::Vdir(cmd) => {
+                let client = build_vdir_client(printer, config_paths, account_name)?;
+                cmd.execute(printer, client)
+            }
 
+            #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+            Self::Configure(cmd) => cmd.execute(printer, config_paths),
             Self::Account(cmd) => cmd.execute(printer, config_paths, account_name, backend),
             Self::Completion(cmd) => cmd.execute(printer, CalendulaCli::command()),
             Self::Manual(cmd) => cmd.execute(printer, CalendulaCli::command()),
         }
-    }
-}
-
-/// Runs the parsed CLI: a subcommand, or the wizard when none was
-/// given.
-///
-/// The wizard configures the discoverable backends (CalDAV, vdir,
-/// pimdir); a build carrying none of them has nothing to walk the user
-/// through, and says so rather than offering an empty flow.
-pub fn execute(cli: CalendulaCli, printer: &mut impl Printer) -> Result<()> {
-    match cli.command {
-        Some(command) => command.execute(
-            printer,
-            &cli.config_paths,
-            cli.account.name.as_deref(),
-            cli.backend,
-        ),
-        #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
-        None => wizard::discover::run(printer),
-        #[cfg(not(any(feature = "caldav", feature = "vdir", feature = "pimdir")))]
-        None => bail!(
-            "This build carries no wizard-capable backend; write a configuration by hand, \
-             starting from config.sample.toml"
-        ),
     }
 }

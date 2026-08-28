@@ -1,5 +1,6 @@
 #[cfg(feature = "caldav")]
 pub mod caldav;
+pub mod configure;
 pub mod discover;
 #[cfg(any(feature = "vdir", feature = "pimdir"))]
 pub mod local;

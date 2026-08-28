@@ -41,36 +41,48 @@ An item whose iCalendar carries no VEVENT SHALL be refused by component name rat
 vdir SHALL adapt io-vdir. A collection directory is a calendar and its metadata marker files carry the display name, description and color; each `.ics` file inside is an item, and a `.vcf` file is not. vdir has no entity tag, so `if_match` SHALL be ignored rather than refused. An update SHALL read the current metadata before writing, so a field the patch leaves untouched survives.
 
 ### Requirement: pimdir backend
-pimdir SHALL adapt io-pimdir over io-replica. The store is an offline cache a sync engine fills, not a server: reads project the store's items and writes are staged io-replica mutations a later sync propagates.
+pimdir SHALL adapt io-pimdir over io-replica. The store is an offline cache a sync engine fills, not a server: reads project the store's items and writes are queue actions a later sync applies and propagates.
 
-Collections come from the sync, so `create_calendar`, `update_calendar` and `delete_calendar` SHALL refuse with a message pointing at the account the store syncs. A collection SHALL be listed as a calendar when it declares `text/calendar`, or when it declares no kind at all (a sync created it before any consumer declared one).
+Collections come from the sync, so `create_calendar`, `update_calendar` and `delete_calendar` SHALL refuse with a message pointing at the account the store syncs. A collection SHALL be listed as a calendar when it declares `text/calendar`, or when it declares no kind at all (a sync created it before any consumer declared one). A store grouping its collections under accounts (pimdir SPEC 9.2) SHALL be narrowed to `pimdir.account` when that is set, and read whole when it is not.
+
+### Requirement: pimdir takes the reader and producer roles, never the owner
+The pimdir backend SHALL read through a `PimdirReader` and write through a `PimdirProducer`, and SHALL NOT open a `PimdirStore`. The owner handle drains the queue, sweeps the objects and purges the trash, and holds an exclusive lock on the store for its lifetime, so holding it would both lock a sync out for the length of a listing and put every destructive verb behind a frontend that never calls them. The reader SHALL be built with the pending overlay, so an action this process staged reads back before the store's owner applies it.
+
+### Requirement: pimdir refuses an unknown calendar
+Every pimdir read and write SHALL fail when the calendar id names no collection of the account. The store's read seam answers an unknown collection with an empty page and its queue accepts an action for any name, so without this a typo in `-k` would read as an empty calendar and stage into one nothing will ever apply.
+
+### Requirement: pimdir lists in the store's calendar order
+A pimdir listing SHALL scan the collection by the store's own sort key, ascending, which is the item's resolved start. Paging by link id is an arbitrary order for a calendar, and the store maintains the one a reader expects.
 
 ### Requirement: pimdir shows a short public id
 The pimdir backend SHALL show and accept each item's public id (`items.seq`, a small store-assigned integer stable across every collection the item is filed in), not the internal `link_id`. It SHALL resolve that id to the `link_id` before reading a body or staging a change, and SHALL fail clearly on a non-numeric id rather than looking up nothing.
 
+Addressing by the public id is what keeps two duplicated resources distinguishable: they carry one `UID` between them and have two `seq`s, so an address derived from the body would be ambiguous where a `seq` is not.
+
 ### Requirement: pimdir is an availability-aware cache
 An item whose body is not local (`level < Full`, no stored object) SHALL still list, carrying no bytes. `get_item` on such an item SHALL report a clear "body not fetched" state, the cue to sync, not a data-loss error. A range filter SHALL still apply to it, read off the stored `text/calendar` summary rather than off bytes that are not local: a cache that hid its own undownloaded items from a date window would answer a different question than the one asked.
 
-### Requirement: pimdir writes are staged and source-guarded
-`create_item` SHALL stage an io-replica `Add`, `update_item` an `Edit` and `delete_item` a `Remove`, all through the store's `mutate` seam and never raw SQL. Each SHALL be attributed to the configured `pimdir.source`; on a store never synced as that source (the placement carries no base) the write SHALL fail loudly rather than stage a change no sync will carry. An `Edit` SHALL restate the sort key alongside the body, or an item whose DTSTART moved would stay sorted where its old start put it.
+An item naming an object whose blob file is absent is a different state: the store is inconsistent rather than partially synced. It SHALL still list, and the listing SHALL log a warning naming the item, since the row renders the same as an unhydrated one and `get_item` refuses it outright.
 
-`create_item` SHALL content-hash the body with the same 128-bit FNV-1a digest as Neverest, himalaya and himalaya-android-m3, so an item calendula adds deduplicates against the same item a sync stored.
+### Requirement: pimdir writes are staged queue actions
+A pimdir write SHALL append one action to the store's queue (pimdir SPEC 15.1) through a producer opened for that write and dropped after it: `create_item` to `add`, `update_item` to `update`, `delete_item` to `remove`. The body SHALL reach the blob tree through the blob writer, durably, before the row that pins it is appended, and the action SHALL address the item by the public `seq` that is already the item's shared id. `update_item` SHALL ignore `--if-match`, because the engine reconciles the applied edit against the base body it recorded at sync time, which is stronger than an entity-tag precondition a local store cannot check. Because a queued create carries no public id until the owner applies it, `create_item` SHALL report the item's link id instead.
+
+### Requirement: A pimdir body is named by the store's own hash
+The pimdir backend SHALL name a body it writes with the hash the store records in `store_meta.hash_algo`, read through the handle it holds, and SHALL NOT compute a digest of its own choosing. A body named under the wrong algorithm is a body no read ever finds.
 
 ### Requirement: pimdir store path is shell-expanded
 The pimdir backend SHALL expand `~` and environment variables on `pimdir.root` before opening the store and its blob reader. Opening the raw path would create an empty store at a literal `./~/…` relative to the working directory and silently return an empty calendar list.
 
-### Requirement: pimdir writes auto-source
-When `pimdir.source` is unset, the backend SHALL attribute its writes to the store's single synced source (via `distinct_sources`) when there is exactly one, which is the ordinary one-device case, falling back to `local` when the store has none or several.
-
 ### Requirement: The text/calendar summary convention
-calendula SHALL write, and read, the pimdir `text/calendar` summary at `v: 1`: an optional `uid`, an optional `component` (`VEVENT`, `VTODO` or `VJOURNAL`), a required (possibly empty) `summary`, an optional `dtstart` carried verbatim beside its `dtstart_tzid` and `dtstart_value` (`date-time` or `date`), an optional verbatim `dtend`, an optional verbatim `due`, whether the item is `recurring`, and an optional `size`.
+The link id, the `v: 1` summary and the sort key a pimdir write records SHALL be derived by `io_pimdir::conventions::calendar`, the format's own derivations (pimdir SPEC Annex A.3), so an item calendula stages links and summarises exactly as the same item arriving through a sync. The link id is the bare `UID`, with nothing prepended. A queued action carries no sort key: the format leaves the key to the sync that pushes the write, and a producer deriving one would order an item the connector is about to reorder.
 
-Times SHALL be carried verbatim rather than as resolved instants, so a reader with a time zone database re-derives an instant in its own zone and a reader without one displays the wall time the calendar wrote instead of a UTC claim the writer fabricated. The resolved instant SHALL NOT be duplicated in the summary: the `sort_key` is returned by the store's paging reads and is the single resolved projection.
+calendula SHALL read that summary to answer a date question about an item whose body is not local: `dtstart`, then `due` for a to-do carrying no start.
 
-The summary SHALL describe the master of a recurrence set, the component carrying no RECURRENCE-ID, since that is the item as a reader lists it. A resource carrying overrides alone SHALL still be summarised, from the first of them.
+### Requirement: A UID is not an address
+The pimdir backend SHALL NOT assume an item's link id is the `UID` its body carries, nor that a `UID` identifies at most one item in a calendar. A store may hold two calendar object resources of one calendar sharing a `UID`, keyed apart by the store (pimdir SPEC 9), and both SHALL list, read and act as ordinary items, addressed by their own public `seq`.
 
-The companion `sort_key` SHALL hold the item's start normalised to RFC 3339 in UTC at seconds precision, read ascending: DTSTART for a VEVENT or a VJOURNAL, and DUE then DTSTART for a VTODO, which is scheduled by its due date (RFC 5545 3.8.2.3) and need not carry a DTSTART at all.
+What stays unique is the key and the public id: `(collection, link_id)` still names one item and `seq` still names one resource. What ends is the link id being derivable from the body, so a read that re-derives a `UID` in order to address a row is addressing an unknown number of them.
 
-A UTC value SHALL be taken verbatim. A zoned one SHALL resolve through the VTIMEZONE the document carries, taking the earlier offset when the local time is ambiguous and the offset after the transition when it does not exist, since a local time at a transition names two instants or none. A zoned one whose zone the document does not define SHALL be read as floating rather than left unknown: the error is bounded by the offset and keeps the item near its place, where dropping the key would move every such item to the far end of the listing. A date-only value SHALL be read at midnight UTC and a floating one on the wall clock, both conventions rather than facts. An item with nothing parseable at all SHALL keep an empty key, which reads as unknown.
+RFC 4791 4.1 requires the `UID` to be unique in the collection and servers do not always enforce it. The two copies need not even be the same event: a verified case held two different meetings under one `UID`. Resolving an identity to whichever row came first would hide one of them.
 
-A recurring item SHALL key on its first occurrence, which is what DTSTART holds and is fixed for the life of the series. A date-range read over recurring items therefore needs the recurrence expanded above the store, expansion being a function of when you ask.
+This is a second resource, not a second component: every component sharing a `UID` still lives in one resource, so each of the two items holds its own whole recurrence set.

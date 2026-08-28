@@ -7,12 +7,12 @@ use pimalaya_cli::{
     printer::Printer,
     table::{Cell, Color, ContentArrangement, Row, Table, TableStyle},
 };
-use pimalaya_config::toml::TomlConfig;
 use serde::Serialize;
 
 use crate::{
     account::context::map_color_or,
-    config::{AccountConfig, Config, TableArrangementConfig},
+    cli::load_config,
+    config::{AccountConfig, TableArrangementConfig},
     shared::table::{DEFAULT_PRESET, style_from_preset},
 };
 
@@ -27,7 +27,7 @@ pub struct AccountListCommand;
 
 impl AccountListCommand {
     pub fn execute(self, printer: &mut impl Printer, config_paths: &[PathBuf]) -> Result<()> {
-        let config = load_config(config_paths)?;
+        let config = load_config(printer, config_paths)?;
 
         let style = style_from_preset(config.table.preset.as_deref().unwrap_or(DEFAULT_PRESET));
         let arrangement = config
@@ -66,16 +66,6 @@ struct AccountColors {
     name: Color,
     backends: Color,
     default: Color,
-}
-
-/// Loads the configuration, or explains where one comes from.
-fn load_config(paths: &[PathBuf]) -> Result<Config> {
-    match Config::from_paths_or_default(paths)? {
-        Some(config) => Ok(config),
-        None => anyhow::bail!(
-            "No configuration found. Run `calendula` to generate one with the wizard."
-        ),
-    }
 }
 
 /// One account's row in an [`AccountsTable`].

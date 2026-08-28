@@ -57,7 +57,7 @@ fn detect(root: &Path) -> Option<Local> {
     if root.join(PIMDIR_INDEX).is_file() || root.join(PIMDIR_OBJECTS).is_dir() {
         return Some(Local::Pimdir(PimdirConfig {
             root: root.to_path_buf(),
-            source: None,
+            account: None,
         }));
     }
 
@@ -107,7 +107,10 @@ fn pick(root: PathBuf) -> Result<Local> {
     Ok(
         match prompt::item("Local backend:", [VDIR, PIMDIR], None)? {
             VDIR => Local::Vdir(VdirConfig { home_dir: root }),
-            _ => Local::Pimdir(PimdirConfig { root, source: None }),
+            _ => Local::Pimdir(PimdirConfig {
+                root,
+                account: None,
+            }),
         },
     )
 }
@@ -119,7 +122,10 @@ fn pick(root: PathBuf) -> Result<Local> {
 
 #[cfg(all(feature = "pimdir", not(feature = "vdir")))]
 fn pick(root: PathBuf) -> Result<Local> {
-    Ok(Local::Pimdir(PimdirConfig { root, source: None }))
+    Ok(Local::Pimdir(PimdirConfig {
+        root,
+        account: None,
+    }))
 }
 
 #[cfg(test)]

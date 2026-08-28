@@ -11,14 +11,14 @@ use crate::pimdir::backend::PimdirBackend;
 
 /// Report what the local pimdir store holds.
 ///
-/// Shows the source writes are attributed to, every source the store
-/// has been synced as, and one row per calendar with how many of its
-/// items carry a local body. A calendar whose items list but do not
-/// read is waiting on a sync to hydrate them, and this is where to see
-/// that coming.
+/// Shows the account this client reads, every account the store groups
+/// collections under, and one row per calendar with how many of its
+/// items carry a local body and how many creations are still queued. A
+/// calendar whose items list but do not read is waiting on a sync to
+/// hydrate them, and this is where to see that coming.
 ///
-/// JSON output: `{"source", "sources", "calendars": [{"id", "name",
-/// "total", "hydrated"}]}`.
+/// JSON output: `{"account", "accounts", "calendars": [{"id", "name",
+/// "total", "hydrated", "queued"}]}`.
 #[derive(Debug, Parser)]
 pub struct PimdirStatusCommand;
 
@@ -31,10 +31,10 @@ impl PimdirStatusCommand {
 /// What a store holds, as `pimdir status` reports it.
 #[derive(Clone, Debug, Serialize)]
 pub struct PimdirStatus {
-    /// The source this account's writes are attributed to.
-    pub source: String,
-    /// Every source the store has been synced as.
-    pub sources: Vec<String>,
+    /// The account this client reads, `None` in a store grouping none.
+    pub account: Option<String>,
+    /// Every account the store groups collections under.
+    pub accounts: Vec<String>,
     /// One row per calendar collection.
     pub calendars: Vec<PimdirCalendarStatus>,
 }
@@ -50,26 +50,38 @@ pub struct PimdirCalendarStatus {
     pub total: usize,
     /// How many of those carry a local body.
     pub hydrated: usize,
+    /// How many creations are queued for it, which have no public id
+    /// until the store's owner applies them and so list nowhere else.
+    pub queued: usize,
 }
 
 impl fmt::Display for PimdirStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f)?;
-        writeln!(f, "Writes attributed to source: {}", self.source)?;
 
-        match self.sources.as_slice() {
-            [] => writeln!(f, "Synced sources: none yet")?,
-            sources => writeln!(f, "Synced sources: {}", sources.join(", "))?,
+        match &self.account {
+            Some(account) => writeln!(f, "Reading account: {account}")?,
+            None => writeln!(f, "Reading account: every account in the store")?,
+        }
+
+        match self.accounts.as_slice() {
+            [] => writeln!(f, "Grouped accounts: none")?,
+            accounts => writeln!(f, "Grouped accounts: {}", accounts.join(", "))?,
         }
 
         writeln!(f)?;
 
         for calendar in &self.calendars {
-            writeln!(
+            write!(
                 f,
                 "  {} ({}): {}/{} items downloaded",
                 calendar.name, calendar.id, calendar.hydrated, calendar.total
             )?;
+
+            match calendar.queued {
+                0 => writeln!(f)?,
+                queued => writeln!(f, ", {queued} queued for the next sync")?,
+            }
         }
 
         Ok(())

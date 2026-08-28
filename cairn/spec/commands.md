@@ -12,7 +12,9 @@ The command tree is split into three groups, in this order: the shared cross-pro
 The `calendar`, `event` and `item` families SHALL expose only operations every compiled backend can serve identically. A concept one backend has and another does not SHALL NOT appear here; it belongs to that backend's own family. Adding a backend that cannot serve a shared operation SHALL move the operation out rather than have it emulated.
 
 ### Requirement: Protocol-specific families
-`caldav`, `gcal`, `pimdir` and `vdir` SHALL each expose what only that backend has, gated behind its own cargo feature. CalDAV covers `discover`, its own calendar listing (carrying the ctag, the sync token and the accepted component kinds), `create` and `delete`. gcal covers the half of the Calendar API iCalendar cannot express: sharing, availability, recurrence expansion, server-side parsing and the palettes. vdir covers its collection verbs including `rename`, which the shared API has no home for. pimdir covers `status`, reporting the source writes are attributed to, every source the store has been synced as, and how much of each calendar is downloaded.
+`configure` (alias `wizard`) SHALL run the account wizard.
+
+`caldav`, `gcal`, `pimdir` and `vdir` SHALL each expose what only that backend has, gated behind its own cargo feature. CalDAV covers `discover`, its own calendar listing (carrying the ctag, the sync token and the accepted component kinds), `create` and `delete`. gcal covers the half of the Calendar API iCalendar cannot express: sharing, availability, recurrence expansion, server-side parsing and the palettes. vdir covers its collection verbs including `rename`, which the shared API has no home for. pimdir covers `status`, reporting the account being read, every account the store groups collections under, how much of each calendar is downloaded, and how many creations are queued for the next sync.
 
 A backend MAY exist without a family where its protocol adds nothing the shared surface lacks; a family SHALL NOT push protocol-specific concepts into the shared API instead.
 
@@ -35,6 +37,13 @@ A component listing SHALL render the properties its kind is read by: an event it
 
 ### Requirement: Only events draw an agenda
 `agenda` SHALL stay a VEVENT command. The grid marks the days that carry an event because an event occupies time; a todo's due date and a journal's date do not fill a day, and drawing them the same way would say they do.
+
+### Requirement: An agenda shows every event at an instant
+The agenda SHALL render every event whose start falls at a given instant, never one of them, and SHALL order two events at one instant totally and stably, by label then by item id, so the same calendar renders the same way twice. The events at one instant SHALL print under one time column rather than repeating it, so a duplicated pair reads as two events rather than as two rows that happen to share a time.
+
+Two events may legitimately start at the same moment: two unrelated meetings at 09:00, and, since a collection may hold two resources under one `UID` (pimdir SPEC 9), two copies of what a server considers one identity. A view keyed by the instant alone shows the last one written and reports nothing, which loses exactly the event the store went to the trouble of keeping.
+
+The `--json` payload SHALL carry the same multiplicity, so a consumer reading it is not told there was one event where there were two: it maps each start datetime to the list of the labels starting at it, in the same order the text renders them. No second shape SHALL be kept beside it, since one that still dropped an event would leave the defect reachable.
 
 ### Requirement: A component window is applied locally
 `event list` pushes its window down where the backend can narrow server-side. `todo list` and `journal list` SHALL apply theirs after parsing instead: a server-side range filter is defined against a component's start and end (RFC 4791 9.9), which a todo (due, no start) and a journal entry (dated, no end) do not both carry, so a pushed-down filter would drop them for the wrong reason. A component carrying no date at all SHALL show only in an unfiltered listing.

@@ -18,7 +18,7 @@ The top-level rendering options SHALL be folded under the selected account, the 
 `deny_unknown_fields` SHALL be set on the leaf blocks, so a typo in an option is reported rather than ignored, and SHALL NOT be set on the top-level and account blocks, so a future TUI reading the same file can add its own sections without breaking this one.
 
 ### Requirement: Backend blocks
-An account SHALL carry an optional block per compiled backend: `vdir` with a `home-dir`, `pimdir` with a `root` and an optional `source`, `caldav` with its endpoint, TLS and authentication, `gcal` with TLS and authentication. An account MAY carry several; which one a shared command uses is the backend capability's business.
+An account SHALL carry an optional block per compiled backend: `vdir` with a `home-dir`, `pimdir` with a `root` and an optional `account`, `caldav` with its endpoint, TLS and authentication, `gcal` with TLS and authentication. An account MAY carry several; which one a shared command uses is the backend capability's business.
 
 Every listing family SHALL additionally carry a rendering block naming its default page size and its column colours: `calendar.list`, `event.list`, `todo.list`, `journal.list` and `item.list`.
 

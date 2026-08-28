@@ -40,7 +40,7 @@ CLI to manage calendars.
 - **pimdir**: read and stage writes against a local [pimdir](https://github.com/pimalaya/pimdir) store, the offline cache a sync engine fills.
 - **Agenda view**: `event agenda` draws a cal(1)-style grid marking the days that carry an event.
 - **Discovery**: an email address is enough to find a provider's server, through SRV records, `.well-known` and the provider configuration documents.
-- **Interactive wizard**: bare `calendula` discovers an account, tests it, and prints a ready-to-save configuration.
+- **Interactive wizard**: `calendula configure` discovers an account, tests it, and saves it; a first run with no configuration is offered it.
 - **Multi-account**: one TOML file, one block per account, several files deep-merged when you want secrets apart.
 - **JSON output**: every command switches to JSON with `--json`, for scripts and other tools.
 - Full standard, blocking client with **TLS** support:
@@ -142,12 +142,14 @@ The configuration is loaded from the first existing path among:
 
 Override the path with `calendula -c <PATH>` or `CALENDULA_CONFIG=<PATH>`. Multiple paths can be passed at once, separated by `:`; the first is the base and the rest are deep-merged on top, which is how a public configuration and a private one stay separate files. The full field reference lives in [config.sample.toml](./config.sample.toml).
 
-Run `calendula` with no command to launch the wizard. It asks one question, taking an email address, a server URL, or a local folder path, and the shape of what you type decides the rest. An address is discovered: every reachable server is offered, and picking one prompts only its credentials. A URL is taken as the CalDAV context root, which is how a self-hosted server publishing no SRV record gets configured. A folder is detected as a vdir home or a pimdir store.
+Run `calendula configure` to launch the wizard. It asks one question, taking an email address, a server URL, or a local folder path, and the shape of what you type decides the rest. An address is discovered: every reachable server is offered, and picking one prompts only its credentials. A URL is taken as the CalDAV context root, which is how a self-hosted server publishing no SRV record gets configured. A folder is detected as a vdir home or a pimdir store.
 
-The wizard tests the account before showing you anything, then prints a ready-to-save configuration. Redirect it to keep it, or let the wizard save it for you:
+The wizard tests the account before showing you anything, then offers to save it: to a new configuration file, or appended to the one you already have, leaving its comments and formatting untouched. A first run with no configuration is offered the wizard by a bare `calendula` or by any command needing an account; once you have one, bare `calendula` prints the help.
+
+Redirect it instead to keep the document yourself:
 
 ```sh
-calendula > ~/.config/calendula/config.toml
+calendula configure > ~/.config/calendula/config.toml
 ```
 
 ### Apple
@@ -249,11 +251,11 @@ A [pimdir](https://github.com/pimalaya/pimdir) store is the offline cache a sync
 ```toml
 [accounts.cached]
 pimdir.root = "~/.local/state/neverest/example"
-# Usually left unset: a store synced as a single source is opened as it.
-#pimdir.source = "caldav"
+# Usually left unset: a store synced by one account is read as that one.
+#pimdir.account = "personal"
 ```
 
-Run `calendula pimdir status` to see which source your writes are attributed to and how much of each calendar is downloaded. An item that is listed but not downloaded reads as "body not fetched" until a sync hydrates it.
+Run `calendula pimdir status` to see which account you are reading, how much of each calendar is downloaded, and how many creations are still queued. An item that is listed but not downloaded reads as "body not fetched" until a sync hydrates it.
 
 ## Usage
 

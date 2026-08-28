@@ -1,32 +1,36 @@
 //! pimdir adapter for the shared cross-protocol client.
 //!
-//! Reads project the store's items through [`io_pimdir`]'s client read
-//! API plus the blob reader. An item whose body is not local still
-//! lists, carrying no bytes; only a read of that item reports "body not
-//! fetched", which is the cue to sync rather than a data-loss error.
+//! Reads project the store's items through [`io_pimdir`]'s reader plus
+//! the blob store. An item whose body is not local still lists, carrying
+//! no bytes; only a read of that item reports "body not fetched", which
+//! is the cue to sync rather than a data-loss error.
 //!
-//! Writes stage [`io_replica`] mutations through the store's `mutate`
-//! seam, never raw SQL, so the next sync derives and pushes them. Each
-//! is attributed to the client's configured source and fails loudly
-//! when the store was not synced as that source, rather than silently
-//! staging a change no sync will carry.
+//! Writes append one action to the store's queue (pimdir SPEC 15.1)
+//! through a producer opened for that write: the body reaches the blob
+//! tree first, then the row pinning it. The store's owner, a sync,
+//! applies the action and pushes it. The same reader folds the pending
+//! queue over its reads, so a staged change shows here before that
+//! happens.
 //!
-//! Ids are the store's public `seq`, a small integer stable across
-//! every collection an item is filed in, never the internal link id.
+//! Calendars themselves come from the sync, so the collection verbs
+//! (create, update, delete) are not served here: a cache does not invent
+//! collections its source does not have.
+//!
+//! Ids are the store's public `seq`, a small integer stable across every
+//! collection an item is filed in, never the internal link id.
 
-use std::path::PathBuf;
+use std::{io::Write, path::PathBuf};
 
 use anyhow::{Result, anyhow, bail};
-use io_pimdir::PimdirItem;
-use io_replica::{
-    client::ReplicaStorage,
-    collection::ReplicaCollectionId,
-    coroutine::{ReplicaArg, ReplicaCoroutine, ReplicaCoroutineState, ReplicaYield},
-    mutate::{ReplicaMutate, ReplicaMutation},
-    object::ReplicaObject,
-    placement::{ReplicaFlags, ReplicaHandle, ReplicaPlacement},
+use chrono::{SecondsFormat, Utc};
+use io_pimdir::{
+    PimdirCollection, PimdirItem,
+    codec::PimdirAction,
+    conventions::{PimdirDerivation, calendar::PimdirCalendarMeta},
 };
-
+use io_replica::{object::ReplicaHash, placement::ReplicaFlags};
+use log::warn;
+use pimalaya_cli::printer::Printer;
 use pimalaya_config::toml::TomlConfig;
 
 use crate::{
@@ -34,8 +38,6 @@ use crate::{
     config::PimdirConfig,
     pimdir::{
         client::PimdirClient,
-        hash::content_hash,
-        meta::{CALENDAR_KIND, CalendarMeta, project},
         status::{PimdirCalendarStatus, PimdirStatus},
     },
     shared::{
@@ -45,6 +47,9 @@ use crate::{
         item::{CalendarItem, CalendarTimeRange},
     },
 };
+
+/// The media type a pimdir collection carries to be a calendar.
+const CALENDAR_KIND: &str = "text/calendar";
 
 /// How many items to pull per keyset page when scanning a collection.
 const SCAN_BATCH: usize = 500;
@@ -64,8 +69,12 @@ impl PimdirBackend {
 
     /// Loads the configuration, picks the active account, then opens
     /// the store. Bails when the account carries no `[pimdir]` block.
-    pub fn build(config_paths: &[PathBuf], account_name: Option<&str>) -> Result<Self> {
-        let mut config = load_config(config_paths)?;
+    pub fn build(
+        printer: &mut impl Printer,
+        config_paths: &[PathBuf],
+        account_name: Option<&str>,
+    ) -> Result<Self> {
+        let mut config = load_config(printer, config_paths)?;
         let (name, mut account_config) = config
             .take_account(account_name)?
             .ok_or_else(|| anyhow!("Cannot find account"))?;
@@ -83,11 +92,8 @@ impl PimdirBackend {
     /// declared a kind.
     pub fn list_calendars(&mut self) -> Result<Vec<Calendar>> {
         let mut calendars: Vec<Calendar> = self
-            .client
-            .store
-            .list_collections()?
+            .calendar_collections()?
             .into_iter()
-            .filter(|collection| collection.kind.is_empty() || collection.kind == CALENDAR_KIND)
             .map(|collection| Calendar {
                 name: if collection.name.is_empty() {
                     collection.id.clone()
@@ -104,9 +110,9 @@ impl PimdirBackend {
         Ok(calendars)
     }
 
-    /// Refuses to create a calendar: a cache holds the collections its
-    /// sync source has, and inventing one here would produce a calendar
-    /// no server knows about and no sync would ever carry.
+    /// Refuses to create a calendar: declaring a collection is an owner
+    /// write (pimdir SPEC 8) and this backend is a producer, and a
+    /// collection no sync knows about is one no sync would carry.
     pub fn create_calendar(
         &mut self,
         _id: &str,
@@ -144,6 +150,8 @@ impl PimdirBackend {
         page_size: Option<u32>,
         range: Option<&CalendarTimeRange>,
     ) -> Result<Vec<CalendarItem>> {
+        self.known_collection(calendar_id)?;
+
         let mut items = Vec::new();
 
         for stored in self.scan_items(calendar_id)? {
@@ -167,12 +175,11 @@ impl PimdirBackend {
     /// hydrated: that is a state to resolve with a sync, not a missing
     /// item.
     pub fn get_item(&mut self, calendar_id: &str, item_id: &str) -> Result<CalendarItem> {
-        let seq = parse_id(item_id)?;
-        let Some(stored) = self.client.store.get_item(calendar_id, seq)? else {
-            bail!("Item `{item_id}` not found in calendar `{calendar_id}`");
-        };
+        self.known_collection(calendar_id)?;
 
-        let Some(hash) = stored.object.clone() else {
+        let stored = self.item(calendar_id, item_id)?;
+
+        let Some(hash) = stored.object else {
             bail!(
                 "Item `{item_id}` in calendar `{calendar_id}` is not downloaded yet \
                  (body not fetched); run a sync to hydrate it"
@@ -191,43 +198,37 @@ impl PimdirBackend {
         })
     }
 
-    /// Stages a locally-authored item as an `Add` the next sync
-    /// uploads. Returns the public id the store assigned it.
+    /// Stages a locally-authored item as an `add` action the next sync
+    /// applies and uploads.
+    ///
+    /// Returns the item's link id, its `UID`: a queued create carries
+    /// no public `seq` until the store's owner applies it, so there is
+    /// no store-assigned id to report yet.
     pub fn create_item(&mut self, calendar_id: &str, contents: Vec<u8>) -> Result<String> {
-        let projection = project(&contents);
-        let link = projection.link_id.0.clone();
-        let object = ReplicaObject {
-            hash: content_hash(&contents),
-            size: contents.len(),
+        self.known_collection(calendar_id)?;
+
+        let derived = derive(&contents);
+        let (hash, size) = self.stage_body(&contents)?;
+
+        let action = PimdirAction::Add {
+            link_id: Some(derived.link_id.clone()),
+            flags: ReplicaFlags::default(),
+            object: Some(hash),
+            meta: Some(derived.meta),
+            handle: None,
         };
+        self.enqueue(calendar_id, &action, Some(size))?;
 
-        self.mutate(
-            calendar_id,
-            ReplicaMutation::Add {
-                handle: ReplicaHandle(format!("local:{link}")),
-                link_id: projection.link_id,
-                flags: ReplicaFlags::default(),
-                object,
-                body: contents,
-                meta: Some(projection.meta),
-                sort_key: projection.sort_key,
-            },
-        )?;
-
-        let seq = self
-            .client
-            .store
-            .seq_for_link(calendar_id, &link)?
-            .ok_or_else(|| anyhow!("Added item `{link}` in `{calendar_id}` has no public id"))?;
-
-        Ok(seq.to_string())
+        Ok(derived.link_id.0)
     }
 
-    /// Stages a content change as an `Edit` the next sync pushes.
+    /// Stages a body replacement as an `update` action the next sync
+    /// applies and pushes, three-way merging against the stored base.
     ///
-    /// pimdir carries no entity tag of its own, so `if_match` cannot be
-    /// honoured: the engine's own three-way merge against the stored
-    /// base is what guards a concurrent remote change.
+    /// `if_match` is ignored: the applied edit is reconciled by the
+    /// engine against the base body it recorded at sync time, which is
+    /// a stronger guarantee than an entity tag a local store cannot
+    /// check.
     pub fn update_item(
         &mut self,
         calendar_id: &str,
@@ -235,47 +236,39 @@ impl PimdirBackend {
         contents: Vec<u8>,
         _if_match: Option<&str>,
     ) -> Result<()> {
-        let placement = self.synced_placement(calendar_id, item_id)?;
-        let projection = project(&contents);
-        let object = ReplicaObject {
-            hash: content_hash(&contents),
-            size: contents.len(),
+        self.known_collection(calendar_id)?;
+
+        let seq = self.item(calendar_id, item_id)?.seq;
+        let derived = derive(&contents);
+        let (hash, size) = self.stage_body(&contents)?;
+
+        let action = PimdirAction::Update {
+            seq,
+            object: hash,
+            meta: Some(derived.meta),
         };
-
-        self.mutate(
-            calendar_id,
-            ReplicaMutation::Edit {
-                handle: placement.handle,
-                object,
-                body: contents,
-                meta: Some(projection.meta),
-                // NOTE: an edit that moves DTSTART has to restate the
-                // key, or the item stays sorted where its old start put
-                // it.
-                sort_key: Some(projection.sort_key),
-            },
-        )
+        self.enqueue(calendar_id, &action, Some(size))
     }
 
-    /// Stages a removal as a tombstone the next sync pushes.
+    /// Stages a `remove` action, which the next sync applies as a
+    /// tombstone and pushes as a server-side delete.
     pub fn delete_item(&mut self, calendar_id: &str, item_id: &str) -> Result<()> {
-        let placement = self.synced_placement(calendar_id, item_id)?;
-        self.mutate(calendar_id, ReplicaMutation::Remove(placement.handle))
+        self.known_collection(calendar_id)?;
+
+        let seq = self.item(calendar_id, item_id)?.seq;
+        self.enqueue(calendar_id, &PimdirAction::Remove { seq }, None)
     }
 
-    /// Collects the store's sources and per-calendar hydration state,
+    /// Collects the store's accounts and per-calendar hydration state,
     /// for the `pimdir status` command.
     pub fn status(&mut self) -> Result<PimdirStatus> {
-        let sources = self.client.store.distinct_sources()?;
+        let accounts = self.client.reader.list_accounts()?;
         let mut calendars = Vec::new();
 
-        for collection in self.client.store.list_collections()? {
-            if !collection.kind.is_empty() && collection.kind != CALENDAR_KIND {
-                continue;
-            }
-
+        for collection in self.calendar_collections()? {
             let items = self.scan_items(&collection.id)?;
             let hydrated = items.iter().filter(|item| item.object.is_some()).count();
+            let queued = self.client.reader.count_pending_creates(&collection.id)?;
 
             calendars.push(PimdirCalendarStatus {
                 name: if collection.name.is_empty() {
@@ -286,34 +279,71 @@ impl PimdirBackend {
                 id: collection.id,
                 total: items.len(),
                 hydrated,
+                queued,
             });
         }
 
         calendars.sort_by(|a, b| a.name.cmp(&b.name));
 
         Ok(PimdirStatus {
-            source: self.client.source().to_owned(),
-            sources,
+            account: self.client.account.clone(),
+            accounts,
             calendars,
         })
     }
 
-    /// Pulls every live item of a collection by keyset paging: the
-    /// store's read API is paginated, and the shared commands sort and
-    /// paginate in memory as the other local backend does.
+    /// The store's calendar collections, narrowed to the configured
+    /// account when the store groups several (pimdir SPEC 9.2).
+    fn calendar_collections(&self) -> Result<Vec<PimdirCollection>> {
+        let collections = match self.client.account.as_deref() {
+            Some(account) => self
+                .client
+                .reader
+                .list_collections_by_account(Some(account))?,
+            None => self.client.reader.list_collections()?,
+        };
+
+        Ok(collections
+            .into_iter()
+            .filter(|collection| collection.kind.is_empty() || collection.kind == CALENDAR_KIND)
+            .collect())
+    }
+
+    /// Fails unless `calendar_id` names a calendar the store knows.
+    ///
+    /// The store's read seam answers an unknown collection with an
+    /// empty page and its queue accepts an action for any name, so
+    /// without this a typo in `-k` would read as an empty calendar and
+    /// stage into one nothing will ever apply.
+    fn known_collection(&self, calendar_id: &str) -> Result<()> {
+        let known = self
+            .calendar_collections()?
+            .into_iter()
+            .any(|candidate| candidate.id == calendar_id);
+
+        if !known {
+            bail!("Calendar `{calendar_id}` not found");
+        }
+
+        Ok(())
+    }
+
+    /// Pulls every live item of a collection by keyset paging, in the
+    /// order the store maintains for calendars (start ascending).
     fn scan_items(&self, calendar_id: &str) -> Result<Vec<PimdirItem>> {
         let mut all = Vec::new();
-        let mut cursor: Option<String> = None;
+        let mut cursor: Option<(String, i64)> = None;
 
         loop {
-            let page = self
-                .client
-                .store
-                .list_items(calendar_id, cursor.as_deref(), SCAN_BATCH)?;
+            let page = self.client.reader.list_items_page_asc(
+                calendar_id,
+                cursor.as_ref().map(|(key, seq)| (key.as_str(), *seq)),
+                SCAN_BATCH,
+            )?;
             let count = page.len();
 
             if let Some(last) = page.last() {
-                cursor = Some(last.link_id.0.clone());
+                cursor = Some((last.sort_key.clone(), last.seq));
             }
 
             all.extend(page);
@@ -326,11 +356,43 @@ impl PimdirBackend {
         Ok(all)
     }
 
+    /// The stored item behind a public item id, or a clear miss.
+    ///
+    /// Anything non-numeric is the internal link id or a mistyped
+    /// value, and saying so beats a lookup that silently finds nothing.
+    fn item(&self, calendar_id: &str, item_id: &str) -> Result<PimdirItem> {
+        let seq = item_id.parse::<i64>().map_err(|_| {
+            anyhow!("Invalid pimdir item id `{item_id}`: expected the number a listing showed")
+        })?;
+
+        self.client
+            .reader
+            .get_item(calendar_id, seq)?
+            .ok_or_else(|| anyhow!("Item `{item_id}` not found in calendar `{calendar_id}`"))
+    }
+
     /// Projects a stored item onto the shared type, reading its body
     /// when one is local and leaving the contents empty otherwise.
+    ///
+    /// Empty contents mean two different things, and only one of them
+    /// is ordinary: an item the sync has not hydrated yet carries no
+    /// object at all, while an item naming an object whose blob is gone
+    /// is an inconsistent store. The second is logged, since the row
+    /// renders the same either way and [`get_item`](Self::get_item)
+    /// refuses it outright.
     fn item_from(&self, calendar_id: &str, stored: &PimdirItem) -> Result<CalendarItem> {
         let contents = match &stored.object {
-            Some(hash) => self.client.blobs.get(hash)?.unwrap_or_default(),
+            Some(hash) => match self.client.blobs.get(hash)? {
+                Some(contents) => contents,
+                None => {
+                    warn!(
+                        "body blob missing for item `{}` in calendar `{calendar_id}`, \
+                         listing it without contents",
+                        stored.seq
+                    );
+                    Vec::new()
+                }
+            },
             None => Vec::new(),
         };
 
@@ -342,72 +404,53 @@ impl PimdirBackend {
         })
     }
 
-    /// The source's placement for the public id `item_id`, guaranteed
-    /// to carry a sync base.
+    /// Writes a body into the blob tree under the store's own hash,
+    /// returning that hash and the committed byte size.
     ///
-    /// A change staged on a placement with no base would look like a
-    /// fresh create rather than an edit, and no sync would carry it, so
-    /// this is the guard that turns a misconfigured source into a clear
-    /// error instead of a silent no-op.
-    fn synced_placement(&self, calendar_id: &str, item_id: &str) -> Result<ReplicaPlacement> {
-        let seq = parse_id(item_id)?;
-        let link_id = self
-            .client
-            .store
-            .get_item(calendar_id, seq)?
-            .map(|item| item.link_id.0)
-            .ok_or_else(|| anyhow!("Item `{item_id}` not found in calendar `{calendar_id}`"))?;
+    /// Durable before anything references it (pimdir SPEC 14), so the
+    /// queue row appended next pins a body that is already there.
+    fn stage_body(&self, contents: &[u8]) -> Result<(ReplicaHash, u64)> {
+        // NOTE: the hash is the store's, read from `store_meta.hash_algo`,
+        // never one this crate picks: a body named under another
+        // algorithm is a body no read ever finds.
+        let hash = self.client.reader.hash(contents);
+        let mut writer = self.client.blobs.writer()?;
+        writer.write_all(contents)?;
+        let size = writer.commit(&hash)?;
 
-        let loaded = self
-            .client
-            .store
-            .load(&ReplicaCollectionId(calendar_id.to_owned()))?;
-
-        let placement = loaded
-            .placements
-            .into_iter()
-            .find(|placement| {
-                placement.link_id.as_ref().map(|link| link.0.as_str()) == Some(link_id.as_str())
-            })
-            .ok_or_else(|| anyhow!("Item `{item_id}` not found in calendar `{calendar_id}`"))?;
-
-        if placement.base.is_none() {
-            bail!(
-                "Calendar `{calendar_id}` was not synced as source `{}`, so item `{item_id}` \
-                 cannot be edited here; set `pimdir.source` to the sync source and sync first",
-                self.client.source()
-            );
-        }
-
-        Ok(placement)
+        Ok((hash, size))
     }
 
-    /// Drives a `mutate` coroutine to completion against the store: it
-    /// only ever asks to load the collection and to write the staged
-    /// operations.
-    fn mutate(&mut self, calendar_id: &str, mutation: ReplicaMutation) -> Result<()> {
-        let mut coroutine = ReplicaMutate::new(calendar_id.to_owned(), mutation);
-        let mut arg: Option<ReplicaArg> = None;
+    /// Appends one action to a collection's queue through a producer
+    /// opened for this write and dropped with it.
+    fn enqueue(
+        &self,
+        calendar_id: &str,
+        action: &PimdirAction,
+        object_size: Option<u64>,
+    ) -> Result<()> {
+        self.client
+            .producer()?
+            .enqueue(calendar_id, action, object_size, &now())
+            .map_err(|err| anyhow!("Stage the pimdir action: {err}"))?;
 
-        loop {
-            match coroutine.resume(arg.take()) {
-                ReplicaCoroutineState::Yielded(ReplicaYield::WantsLoad(collection)) => {
-                    let loaded = self.client.store.load(&collection)?;
-                    arg = Some(ReplicaArg::Load(loaded));
-                }
-                ReplicaCoroutineState::Yielded(ReplicaYield::WantsWrite(ops)) => {
-                    self.client.store.write(ops)?;
-                    arg = Some(ReplicaArg::Write);
-                }
-                ReplicaCoroutineState::Yielded(_) => {
-                    bail!("pimdir mutate asked for an unexpected step");
-                }
-                ReplicaCoroutineState::Complete(result) => {
-                    return result.map_err(|err| anyhow!("pimdir mutate failed: {err}"));
-                }
-            }
-        }
+        Ok(())
     }
+}
+
+/// The item's link id and `v: 1` summary, as the format derives them
+/// (pimdir SPEC Annex A.3), which is what keeps an item staged here and
+/// the same item arriving through a sync one item rather than two.
+///
+/// A queued action carries no sort key: the format leaves the key to the
+/// sync that pushes the create.
+fn derive(contents: &[u8]) -> PimdirDerivation {
+    io_pimdir::conventions::calendar::derive(contents)
+}
+
+/// The enqueue timestamp, RFC 3339 as the queue column expects.
+fn now() -> String {
+    Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
 /// Whether an item falls inside `range`.
@@ -424,7 +467,7 @@ fn in_range(item: &CalendarItem, stored: &PimdirItem, range: &CalendarTimeRange)
             .any(|event| range.contains(&event.start));
     }
 
-    let meta = CalendarMeta::read(stored.meta.as_ref());
+    let meta = summary_of(stored);
 
     // NOTE: DTSTART then DUE, the same order the sort key takes, so a
     // to-do carrying only a due date still answers a date question.
@@ -433,6 +476,17 @@ fn in_range(item: &CalendarItem, stored: &PimdirItem, range: &CalendarTimeRange)
         .or(meta.due.as_deref())
         .map(|start| range.contains(&stamp_of(start)))
         .unwrap_or(false)
+}
+
+/// Reads a stored item's `v: 1` summary, falling back to an empty one
+/// when the item was never projected or was written to a shape this
+/// version cannot read. A listing showing blank columns beats one that
+/// fails.
+fn summary_of(item: &PimdirItem) -> PimdirCalendarMeta {
+    item.meta
+        .as_ref()
+        .and_then(|meta| serde_json::from_str(&meta.0).ok())
+        .unwrap_or_default()
 }
 
 /// Folds a summary stamp into the leading `YYYYMMDD` the range
@@ -457,28 +511,11 @@ fn unsupported(verb: &str) -> String {
     )
 }
 
-/// Parses the public id a listing showed. Anything non-numeric is the
-/// internal link id or a mistyped value, and saying so beats a lookup
-/// that silently finds nothing.
-fn parse_id(id: &str) -> Result<i64> {
-    id.parse()
-        .map_err(|_| anyhow!("Invalid pimdir item id `{id}`: expected the number a listing showed"))
-}
-
 #[cfg(test)]
 mod tests {
+    use io_replica::placement::{ReplicaLevel, ReplicaLinkId, ReplicaMeta};
+
     use super::*;
-
-    #[test]
-    fn a_public_id_parses_and_a_link_id_is_rejected_by_name() {
-        assert_eq!(parse_id("42").unwrap(), 42);
-
-        let err = parse_id("uid:event-1@example.org").unwrap_err().to_string();
-        assert!(
-            err.contains("expected the number a listing showed"),
-            "{err}"
-        );
-    }
 
     #[test]
     fn the_collection_refusal_points_at_the_sync() {
@@ -493,10 +530,70 @@ mod tests {
         assert_eq!(stamp_of(""), "");
     }
 
+    /// An added item links the way the store spells it: the bare `UID`
+    /// pimdir SPEC Annex A.3 gives, which is what a synced copy carries,
+    /// so a staged add naming an identity the collection already holds
+    /// parks (pimdir SPEC 15.3) instead of being filed under a key its
+    /// producer never asked for. Minting is the store's answer to what a
+    /// source hands over; parking is its answer to a producer authoring
+    /// an item the collection already holds.
+    #[test]
+    fn an_added_item_links_the_way_the_store_spells_it() {
+        let raw = b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:party@example.org\r\n\
+                    SUMMARY:Party\r\nDTSTART:20260814T090000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let derived = derive(raw);
+
+        assert_eq!(derived.link_id.0, "party@example.org");
+        assert!(derived.meta.0.contains("\"v\":1"));
+        assert!(derived.meta.0.contains("Party"));
+    }
+
+    /// One calendar may hold two resources whose bodies carry one `UID`
+    /// (pimdir SPEC 9): the store keys them apart and draws each its own
+    /// public id, so both list as ordinary items. What addresses an item
+    /// here is that id, never the identity its body states, and the two
+    /// copies need not even be the same event.
+    #[test]
+    fn two_items_sharing_one_uid_list_under_their_own_public_ids() {
+        let body = |summary: &str| {
+            format!(
+                "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:demo@example.org\r\n\
+                 SUMMARY:{summary}\r\nDTSTART:20260814T090000Z\r\n\
+                 END:VEVENT\r\nEND:VCALENDAR\r\n"
+            )
+            .into_bytes()
+        };
+        let item = |seq: &str, summary: &str| CalendarItem {
+            id: seq.into(),
+            calendar_id: "personal".into(),
+            etag: None,
+            contents: body(summary),
+        };
+
+        let woonies = item("1", "Pre demo woonies");
+        let minis = item("2", "Pre demo MINIS");
+
+        // The identity the two bodies state is one string, so it names
+        // both of them and addresses neither.
+        assert_eq!(
+            derive(&woonies.contents).link_id.0,
+            derive(&minis.contents).link_id.0
+        );
+
+        let events: Vec<Event> = [&woonies, &minis]
+            .into_iter()
+            .flat_map(Event::project)
+            .collect();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].id, "1");
+        assert_eq!(events[0].summary, "Pre demo woonies");
+        assert_eq!(events[1].id, "2");
+        assert_eq!(events[1].summary, "Pre demo MINIS");
+    }
+
     #[test]
     fn an_undownloaded_item_is_windowed_from_its_summary() {
-        use io_replica::placement::{ReplicaLevel, ReplicaLinkId, ReplicaMeta};
-
         let range = CalendarTimeRange {
             start: Some("20260801T000000Z".into()),
             end: Some("20260901T000000Z".into()),
@@ -509,14 +606,15 @@ mod tests {
         };
         let stored = |start: &str| PimdirItem {
             seq: 1,
-            link_id: ReplicaLinkId("uid:x".into()),
+            link_id: ReplicaLinkId("party@example.org".into()),
             flags: ReplicaFlags::default(),
             meta: Some(ReplicaMeta(format!(
                 "{{\"v\":1,\"summary\":\"x\",\"dtstart\":\"{start}\"}}"
             ))),
+            sort_key: String::new(),
             object: None,
             level: ReplicaLevel::Meta,
-            sort_key: Default::default(),
+            retention: None,
         };
 
         assert!(in_range(&item, &stored("20260814T090000Z"), &range));

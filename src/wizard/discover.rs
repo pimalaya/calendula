@@ -23,12 +23,10 @@
 //! calendula runs no OAuth 2.0 grant itself: a grant only unlocks the
 //! external token brokers behind the API-token prompt.
 
-use std::{collections::HashMap, fmt, fs, io::IsTerminal, path::Path};
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use pimalaya_cli::{printer::Printer, prompt, spinner::Spinner};
-use pimalaya_config::toml as config_toml;
-use serde::{Serialize, Serializer};
+use pimalaya_cli::{prompt, spinner::Spinner};
 use url::Url;
 
 #[cfg(feature = "pimdir")]
@@ -40,7 +38,7 @@ use crate::wizard::local;
 use crate::{
     account::check::{all_ok, check_account},
     backend::Backend,
-    config::{AccountConfig, Config},
+    config::AccountConfig,
 };
 #[cfg(feature = "caldav")]
 use crate::{
@@ -50,11 +48,6 @@ use crate::{
 
 /// The endpoint prompt label.
 const ENDPOINT_PROMPT: &str = "Email, server or folder:";
-
-/// The documented sample configuration, shown in the welcome banner and
-/// pointed at when discovery finds nothing to configure.
-const CONFIG_SAMPLE_URL: &str =
-    "https://github.com/pimalaya/calendula/blob/master/config.sample.toml";
 
 /// The backend config a flow produced, folded into a fresh
 /// [`AccountConfig`] afterwards.
@@ -67,19 +60,14 @@ enum Chosen {
     Pimdir(PimdirConfig),
 }
 
-/// Runs the wizard and either saves the resulting [`Config`] to a file
-/// or prints it as a ready-to-save TOML document.
+/// Discovers one account from a single prompt, tests it, and hands back
+/// its name and configuration.
 ///
-/// A welcome message renders on stderr first, skipped in JSON mode, to
-/// frame what calendula is and what the wizard does. The generated
-/// config is then offered for saving when writing to a terminal; when
-/// stdout is redirected or in JSON mode it goes straight to stdout, so
-/// the redirect and any script keep working.
-pub fn run(printer: &mut impl Printer) -> Result<()> {
-    if !printer.is_json() {
-        print_welcome();
-    }
-
+/// It generates and nothing more: where the account lands is
+/// [`configure`](super::configure)'s business, and no welcome renders
+/// here, whoever reached this point having already been told what the
+/// wizard is.
+pub fn run() -> Result<(String, AccountConfig)> {
     let input = prompt::text::<&str>(ENDPOINT_PROMPT, None)?;
     let input = input.trim();
 
@@ -118,116 +106,15 @@ pub fn run(printer: &mut impl Printer) -> Result<()> {
 
     spinner.success("Account configuration is valid");
 
-    let config = Config {
-        accounts: HashMap::from([(account_name, account)]),
-        ..Default::default()
-    };
-
-    if printer.is_json() || !std::io::stdout().is_terminal() {
-        return printer.out(GeneratedConfig(config));
-    }
-
-    save_or_print(printer, config)
-}
-
-/// Prints a welcome banner on stderr framing the project and the
-/// wizard, so bare `calendula` explains itself before dropping into
-/// prompts. On stderr so it never pollutes a redirected document.
-fn print_welcome() {
-    eprintln!();
-    eprintln!("Welcome to calendula, the CLI to manage calendars.");
-    eprintln!();
-    eprintln!("calendula talks to your existing calendars over CalDAV, or reads a");
-    eprintln!("local vdir home or pimdir store. Before you can list or edit an");
-    eprintln!("event, it needs to know about one account.");
-    eprintln!();
-    eprintln!("This wizard discovers a provider's settings from your email address");
-    eprintln!("(or a server URL, or a local folder path), tests the connection and");
-    eprintln!("generates a ready-to-use configuration it can save for you.");
-    eprintln!();
-    eprintln!("Every field is documented in the sample configuration:");
-    eprintln!("  {CONFIG_SAMPLE_URL}");
-    eprintln!();
-}
-
-/// Offers to save the generated config to a file, falling back to
-/// printing it on stdout when the user declines or an existing file
-/// must not be overwritten. Prompts and confirmations render on stderr.
-fn save_or_print(printer: &mut impl Printer, config: Config) -> Result<()> {
-    if !prompt::bool("Save this configuration to a file, or print it?", true)? {
-        return printer.out(GeneratedConfig(config));
-    }
-
-    let default = default_config_path();
-    let path = prompt::text("Configuration file path:", default.as_deref())?;
-    let path = shellexpand::full(path.trim())?.into_owned();
-    let path = Path::new(&path);
-
-    // Bare `calendula` runs the wizard even when a configuration
-    // already exists, so guard the default path: never clobber without
-    // confirmation, and fall back to printing so the generated config
-    // is never lost.
-    if path.exists()
-        && !prompt::bool(
-            format!("`{}` already exists. Overwrite it?", path.display()),
-            false,
-        )?
-    {
-        return printer.out(GeneratedConfig(config));
-    }
-
-    if let Some(parent) = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("Create config directory `{}`", parent.display()))?;
-    }
-
-    fs::write(path, GeneratedConfig(config).to_string())
-        .with_context(|| format!("Write config file `{}`", path.display()))?;
-
-    eprintln!();
-    eprintln!("Configuration saved to {}.", path.display());
-    eprintln!("Run `calendula calendar list` to read your calendars.");
-
-    Ok(())
-}
-
-/// The default config path, used to seed the save prompt; `None` when
-/// no config directory resolves.
-fn default_config_path() -> Option<String> {
-    let path = dirs::config_dir()?
-        .join(env!("CARGO_PKG_NAME"))
-        .join("config.toml");
-
-    Some(path.to_string_lossy().into_owned())
-}
-
-/// The account the wizard produced, rendered as a ready-to-save TOML
-/// document, or serialized as an object in JSON mode.
-struct GeneratedConfig(Config);
-
-impl fmt::Display for GeneratedConfig {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let toml = config_toml::to_string(&self.0).map_err(|_| fmt::Error)?;
-        write!(f, "{toml}")
-    }
-}
-
-impl Serialize for GeneratedConfig {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.0.serialize(serializer)
-    }
+    Ok((account_name, account))
 }
 
 /// Orients the setup from the input shape, then folds the chosen
 /// backend into a fresh [`AccountConfig`].
 ///
-/// The account is left non-default, so the wizard's output does not
-/// hijack the default when merged into a configuration that already has
-/// one. Being false, `default` is dropped from the printed TOML; the
-/// user marks their choice with `default = true`.
+/// The account is left non-default here: whether it claims the default
+/// depends on what the configuration it joins already holds, which is
+/// [`configure`](super::configure)'s to decide.
 fn build_account(account_name: &str, input: &str) -> Result<AccountConfig> {
     let chosen = if is_path(input) {
         configure_local(input)?
@@ -304,6 +191,9 @@ fn configure_manual(_account_name: &str, server: Url) -> Result<Chosen> {
 /// Stops the wizard when discovery found nothing for `input`: it says
 /// where to go next and errors out, rather than dropping into a
 /// hand-entry flow for fields nobody knows.
+#[cfg(feature = "caldav")]
+use crate::config::CONFIG_SAMPLE_URL;
+
 #[cfg(feature = "caldav")]
 fn stop_undiscovered(input: &str) -> Result<Chosen> {
     bail!(
@@ -458,26 +348,5 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("Unsupported server scheme `imaps`"), "{err}");
-    }
-
-    #[test]
-    fn the_generated_document_keeps_the_account_table_as_a_header() {
-        #[allow(unused_mut)]
-        let mut account = AccountConfig::default();
-
-        #[cfg(feature = "vdir")]
-        {
-            account.vdir = Some(VdirConfig {
-                home_dir: "/srv/calendars".into(),
-            });
-        }
-
-        let config = Config {
-            accounts: HashMap::from([("posteo".to_string(), account)]),
-            ..Default::default()
-        };
-        let rendered = GeneratedConfig(config).to_string();
-
-        assert!(rendered.contains("[accounts.posteo]"), "{rendered}");
     }
 }

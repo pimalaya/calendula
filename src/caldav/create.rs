@@ -46,8 +46,7 @@ impl CaldavCalendarCreateCommand {
             color: self.color,
             components: self.components.into_iter().collect(),
             tz: self.tz,
-            ctag: None,
-            sync_token: None,
+            ..Default::default()
         };
 
         client.create_calendar(&calendar)?;

@@ -18,6 +18,7 @@ use io_pim_discovery::{
     shared::dns::system_resolver,
 };
 use io_webdav::{client::WebdavClientStd, rfc4918::WebdavAuth};
+use pimalaya_cli::printer::Printer;
 use pimalaya_config::toml::TomlConfig;
 use pimalaya_stream::tls::Tls;
 use secrecy::ExposeSecret;
@@ -142,10 +143,11 @@ fn build_auth(config: &CaldavAuthConfig) -> Result<WebdavAuth> {
 /// Loads the configuration, picks the active account, then opens the
 /// CalDAV client. Bails when the account carries no `[caldav]` block.
 pub fn build_caldav_client(
+    printer: &mut impl Printer,
     config_paths: &[PathBuf],
     account_name: Option<&str>,
 ) -> Result<CaldavClient> {
-    let mut config = load_config(config_paths)?;
+    let mut config = load_config(printer, config_paths)?;
     let (name, mut account_config) = config
         .take_account(account_name)?
         .ok_or_else(|| anyhow!("Cannot find account"))?;
