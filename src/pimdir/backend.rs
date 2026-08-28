@@ -39,10 +39,10 @@ use crate::{
         status::{PimdirCalendarStatus, PimdirStatus},
     },
     shared::{
-        calendars::{Calendar, CalendarDiff},
+        calendar::{Calendar, CalendarDiff},
         client::paginate,
-        events::Event,
-        items::{CalendarItem, CalendarTimeRange},
+        event::Event,
+        item::{CalendarItem, CalendarTimeRange},
     },
 };
 
@@ -424,16 +424,21 @@ fn in_range(item: &CalendarItem, stored: &PimdirItem, range: &CalendarTimeRange)
             .any(|event| range.contains(&event.start));
     }
 
-    CalendarMeta::read(stored.meta.as_ref())
-        .start
+    let meta = CalendarMeta::read(stored.meta.as_ref());
+
+    // NOTE: DTSTART then DUE, the same order the sort key takes, so a
+    // to-do carrying only a due date still answers a date question.
+    meta.dtstart
         .as_deref()
+        .or(meta.due.as_deref())
         .map(|start| range.contains(&stamp_of(start)))
         .unwrap_or(false)
 }
 
-/// Folds an RFC 3339 summary stamp into the leading `YYYYMMDD` the
-/// range comparison reads, so a summary written by any connector
-/// answers the same question as parsed bytes.
+/// Folds a summary stamp into the leading `YYYYMMDD` the range
+/// comparison reads, so a summary written by any connector answers the
+/// same question as parsed bytes. The digits lead in both an iCalendar
+/// value and an RFC 3339 one, so either folds.
 fn stamp_of(rfc3339: &str) -> String {
     rfc3339
         .chars()
@@ -507,14 +512,14 @@ mod tests {
             link_id: ReplicaLinkId("uid:x".into()),
             flags: ReplicaFlags::default(),
             meta: Some(ReplicaMeta(format!(
-                "{{\"v\":1,\"summary\":\"x\",\"start\":\"{start}\"}}"
+                "{{\"v\":1,\"summary\":\"x\",\"dtstart\":\"{start}\"}}"
             ))),
             object: None,
             level: ReplicaLevel::Meta,
             sort_key: Default::default(),
         };
 
-        assert!(in_range(&item, &stored("2026-08-14T09:00:00Z"), &range));
-        assert!(!in_range(&item, &stored("2026-09-14T09:00:00Z"), &range));
+        assert!(in_range(&item, &stored("20260814T090000Z"), &range));
+        assert!(!in_range(&item, &stored("20260914T090000Z"), &range));
     }
 }

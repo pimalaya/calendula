@@ -9,7 +9,7 @@ use clap::Parser;
 use pimalaya_cli::printer::Printer;
 use serde::{Serialize, Serializer};
 
-use crate::shared::{arg::CalendarIdArg, client::CalendarClient, events::Event};
+use crate::shared::{arg::CalendarIdArg, client::CalendarClient, event::Event};
 
 const DAYS_IN_WEEK: usize = 7;
 const MAXDAYS: usize = 42;

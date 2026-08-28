@@ -18,8 +18,8 @@ use crate::{
     backend::Backend,
     config::{AccountConfig, Config},
     shared::{
-        calendars::{Calendar, CalendarDiff},
-        items::{CalendarItem, CalendarTimeRange},
+        calendar::{Calendar, CalendarDiff},
+        item::{CalendarItem, CalendarTimeRange},
     },
 };
 

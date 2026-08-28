@@ -30,7 +30,7 @@
 //!
 //! There is no aggregator crate between the CLI and the io-* libraries.
 //! calendula owns its own least-common-denominator types
-//! ([`shared::calendars::Calendar`], [`shared::items::CalendarItem`])
+//! ([`shared::calendar::Calendar`], [`shared::item::CalendarItem`])
 //! and its own dispatcher ([`shared::client::CalendarClient`]), an enum
 //! holding exactly one backend. Each protocol module carries a backend
 //! submodule adapting that library to the shared surface, so an
@@ -42,7 +42,7 @@
 //! Three backends speak iCalendar natively and store the bytes
 //! verbatim. Google does not: it holds a JSON event and exposes no
 //! per-event iCalendar representation, so [`gcal::project`] synthesizes
-//! [`shared::items::CalendarItem`]'s contents on read and re-projects
+//! [`shared::item::CalendarItem`]'s contents on read and re-projects
 //! them on write, stashing whatever the projection neither manages nor
 //! mints so it survives a round-trip. The policy is written down in
 //! cairn/spec/projection.md.

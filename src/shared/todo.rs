@@ -25,7 +25,7 @@ use ical::tree::{
 };
 use serde::Serialize;
 
-use crate::shared::items::CalendarItem;
+use crate::shared::item::CalendarItem;
 
 /// A VTODO projected out of a [`CalendarItem`]'s iCalendar bytes.
 ///

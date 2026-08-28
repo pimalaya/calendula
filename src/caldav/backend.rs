@@ -21,9 +21,9 @@ use crate::{
     caldav::client::connect_and_resolve,
     config::CaldavConfig,
     shared::{
-        calendars::{Calendar, CalendarDiff},
+        calendar::{Calendar, CalendarDiff},
         client::paginate,
-        items::{CalendarItem, CalendarTimeRange},
+        item::{CalendarItem, CalendarTimeRange},
     },
 };
 

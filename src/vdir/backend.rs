@@ -20,10 +20,10 @@ use io_vdir::{
 use crate::{
     config::VdirConfig,
     shared::{
-        calendars::{Calendar, CalendarDiff},
+        calendar::{Calendar, CalendarDiff},
         client::paginate,
-        events::Event,
-        items::{CalendarItem, CalendarTimeRange},
+        event::Event,
+        item::{CalendarItem, CalendarTimeRange},
     },
 };
 

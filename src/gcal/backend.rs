@@ -33,9 +33,9 @@ use crate::{
     config::GcalConfig,
     gcal::{client::connect, project, render::rfc3339},
     shared::{
-        calendars::{Calendar, CalendarDiff},
+        calendar::{Calendar, CalendarDiff},
         client::paginate,
-        items::{CalendarItem, CalendarTimeRange},
+        item::{CalendarItem, CalendarTimeRange},
     },
 };
 
@@ -162,7 +162,7 @@ impl GcalBackend {
         let time_max = range.and_then(|range| range.end.as_deref()).map(rfc3339);
         let wanted = window(page, page_size);
 
-        let mut items = Vec::new();
+        let mut events = Vec::new();
         let mut page_token: Option<String> = None;
 
         loop {
@@ -175,14 +175,9 @@ impl GcalBackend {
             };
             let current = self.client.events_list(calendar_id, &params)?.response;
 
-            items.extend(
-                current
-                    .items
-                    .into_iter()
-                    .map(|event| item_from(calendar_id, event)),
-            );
+            events.extend(current.items);
 
-            if wanted.is_some_and(|wanted| items.len() >= wanted) {
+            if wanted.is_some_and(|wanted| events.len() >= wanted) {
                 break;
             }
 
@@ -192,10 +187,11 @@ impl GcalBackend {
             }
         }
 
-        Ok(paginate(items, page, page_size))
+        Ok(paginate(resources(calendar_id, &events), page, page_size))
     }
 
-    /// Reads one event, projected onto an iCalendar document.
+    /// Reads one event, projected onto an iCalendar document, with the
+    /// exceptions of a series folded into it.
     pub fn get_item(&mut self, calendar_id: &str, item_id: &str) -> Result<CalendarItem> {
         let event = self
             .client
@@ -203,7 +199,58 @@ impl GcalBackend {
             .with_context(|| format!("Read item `{item_id}` from calendar `{calendar_id}`"))?
             .response;
 
-        Ok(item_from(calendar_id, event))
+        let exceptions = self.exceptions(calendar_id, &event)?;
+
+        Ok(item_from(
+            calendar_id,
+            &event,
+            &exceptions.iter().collect::<Vec<_>>(),
+        ))
+    }
+
+    /// The exceptions of a series, the events Google returns beside a
+    /// recurring event to say that one of its instances was modified.
+    ///
+    /// Every event of a series carries the series' own iCalUID, so one
+    /// filtered listing returns the master and its exceptions; the API
+    /// offers no "children of this event" query, and expanding the
+    /// instances would return the occurrences the RRULE already
+    /// generates rather than the modifications alone.
+    fn exceptions(&mut self, calendar_id: &str, event: &GcalEvent) -> Result<Vec<GcalEvent>> {
+        if event.recurrence.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let Some(uid) = event.ical_uid.as_deref() else {
+            return Ok(Vec::new());
+        };
+
+        let mut exceptions = Vec::new();
+        let mut page_token: Option<String> = None;
+
+        loop {
+            let params = GcalEventsListParams {
+                max_results: Some(PAGE_SIZE),
+                page_token: page_token.as_deref(),
+                ical_uid: Some(uid),
+                ..Default::default()
+            };
+            let current = self.client.events_list(calendar_id, &params)?.response;
+
+            exceptions.extend(
+                current
+                    .items
+                    .into_iter()
+                    .filter(|listed| listed.recurring_event_id.as_deref() == event.id.as_deref()),
+            );
+
+            match current.next_page_token {
+                Some(next) => page_token = Some(next),
+                None => break,
+            }
+        }
+
+        Ok(exceptions)
     }
 
     /// Creates an event from an iCalendar document.
@@ -303,20 +350,85 @@ fn calendar_from(entry: GcalCalendarListEntry) -> Calendar {
     }
 }
 
-/// Projects a Google event onto the shared [`CalendarItem`], its
-/// contents synthesized by the projection.
-fn item_from(calendar_id: &str, event: GcalEvent) -> CalendarItem {
+/// Folds a batch of Google events into calendar object resources.
+///
+/// An exception is not an item of its own: RFC 4791 4.1 keeps the
+/// components sharing a UID in one resource, so a modified instance
+/// belongs to the document of the series it modifies. An exception
+/// whose master this batch did not return still files on its own,
+/// since dropping it would lose an item the listing was asked for.
+fn resources(calendar_id: &str, events: &[GcalEvent]) -> Vec<CalendarItem> {
+    let masters: Vec<&str> = events
+        .iter()
+        .filter(|event| event.recurring_event_id.is_none())
+        .filter_map(|event| event.id.as_deref())
+        .collect();
+
+    let folded = |event: &GcalEvent| {
+        event
+            .recurring_event_id
+            .as_deref()
+            .is_some_and(|master| masters.contains(&master))
+    };
+
+    events
+        .iter()
+        .filter(|event| !folded(event))
+        .map(|event| {
+            let exceptions: Vec<&GcalEvent> = events
+                .iter()
+                .filter(|listed| {
+                    event.id.is_some()
+                        && listed.recurring_event_id.as_deref() == event.id.as_deref()
+                })
+                .collect();
+
+            item_from(calendar_id, event, &exceptions)
+        })
+        .collect()
+}
+
+/// Projects a Google event and the exceptions of its series onto the
+/// shared [`CalendarItem`], its contents synthesized by the projection.
+fn item_from(calendar_id: &str, event: &GcalEvent, exceptions: &[&GcalEvent]) -> CalendarItem {
     CalendarItem {
         id: event.id.clone().unwrap_or_default(),
         calendar_id: calendar_id.to_owned(),
         etag: event.etag.clone(),
-        contents: project::to_ical(&event).into_bytes(),
+        contents: project::set_to_ical(event, exceptions).into_bytes(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_exception_files_with_its_master_rather_than_beside_it() {
+        let event = |id: &str, master: Option<&str>| GcalEvent {
+            id: Some(id.to_owned()),
+            ical_uid: Some(format!("{id}@example.org")),
+            recurring_event_id: master.map(str::to_owned),
+            ..Default::default()
+        };
+
+        let events = vec![
+            event("standup", None),
+            event("standup_20260811T090000Z", Some("standup")),
+            event("lunch", None),
+            // NOTE: its master fell outside the window this page asked
+            // for, so it stands on its own rather than being dropped.
+            event("orphan_20260811T090000Z", Some("elsewhere")),
+        ];
+
+        let items = resources("personal", &events);
+        let ids: Vec<&str> = items.iter().map(|item| item.id.as_str()).collect();
+
+        assert_eq!(ids, ["standup", "lunch", "orphan_20260811T090000Z"]);
+
+        let series = String::from_utf8(items[0].contents.clone()).unwrap();
+        assert_eq!(series.matches("BEGIN:VEVENT").count(), 2);
+    }
 
     #[test]
     fn the_window_covers_every_page_up_to_the_requested_one() {

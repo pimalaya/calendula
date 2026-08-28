@@ -27,11 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   A boundary anchored in a named zone carries the VTIMEZONE it references, minted from the zone name Google sends, so an item stands on its own as an .ics file. The Calendar API carries the IANA name and nothing behind it, so the `gcal` feature carries a time zone database of its own.
 
+  A recurring series and its modified instances are **one** item rather than several. Google is instance-granular where iCalendar is resource-granular: it hands an exception over as an event of its own, so the backend folds it back into the master's document, under the master's UID and with the RECURRENCE-ID naming the instance it replaces. That is the single calendar object resource RFC 4791 4.1 requires, and it is what a CalDAV store of the same calendar holds, so the two agree on how many items exist. Reading a series costs one extra listing, filtered by its iCalUID, since the API offers no query for the children of an event.
+
 - `calendar create` now reports the identifier the backend assigned rather than the one asked for. They differ only on Google, which mints its own, and the reported id is the one later commands address the calendar by.
 
 - Added the `pimdir` backend: calendula over a local [pimdir](https://github.com/pimalaya/pimdir) store, the offline cache a sync engine fills.
 
   It sits behind a `pimdir` cargo feature and a `[accounts.<name>.pimdir]` block carrying a `root` and an optional `source`. Reads are availability-aware: an item the sync listed but has not downloaded still shows in a listing, and reading it reports "body not fetched" rather than failing. Writes are staged io-replica mutations the next sync pushes, attributed to `source` and refused outright on a store never synced as it. Calendars come from the sync, so `calendar create`, `update` and `delete` refuse here.
+
+  An item's summary follows the pimdir SPEC Annex A.3 `text/calendar` convention: the resource's UID, its component, its location, DTSTART carried verbatim beside the TZID naming its zone and the value type saying whether it has a time at all, DTEND, DUE, whether the item recurs and, when the rule is bounded, its UNTIL, which brackets the series so a range read drops it without expanding an occurrence. A reader with a time zone database re-derives an instant in its own zone without fetching the body, instead of trusting one the writer resolved. The item is summarised from the master of a recurrence set, the component carrying no RECURRENCE-ID, rather than from whichever component the resource happens to list first.
+
+  The companion sort key is the one resolved projection: DTSTART for an event or a journal entry, DUE then DTSTART for a to-do, which need not carry a start at all. A zoned start resolves through the VTIMEZONE the document carries, taking the earlier offset of an ambiguous local time and the offset after a nonexistent one; a zone the document leaves undefined, a date-only value and a floating one are read on the wall clock, which is a convention rather than a fact but keeps the item near its place in a listing.
 
 - Added `pimdir status`, reporting the source writes are attributed to, every source the store has been synced as, and how many of each calendar's items carry a local body.
 
@@ -42,6 +48,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adopted the [Cairn](https://github.com/pimalaya/cairn) convention: cairn/spec holds the living specification (backends, commands, config, wizard, packaging), cairn/changes the proposals, cairn/log the dated history.
 
 ### Changed
+
+- **BREAKING**: renamed `completions` and `manuals` to `completion` and `manual`, the plural staying as a hidden alias. The `gcal` commands mirroring a Calendar API resource keep that API's spelling (`calendars`, `instances`, `colors`, `settings`) and gained hidden singular aliases.
+
+- Bumped io-http to 0.5.
+
+- Bumped pimalaya-stream to 0.3, whose `Read` and `Write` retry a stream reporting it is not ready. **Behaviour change.**
+
+  A blocking socket is not supposed to report `EAGAIN`, yet callers saw one surface mid-exchange and end the exchange with a bare `Resource temporarily unavailable (os error 35)`, macOS especially and the more readily the longer the exchange ran. The transport now retries such a failure for a minute before giving up with a `TimedOut` naming the budget, and arms a socket read deadline at connect time so a server going silent on a healthy connection stops blocking the caller forever. Its `StreamStd` is renamed `stream::Stream` and its connects take a per-transport options struct, which is what this crate now calls.
+
+- Bumped pimalaya-stream to 0.2, whose only change here is the removal of its SASL module: this crate uses the TLS options and the blocking stream, neither of which moved.
 
 - **BREAKING** Rewrote the wizard on the Himalaya model, and made bare `calendula` run it.
 
@@ -82,6 +98,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Relicensed from AGPL-3.0-only to dual MIT OR Apache-2.0.
 
 ### Fixed
+
+- Fixed `completions` writing files to the working directory instead of printing the script to the standard output, which broke every packaging helper capturing stdout.
+
+  `manuals` now shares its shape: a positional list selecting what to generate, printed to stdout, and an optional `--dir` deciding where it lands instead of the directory it used to take as a positional argument. `calendula manuals ./man` becomes `calendula manuals --dir ./man`, and both accept command names (`calendula`, `calendula-event`) to generate a single item.
 
 - Fixed a CalDAV calendar's time zone being silently dropped on create and update: io-webdav read `calendar-timezone` when listing but never wrote it back.
 

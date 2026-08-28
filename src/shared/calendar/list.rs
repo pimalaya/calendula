@@ -8,7 +8,7 @@ use pimalaya_cli::{
 };
 use serde::Serialize;
 
-use crate::shared::{calendars::Calendar, client::CalendarClient};
+use crate::shared::{calendar::Calendar, client::CalendarClient};
 
 /// List the calendars of the active account.
 ///

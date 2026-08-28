@@ -10,7 +10,7 @@ use pimalaya_cli::{
 use serde::Serialize;
 
 use crate::shared::{
-    arg::CalendarIdArg, client::CalendarClient, items::CalendarTimeRange, todos::Todo,
+    arg::CalendarIdArg, client::CalendarClient, item::CalendarTimeRange, todo::Todo,
 };
 
 /// List the todos of a calendar.

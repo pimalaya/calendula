@@ -30,8 +30,8 @@ use crate::{
     backend::Backend,
     config::Config,
     shared::{
-        calendars::cli::CalendarCommand, client::CalendarClient, events::cli::EventCommand,
-        items::cli::ItemCommand, journals::cli::JournalCommand, todos::cli::TodoCommand,
+        calendar::cli::CalendarCommand, client::CalendarClient, event::cli::EventCommand,
+        item::cli::ItemCommand, journal::cli::JournalCommand, todo::cli::TodoCommand,
     },
 };
 
@@ -106,8 +106,10 @@ pub enum CalendulaCommand {
 
     #[command(subcommand)]
     Account(AccountCommand),
-    Completions(CompletionCommand),
-    Manuals(ManualCommand),
+    #[command(alias = "completions")]
+    Completion(CompletionCommand),
+    #[command(alias = "manuals")]
+    Manual(ManualCommand),
 }
 
 /// Loads the configuration from the merged `config_paths`, or explains
@@ -196,8 +198,8 @@ impl CalendulaCommand {
             Self::Vdir(cmd) => cmd.execute(printer, build_vdir_client(config_paths, account_name)?),
 
             Self::Account(cmd) => cmd.execute(printer, config_paths, account_name, backend),
-            Self::Completions(cmd) => cmd.execute(printer, CalendulaCli::command()),
-            Self::Manuals(cmd) => cmd.execute(printer, CalendulaCli::command()),
+            Self::Completion(cmd) => cmd.execute(printer, CalendulaCli::command()),
+            Self::Manual(cmd) => cmd.execute(printer, CalendulaCli::command()),
         }
     }
 }

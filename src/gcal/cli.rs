@@ -26,10 +26,13 @@ pub enum GcalCommand {
     #[command(subcommand)]
     Acl(GcalAclCommand),
     FreeBusy(GcalFreeBusyCommand),
+    #[command(alias = "instance")]
     Instances(GcalInstancesCommand),
     Move(GcalMoveCommand),
     QuickAdd(GcalQuickAddCommand),
+    #[command(alias = "color")]
     Colors(GcalColorsCommand),
+    #[command(alias = "setting")]
     Settings(GcalSettingsCommand),
 }
 

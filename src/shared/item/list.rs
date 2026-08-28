@@ -8,7 +8,7 @@ use pimalaya_cli::{
 };
 use serde::Serialize;
 
-use crate::shared::{arg::CalendarIdArg, client::CalendarClient, items::CalendarItem};
+use crate::shared::{arg::CalendarIdArg, client::CalendarClient, item::CalendarItem};
 
 /// List the raw iCalendar items of a calendar.
 ///

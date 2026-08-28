@@ -1,9 +1,9 @@
 pub mod arg;
-pub mod calendars;
+pub mod calendar;
 pub mod client;
-pub mod events;
+pub mod event;
 pub mod ical;
-pub mod items;
-pub mod journals;
+pub mod item;
+pub mod journal;
 pub mod table;
-pub mod todos;
+pub mod todo;

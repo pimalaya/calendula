@@ -4,7 +4,7 @@ use pimalaya_cli::printer::Printer;
 
 use crate::shared::{
     client::CalendarClient,
-    todos::{
+    todo::{
         create::TodoCreateCommand, delete::TodoDeleteCommand, list::TodoListCommand,
         read::TodoReadCommand, update::TodoUpdateCommand,
     },

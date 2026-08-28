@@ -3,27 +3,30 @@ use clap::Subcommand;
 use pimalaya_cli::printer::Printer;
 
 use crate::shared::{
-    calendars::{
-        create::CalendarCreateCommand, delete::CalendarDeleteCommand, list::CalendarListCommand,
-        update::CalendarUpdateCommand,
-    },
     client::CalendarClient,
+    journal::{
+        create::JournalCreateCommand, delete::JournalDeleteCommand, list::JournalListCommand,
+        read::JournalReadCommand, update::JournalUpdateCommand,
+    },
 };
 
-/// Shared API to manage calendars for the active account.
+/// Shared API to manage VJOURNAL items: list, read, create, update,
+/// delete.
 #[derive(Debug, Subcommand)]
-pub enum CalendarCommand {
+pub enum JournalCommand {
     #[command(visible_alias = "ls")]
-    List(CalendarListCommand),
-    Create(CalendarCreateCommand),
-    Update(CalendarUpdateCommand),
-    Delete(CalendarDeleteCommand),
+    List(JournalListCommand),
+    Read(JournalReadCommand),
+    Create(JournalCreateCommand),
+    Update(JournalUpdateCommand),
+    Delete(JournalDeleteCommand),
 }
 
-impl CalendarCommand {
+impl JournalCommand {
     pub fn execute(self, printer: &mut impl Printer, client: CalendarClient) -> Result<()> {
         match self {
             Self::List(cmd) => cmd.execute(printer, client),
+            Self::Read(cmd) => cmd.execute(printer, client),
             Self::Create(cmd) => cmd.execute(printer, client),
             Self::Update(cmd) => cmd.execute(printer, client),
             Self::Delete(cmd) => cmd.execute(printer, client),

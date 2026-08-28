@@ -4,7 +4,7 @@ use pimalaya_cli::printer::Printer;
 
 use crate::shared::{
     client::CalendarClient,
-    events::{
+    event::{
         agenda::EventAgendaCommand, create::EventCreateCommand, delete::EventDeleteCommand,
         list::EventListCommand, read::EventReadCommand, update::EventUpdateCommand,
     },

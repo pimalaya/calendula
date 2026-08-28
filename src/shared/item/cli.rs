@@ -4,25 +4,24 @@ use pimalaya_cli::printer::Printer;
 
 use crate::shared::{
     client::CalendarClient,
-    journals::{
-        create::JournalCreateCommand, delete::JournalDeleteCommand, list::JournalListCommand,
-        read::JournalReadCommand, update::JournalUpdateCommand,
+    item::{
+        create::ItemCreateCommand, delete::ItemDeleteCommand, list::ItemListCommand,
+        read::ItemReadCommand, update::ItemUpdateCommand,
     },
 };
 
-/// Shared API to manage VJOURNAL items: list, read, create, update,
-/// delete.
+/// Shared API to manage raw iCalendar items (VEVENT, VTODO, VJOURNAL).
 #[derive(Debug, Subcommand)]
-pub enum JournalCommand {
+pub enum ItemCommand {
     #[command(visible_alias = "ls")]
-    List(JournalListCommand),
-    Read(JournalReadCommand),
-    Create(JournalCreateCommand),
-    Update(JournalUpdateCommand),
-    Delete(JournalDeleteCommand),
+    List(ItemListCommand),
+    Read(ItemReadCommand),
+    Create(ItemCreateCommand),
+    Update(ItemUpdateCommand),
+    Delete(ItemDeleteCommand),
 }
 
-impl JournalCommand {
+impl ItemCommand {
     pub fn execute(self, printer: &mut impl Printer, client: CalendarClient) -> Result<()> {
         match self {
             Self::List(cmd) => cmd.execute(printer, client),

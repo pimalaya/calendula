@@ -112,6 +112,17 @@ pub fn to_ical(event: &GcalEvent) -> String {
         push_boundary(&mut vevent, IcalPropKind::DtEnd, end);
     }
 
+    // NOTE: an exception carries the UID of the series it belongs to and
+    // names the instance it replaces with a RECURRENCE-ID (RFC 5545
+    // 3.8.4.4). Without it the exception reads as an unrelated event,
+    // and the two cannot be filed as the one resource RFC 4791 4.1
+    // requires them to share.
+    if event.recurring_event_id.is_some()
+        && let Some(original) = &event.original_start_time
+    {
+        push_boundary(&mut vevent, IcalPropKind::RecurrenceId, original);
+    }
+
     for (kind, value) in [
         (IcalPropKind::Summary, &event.summary),
         (IcalPropKind::Description, &event.description),
@@ -199,12 +210,58 @@ pub fn to_ical(event: &GcalEvent) -> String {
         &stashed(event, CALENDAR_STASH_PREFIX),
     );
 
-    // NOTE: RFC 5545 3.2.19 makes every TZID the finished document
-    // names owe a VTIMEZONE, and Google carries none: its resource
-    // holds the zone name alone. The definitions are minted last, once
-    // the recurrence lines and the stash have had their say, since a
-    // TZID reaches the document through those too.
-    let anchor = anchor(event);
+    define_zones(document, anchor(event))
+}
+
+/// Folds a recurrence set into the one resource RFC 4791 4.1 requires:
+/// the master, then the exceptions Google hands over as events of their
+/// own, each keeping the master's UID and naming its instance with a
+/// RECURRENCE-ID.
+///
+/// Google is instance-granular where CalDAV is resource-granular, so
+/// without this fold a series and its three modified instances are four
+/// items here and one item over CalDAV, and two stores of the same
+/// calendar disagree about what they hold.
+pub fn set_to_ical(master: &GcalEvent, overrides: &[&GcalEvent]) -> String {
+    let document = to_ical(master);
+
+    if overrides.is_empty() {
+        return document;
+    }
+
+    let uid = master.ical_uid.clone().or_else(|| master.id.clone());
+
+    let mut lines = Vec::new();
+
+    for exception in overrides {
+        let mut exception = (*exception).clone();
+
+        // NOTE: the components of one resource share one UID (RFC 4791
+        // 4.1), and an exception projected on its own would mint its
+        // own from its event id when Google returned no iCalUID for it.
+        exception.ical_uid = uid.clone();
+
+        lines.extend(vevent_lines(&to_ical(&exception)));
+    }
+
+    // NOTE: the zones are minted again over the whole document, since an
+    // exception moved into another zone names a TZID the master's own
+    // definitions never covered.
+    define_zones(
+        splice_before(document, "END:VCALENDAR", &lines),
+        anchor(master),
+    )
+}
+
+/// Mints a VTIMEZONE for every zone the document names without defining,
+/// describing each around `anchor`.
+///
+/// RFC 5545 3.2.19 makes every TZID the finished document names owe a
+/// VTIMEZONE, and Google carries none: its resource holds the zone name
+/// alone. The definitions are minted last, once the recurrence lines,
+/// the stash and any folded exception have had their say, since a TZID
+/// reaches the document through those too.
+fn define_zones(document: String, anchor: i64) -> String {
     let definitions: Vec<String> = undefined_zones(&document)
         .iter()
         .filter_map(|zone| timezone::vtimezone(zone, anchor))
@@ -216,6 +273,28 @@ pub fn to_ical(event: &GcalEvent) -> String {
     // taking the document a line at a time then meets a definition
     // before the property leaning on it.
     splice_before(document, "BEGIN:VEVENT", &definitions)
+}
+
+/// The VEVENT block of a projected document, its BEGIN and END lines
+/// included, taken verbatim so a folded exception keeps the wire form
+/// the projection just wrote.
+fn vevent_lines(document: &str) -> Vec<String> {
+    let mut lines: Vec<String> = document
+        .lines()
+        .map(|line| line.trim_end_matches('\r'))
+        .skip_while(|line| !line.starts_with("BEGIN:VEVENT"))
+        .take_while(|line| !line.starts_with("END:VEVENT"))
+        .map(str::to_string)
+        .collect();
+
+    // NOTE: the END line closes the block the take_while stopped at, and
+    // a document holding no VEVENT at all must contribute nothing rather
+    // than a stray END.
+    if !lines.is_empty() {
+        lines.push(String::from("END:VEVENT"));
+    }
+
+    lines
 }
 
 /// Every zone the document names in a TZID parameter without defining
@@ -1662,7 +1741,7 @@ mod tests {
 
     #[test]
     fn the_synthesized_document_feeds_the_shared_event_projection() {
-        use crate::shared::{events::Event, items::CalendarItem};
+        use crate::shared::{event::Event, item::CalendarItem};
 
         let item = CalendarItem {
             id: String::from("event-1"),
@@ -1758,5 +1837,90 @@ mod tests {
         assert_eq!(lead_minutes("-P5W"), None);
         assert_eq!(lead_minutes("-PT15X"), None);
         assert_eq!(lead_minutes("-PTM"), None);
+    }
+
+    #[test]
+    fn an_exception_names_the_instance_it_replaces() {
+        let mut exception = event();
+        exception.recurrence.clear();
+        exception.recurring_event_id = Some(String::from("master-1"));
+        exception.original_start_time = Some(GcalEventDateTime {
+            date_time: Some(String::from("2026-08-11T09:00:00Z")),
+            time_zone: Some(String::from("UTC")),
+            ..Default::default()
+        });
+
+        let ical = to_ical(&exception);
+
+        assert!(
+            ical.contains("RECURRENCE-ID:20260811T090000Z\r\n"),
+            "{ical}"
+        );
+    }
+
+    #[test]
+    fn a_series_and_its_exception_fold_into_one_resource() {
+        let mut master = event();
+        master.id = Some(String::from("master-1"));
+
+        let mut exception = event();
+        exception.id = Some(String::from("master-1_20260811T090000Z"));
+        exception.ical_uid = Some(String::from("minted-by-google@google.com"));
+        exception.recurrence.clear();
+        exception.summary = Some(String::from("Stand-up moved"));
+        exception.recurring_event_id = Some(String::from("master-1"));
+        exception.original_start_time = Some(GcalEventDateTime {
+            date_time: Some(String::from("2026-08-11T09:00:00Z")),
+            time_zone: Some(String::from("UTC")),
+            ..Default::default()
+        });
+
+        let document = set_to_ical(&master, &[&exception]);
+
+        // One resource, two components, and the one UID RFC 4791 4.1
+        // allows a resource to carry.
+        assert_eq!(document.matches("BEGIN:VEVENT\r\n").count(), 2);
+        assert_eq!(document.matches("BEGIN:VCALENDAR\r\n").count(), 1);
+        assert_eq!(
+            document.matches("UID:event-1@example.org\r\n").count(),
+            2,
+            "{document}"
+        );
+        assert!(!document.contains("minted-by-google@google.com"));
+
+        // The master keeps the series, the exception moves one instance.
+        assert!(document.contains("RRULE:FREQ=WEEKLY;COUNT=4\r\n"));
+        assert!(document.contains("RECURRENCE-ID:20260811T090000Z\r\n"));
+        assert!(document.contains("SUMMARY:Stand-up moved\r\n"));
+
+        // The folded block is a whole component, not a run of lines.
+        assert_eq!(document.matches("END:VEVENT\r\n").count(), 2);
+    }
+
+    #[test]
+    fn a_folded_exception_gets_the_zone_it_names_defined() {
+        let mut master = event();
+        master.id = Some(String::from("master-1"));
+
+        let mut exception = event();
+        exception.recurrence.clear();
+        exception.recurring_event_id = Some(String::from("master-1"));
+        exception.original_start_time = Some(GcalEventDateTime {
+            date_time: Some(String::from("2026-08-11T09:00:00Z")),
+            time_zone: Some(String::from("UTC")),
+            ..Default::default()
+        });
+        exception.start = Some(GcalEventDateTime {
+            date_time: Some(String::from("2026-08-11T14:00:00+02:00")),
+            time_zone: Some(String::from("Europe/Paris")),
+            ..Default::default()
+        });
+
+        let document = set_to_ical(&master, &[&exception]);
+
+        // RFC 5545 3.2.19: a TZID the master never named still owes a
+        // VTIMEZONE, so the zones are minted over the folded document.
+        assert!(document.contains("TZID=Europe/Paris"), "{document}");
+        assert!(document.contains("TZID:Europe/Paris\r\n"), "{document}");
     }
 }

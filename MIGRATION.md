@@ -9,7 +9,7 @@ calendula 0.2.0 drops `pimalaya-toolbox` and the inline CalDAV implementation in
 - The command tree was reorganised. Shared commands live under `calendar`, `event` and `item` (the plural forms remain as hidden aliases); protocol-specific commands live under `caldav`, `pimdir` and `vdir`.
 - A new global `-b/--backend` flag selects the backend the shared commands use. The default is `auto`: the first configured backend wins, in the order vdir, pimdir, caldav.
 - `account list` and `account check` were added under the new `account` subcommand. **`account configure` does not exist**: the wizard prints a configuration rather than writing one, so generate an account with `calendula` and merge it into your file.
-- `completions` and `manuals` were renamed from the previous `completion` / `man` shapes.
+- `completion` and `manual` were renamed from the previous `completion` / `man` shapes; the plural spellings work as hidden aliases.
 - `event list` gained `--from` and `--to` (YYYY-MM-DD, both inclusive). A range returns every match rather than the first page.
 
 ### Item ids

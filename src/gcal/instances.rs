@@ -12,7 +12,7 @@ use serde::Serialize;
 
 use crate::{
     gcal::{client::GcalClient, render},
-    shared::items::CalendarTimeRange,
+    shared::item::CalendarTimeRange,
 };
 
 /// Expand a recurring event into its occurrences.

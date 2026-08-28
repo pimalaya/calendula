@@ -10,22 +10,23 @@ use pimalaya_cli::{
 use serde::Serialize;
 
 use crate::shared::{
-    arg::CalendarIdArg, client::CalendarClient, items::CalendarTimeRange, journals::Journal,
+    arg::CalendarIdArg, client::CalendarClient, event::Event, item::CalendarTimeRange,
 };
 
-/// List the journal entries of a calendar.
+/// List the events of a calendar.
 ///
-/// Only VJOURNAL components are rendered; the other kinds a calendar
-/// holds (VEVENT, VTODO) are dropped, so use `item list` for the
+/// Only VEVENT components are rendered; the other kinds a calendar
+/// holds (VTODO, VJOURNAL) are dropped, so use `item list` for the
 /// unfiltered raw view.
 ///
 /// Pass `--from` and `--to` (YYYY-MM-DD, both inclusive) to narrow the
-/// listing to a window. A window lifts the default page-size cap, so
-/// every match is returned.
+/// listing to a window: CalDAV runs it server-side, the local backends
+/// after parsing. A window lifts the default page-size cap, so every
+/// match is returned.
 ///
-/// JSON output: `{"journals": [{"id", "summary", "start", "status"}]}`.
+/// JSON output: `{"events": [{"id", "summary", "start", "end"}]}`.
 #[derive(Debug, Parser)]
-pub struct JournalListCommand {
+pub struct EventListCommand {
     #[command(flatten)]
     pub calendar: CalendarIdArg,
 
@@ -37,13 +38,11 @@ pub struct JournalListCommand {
     #[arg(short = 's', long, value_name = "N")]
     pub page_size: Option<u32>,
 
-    /// Only list entries dated on or after this day (inclusive,
-    /// YYYY-MM-DD).
+    /// Only list events on or after this day (inclusive, YYYY-MM-DD).
     #[arg(long, value_name = "DATE")]
     pub from: Option<NaiveDate>,
 
-    /// Only list entries dated on or before this day (inclusive,
-    /// YYYY-MM-DD).
+    /// Only list events on or before this day (inclusive, YYYY-MM-DD).
     #[arg(long, value_name = "DATE")]
     pub to: Option<NaiveDate>,
 
@@ -52,7 +51,7 @@ pub struct JournalListCommand {
     pub max_width: Option<u16>,
 }
 
-impl JournalListCommand {
+impl EventListCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         let range = CalendarTimeRange::from_days(self.from, self.to)?;
@@ -63,55 +62,39 @@ impl JournalListCommand {
             Some(_) => self.page_size,
             None => self
                 .page_size
-                .or(Some(client.account.journals_list_page_size())),
+                .or(Some(client.account.events_list_page_size())),
         };
 
-        // NOTE: a server-side range filter is defined against a
-        // component's start and end (RFC 4791 9.9), and a journal entry
-        // carries no end, so the window is applied after parsing rather
-        // than pushed down.
-        let items = client.list_items(&calendar_id, self.page, page_size, None)?;
-        let journals = items
-            .iter()
-            .flat_map(Journal::project)
-            .filter(|journal| dated_within(journal, range.as_ref()))
-            .collect();
+        let items = client.list_items(&calendar_id, self.page, page_size, range.as_ref())?;
+        let events = items.iter().flat_map(Event::project).collect();
 
-        printer.out(Journals {
+        printer.out(Events {
             style: client.account.table_style(),
             arrangement: client.account.table_arrangement(),
             max_width: self.max_width,
-            colors: JournalColors {
-                id: client.account.journals_list_table_id_color(),
-                summary: client.account.journals_list_table_summary_color(),
-                start: client.account.journals_list_table_start_color(),
+            colors: EventColors {
+                id: client.account.events_list_table_id_color(),
+                summary: client.account.events_list_table_summary_color(),
+                start: client.account.events_list_table_start_color(),
+                end: client.account.events_list_table_end_color(),
             },
-            journals,
+            events,
         })
     }
 }
 
-/// Whether an entry's date falls inside `range`. An entry carrying no
-/// date is kept only when no window was asked for.
-fn dated_within(journal: &Journal, range: Option<&CalendarTimeRange>) -> bool {
-    let Some(range) = range else {
-        return true;
-    };
-
-    !journal.start.is_empty() && range.contains(&journal.start)
-}
-
-/// The per-column colors a journal listing renders with.
+/// The per-column colors an event listing renders with.
 #[derive(Clone, Copy, Debug)]
-struct JournalColors {
+struct EventColors {
     id: Color,
     summary: Color,
     start: Color,
+    end: Color,
 }
 
-/// The rendered journal listing.
+/// The rendered event listing.
 #[derive(Clone, Debug, Serialize)]
-pub struct Journals {
+pub struct Events {
     #[serde(skip)]
     pub style: TableStyle,
     #[serde(skip)]
@@ -119,11 +102,11 @@ pub struct Journals {
     #[serde(skip)]
     pub max_width: Option<u16>,
     #[serde(skip)]
-    colors: JournalColors,
-    pub journals: Vec<Journal>,
+    colors: EventColors,
+    pub events: Vec<Event>,
 }
 
-impl fmt::Display for Journals {
+impl fmt::Display for Events {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut table = Table::new();
 
@@ -133,16 +116,16 @@ impl fmt::Display for Journals {
             .set_header(Row::from(vec![
                 Cell::new("ID"),
                 Cell::new("SUMMARY"),
-                Cell::new("DATE"),
-                Cell::new("STATUS"),
+                Cell::new("START"),
+                Cell::new("END"),
             ]))
-            .add_rows(self.journals.iter().map(|journal| {
+            .add_rows(self.events.iter().map(|event| {
                 let mut row = Row::new();
                 row.max_height(1);
-                row.add_cell(Cell::new(&journal.id).fg(self.colors.id));
-                row.add_cell(Cell::new(&journal.summary).fg(self.colors.summary));
-                row.add_cell(Cell::new(&journal.start).fg(self.colors.start));
-                row.add_cell(Cell::new(&journal.status));
+                row.add_cell(Cell::new(&event.id).fg(self.colors.id));
+                row.add_cell(Cell::new(&event.summary).fg(self.colors.summary));
+                row.add_cell(Cell::new(&event.start).fg(self.colors.start));
+                row.add_cell(Cell::new(&event.end).fg(self.colors.end));
                 row
             }));
 

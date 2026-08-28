@@ -59,6 +59,15 @@ A definition SHALL describe the era the item falls in rather than the zone's who
 
 The definitions SHALL precede the VEVENT that references them, and a zone named twice SHALL be defined once. A name the database does not know SHALL mint nothing, leaving the TZID as it was rather than inventing a zone.
 
+### Requirement: A recurrence set is one resource
+Google returns a modified instance of a recurring event as an event of its own, carrying `recurringEventId` and `originalStartTime`. The projection SHALL emit a RECURRENCE-ID for such an event, naming the instance it replaces (RFC 5545 3.8.4.4), or the exception reads as an unrelated event.
+
+A listing SHALL fold the exceptions of a series into the document of the master they modify, so a series and its modified instances are one item rather than several. The folded components SHALL carry the master's UID, since the components of one resource share one UID (RFC 4791 4.1) and an exception projected alone would otherwise mint its own. The item SHALL keep the master's event id as its identifier, and an exception whose master the batch did not return SHALL still file on its own rather than be dropped.
+
+Reading one item SHALL fold the same way, gathering the exceptions through a listing filtered by the series' iCalUID: every event of a series carries the series' own iCalUID, the API offers no query for the children of an event, and expanding the instances would return the occurrences the recurrence rule already generates rather than the modifications alone.
+
+The zones SHALL be minted over the folded document, so an exception moved into a zone the master never named still arrives with the definition RFC 5545 3.2.19 owes it.
+
 ### Requirement: An instant outranks a display zone
 Google returns a boundary as an absolute instant plus the calendar's display zone, a pair no iCalendar boundary expresses. Only the offset SHALL decide the instant: a `Z`-stamped boundary SHALL project as a UTC stamp even when a zone is named alongside it, since reading the literal time as that zone's wall time would shift the event by the zone's offset.
 
