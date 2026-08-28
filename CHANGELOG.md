@@ -111,6 +111,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed the pimdir backend refusing an unknown calendar without saying which ones the account holds. A calendar is its collection id, which carries the namespace the sync engine binds it under, so the id to type is not guessable and the refusal now lists the ones it can take.
+
 - Fixed `completions` writing files to the working directory instead of printing the script to the standard output, which broke every packaging helper capturing stdout.
 
   `manuals` now shares its shape: a positional list selecting what to generate, printed to stdout, and an optional `--dir` deciding where it lands instead of the directory it used to take as a positional argument. `calendula manuals ./man` becomes `calendula manuals --dir ./man`, and both accept command names (`calendula`, `calendula-event`) to generate a single item.

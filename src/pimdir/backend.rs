@@ -309,23 +309,32 @@ impl PimdirBackend {
             .collect())
     }
 
-    /// Fails unless `calendar_id` names a calendar the store knows.
+    /// Fails unless `calendar_id` names a calendar the store knows,
+    /// naming the ones it does hold.
     ///
     /// The store's read seam answers an unknown collection with an
     /// empty page and its queue accepts an action for any name, so
     /// without this a typo in `-k` would read as an empty calendar and
-    /// stage into one nothing will ever apply.
+    /// stage into one nothing will ever apply. A calendar is its
+    /// collection id, which carries the sync engine's namespace and is
+    /// not guessable, so the refusal shows the ids to choose from.
     fn known_collection(&self, calendar_id: &str) -> Result<()> {
-        let known = self
+        let mut ids: Vec<String> = self
             .calendar_collections()?
             .into_iter()
-            .any(|candidate| candidate.id == calendar_id);
+            .map(|collection| collection.id)
+            .collect();
 
-        if !known {
-            bail!("Calendar `{calendar_id}` not found");
+        if ids.iter().any(|id| id == calendar_id) {
+            return Ok(());
         }
 
-        Ok(())
+        ids.sort();
+
+        bail!(
+            "Calendar `{calendar_id}` not found; this account holds: {}",
+            ids.join(", "),
+        )
     }
 
     /// Pulls every live item of a collection by keyset paging, in the

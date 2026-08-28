@@ -48,8 +48,15 @@ Collections come from the sync, so `create_calendar`, `update_calendar` and `del
 ### Requirement: pimdir takes the reader and producer roles, never the owner
 The pimdir backend SHALL read through a `PimdirReader` and write through a `PimdirProducer`, and SHALL NOT open a `PimdirStore`. The owner handle drains the queue, sweeps the objects and purges the trash, and holds an exclusive lock on the store for its lifetime, so holding it would both lock a sync out for the length of a listing and put every destructive verb behind a frontend that never calls them. The reader SHALL be built with the pending overlay, so an action this process staged reads back before the store's owner applies it.
 
+### Requirement: A pimdir calendar is its collection id
+The pimdir backend SHALL show and accept a calendar as the store's collection id, verbatim: the collection `caldav/default` is the calendar `caldav/default`. It SHALL NOT derive, strip or accept a shortened spelling, and no configuration SHALL offer one.
+
+A sync engine binds a source's collections under a namespace, so an id carries one; the store is opaque to it, neither parsing nor validating an id (pimdir SPEC 9.2) and modelling hierarchy through `parent` rather than through a separator. Shortening is therefore a guess at the producer's convention, and one that makes a single calendar answer to two spellings.
+
 ### Requirement: pimdir refuses an unknown calendar
 Every pimdir read and write SHALL fail when the calendar id names no collection of the account. The store's read seam answers an unknown collection with an empty page and its queue accepts an action for any name, so without this a typo in `-k` would read as an empty calendar and stage into one nothing will ever apply.
+
+The refusal SHALL name the calendars the account holds. Ids carry the sync engine's namespace and are not guessable, so an error asking for one that shows none leaves the user nothing to act on.
 
 ### Requirement: pimdir lists in the store's calendar order
 A pimdir listing SHALL scan the collection by the store's own sort key, ascending, which is the item's resolved start. Paging by link id is an arbitrary order for a calendar, and the store maintains the one a reader expects.
