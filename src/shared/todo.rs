@@ -1,11 +1,13 @@
-//! VTODO projection over the shared items, plus the `todo` command
-//! family built on it.
+//! # Todo
 //!
-//! A calendar collection mixes component kinds, so the `todo` commands
-//! read the same items the `item` commands do and keep only the VTODOs.
-//! [`Todo`] is that projection: the few properties a task list is read
-//! by, pulled out of the iCalendar bytes with ical-rs. The bytes
-//! themselves are never rewritten, so a projection is read-only and
+//! The VTODO projection over the shared items, and the `todo` command family
+//! built on it.
+//!
+//! A calendar collection mixes component kinds, so the `todo` commands read
+//! the same items the `item` commands do and keep only the VTODOs. [`Todo`]
+//! is that projection, the few properties a task list is read by.
+//!
+//! The bytes themselves are never rewritten, so a projection is read-only and
 //! lossy by design.
 
 pub mod cli;
@@ -29,9 +31,8 @@ use crate::shared::item::CalendarItem;
 
 /// A VTODO projected out of a [`CalendarItem`]'s iCalendar bytes.
 ///
-/// DUE keeps its iCalendar wire spelling (`YYYYMMDD` for a date,
-/// `YYYYMMDDTHHMMSS` with an optional `Z` for a date-time), so what a
-/// listing prints is what the calendar carries.
+/// DUE keeps its iCalendar wire spelling, so what a listing prints is what
+/// the calendar carries.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Todo {
@@ -44,12 +45,10 @@ pub struct Todo {
     /// The todo's STATUS (`NEEDS-ACTION`, `IN-PROCESS`, `COMPLETED`,
     /// `CANCELLED`), empty when it carries none.
     pub status: String,
-    /// The todo's PRIORITY, 1 (highest) to 9 (lowest), `None` when it
-    /// carries none or an unparseable one.
+    /// The todo's PRIORITY, 1 (highest) to 9 (lowest).
     #[serde(default)]
     pub priority: Option<i64>,
-    /// The todo's PERCENT-COMPLETE, 0 to 100, `None` when it carries
-    /// none or an unparseable one.
+    /// The todo's PERCENT-COMPLETE, 0 to 100.
     #[serde(default)]
     pub percent_complete: Option<i64>,
 }
@@ -57,10 +56,9 @@ pub struct Todo {
 impl Todo {
     /// Projects every VTODO carried by `item`, in source order.
     ///
-    /// An item whose bytes do not parse yields no todo rather than an
-    /// error: a listing showing the rest of a calendar is more useful
-    /// than one refusing to render because a single resource is
-    /// malformed.
+    /// An item whose bytes do not parse yields no todo rather than an error,
+    /// so one malformed resource does not stop the rest of the calendar from
+    /// rendering.
     pub fn project(item: &CalendarItem) -> Vec<Self> {
         let Ok(cst) = IcalCst::parse(&item.contents) else {
             return Vec::new();
@@ -89,12 +87,10 @@ impl Todo {
             .collect()
     }
 
-    /// The completion percentage as a column value: the number with a
-    /// percent sign, or empty when the todo states none.
+    /// The completion percentage as a column value, empty when there is none.
     ///
-    /// A COMPLETED status implies 100 even where the property is
-    /// absent (RFC 5545 3.8.1.8), so a finished task never reads as
-    /// unstarted.
+    /// A COMPLETED status implies 100 even where the property is absent (RFC
+    /// 5545 3.8.1.8), so a finished task never reads as unstarted.
     pub fn progress(&self) -> String {
         match self.percent_complete {
             Some(percent) => format!("{percent}%"),
@@ -182,7 +178,7 @@ mod tests {
         };
         assert_eq!(completed.progress(), "100%");
 
-        // An explicit percentage always wins over the implication.
+        // NOTE: an explicit percentage always wins over the implication.
         let explicit = Todo {
             status: "COMPLETED".into(),
             percent_complete: Some(90),

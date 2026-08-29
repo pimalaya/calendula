@@ -9,9 +9,15 @@ created: 2026-08-28
 
 ## Why
 
-The agenda collects its labels into a map keyed by the start instant, one label per key, so two events starting at the same moment print as one: the second overwrites the first and nothing says it did. Two unrelated meetings at 09:00 are enough to trigger it, which makes this a defect the calendar has today.
+The agenda collects its labels into a map keyed by the start instant, one label per key, so two events starting at the same moment print as one: the second overwrites the first and nothing says it did.
 
-What raises it from latent to systematic is the change in flight beside it (`duplicate-link-id-mints-an-item`). A calendar collection may hold two resources under one `UID`, and the store used to keep one of them; it will now keep both. The verified case is a Posteo calendar holding "Pre demo woonies" and "Pre demo MINIS" under one `UID`. Both will list, both start at the same instant, and the agenda will show one of them. A change whose whole purpose is to stop losing the second copy would deliver it into a view that drops it again.
+Two unrelated meetings at 09:00 are enough to trigger it, which makes this a defect the calendar has today.
+
+What raises it from latent to systematic is the change in flight beside it (`duplicate-link-id-mints-an-item`). A calendar collection may hold two resources under one `UID`, and the store used to keep one of them; it will now keep both.
+
+The verified case is a Posteo calendar holding "Pre demo woonies" and "Pre demo MINIS" under one `UID`. Both will list, both start at the same instant, and the agenda will show one of them.
+
+A change whose whole purpose is to stop losing the second copy would deliver it into a view that drops it again.
 
 It is separated from that change deliberately: it is a pre-existing defect with its own cause, and fixing it changes a user-facing output shape, which is a decision to take on its own terms rather than inside a storage change.
 

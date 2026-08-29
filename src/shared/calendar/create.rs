@@ -1,3 +1,7 @@
+//! # Calendar create
+//!
+//! The `calendar create` command, adding a calendar to the account.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};
@@ -6,10 +10,9 @@ use crate::shared::client::CalendarClient;
 
 /// Create a new calendar.
 ///
-/// The reported id is the one the backend assigned. It is the id given
-/// here on every backend that lets a client name a collection; Google
-/// mints its own, so there it is the minted one, which is what later
-/// commands address the calendar by.
+/// The reported id is the one the backend assigned, and it is what later
+/// commands address the calendar by. Every backend that lets a client name a
+/// collection keeps the id given here; Google mints its own instead.
 ///
 /// JSON output: `{"message": "..."}`.
 #[derive(Debug, Parser)]

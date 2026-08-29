@@ -1,4 +1,6 @@
-//! calendula wrapper around [`io_vdir`]'s std client, bundling the
+//! # Vdir client
+//!
+//! calendula's wrapper around [`io_vdir`]'s std client, bundling the
 //! merged runtime [`Account`] alongside it for the protocol-specific
 //! subcommands.
 
@@ -17,13 +19,15 @@ use crate::{account::context::Account, cli::load_config, config::VdirConfig};
 /// A vdir client rooted at the configured home directory.
 pub struct VdirClient {
     inner: Inner,
+    /// The merged account the commands read their rendering from.
     pub account: Account,
 }
 
 impl VdirClient {
-    /// Builds the client, shell-expanding the configured home first so
-    /// a path written with `~` resolves to the home-relative directory
-    /// instead of a literal one.
+    /// Builds the client rooted at the configured home directory.
+    ///
+    /// The path is shell-expanded first, so a `~` resolves to the home
+    /// directory rather than to a literal one under the cwd.
     pub fn new(config: VdirConfig, account: Account) -> Self {
         let root = shellexpand::full(&config.home_dir.to_string_lossy())
             .map(|home| VdirPath::new(home.into_owned()))
@@ -50,8 +54,9 @@ impl DerefMut for VdirClient {
     }
 }
 
-/// Loads the configuration, picks the active account, then opens the
-/// vdir client. Bails when the account carries no `[vdir]` block.
+/// Loads the configuration, picks the active account, then opens it.
+///
+/// Bails when the account carries no `[vdir]` block.
 pub fn build_vdir_client(
     printer: &mut impl Printer,
     config_paths: &[PathBuf],

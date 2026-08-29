@@ -1,3 +1,8 @@
+//! # CalDAV calendar delete
+//!
+//! The `calendula caldav delete` command, removing one calendar
+//! collection from the server.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};
@@ -5,6 +10,8 @@ use pimalaya_cli::printer::{Message, Printer};
 use crate::caldav::client::CaldavClient;
 
 /// Delete a CalDAV calendar by id.
+///
+/// The DELETE takes the collection and every resource filed in it.
 ///
 /// JSON output: `{"message": "..."}`.
 #[derive(Debug, Parser)]

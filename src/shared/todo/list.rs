@@ -1,3 +1,8 @@
+//! # Todo list
+//!
+//! The `calendula todo list` command, rendering the VTODOs of a
+//! calendar as a table.
+
 use std::fmt;
 
 use anyhow::Result;
@@ -20,8 +25,9 @@ use crate::shared::{
 /// unfiltered raw view.
 ///
 /// Pass `--from` and `--to` (YYYY-MM-DD, both inclusive) to narrow the
-/// listing to a window. A window lifts the default page-size cap, so
-/// every match is returned.
+/// listing to a window on DUE, which also drops the tasks carrying no
+/// due date. A window lifts the default page-size cap, so every match
+/// is returned.
 ///
 /// JSON output: `{"todos": [{"id", "summary", "due", "status",
 /// "priority", "percent-complete"}]}`.
@@ -56,8 +62,8 @@ impl TodoListCommand {
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         let range = CalendarTimeRange::from_days(self.from, self.to)?;
 
-        // A window should return every match, so the default page-size
-        // cap only applies to the unfiltered listing.
+        // NOTE: a window must return every match, so the default
+        // page-size cap only applies to the unfiltered listing.
         let page_size = match range {
             Some(_) => self.page_size,
             None => self
@@ -91,9 +97,10 @@ impl TodoListCommand {
     }
 }
 
-/// Whether a todo's DUE falls inside `range`. A todo carrying no due
-/// date is kept only when no window was asked for, so a filtered
-/// listing never shows an undated task.
+/// Whether a todo's DUE falls inside `range`.
+///
+/// A todo carrying no due date is kept only when no window was asked
+/// for, so a filtered listing never shows an undated task.
 fn due_within(todo: &Todo, range: Option<&CalendarTimeRange>) -> bool {
     let Some(range) = range else {
         return true;
@@ -114,14 +121,18 @@ struct TodoColors {
 /// The rendered todo listing.
 #[derive(Clone, Debug, Serialize)]
 pub struct Todos {
+    /// The table preset the account configures.
     #[serde(skip)]
     pub style: TableStyle,
+    /// How the table spreads its columns over the terminal.
     #[serde(skip)]
     pub arrangement: ContentArrangement,
+    /// The `--max-width` cap, when one was given.
     #[serde(skip)]
     pub max_width: Option<u16>,
     #[serde(skip)]
     colors: TodoColors,
+    /// The listed todos, in the order the backend returned them.
     pub todos: Vec<Todo>,
 }
 
@@ -184,8 +195,6 @@ mod tests {
         assert!(due_within(&due("20260814T170000Z"), Some(&range)));
         assert!(!due_within(&due("20260914T170000Z"), Some(&range)));
 
-        // An undated task has no due date to compare, so it only shows
-        // in an unfiltered listing.
         assert!(!due_within(&due(""), Some(&range)));
         assert!(due_within(&due(""), None));
     }

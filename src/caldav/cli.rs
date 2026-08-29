@@ -1,3 +1,8 @@
+//! # CalDAV CLI
+//!
+//! The `caldav` command family: the protocol-specific verbs, each
+//! handed a connected [`CaldavClient`].
+
 use anyhow::Result;
 use clap::Subcommand;
 use pimalaya_cli::printer::Printer;

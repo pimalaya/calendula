@@ -1,3 +1,8 @@
+//! # Journal delete
+//!
+//! The `journal delete` command, removing one VJOURNAL entry from a
+//! calendar.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};

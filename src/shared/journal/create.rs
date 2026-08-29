@@ -1,3 +1,8 @@
+//! # Journal create
+//!
+//! The `journal create` command, writing a new VJOURNAL entry into a
+//! calendar.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};
@@ -6,8 +11,8 @@ use crate::shared::{arg::CalendarIdArg, client::CalendarClient, ical::IcalArg};
 
 /// Create a new journal entry from an iCalendar source.
 ///
-/// The source is stored as given: a backend that cannot model a
-/// VJOURNAL refuses it by name rather than emulating one.
+/// The source is stored as given: a backend that cannot model a VJOURNAL
+/// refuses it by name rather than emulating one.
 ///
 /// JSON output: `{"message": "..."}`.
 #[derive(Debug, Parser)]

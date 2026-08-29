@@ -1,3 +1,8 @@
+//! # Calendar list
+//!
+//! The `calendula gcal calendars` command, listing the user's calendar list
+//! with the properties only Google carries.
+
 use std::fmt;
 
 use anyhow::Result;
@@ -14,9 +19,9 @@ use crate::gcal::{client::GcalClient, render};
 /// List the calendars of the user's calendar list.
 ///
 /// Unlike the shared listing, this shows what only Google carries: the
-/// access role the account has on each calendar, which one is the
-/// primary, the time zone events are expanded in, and the default
-/// reminders a new event inherits.
+/// access role the account has on each calendar, which one is the primary,
+/// the time zone events expand in, and the default reminders a new event
+/// inherits.
 ///
 /// JSON output: `{"calendars": [{"id", "summary", "description",
 /// "time-zone", "access-role", "primary", "selected", "color",
@@ -79,10 +84,13 @@ impl GcalCalendarListCommand {
 /// The rendered Google calendar listing.
 #[derive(Clone, Debug, Serialize)]
 pub struct CalendarsTable {
+    /// The table style the account configured.
     #[serde(skip)]
     pub style: TableStyle,
+    /// The colour calendar names are printed in.
     #[serde(skip)]
     pub name_color: Color,
+    /// The calendars of the list, one row each.
     #[serde(rename = "calendars")]
     pub rows: Vec<CalendarRow>,
 }
@@ -91,11 +99,9 @@ pub struct CalendarsTable {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct CalendarRow {
-    /// The calendar identifier, an address for a primary or secondary
-    /// calendar.
+    /// The calendar identifier, an address for a primary or secondary one.
     pub id: String,
-    /// The title, the one this user gave the calendar winning over the
-    /// calendar's own.
+    /// The title, this user's own overriding the calendar's.
     pub summary: String,
     /// The free-form description.
     pub description: Option<String>,

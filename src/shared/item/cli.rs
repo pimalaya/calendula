@@ -1,3 +1,8 @@
+//! # Item command
+//!
+//! The `item` command family, the raw and unfiltered view over a calendar:
+//! it addresses any iCalendar object by id and leaves the bytes untouched.
+
 use anyhow::Result;
 use clap::Subcommand;
 use pimalaya_cli::printer::Printer;

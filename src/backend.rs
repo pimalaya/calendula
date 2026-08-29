@@ -1,4 +1,7 @@
-//! The `--backend` selector.
+//! # Backend
+//!
+//! The `--backend` selector, naming which backend the cross-protocol
+//! commands target and how `auto` resolves.
 
 use std::{fmt, str::FromStr};
 
@@ -7,15 +10,10 @@ use clap::Parser;
 
 /// Selects which backend a cross-protocol command targets.
 ///
-/// [`Auto`](Self::Auto) picks the first configured-and-compiled backend
-/// in calendula's own priority order (vdir, pimdir, CalDAV, gcal), so a
-/// local store is preferred over a network round-trip and a
-/// protocol-standard server over a vendor API. A named variant pins the
-/// command to that backend and bails when the account carries no
-/// matching configuration block.
-///
-/// The protocol-specific subcommands ignore this flag entirely: each
-/// already names its backend.
+/// [`Auto`](Self::Auto) takes the first configured and compiled backend
+/// of calendula's priority order (vdir, pimdir, CalDAV, gcal): a local
+/// store before a network round-trip, a standard protocol before a
+/// vendor API. A named variant pins that one instead.
 #[derive(Clone, Copy, Debug, Default, Parser, PartialEq, Eq)]
 pub enum Backend {
     /// The first configured backend, in calendula's priority order.

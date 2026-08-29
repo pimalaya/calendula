@@ -1,3 +1,8 @@
+//! # Google Calendar CLI
+//!
+//! The `calendula gcal` command tree, dispatching each protocol-specific
+//! subcommand over a connected [`GcalClient`].
+
 use anyhow::Result;
 use clap::Subcommand;
 use pimalaya_cli::printer::Printer;
@@ -10,14 +15,14 @@ use crate::gcal::{
 
 /// Google Calendar CLI.
 ///
-/// Direct access to the half of the Calendar API iCalendar cannot
-/// express: sharing, availability, recurrence expansion, server-side
-/// parsing and the palettes. Everything a calendar and its items have
-/// in common with the other backends stays in the shared API.
+/// Direct access to the half of the Calendar API iCalendar cannot express:
+/// sharing, availability, recurrence expansion, server-side parsing and the
+/// palettes. Everything a calendar and its items have in common with the
+/// other backends stays in the shared API.
 ///
-/// Push channels are not exposed: a channel delivers to an HTTPS
-/// endpoint the caller must host, which a CLI has not. Neither are
-/// `calendars.clear` and `transferOwnership`, both irreversible.
+/// Push channels are not exposed: a channel delivers to an HTTPS endpoint
+/// the caller must host, which a CLI has not. Neither are `calendars.clear`
+/// and `transferOwnership`, both irreversible.
 #[derive(Debug, Subcommand)]
 #[command(rename_all = "kebab-case")]
 pub enum GcalCommand {

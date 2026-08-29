@@ -1,23 +1,23 @@
-//! pimdir adapter for the shared cross-protocol client.
+//! # Pimdir backend
 //!
-//! Reads project the store's items through [`io_pimdir`]'s reader plus
-//! the blob store. An item whose body is not local still lists, carrying
-//! no bytes; only a read of that item reports "body not fetched", which
-//! is the cue to sync rather than a data-loss error.
+//! The shared-API adapter over a pimdir store, projecting its items
+//! through [`io_pimdir`]'s reader plus the blob store.
 //!
-//! Writes append one action to the store's queue (pimdir SPEC 15.1)
-//! through a producer opened for that write: the body reaches the blob
-//! tree first, then the row pinning it. The store's owner, a sync,
-//! applies the action and pushes it. The same reader folds the pending
-//! queue over its reads, so a staged change shows here before that
-//! happens.
+//! An item whose body is not local still lists, carrying no bytes; only
+//! a read of it reports "body not fetched", the cue to sync rather than
+//! a data-loss error.
 //!
-//! Calendars themselves come from the sync, so the collection verbs
-//! (create, update, delete) are not served here: a cache does not invent
+//! Writes append one action to the store's queue (pimdir SPEC 15.1):
+//! the body reaches the blob tree first, then the row pinning it. The
+//! owner, a sync, applies and pushes it, while the reader folds the
+//! pending queue over its reads so a staged change shows before that.
+//!
+//! Calendars come from the sync, so the collection verbs (create,
+//! update, delete) are not served here: a cache does not invent
 //! collections its source does not have.
 //!
-//! Ids are the store's public `seq`, a small integer stable across every
-//! collection an item is filed in, never the internal link id.
+//! Ids are the store's public `seq`, stable across every collection an
+//! item is filed in, never the internal link id.
 
 use std::{io::Write, path::PathBuf};
 
@@ -68,7 +68,9 @@ impl PimdirBackend {
     }
 
     /// Loads the configuration, picks the active account, then opens
-    /// the store. Bails when the account carries no `[pimdir]` block.
+    /// the store.
+    ///
+    /// Bails when the account carries no `[pimdir]` block.
     pub fn build(
         printer: &mut impl Printer,
         config_paths: &[PathBuf],
@@ -87,9 +89,10 @@ impl PimdirBackend {
         Self::new(pimdir_config)
     }
 
-    /// Lists the calendar collections: those declaring `text/calendar`,
-    /// plus the kind-less ones a sync created before any consumer
-    /// declared a kind.
+    /// Lists the calendar collections.
+    ///
+    /// Those declaring `text/calendar`, plus the kind-less ones a sync
+    /// created before any consumer declared a kind.
     pub fn list_calendars(&mut self) -> Result<Vec<Calendar>> {
         let mut calendars: Vec<Calendar> = self
             .calendar_collections()?
@@ -110,9 +113,11 @@ impl PimdirBackend {
         Ok(calendars)
     }
 
-    /// Refuses to create a calendar: declaring a collection is an owner
-    /// write (pimdir SPEC 8) and this backend is a producer, and a
-    /// collection no sync knows about is one no sync would carry.
+    /// Refuses to create a calendar.
+    ///
+    /// Declaring a collection is an owner write (pimdir SPEC 8) and
+    /// this backend is a producer, and a collection no sync knows about
+    /// is one no sync would carry.
     pub fn create_calendar(
         &mut self,
         _id: &str,
@@ -135,14 +140,11 @@ impl PimdirBackend {
         bail!(unsupported("delete"))
     }
 
-    /// Lists a collection's items, reading each local body so the
-    /// shared type carries the bytes every other backend carries.
+    /// Lists a collection's items, reading each local body.
     ///
-    /// An item that is not hydrated lists with empty contents. A range
-    /// filter still applies to it, read off the stored summary rather
-    /// than off bytes that are not local yet: an offline cache that
-    /// hid its own undownloaded items from a date window would answer
-    /// a different question than the one asked.
+    /// An unhydrated item lists with empty contents, and a range still
+    /// filters it off the stored summary: a cache hiding its own
+    /// undownloaded items from a window would answer another question.
     pub fn list_items(
         &mut self,
         calendar_id: &str,
@@ -172,8 +174,7 @@ impl PimdirBackend {
     /// Reads one item's bytes from its content-addressed blob.
     ///
     /// Fails with a clear "body not fetched" when the item is not
-    /// hydrated: that is a state to resolve with a sync, not a missing
-    /// item.
+    /// hydrated: a state to resolve with a sync, not a missing item.
     pub fn get_item(&mut self, calendar_id: &str, item_id: &str) -> Result<CalendarItem> {
         self.known_collection(calendar_id)?;
 
@@ -198,8 +199,7 @@ impl PimdirBackend {
         })
     }
 
-    /// Stages a locally-authored item as an `add` action the next sync
-    /// applies and uploads.
+    /// Stages a locally-authored item as an `add` the next sync pushes.
     ///
     /// Returns the item's link id, its `UID`: a queued create carries
     /// no public `seq` until the store's owner applies it, so there is
@@ -222,13 +222,11 @@ impl PimdirBackend {
         Ok(derived.link_id.0)
     }
 
-    /// Stages a body replacement as an `update` action the next sync
-    /// applies and pushes, three-way merging against the stored base.
+    /// Stages a body replacement as an `update` the next sync pushes.
     ///
-    /// `if_match` is ignored: the applied edit is reconciled by the
-    /// engine against the base body it recorded at sync time, which is
-    /// a stronger guarantee than an entity tag a local store cannot
-    /// check.
+    /// The engine three-way merges it against the base body it recorded
+    /// at sync time, which is why `if_match` is ignored: that base is a
+    /// stronger guarantee than an entity tag a local store cannot check.
     pub fn update_item(
         &mut self,
         calendar_id: &str,
@@ -250,8 +248,7 @@ impl PimdirBackend {
         self.enqueue(calendar_id, &action, Some(size))
     }
 
-    /// Stages a `remove` action, which the next sync applies as a
-    /// tombstone and pushes as a server-side delete.
+    /// Stages a `remove` action: a tombstone, then a server-side delete.
     pub fn delete_item(&mut self, calendar_id: &str, item_id: &str) -> Result<()> {
         self.known_collection(calendar_id)?;
 
@@ -259,8 +256,8 @@ impl PimdirBackend {
         self.enqueue(calendar_id, &PimdirAction::Remove { seq }, None)
     }
 
-    /// Collects the store's accounts and per-calendar hydration state,
-    /// for the `pimdir status` command.
+    /// Collects the accounts and per-calendar hydration state that
+    /// `pimdir status` reports.
     pub fn status(&mut self) -> Result<PimdirStatus> {
         let accounts = self.client.reader.list_accounts()?;
         let mut calendars = Vec::new();
@@ -292,8 +289,10 @@ impl PimdirBackend {
         })
     }
 
-    /// The store's calendar collections, narrowed to the configured
-    /// account when the store groups several (pimdir SPEC 9.2).
+    /// The store's calendar collections.
+    ///
+    /// Narrowed to the configured account when the store groups several
+    /// (pimdir SPEC 9.2).
     fn calendar_collections(&self) -> Result<Vec<PimdirCollection>> {
         let collections = match self.client.account.as_deref() {
             Some(account) => self
@@ -309,15 +308,11 @@ impl PimdirBackend {
             .collect())
     }
 
-    /// Fails unless `calendar_id` names a calendar the store knows,
-    /// naming the ones it does hold.
+    /// Fails unless `calendar_id` names a calendar the store knows.
     ///
-    /// The store's read seam answers an unknown collection with an
-    /// empty page and its queue accepts an action for any name, so
-    /// without this a typo in `-k` would read as an empty calendar and
-    /// stage into one nothing will ever apply. A calendar is its
-    /// collection id, which carries the sync engine's namespace and is
-    /// not guessable, so the refusal shows the ids to choose from.
+    /// The read seam answers an unknown collection with an empty page
+    /// and the queue takes any name, so a typo in `-k` would read as an
+    /// empty calendar and stage into one nothing ever applies.
     fn known_collection(&self, calendar_id: &str) -> Result<()> {
         let mut ids: Vec<String> = self
             .calendar_collections()?
@@ -337,8 +332,9 @@ impl PimdirBackend {
         )
     }
 
-    /// Pulls every live item of a collection by keyset paging, in the
-    /// order the store maintains for calendars (start ascending).
+    /// Pulls every live item of a collection by keyset paging.
+    ///
+    /// In the order the store maintains for calendars, start ascending.
     fn scan_items(&self, calendar_id: &str) -> Result<Vec<PimdirItem>> {
         let mut all = Vec::new();
         let mut cursor: Option<(String, i64)> = None;
@@ -380,15 +376,11 @@ impl PimdirBackend {
             .ok_or_else(|| anyhow!("Item `{item_id}` not found in calendar `{calendar_id}`"))
     }
 
-    /// Projects a stored item onto the shared type, reading its body
-    /// when one is local and leaving the contents empty otherwise.
+    /// Projects a stored item onto the shared type, body when local.
     ///
-    /// Empty contents mean two different things, and only one of them
-    /// is ordinary: an item the sync has not hydrated yet carries no
-    /// object at all, while an item naming an object whose blob is gone
-    /// is an inconsistent store. The second is logged, since the row
-    /// renders the same either way and [`get_item`](Self::get_item)
-    /// refuses it outright.
+    /// Empty contents mean two things and only one is ordinary: the
+    /// sync has not hydrated the item, or its object's blob is gone,
+    /// an inconsistent store, logged since the row renders alike.
     fn item_from(&self, calendar_id: &str, stored: &PimdirItem) -> Result<CalendarItem> {
         let contents = match &stored.object {
             Some(hash) => match self.client.blobs.get(hash)? {
@@ -413,15 +405,14 @@ impl PimdirBackend {
         })
     }
 
-    /// Writes a body into the blob tree under the store's own hash,
-    /// returning that hash and the committed byte size.
+    /// Writes a body into the blob tree, returning its hash and size.
     ///
     /// Durable before anything references it (pimdir SPEC 14), so the
     /// queue row appended next pins a body that is already there.
     fn stage_body(&self, contents: &[u8]) -> Result<(ReplicaHash, u64)> {
-        // NOTE: the hash is the store's, read from `store_meta.hash_algo`,
+        // NOTE: the hash is the store's, from `store_meta.hash_algo`,
         // never one this crate picks: a body named under another
-        // algorithm is a body no read ever finds.
+        // algorithm is one no read ever finds.
         let hash = self.client.reader.hash(contents);
         let mut writer = self.client.blobs.writer()?;
         writer.write_all(contents)?;
@@ -430,8 +421,9 @@ impl PimdirBackend {
         Ok((hash, size))
     }
 
-    /// Appends one action to a collection's queue through a producer
-    /// opened for this write and dropped with it.
+    /// Appends one action to a collection's queue.
+    ///
+    /// The producer is opened for this write and dropped with it.
     fn enqueue(
         &self,
         calendar_id: &str,
@@ -447,12 +439,11 @@ impl PimdirBackend {
     }
 }
 
-/// The item's link id and `v: 1` summary, as the format derives them
-/// (pimdir SPEC Annex A.3), which is what keeps an item staged here and
-/// the same item arriving through a sync one item rather than two.
+/// The item's link id and `v: 1` summary (pimdir SPEC Annex A.3).
 ///
-/// A queued action carries no sort key: the format leaves the key to the
-/// sync that pushes the create.
+/// Deriving them the format's way is what keeps an item staged here and
+/// the same item arriving through a sync one item rather than two. A
+/// queued action carries no sort key: the format leaves it to the sync.
 fn derive(contents: &[u8]) -> PimdirDerivation {
     io_pimdir::conventions::calendar::derive(contents)
 }
@@ -464,11 +455,9 @@ fn now() -> String {
 
 /// Whether an item falls inside `range`.
 ///
-/// A hydrated item is answered from its own bytes, which is exact. An
-/// item with no local body falls back to the DTSTART the store's
-/// summary carries, which is the whole point of keeping a summary
-/// beside the pointer: a cache can answer a date question without the
-/// content behind it.
+/// A hydrated item is answered from its own bytes, which is exact. One
+/// with no local body falls back to the DTSTART its summary carries,
+/// the whole point of a summary beside the pointer.
 fn in_range(item: &CalendarItem, stored: &PimdirItem, range: &CalendarTimeRange) -> bool {
     if !item.contents.is_empty() {
         return Event::project(item)
@@ -487,10 +476,10 @@ fn in_range(item: &CalendarItem, stored: &PimdirItem, range: &CalendarTimeRange)
         .unwrap_or(false)
 }
 
-/// Reads a stored item's `v: 1` summary, falling back to an empty one
-/// when the item was never projected or was written to a shape this
-/// version cannot read. A listing showing blank columns beats one that
-/// fails.
+/// Reads a stored item's `v: 1` summary, or an empty one.
+///
+/// An item never projected, or written to a shape this version cannot
+/// read, falls back: blank columns beat a listing that fails.
 fn summary_of(item: &PimdirItem) -> PimdirCalendarMeta {
     item.meta
         .as_ref()
@@ -498,10 +487,10 @@ fn summary_of(item: &PimdirItem) -> PimdirCalendarMeta {
         .unwrap_or_default()
 }
 
-/// Folds a summary stamp into the leading `YYYYMMDD` the range
-/// comparison reads, so a summary written by any connector answers the
-/// same question as parsed bytes. The digits lead in both an iCalendar
-/// value and an RFC 3339 one, so either folds.
+/// Folds a summary stamp into the leading `YYYYMMDD` a range compares.
+///
+/// The digits lead in both an iCalendar value and an RFC 3339 one, so
+/// a summary written by any connector answers as parsed bytes do.
 fn stamp_of(rfc3339: &str) -> String {
     rfc3339
         .chars()
@@ -510,8 +499,7 @@ fn stamp_of(rfc3339: &str) -> String {
         .collect()
 }
 
-/// The message a collection verb refuses with, naming what to do
-/// instead.
+/// The message a collection verb refuses with, naming the way out.
 fn unsupported(verb: &str) -> String {
     format!(
         "pimdir cannot {verb} a calendar: the store is an offline cache, and its collections \
@@ -539,13 +527,12 @@ mod tests {
         assert_eq!(stamp_of(""), "");
     }
 
-    /// An added item links the way the store spells it: the bare `UID`
-    /// pimdir SPEC Annex A.3 gives, which is what a synced copy carries,
-    /// so a staged add naming an identity the collection already holds
-    /// parks (pimdir SPEC 15.3) instead of being filed under a key its
-    /// producer never asked for. Minting is the store's answer to what a
-    /// source hands over; parking is its answer to a producer authoring
-    /// an item the collection already holds.
+    /// A staged add links under the bare `UID` (pimdir SPEC Annex A.3),
+    /// which is what a synced copy carries.
+    ///
+    /// So an add naming an identity the collection already holds parks
+    /// (pimdir SPEC 15.3) instead of being filed under a key its
+    /// producer never asked for.
     #[test]
     fn an_added_item_links_the_way_the_store_spells_it() {
         let raw = b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:party@example.org\r\n\
@@ -557,11 +544,11 @@ mod tests {
         assert!(derived.meta.0.contains("Party"));
     }
 
-    /// One calendar may hold two resources whose bodies carry one `UID`
-    /// (pimdir SPEC 9): the store keys them apart and draws each its own
-    /// public id, so both list as ordinary items. What addresses an item
-    /// here is that id, never the identity its body states, and the two
-    /// copies need not even be the same event.
+    /// One calendar may hold two resources carrying one `UID` (pimdir
+    /// SPEC 9), which the store keys apart under their own public ids.
+    ///
+    /// What addresses an item here is that id, never the identity its
+    /// body states, and the two copies need not be the same event.
     #[test]
     fn two_items_sharing_one_uid_list_under_their_own_public_ids() {
         let body = |summary: &str| {
@@ -582,8 +569,8 @@ mod tests {
         let woonies = item("1", "Pre demo woonies");
         let minis = item("2", "Pre demo MINIS");
 
-        // The identity the two bodies state is one string, so it names
-        // both of them and addresses neither.
+        // NOTE: the identity the two bodies state is one string, so it
+        // names both of them and addresses neither.
         assert_eq!(
             derive(&woonies.contents).link_id.0,
             derive(&minis.contents).link_id.0

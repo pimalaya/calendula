@@ -1,3 +1,8 @@
+//! # Build script
+//!
+//! Bakes the enabled features, the target triple and the git revision
+//! into the binary, for `calendula --version` to report them.
+
 use pimalaya_cli::build::{features_env, git_envs, target_envs};
 
 fn main() {

@@ -1,12 +1,14 @@
-//! VJOURNAL projection over the shared items, plus the `journal`
-//! command family built on it.
+//! # Journal
 //!
-//! A calendar collection mixes component kinds, so the `journal`
-//! commands read the same items the `item` commands do and keep only
-//! the VJOURNALs. [`Journal`] is that projection: a journal entry is a
-//! dated note, so it carries a date and no end. The bytes themselves
-//! are never rewritten, so a projection is read-only and lossy by
-//! design.
+//! The VJOURNAL projection over the shared items, and the `journal` command
+//! family built on it.
+//!
+//! A calendar collection mixes component kinds, so the `journal` commands
+//! read the same items the `item` commands do and keep only the VJOURNALs.
+//! [`Journal`] is that projection: a dated note, carrying no end.
+//!
+//! The bytes themselves are never rewritten, so a projection is read-only and
+//! lossy by design.
 
 pub mod cli;
 pub mod create;
@@ -26,8 +28,8 @@ use crate::shared::item::CalendarItem;
 
 /// A VJOURNAL projected out of a [`CalendarItem`]'s iCalendar bytes.
 ///
-/// DTSTART keeps its iCalendar wire spelling, so what a listing prints
-/// is what the calendar carries.
+/// DTSTART keeps its iCalendar wire spelling, so what a listing prints is
+/// what the calendar carries.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Journal {
@@ -35,11 +37,10 @@ pub struct Journal {
     pub id: String,
     /// The entry's SUMMARY, empty when it carries none.
     pub summary: String,
-    /// The entry's DTSTART, verbatim, empty when it carries none. A
-    /// journal entry is dated rather than scheduled, so it has no end.
+    /// The entry's DTSTART, verbatim: an entry is dated, never scheduled.
     pub start: String,
-    /// The entry's STATUS (`DRAFT`, `FINAL`, `CANCELLED`), empty when
-    /// it carries none.
+    /// The entry's STATUS (`DRAFT`, `FINAL`, `CANCELLED`), empty when it
+    /// carries none.
     pub status: String,
 }
 

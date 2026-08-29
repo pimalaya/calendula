@@ -1,3 +1,7 @@
+//! # Journal read
+//!
+//! The `journal read` command, printing one VJOURNAL entry verbatim.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};

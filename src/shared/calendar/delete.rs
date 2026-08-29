@@ -1,3 +1,8 @@
+//! # Calendar delete
+//!
+//! The `calendar delete` command, removing a calendar and everything in
+//! it.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};
@@ -9,9 +14,10 @@ use crate::shared::client::CalendarClient;
 /// JSON output: `{"message": "..."}`.
 #[derive(Debug, Parser)]
 pub struct CalendarDeleteCommand {
-    /// Calendar to delete. Mandatory: unlike the other shared-API
-    /// commands, deletion never falls back to the `calendar.default`
-    /// config.
+    /// Calendar to delete.
+    ///
+    /// Mandatory: unlike the other shared-API commands, deletion never falls
+    /// back to the `calendar.default` config.
     #[arg(short = 'k', long = "calendar", value_name = "CALENDAR-ID")]
     pub id: String,
 }

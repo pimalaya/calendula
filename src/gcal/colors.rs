@@ -1,3 +1,8 @@
+//! # Colors
+//!
+//! The `calendula gcal colors` command, showing the calendar and event
+//! colour palettes.
+
 use std::fmt;
 
 use anyhow::Result;
@@ -12,9 +17,9 @@ use crate::gcal::client::GcalClient;
 
 /// Show the two colour palettes.
 ///
-/// Google talks in colour ids rather than hex values, so this is what
-/// turns a `colorId` into something readable, and what tells you which
-/// id to reach for.
+/// Google talks in colour ids rather than hex values, so this is what turns
+/// a `colorId` into something readable, and what tells you which id to
+/// reach for.
 ///
 /// JSON output: `{"colors": [{"palette", "id", "background",
 /// "foreground"}]}`.
@@ -46,8 +51,10 @@ impl GcalColorsCommand {
 /// The rendered palettes.
 #[derive(Clone, Debug, Serialize)]
 pub struct ColorsTable {
+    /// The table style the account configured.
     #[serde(skip)]
     pub style: TableStyle,
+    /// Both palettes flattened, one row per entry.
     #[serde(rename = "colors")]
     pub rows: Vec<ColorRow>,
 }

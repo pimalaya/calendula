@@ -1,14 +1,13 @@
-//! CalDAV wizard.
+//! # CalDAV wizard
 //!
-//! Two entry points, one per way the endpoint became known. A discovery
-//! entry pins the context root and the advertised methods, so
-//! [`configure_discovered`] prompts only what is left.
-//! [`configure_manual`] handles a typed server URL, where nothing is
-//! advertised and the authentication scheme is prompted too.
+//! Two entry points, one per way the endpoint became known. A discovery entry
+//! pins the context root and the advertised methods, so
+//! [`configure_discovered`] prompts only what is left, while
+//! [`configure_manual`] takes a typed server URL and prompts the scheme too.
 //!
-//! Neither connects: the wizard validates the whole account once, at
-//! the end, and the runtime walks the principal and calendar home-set
-//! from the stored `server`.
+//! Neither connects: the wizard validates the whole account once at the end,
+//! and the runtime walks the principal and calendar home-set from the stored
+//! `server`.
 
 use anyhow::Result;
 use pimalaya_cli::prompt;
@@ -25,9 +24,9 @@ use crate::{
 const BASIC: &str = "Basic (username + password)";
 const BEARER: &str = "Bearer (API token)";
 
-/// Configures CalDAV from a discovered entry: the context root is
-/// pinned and the scheme is picked among those advertised, skipped when
-/// only one qualifies.
+/// Configures CalDAV from a discovered entry: the context root is pinned and
+/// the scheme picked among those advertised, skipped when only one
+/// qualifies.
 pub fn configure_discovered(
     account_name: &str,
     email: &str,
@@ -44,21 +43,19 @@ pub fn configure_discovered(
 
 /// Configures CalDAV from a typed server URL.
 ///
-/// Nothing was discovered here, so every scheme is offered. This is the
-/// path a self-hosted server takes: Radicale, Baikal and friends
-/// routinely publish neither an SRV record nor a `.well-known`
-/// redirect, and refusing to configure them at all would put the
-/// servers calendula's users most often run out of reach.
+/// Nothing was discovered, so every scheme is offered. Radicale, Baikal and
+/// friends publish neither an SRV record nor a `.well-known` redirect, and
+/// refusing them would put the servers calendula's users run out of reach.
 pub fn configure_manual(account_name: &str, server: Url) -> Result<CaldavConfig> {
     let auth = prompt_auth(account_name, None, AuthCaps::default())?;
     Ok(config(server, auth))
 }
 
-/// Prompts the HTTP authentication scheme from `caps`, then its
-/// credentials. Every scheme is offered when nothing was advertised, so
-/// an undiscovered server is never left unconfigurable. The token flow
-/// shows the OAuth brokers only when a grant was advertised, or when
-/// nothing was.
+/// Prompts the HTTP authentication scheme from `caps`, then its credentials.
+///
+/// Every scheme is offered when nothing was advertised, so an undiscovered
+/// server is never left unconfigurable. The token flow shows the OAuth
+/// brokers only when a grant was advertised, or when nothing was.
 fn prompt_auth(
     account_name: &str,
     login_hint: Option<&str>,
@@ -98,9 +95,9 @@ fn prompt_auth(
 
 /// Folds the endpoint and credentials into a config block.
 ///
-/// The context root is stored as `server`, not as a bare `discover`
-/// domain: discovery already ran here, and pinning what it found spares
-/// every later run the DNS and HTTP round-trips.
+/// The context root is stored as `server`, not a bare `discover` domain:
+/// discovery already ran, and pinning what it found spares every later run
+/// the DNS and HTTP round-trips.
 fn config(server: Url, auth: CaldavAuthConfig) -> CaldavConfig {
     CaldavConfig {
         discover: None,

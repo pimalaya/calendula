@@ -1,3 +1,8 @@
+//! # Item create
+//!
+//! The `item create` command, writing a new iCalendar object into a
+//! calendar.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};

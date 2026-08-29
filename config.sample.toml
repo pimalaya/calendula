@@ -10,11 +10,11 @@
 # can be passed at once, separated by `:`; the first one is the base and the
 # rest are deep-merged on top of it.
 #
-# Run `calendula` with no command to launch the wizard. It asks one question,
-# taking an email address, a server URL or a local folder path, discovers what
-# it can, tests the account, then prints a ready-to-save configuration on
-# stdout. It writes nothing on its own: redirect it, or let it save the file
-# for you when it asks.
+# Run `calendula` with no command to launch the wizard. One question takes an
+# email address, a server URL or a local folder path; it discovers what it can,
+# tests the account, then prints a ready-to-save configuration on stdout.
+#
+# It writes nothing on its own: redirect it, or let it save the file when asked.
 # ================================================================================
 
 # --------------------------------------------------------------------------------
@@ -110,9 +110,10 @@ default = true
 #
 # An account may carry several backend blocks. The shared commands (`calendar`,
 # `event`, `item`) use the first configured one in calendula's priority order:
-# vdir, pimdir, caldav, gcal, so a local read is preferred to a network
-# round-trip and a protocol-standard server to a vendor API. Pass
-# `-b/--backend <name>` to pin one instead. The protocol-specific commands
+# vdir, pimdir, caldav, gcal, which prefers a local read to a network round-trip
+# and a protocol-standard server to a vendor API.
+#
+# Pass `-b/--backend <name>` to pin one instead; the protocol-specific commands
 # (`caldav`, `pimdir`, `vdir`) always use their own.
 # --------------------------------------------------------------------------------
 
@@ -133,15 +134,13 @@ vdir.home-dir = "~/.local/share/vdirsyncer/calendars"
 # A local pimdir store: an offline cache (a SQLite index plus content-addressed
 # blobs) that a sync engine fills; see <https://github.com/pimalaya/pimdir>.
 #
-# It is a cache, not a server. Calendars come from whatever the sync mirrors, so
-# the collection verbs (`calendar create/update/delete`) refuse here. An item
-# the sync has listed but not downloaded still shows up, and reading it reports
-# "body not fetched" rather than failing. `calendula pimdir status` shows how
-# much of each calendar is downloaded.
+# It is a cache, not a server: calendars come from whatever the sync mirrors, so
+# the collection verbs (`calendar create/update/delete`) refuse here, and an
+# item the sync listed but has not downloaded reads as "body not fetched" rather
+# than failing. `calendula pimdir status` shows how much is downloaded.
 #
-# Writes are staged: one action appended to the store's queue, which the sync
-# applies and pushes on its next run. calendula never owns the store, so a
-# listing runs beside a sync instead of locking it out.
+# Writes are staged as one queue action for the next sync to apply and push, and
+# a listing runs beside a sync rather than locking it out.
 #
 # `account` names the account the sync groups these collections under. Leave it
 # unset: a store synced by one account is read as that one. Set it only for a
@@ -199,10 +198,11 @@ caldav.auth.basic.password.command = "pass show example"
 # and a TLS profile.
 #
 # Google stores events as JSON and exposes no iCalendar representation of one,
-# so calendula synthesizes it: what has a well-defined iCalendar slot is
-# managed both ways, Google-only fields survive an update untouched, and every
-# remaining property is stashed verbatim server-side so it round-trips. Only
-# events project; a VTODO or VJOURNAL is refused, since Google models neither.
+# so calendula synthesizes it: what has a well-defined iCalendar slot is managed
+# both ways, Google-only fields survive an update untouched, and every remaining
+# property is stashed verbatim server-side so it round-trips.
+#
+# Only events project; a VTODO or VJOURNAL is refused, Google modelling neither.
 #
 # Calendar ids are the ones `calendula calendar list` shows: your email address
 # for the primary calendar, a `...@group.calendar.google.com` value for a

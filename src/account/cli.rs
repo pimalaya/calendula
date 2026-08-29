@@ -1,3 +1,7 @@
+//! # Account command
+//!
+//! The `account` command group and its dispatch point.
+
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -22,6 +26,8 @@ pub enum AccountCommand {
 }
 
 impl AccountCommand {
+    /// Runs the subcommand against the account `-a` names, or the
+    /// default one.
     pub fn execute(
         self,
         printer: &mut impl Printer,

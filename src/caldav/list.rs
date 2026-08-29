@@ -1,3 +1,8 @@
+//! # CalDAV calendar list
+//!
+//! The `calendula caldav list` command, showing the collections under
+//! the resolved home-set with the properties only CalDAV carries.
+
 use std::fmt;
 
 use anyhow::Result;
@@ -51,16 +56,18 @@ impl CaldavCalendarListCommand {
 /// The rendered CalDAV calendar listing.
 #[derive(Clone, Debug, Serialize)]
 pub struct CalendarsTable {
+    /// The table style the account renders with.
     #[serde(skip)]
     pub style: TableStyle,
+    /// The color the name column is drawn in.
     #[serde(skip)]
     pub name_color: Color,
+    /// One row per calendar collection.
     #[serde(rename = "calendars")]
     pub rows: Vec<CalendarRow>,
 }
 
-/// One CalDAV calendar collection, with the properties only CalDAV
-/// carries.
+/// One CalDAV calendar with the properties only CalDAV carries.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct CalendarRow {
@@ -73,6 +80,7 @@ pub struct CalendarRow {
     /// The display color (RFC 7986 5.9).
     pub color: Option<String>,
     /// The component kinds the collection accepts (RFC 4791 5.2.3).
+    ///
     /// Empty means the server declares no restriction.
     pub components: Vec<String>,
     /// The collection change tag, bumped on every change.

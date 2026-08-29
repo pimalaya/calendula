@@ -1,3 +1,8 @@
+//! # Item delete
+//!
+//! The `item delete` command, removing one iCalendar object from a
+//! calendar.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};

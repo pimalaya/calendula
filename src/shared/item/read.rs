@@ -1,3 +1,7 @@
+//! # Item read
+//!
+//! The `item read` command, printing one iCalendar object verbatim.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};

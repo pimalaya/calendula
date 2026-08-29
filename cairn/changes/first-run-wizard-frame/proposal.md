@@ -11,11 +11,19 @@ created: 2026-08-14
 
 Comodoro's `first-run-wizard` landed the shape a Pimalaya CLI meets a newcomer with. Himalaya and Ortie have taken it, Cardamum is next, and Calendula is the last of the five.
 
-Calendula already reasoned about this once and stopped in a defensible place: `load_config` fails with a message naming the wizard rather than running it, because a wizard that prints a document cannot hand a configuration back to a command already underway. That is `The wizard does not serve a running command`, and it is correct given a printing wizard.
+Calendula already reasoned about this once and stopped in a defensible place: `load_config` fails with a message naming the wizard rather than running it, because a wizard that prints a document cannot hand a configuration back to a command already underway.
 
-The frame changes the premise. Once the wizard writes to the resolved configuration path, it can hand a configuration back, and the two products that took the frame handle the remaining doubt by re-reading the configuration after the offer rather than assuming it landed: a wizard that printed instead of writing leaves nothing, the re-read finds nothing, and the command fails the ordinary way. The safety the requirement protects is kept by the re-read, not by refusing to offer.
+That is `The wizard does not serve a running command`, and it is correct given a printing wizard.
 
-What is left is the same list as everywhere else. There is no way to run the wizard by name, so a second account means running the binary bare, and someone already set up who types `calendula` gets a wizard instead of the help. Nothing guards interactivity, so a cron job hitting a missing configuration gets prompts. The welcome names no path, so a mistyped `-c` reads as a first run. An existing configuration can only be overwritten, never appended to. And the account resolution failures do not list the accounts that exist or name the two ways to pick a default.
+The frame changes the premise. Once the wizard writes to the resolved configuration path, it can hand a configuration back, and the two products that took the frame handle the remaining doubt by re-reading the configuration after the offer rather than assuming it landed.
+
+A wizard that printed instead of writing leaves nothing, the re-read finds nothing, and the command fails the ordinary way. The safety the requirement protects is kept by the re-read, not by refusing to offer.
+
+What is left is the same list as everywhere else. There is no way to run the wizard by name, so a second account means running the binary bare, and someone already set up who types `calendula` gets a wizard instead of the help.
+
+Nothing guards interactivity, so a cron job hitting a missing configuration gets prompts. The welcome names no path, so a mistyped `-c` reads as a first run.
+
+An existing configuration can only be overwritten, never appended to. And the account resolution failures do not list the accounts that exist or name the two ways to pick a default.
 
 ## What
 

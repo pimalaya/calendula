@@ -1,14 +1,15 @@
-//! Google Calendar API v3 backend, and the `gcal` command family.
+//! # Google Calendar
 //!
-//! The three other backends speak iCalendar natively; this one does
-//! not. Google stores a JSON event and exposes no per-event iCalendar
-//! representation, so [`project`] synthesizes the document of record on
-//! read and re-projects it on write, following the projection policy
-//! cardamum settled for its own API backends.
+//! The Google Calendar API v3 backend, and the `gcal` command family.
 //!
-//! The [`cli`] family covers what the shared surface cannot: sharing
-//! rules, availability, recurrence expansion, server-side parsing, the
-//! colour palettes and the account settings.
+//! The three other backends speak iCalendar natively; this one does not.
+//! Google stores a JSON event and exposes no per-event iCalendar
+//! representation, so [`project`] synthesizes the document of record on read
+//! and re-projects it on write, per cardamum's projection policy.
+//!
+//! The [`cli`] family covers what the shared surface cannot: sharing rules,
+//! availability, recurrence expansion, server-side parsing, the colour
+//! palettes and the account settings.
 
 pub mod acl;
 pub mod backend;

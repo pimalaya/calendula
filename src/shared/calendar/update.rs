@@ -1,3 +1,8 @@
+//! # Calendar update
+//!
+//! The `calendar update` command, patching a calendar's mutable
+//! properties.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};
@@ -6,9 +11,8 @@ use crate::shared::{arg::CalendarIdArg, calendar::CalendarDiff, client::Calendar
 
 /// Update a calendar's mutable properties.
 ///
-/// Each `--*` flag is optional and only updates the corresponding
-/// field; unset fields are left untouched. To clear an optional field,
-/// pass an empty value (e.g. `--description ""`).
+/// Each flag updates only its own field and an omitted one is left untouched.
+/// Pass an empty value to clear an optional field, as in `--description ""`.
 ///
 /// JSON output: `{"message": "..."}`.
 #[derive(Debug, Parser)]

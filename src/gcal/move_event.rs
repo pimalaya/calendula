@@ -1,3 +1,8 @@
+//! # Move
+//!
+//! The `calendula gcal move` command, relocating one event to another
+//! calendar.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};
@@ -6,9 +11,9 @@ use crate::gcal::client::GcalClient;
 
 /// Move an event to another calendar.
 ///
-/// The shared API would have to emulate this as a create plus a
-/// delete, which mints a new id and drops whatever the projection does
-/// not model. Google relocates the event itself, so it keeps both.
+/// The shared API would have to emulate this as a create plus a delete,
+/// which mints a new id and drops whatever the projection does not model.
+/// Google relocates the event itself, so it keeps both.
 ///
 /// Only a single event moves: an instance of a recurring series cannot
 /// leave its series.

@@ -1,3 +1,8 @@
+//! # CalDAV discover
+//!
+//! The `calendula caldav discover` command, walking the RFC 6764
+//! discovery chain and printing every URL it resolves.
+
 use std::fmt;
 
 use anyhow::Result;
@@ -9,8 +14,9 @@ use crate::caldav::client::CaldavClient;
 
 /// Run the CalDAV discovery chain.
 ///
-/// Walks well-known caldav -> current-user-principal -> calendar
-/// home-set and prints each resolved URL.
+/// Walks the RFC 6764 `.well-known/caldav` path, then the
+/// current-user-principal, then the calendar home-set, printing each
+/// URL it resolves.
 ///
 /// JSON output: `{"principal", "calendar_home_set"}`.
 #[derive(Debug, Parser)]
@@ -28,9 +34,12 @@ impl CaldavDiscoverCommand {
     }
 }
 
+/// The URLs the discovery chain resolved.
 #[derive(Clone, Debug, Serialize)]
 pub struct DiscoveryReport {
+    /// The principal the server reports for these credentials.
     pub principal: String,
+    /// The collection the principal files its calendars under.
     pub calendar_home_set: String,
 }
 

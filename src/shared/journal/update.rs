@@ -1,3 +1,8 @@
+//! # Journal update
+//!
+//! The `journal update` command, overwriting one VJOURNAL entry with new
+//! contents.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};
@@ -6,8 +11,8 @@ use crate::shared::{arg::CalendarIdArg, client::CalendarClient, ical::IcalArg};
 
 /// Overwrite an existing journal entry from an iCalendar source.
 ///
-/// Use `--if-match` to gate the write on a previously-read ETag when
-/// the backend supports optimistic concurrency.
+/// Use `--if-match` to gate the write on a previously-read ETag when the
+/// backend supports optimistic concurrency.
 ///
 /// JSON output: `{"message": "..."}`.
 #[derive(Debug, Parser)]

@@ -1,13 +1,12 @@
-//! vdir adapter for the shared cross-protocol client.
+//! # Vdir backend
 //!
-//! Projects [`io_vdir`]'s collections and items onto calendula's own
-//! shared types. A collection directory is a calendar, its metadata
-//! marker files carry the display name, description and color, and each
-//! `.ics` file inside it is an item.
+//! The shared-API adapter over a vdir home directory, projecting
+//! [`io_vdir`]'s collections and items onto the shared types.
 //!
-//! vdir has no server, so it has no entity tags and no server-side
-//! query: `if_match` is ignored, and a [`CalendarTimeRange`] is applied
-//! after parsing each item rather than pushed down.
+//! A collection directory is a calendar, its marker files carry the
+//! display name, description and color, and each `.ics` file is an
+//! item. vdir has no server, hence no entity tag: `if_match` is ignored
+//! and a [`CalendarTimeRange`] filters after parsing, never pushed down.
 
 use anyhow::{Context, Result, anyhow};
 use io_vdir::{
@@ -34,9 +33,11 @@ pub struct VdirBackend {
 }
 
 impl VdirBackend {
-    /// Opens the backend on the configured home directory, expanding
-    /// `~` and environment variables first. No filesystem check runs
-    /// here; a missing home surfaces on the first operation.
+    /// Opens the backend on the configured home directory.
+    ///
+    /// The path is expanded first, `~` and environment variables
+    /// alike. Nothing is checked here, so a missing home surfaces on
+    /// the first operation.
     pub fn new(config: VdirConfig) -> Self {
         let root = shellexpand::full(&config.home_dir.to_string_lossy())
             .map(|home| VdirPath::new(home.into_owned()))
@@ -54,8 +55,7 @@ impl VdirBackend {
         Ok(collections.into_iter().map(calendar_from).collect())
     }
 
-    /// Creates the collection directory and writes the metadata
-    /// markers it carries.
+    /// Creates the collection directory and its metadata markers.
     pub fn create_calendar(
         &mut self,
         id: &str,
@@ -74,9 +74,10 @@ impl VdirBackend {
         Ok(id.to_owned())
     }
 
-    /// Rewrites the metadata markers of a collection, reading the
-    /// current ones first so a field the patch leaves untouched
-    /// survives.
+    /// Rewrites a collection's metadata markers.
+    ///
+    /// Reads the current ones first, so a field the patch leaves
+    /// untouched survives.
     pub fn update_calendar(&mut self, id: &str, patch: CalendarDiff) -> Result<()> {
         let path = self.path(id);
         let mut collection = self
@@ -108,8 +109,8 @@ impl VdirBackend {
         Ok(())
     }
 
-    /// Lists the iCalendar items of a collection, dropping the vCards a
-    /// mixed directory may also hold.
+    /// Lists a collection's iCalendar items, dropping any vCards a
+    /// mixed directory holds beside them.
     pub fn list_items(
         &mut self,
         calendar_id: &str,
@@ -147,8 +148,9 @@ impl VdirBackend {
         Ok(id)
     }
 
-    /// Overwrites an item's bytes. vdir carries no entity tag, so
-    /// `if_match` cannot be honoured and is ignored.
+    /// Overwrites an item's bytes.
+    ///
+    /// vdir carries no entity tag, so `if_match` cannot be honoured.
     pub fn update_item(
         &mut self,
         calendar_id: &str,
@@ -177,8 +179,9 @@ impl VdirBackend {
     }
 }
 
-/// Projects a vdir collection onto the shared [`Calendar`], falling
-/// back to the directory name when no display name marker is set.
+/// Projects a vdir collection onto the shared [`Calendar`].
+///
+/// The directory name stands in when no display name marker is set.
 fn calendar_from(collection: VdirCollection) -> Calendar {
     let id = collection.id().to_owned();
 
@@ -204,8 +207,9 @@ fn item_from(calendar_id: &str, item: VdirItem) -> CalendarItem {
 }
 
 /// Whether an item has at least one VEVENT starting inside `range`.
-/// An item carrying no event at all is kept only when no range was
-/// asked for, so a filtered listing never shows an undated resource.
+///
+/// An item carrying no event is kept only when no range was asked for,
+/// so a filtered listing never shows an undated resource.
 fn in_range(item: &CalendarItem, range: Option<&CalendarTimeRange>) -> bool {
     let Some(range) = range else {
         return true;

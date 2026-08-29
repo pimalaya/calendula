@@ -1,3 +1,7 @@
+//! # Event command
+//!
+//! The `event` command family, the VEVENT view over a calendar.
+
 use anyhow::Result;
 use clap::Subcommand;
 use pimalaya_cli::printer::Printer;
@@ -10,8 +14,7 @@ use crate::shared::{
     },
 };
 
-/// Shared API to manage VEVENT items: agenda, list, read, create,
-/// update, delete.
+/// Shared API to manage VEVENT items.
 #[derive(Debug, Subcommand)]
 pub enum EventCommand {
     Agenda(EventAgendaCommand),

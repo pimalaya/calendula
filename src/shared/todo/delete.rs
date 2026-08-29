@@ -1,3 +1,8 @@
+//! # Todo delete
+//!
+//! The `calendula todo delete` command, removing one VTODO from the
+//! selected calendar.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};
@@ -5,6 +10,9 @@ use pimalaya_cli::printer::{Message, Printer};
 use crate::shared::{arg::CalendarIdArg, client::CalendarClient};
 
 /// Delete a single todo.
+///
+/// Immediate and unconditional: the task is removed with no
+/// confirmation prompt and no copy kept.
 ///
 /// JSON output: `{"message": "..."}`.
 #[derive(Debug, Parser)]

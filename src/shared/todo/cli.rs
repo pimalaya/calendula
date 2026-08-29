@@ -1,3 +1,7 @@
+//! # Todo command
+//!
+//! The `todo` command family, the VTODO view over a calendar.
+
 use anyhow::Result;
 use clap::Subcommand;
 use pimalaya_cli::printer::Printer;
@@ -10,8 +14,7 @@ use crate::shared::{
     },
 };
 
-/// Shared API to manage VTODO items: list, read, create, update,
-/// delete.
+/// Shared API to manage VTODO items.
 #[derive(Debug, Subcommand)]
 pub enum TodoCommand {
     #[command(visible_alias = "ls")]

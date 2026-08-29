@@ -1,12 +1,12 @@
-//! calendula wrapper around [`io_pimdir`]'s reader and producer roles.
+//! # Pimdir client
 //!
-//! The store belongs to the sync engine, not to calendula. Reads go
-//! through [`PimdirReader`], the role that takes no lock (pimdir SPEC
-//! 8) and carries no write at all, so a sync in flight neither blocks
-//! calendula nor is blocked by it. Writes go through
-//! [`PimdirProducer`], which takes the shared lock for the length of
-//! one enqueue: a producer stages actions for the owner to apply and
-//! never mutates the index itself.
+//! calendula's wrapper around [`io_pimdir`]'s reader and producer
+//! roles. The store belongs to the sync engine, not to calendula.
+//!
+//! Reads go through [`PimdirReader`], which takes no lock (pimdir SPEC
+//! 8) and carries no write, so a sync in flight neither blocks calendula
+//! nor is blocked by it. Writes go through [`PimdirProducer`], which
+//! takes the shared lock for one enqueue and never mutates the index.
 //!
 //! The reader folds the queue's pending actions over the committed rows
 //! (pimdir SPEC 15.4), so an action this process staged reads back
@@ -19,22 +19,24 @@ use io_pimdir::{PimdirBlobs, PimdirProducer, PimdirReader};
 
 use crate::config::PimdirConfig;
 
-/// The process name each staged action records (pimdir SPEC 15.1),
-/// diagnostic only: it says who asked, never who applies.
+/// The process name each staged action records (pimdir SPEC 15.1).
+///
+/// Diagnostic only: it says who asked, never who applies.
 const PRODUCER: &str = "calendula";
 
-/// A live pimdir client: a lock-free reader over the store, plus a blob
-/// reader over the same directory.
+/// A live pimdir client: a lock-free reader over the store and blobs.
 ///
 /// A write opens a producer of its own and drops it, so this handle
 /// never holds anything a sync has to wait on.
 pub struct PimdirClient {
+    /// The lock-free reader every read goes through.
     pub(crate) reader: PimdirReader,
+    /// The blob store item bodies are read from and staged into.
     pub(crate) blobs: PimdirBlobs,
     /// The expanded store root, which a producer is opened against.
     root: PathBuf,
-    /// The account the collections are grouped under, `None` in a
-    /// single-account store.
+    /// The account collections are grouped under, `None` when the store
+    /// groups none.
     pub(crate) account: Option<String>,
 }
 
@@ -45,9 +47,8 @@ impl PimdirClient {
     /// the owner's to write, so a root holding no store fails here
     /// rather than listing an empty calendar set.
     pub fn new(config: PimdirConfig) -> Result<Self> {
-        // NOTE: `root` is a PathBuf carrying the raw `~/…` verbatim, and
-        // opening it unexpanded would look for a store at a literal
-        // ./~/… relative to the cwd.
+        // NOTE: `root` carries the raw `~/…` verbatim, and opening it
+        // unexpanded would look for a store under the cwd.
         let root = shellexpand::full(&config.root.to_string_lossy())
             .map(|expanded| PathBuf::from(expanded.into_owned()))
             .unwrap_or_else(|_| config.root.clone());
@@ -65,13 +66,11 @@ impl PimdirClient {
         })
     }
 
-    /// Opens a producer for one staging window: the enqueue-only role,
-    /// which takes the store's shared lock rather than the owner's
-    /// exclusive one, so several run at once and none keeps a sync out.
+    /// Opens a producer for one staging window.
     ///
-    /// Opened per write and dropped with it, since what the lock buys is
-    /// the window between a body reaching the blob tree and the queue
-    /// row pinning it, which a collector must not run inside.
+    /// The enqueue-only role takes the shared lock, not the owner's
+    /// exclusive one, so it keeps no sync out. Opened per write: the
+    /// lock only buys the window between a body landing and its row.
     pub(crate) fn producer(&self) -> Result<PimdirProducer> {
         let producer = PimdirProducer::open(&self.root, PRODUCER)
             .map_err(|err| anyhow!("Stage into pimdir store `{}`: {err}", self.root.display()))?;

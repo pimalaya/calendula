@@ -1,3 +1,8 @@
+//! # Free/busy
+//!
+//! The `calendula gcal free-busy` command, querying when calendars are busy
+//! over a window.
+
 use std::fmt;
 
 use anyhow::Result;
@@ -17,16 +22,16 @@ use crate::{
 
 /// Query when calendars are busy over a window.
 ///
-/// Availability is a question, not a resource: no component family can
-/// carry it, which is why it lives here. Pass one or more calendar ids;
-/// with none, the account's default calendar is queried.
+/// Availability is a question, not a resource: no component family carries
+/// it, which is why it lives here. Pass one or more calendar ids; with
+/// none, the account's default calendar is queried.
 ///
 /// JSON output: `{"calendars": [{"id", "busy": [{"start", "end"}],
 /// "errors"}]}`.
 #[derive(Debug, Parser)]
 pub struct GcalFreeBusyCommand {
-    /// The calendars to query. Repeat the flag for several; falls back
-    /// to `calendar.default`.
+    /// The calendars to query. Repeat the flag for several; falls back to
+    /// `calendar.default`.
     #[arg(short = 'k', long = "calendar", value_name = "CALENDAR-ID")]
     pub calendar_ids: Vec<String>,
 
@@ -89,8 +94,10 @@ impl GcalFreeBusyCommand {
 /// The rendered free/busy answer.
 #[derive(Clone, Debug, Serialize)]
 pub struct FreeBusyTable {
+    /// The table style the account configured.
     #[serde(skip)]
     pub style: TableStyle,
+    /// The queried calendars, one row each.
     #[serde(rename = "calendars")]
     pub rows: Vec<CalendarBusy>,
 }

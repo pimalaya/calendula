@@ -1,10 +1,11 @@
-//! calendula wrapper around [`io_gcal`]'s std client.
+//! # Google Calendar client
 //!
-//! Builds a connected Google Calendar client from a [`GcalConfig`]:
-//! resolves the bearer token (running its command when it is one) and
-//! opens the TLS connection to the fixed API endpoint through
-//! pimalaya-stream. There is no discovery step: the Calendar API lives
-//! at one well-known base URL.
+//! calendula's wrapper around [`io_gcal`]'s std client, building a connected
+//! client from a [`GcalConfig`].
+//!
+//! Resolves the bearer token, running its command when it is one, then opens
+//! the TLS connection through pimalaya-stream. There is no discovery step:
+//! the Calendar API lives at one well-known base URL.
 
 use std::{
     ops::{Deref, DerefMut},
@@ -20,10 +21,10 @@ use secrecy::ExposeSecret;
 
 use crate::{account::context::Account, cli::load_config, config::GcalConfig};
 
-/// A connected Google Calendar client bundled with the merged runtime
-/// [`Account`], for the protocol-specific subcommands.
+/// A connected client bundled with the merged runtime [`Account`].
 pub struct GcalClient {
     inner: GcalClientStd,
+    /// The account the protocol-specific subcommands take defaults from.
     pub account: Account,
 }
 
@@ -48,8 +49,9 @@ impl DerefMut for GcalClient {
     }
 }
 
-/// Loads the configuration, picks the active account, then opens the
-/// Calendar client. Bails when the account carries no `[gcal]` block.
+/// Loads the configuration, picks the active account, then connects.
+///
+/// Bails when the account carries no `[gcal]` block.
 pub fn build_gcal_client(
     printer: &mut impl Printer,
     config_paths: &[PathBuf],
@@ -81,9 +83,10 @@ pub fn connect(config: &GcalConfig) -> Result<GcalClientStd> {
     Ok(GcalClientStd::connect(token.expose_secret(), options)?)
 }
 
-/// The TLS profile the backend connects with. io-http speaks HTTP/1.1
-/// only, so the ALPN list pins it rather than letting Google negotiate
-/// HTTP/2.
+/// The TLS profile the backend connects with.
+///
+/// io-http speaks HTTP/1.1 only, so the ALPN list pins it rather than
+/// letting Google negotiate HTTP/2.
 fn build_tls(config: &GcalConfig) -> Tls {
     let mut tls: Tls = config.tls.clone().into();
     tls.rustls.alpn = vec!["http/1.1".into()];

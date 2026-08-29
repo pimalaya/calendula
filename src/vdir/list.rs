@@ -1,3 +1,8 @@
+//! # Vdir collection list
+//!
+//! The `calendula vdir list` command, showing every collection
+//! directory under the configured home directory.
+
 use std::fmt;
 
 use anyhow::Result;
@@ -9,7 +14,10 @@ use serde::Serialize;
 
 use crate::vdir::client::VdirClient;
 
-/// List on-disk vdir collections under the configured home directory.
+/// List on-disk vdir collections.
+///
+/// One row per directory directly under the configured home, with the
+/// display name its metadata marker files carry.
 ///
 /// JSON output: `{"collections": [{"id", "display_name", "path"}]}`.
 #[derive(Debug, Parser)]
@@ -29,12 +37,16 @@ impl VdirCollectionListCommand {
     }
 }
 
+/// The rendered vdir collection listing.
 #[derive(Clone, Debug, Serialize)]
 pub struct CollectionsTable {
+    /// The table style the account renders with.
     #[serde(skip)]
     pub style: TableStyle,
+    /// The color the name column is drawn in.
     #[serde(skip)]
     pub name_color: Color,
+    /// One row per collection directory.
     #[serde(rename = "collections")]
     pub rows: Vec<CollectionRow>,
 }
@@ -68,10 +80,14 @@ impl fmt::Display for CollectionsTable {
     }
 }
 
+/// One collection directory, as the listing renders it.
 #[derive(Clone, Debug, Serialize)]
 pub struct CollectionRow {
+    /// The directory name, which is the collection id.
     pub id: String,
+    /// The name the `displayname` marker file carries, if any.
     pub display_name: Option<String>,
+    /// The directory's absolute path.
     pub path: String,
 }
 

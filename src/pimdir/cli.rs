@@ -1,4 +1,7 @@
-//! The `pimdir` command family.
+//! # Pimdir CLI
+//!
+//! The `pimdir` command family, reporting on the local store the
+//! account reads from.
 
 use anyhow::Result;
 use clap::Subcommand;
@@ -9,9 +12,10 @@ use crate::pimdir::{backend::PimdirBackend, status::PimdirStatusCommand};
 /// pimdir CLI.
 ///
 /// Direct access to the local pimdir store behind the account: what it
-/// holds and how much of it is downloaded. The store's own operator
-/// tooling (the `pimdir` binary shipped by io-pimdir) covers the rest,
-/// including the queue and the retained items.
+/// holds and how much of it is downloaded.
+///
+/// The store's own operator tooling, the `pimdir` binary io-pimdir
+/// ships, covers the rest, including the queue and the retained items.
 #[derive(Debug, Subcommand)]
 #[command(rename_all = "kebab-case")]
 pub enum PimdirCommand {

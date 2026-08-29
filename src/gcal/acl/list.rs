@@ -1,3 +1,8 @@
+//! # ACL list
+//!
+//! The `calendula gcal acl list` command, listing the sharing rules of one
+//! calendar.
+
 use std::fmt;
 
 use anyhow::Result;
@@ -66,8 +71,10 @@ impl GcalAclListCommand {
 /// The rendered ACL listing.
 #[derive(Clone, Debug, Serialize)]
 pub struct RulesTable {
+    /// The table style the account configured.
     #[serde(skip)]
     pub style: TableStyle,
+    /// The rules of the calendar, one row each.
     #[serde(rename = "rules")]
     pub rows: Vec<RuleRow>,
 }

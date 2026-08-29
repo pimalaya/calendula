@@ -1,3 +1,8 @@
+//! # Journal list
+//!
+//! The `journal list` command, printing a calendar's VJOURNAL entries as
+//! a table.
+
 use std::fmt;
 
 use anyhow::Result;
@@ -15,13 +20,12 @@ use crate::shared::{
 
 /// List the journal entries of a calendar.
 ///
-/// Only VJOURNAL components are rendered; the other kinds a calendar
-/// holds (VEVENT, VTODO) are dropped, so use `item list` for the
-/// unfiltered raw view.
+/// Only VJOURNAL components are rendered, the other kinds a calendar holds
+/// being dropped; use `item list` for the unfiltered raw view.
 ///
-/// Pass `--from` and `--to` (YYYY-MM-DD, both inclusive) to narrow the
-/// listing to a window. A window lifts the default page-size cap, so
-/// every match is returned.
+/// Pass `--from` and `--to` (YYYY-MM-DD, both inclusive) to narrow the listing
+/// to a window. A window lifts the default page-size cap, so every match is
+/// returned.
 ///
 /// JSON output: `{"journals": [{"id", "summary", "start", "status"}]}`.
 #[derive(Debug, Parser)]
@@ -37,13 +41,11 @@ pub struct JournalListCommand {
     #[arg(short = 's', long, value_name = "N")]
     pub page_size: Option<u32>,
 
-    /// Only list entries dated on or after this day (inclusive,
-    /// YYYY-MM-DD).
+    /// Only list entries dated on or after this day (inclusive, YYYY-MM-DD).
     #[arg(long, value_name = "DATE")]
     pub from: Option<NaiveDate>,
 
-    /// Only list entries dated on or before this day (inclusive,
-    /// YYYY-MM-DD).
+    /// Only list entries dated on or before this day (inclusive, YYYY-MM-DD).
     #[arg(long, value_name = "DATE")]
     pub to: Option<NaiveDate>,
 
@@ -57,7 +59,7 @@ impl JournalListCommand {
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         let range = CalendarTimeRange::from_days(self.from, self.to)?;
 
-        // A window should return every match, so the default page-size
+        // NOTE: a window must return every match, so the default page-size
         // cap only applies to the unfiltered listing.
         let page_size = match range {
             Some(_) => self.page_size,
@@ -66,10 +68,9 @@ impl JournalListCommand {
                 .or(Some(client.account.journals_list_page_size())),
         };
 
-        // NOTE: a server-side range filter is defined against a
-        // component's start and end (RFC 4791 9.9), and a journal entry
-        // carries no end, so the window is applied after parsing rather
-        // than pushed down.
+        // NOTE: a server-side range filter is defined against a component's
+        // start and end (RFC 4791 9.9), and a journal entry carries no end,
+        // so the window is applied after parsing rather than pushed down.
         let items = client.list_items(&calendar_id, self.page, page_size, None)?;
         let journals = items
             .iter()
@@ -91,8 +92,9 @@ impl JournalListCommand {
     }
 }
 
-/// Whether an entry's date falls inside `range`. An entry carrying no
-/// date is kept only when no window was asked for.
+/// Whether an entry's date falls inside `range`.
+///
+/// An entry carrying no date is kept only when no window was asked for.
 fn dated_within(journal: &Journal, range: Option<&CalendarTimeRange>) -> bool {
     let Some(range) = range else {
         return true;

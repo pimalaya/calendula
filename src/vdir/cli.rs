@@ -1,3 +1,8 @@
+//! # Vdir CLI
+//!
+//! The `vdir` command family: the filesystem-specific verbs, each
+//! handed a [`VdirClient`] rooted at the configured home directory.
+
 use anyhow::Result;
 use clap::Subcommand;
 use pimalaya_cli::printer::Printer;

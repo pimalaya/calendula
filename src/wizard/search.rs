@@ -1,17 +1,16 @@
-//! Input-driven service discovery for the wizard.
+//! # Service discovery
 //!
-//! The typed address or domain feeds io-pim-discovery's parallel
-//! discovery (fixed provider rules, PACC, Mozilla autoconfig, and the
-//! RFC 6764 CalDAV resolve), and every reachable service becomes one
-//! selectable entry carrying the authentication capabilities it
-//! advertised. The concrete method is picked once the service is
-//! chosen, so a service appears exactly once in the list.
+//! Input-driven discovery for the wizard. The typed address or domain feeds
+//! io-pim-discovery's parallel search (fixed provider rules, PACC, Mozilla
+//! autoconfig, and the RFC 6764 CalDAV resolve).
 //!
-//! calendula speaks one calendar protocol over the network, so the
-//! discovery surface is narrow: one entry per reachable CalDAV context
-//! root. It stays worth running, because it is what turns an email
-//! address into a server without asking anyone to know their provider's
-//! DAV URL.
+//! Every reachable service becomes one selectable entry carrying the
+//! authentication capabilities it advertised; the concrete method is picked
+//! once the service is chosen, so a service appears exactly once.
+//!
+//! calendula speaks one calendar protocol over the network, so the surface is
+//! narrow: one entry per CalDAV context root. It still earns its place, being
+//! what turns an email address into a server nobody had to know.
 
 use std::{collections::BTreeSet, env, fmt, time::Duration};
 
@@ -27,13 +26,12 @@ use crate::caldav::client::resolver;
 
 /// Upper bound on the parallel discovery fan-out.
 ///
-/// An unreachable endpoint (a firewalled port, a black-hole host) must
-/// not stall the interactive wizard, so a mechanism that has not
-/// reported by then is abandoned and only what completed in time is
-/// offered.
+/// An unreachable endpoint (a firewalled port, a black-hole host) must not
+/// stall the interactive wizard, so mechanisms that have not reported by then
+/// are abandoned and only what completed in time is offered.
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(8);
 
-/// One selectable way to reach the account's calendars, carrying the
+/// One selectable way to reach the account's calendars, with the
 /// authentication capabilities the service advertised.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Discovered {
@@ -45,14 +43,12 @@ pub struct Discovered {
     pub auth: AuthCaps,
 }
 
-/// The authentication capabilities a service advertised, folded across
-/// all its discovered methods.
+/// The authentication capabilities a service advertised, folded across all
+/// its discovered methods.
 ///
-/// It drives the per-service auth prompt: which HTTP schemes to offer,
-/// and whether the OAuth token brokers appear. calendula reads a token
-/// an external manager (Ortie, pizauth, oama) issues but never runs a
-/// grant itself, so OAuth is not a method of its own: it only unlocks
-/// the brokers behind the API-token flow.
+/// It drives the per-service auth prompt. calendula reads a token an external
+/// manager issues but never runs a grant, so OAuth is no method of its own
+/// here: it only unlocks the brokers behind the API-token flow.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct AuthCaps {
     /// HTTP Basic, a username and password, often an app password.
@@ -64,9 +60,8 @@ pub struct AuthCaps {
 }
 
 impl AuthCaps {
-    /// Whether any capability was advertised. When none was, the auth
-    /// prompt offers every method, so the user is never left without a
-    /// choice.
+    /// Whether any capability was advertised. When none was, the auth prompt
+    /// offers every method so the user is never left without a choice.
     pub fn any(self) -> bool {
         self.basic || self.bearer || self.oauth
     }
@@ -84,10 +79,9 @@ impl fmt::Display for Discovered {
 }
 
 impl Discovered {
-    /// The best default login for the credential prompt: the advertised
-    /// username when it looks like an address, else the searched email
-    /// when the user typed a full one, else nothing (a bare domain,
-    /// whose synthesized `@domain` form is rejected here).
+    /// Best default login for the credential prompt: the advertised username
+    /// when it looks like an address, else the searched email when the user
+    /// typed a full one, else nothing.
     pub fn login_default(&self, email: &str) -> Option<String> {
         self.username
             .clone()
@@ -96,8 +90,8 @@ impl Discovered {
     }
 }
 
-/// Searches every calendar service reachable from `email`, one entry
-/// per distinct context root.
+/// Searches every calendar service reachable from `email`, one entry per
+/// distinct context root.
 pub fn search(email: &str) -> Result<Vec<Discovered>> {
     let client = DiscoveryComposeClientStd::new(discovery_resolver(), discovery_tls());
     let services = BTreeSet::from([DiscoveryService::Caldav]);
@@ -118,7 +112,7 @@ pub fn search(email: &str) -> Result<Vec<Discovered>> {
             continue;
         };
 
-        // Mechanisms overlap: SRV and PACC routinely name the same
+        // NOTE: mechanisms overlap, SRV and PACC routinely naming the same
         // root, and offering it twice is a choice with no difference.
         if let Some(existing) = found.iter_mut().find(|entry| entry.server == server) {
             let caps = caps_of(&config.auth);
@@ -138,9 +132,8 @@ pub fn search(email: &str) -> Result<Vec<Discovered>> {
     Ok(found)
 }
 
-/// Folds a service's advertised methods into its [`AuthCaps`]: password
-/// into `basic`, bearer into `bearer`, and every OAuth grant into
-/// `oauth`, which only unlocks the token brokers.
+/// Folds a service's advertised methods into its [`AuthCaps`]: password into
+/// `basic`, bearer into `bearer`, every OAuth grant into `oauth`.
 fn caps_of(auth: &[DiscoveryAuthMethod]) -> AuthCaps {
     let mut caps = AuthCaps::default();
 
@@ -155,19 +148,19 @@ fn caps_of(auth: &[DiscoveryAuthMethod]) -> AuthCaps {
     caps
 }
 
-/// Whether a value is a full `local@domain` address, both parts
-/// non-empty, rejecting the bare-domain `@domain` form discovery
-/// synthesizes.
+/// Whether a value is a full `local@domain` address, both parts non-empty,
+/// rejecting the bare-domain `@domain` form discovery synthesizes.
 fn looks_like_address(value: &str) -> bool {
     value
         .split_once('@')
         .is_some_and(|(local, domain)| !local.is_empty() && !domain.is_empty())
 }
 
-/// The resolver discovery queries: the `CALENDULA_DNS_RESOLVER`
-/// override first, then the system resolver, then the Cloudflare
-/// default. This keeps the domain off a third-party resolver by
-/// default, and works around networks blocking the fallback.
+/// The resolver discovery queries: the `CALENDULA_DNS_RESOLVER` override
+/// first, then the system resolver, then the Cloudflare default.
+///
+/// Preferring the system resolver keeps the domain off a third party; the
+/// override works around networks blocking the fallback.
 fn discovery_resolver() -> Url {
     if let Ok(resolver) = env::var("CALENDULA_DNS_RESOLVER")
         && let Ok(url) = resolver.parse()
@@ -178,8 +171,8 @@ fn discovery_resolver() -> Url {
     resolver()
 }
 
-/// The TLS profile the HTTPS-bound mechanisms use; they only speak
-/// HTTP/1.1 to `.well-known` endpoints.
+/// The TLS profile the HTTPS-bound mechanisms use; they only speak HTTP/1.1
+/// to `.well-known` endpoints.
 fn discovery_tls() -> Tls {
     Tls {
         rustls: Rustls {
@@ -206,8 +199,8 @@ mod tests {
             }
         );
 
-        // The Fastmail shape: a bearer token plus a grant and no Basic
-        // is one API-token method whose brokers are unlocked.
+        // NOTE: the Fastmail shape, a bearer token plus a grant and no
+        // Basic, is one API-token method whose brokers are unlocked.
         let fastmail = caps_of(&[DiscoveryAuthMethod::Bearer, oauth]);
         assert!(fastmail.token());
         assert!(!fastmail.basic);

@@ -1,3 +1,8 @@
+//! # Todo update
+//!
+//! The `calendula todo update` command, replacing one VTODO of the
+//! selected calendar.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};
@@ -7,10 +12,9 @@ use crate::shared::{arg::CalendarIdArg, client::CalendarClient, ical::IcalArg};
 /// Overwrite an existing todo from an iCalendar source.
 ///
 /// The whole component is replaced, so marking a task done means
-/// supplying an iCalendar carrying the new STATUS and
-/// PERCENT-COMPLETE. Use `--if-match` to gate the write on a
-/// previously-read ETag when the backend supports optimistic
-/// concurrency.
+/// supplying an iCalendar carrying the new STATUS and PERCENT-COMPLETE.
+/// Use `--if-match` to gate the write on a previously-read ETag when
+/// the backend supports optimistic concurrency.
 ///
 /// JSON output: `{"message": "..."}`.
 #[derive(Debug, Parser)]

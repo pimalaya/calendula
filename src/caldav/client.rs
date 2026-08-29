@@ -1,10 +1,8 @@
-//! calendula wrapper around [`io_webdav`]'s std client.
+//! # CalDAV client
 //!
-//! Builds a connected CalDAV client from a [`CaldavConfig`]: resolves
-//! the calendar home-set through whichever of the three configured
-//! routes is set, opens the TCP or TLS connection through
-//! pimalaya-stream, and leaves the client's discovery caches populated
-//! so a command runs no extra round-trip.
+//! calendula's wrapper around [`io_webdav`]'s std client. Builds a
+//! connected client from a [`CaldavConfig`], leaving its discovery
+//! caches populated so a command runs no extra round-trip.
 
 use std::{
     ops::{Deref, DerefMut},
@@ -30,14 +28,14 @@ use crate::{
     config::{CaldavAuthConfig, CaldavConfig},
 };
 
-/// DNS-over-TCP resolver used when no system resolver is found:
-/// Cloudflare's `1.1.1.1`.
+/// The DNS-over-TCP resolver used when the host exposes none.
 const DEFAULT_RESOLVER: &str = "tcp://1.1.1.1:53";
 
 /// A connected CalDAV client bundled with the merged runtime
 /// [`Account`], for the protocol-specific subcommands.
 pub struct CaldavClient {
     inner: WebdavClientStd,
+    /// The merged account the commands read their rendering from.
     pub account: Account,
 }
 
@@ -62,14 +60,11 @@ impl DerefMut for CaldavClient {
     }
 }
 
-/// Opens a connected CalDAV client and walks the discovery chain,
-/// following whichever of the three configured routes is set:
+/// Opens a connected CalDAV client and walks the discovery chain.
 ///
-/// 1. `home` pins the calendar home-set, so no discovery runs;
-/// 2. `server` names the context root the principal and home-set walk
-///    starts from;
-/// 3. `discover` resolves a bare domain to that context root first,
-///    through RFC 6764 SRV records and the `.well-known` path.
+/// Follows whichever route the config sets: `home` pins the home-set
+/// and skips discovery, `server` names the context root the principal
+/// walk starts from, `discover` resolves a bare domain to it (RFC 6764).
 pub fn connect_and_resolve(config: &CaldavConfig) -> Result<WebdavClientStd> {
     let auth = build_auth(&config.auth)?;
     let tls = build_tls(config);
@@ -97,16 +92,16 @@ pub fn connect_and_resolve(config: &CaldavConfig) -> Result<WebdavClientStd> {
     Ok(client)
 }
 
-/// Resolves a bare domain to a CalDAV context root through RFC 6764,
-/// reusing `tls` for the `.well-known` probe.
+/// Resolves a bare domain to a CalDAV context root through RFC 6764.
 fn resolve_server(domain: &str, tls: &Tls) -> Result<Url> {
     let mut client = DiscoveryWebdavClientStd::new(resolver()).with_tls(tls.clone());
     Ok(client.resolve(domain, DiscoveryDavService::Caldav)?)
 }
 
-/// The resolver discovery queries: the system one, so the domain is not
-/// leaked to a third party, falling back to the Cloudflare default on
-/// hosts exposing none.
+/// The resolver discovery queries.
+///
+/// The system one, so the domain is not leaked to a third party,
+/// falling back to the Cloudflare default on hosts exposing none.
 pub fn resolver() -> Url {
     system_resolver().unwrap_or_else(|| {
         DEFAULT_RESOLVER
@@ -115,17 +110,19 @@ pub fn resolver() -> Url {
     })
 }
 
-/// The TLS profile CalDAV connects with. WebDAV speaks HTTP/1.1 only,
-/// so the ALPN list pins it rather than letting a server negotiate
-/// HTTP/2.
+/// The TLS profile CalDAV connects with.
+///
+/// WebDAV speaks HTTP/1.1 only, so the ALPN list pins it rather than
+/// letting a server negotiate HTTP/2.
 fn build_tls(config: &CaldavConfig) -> Tls {
     let mut tls: Tls = config.tls.clone().into();
     tls.rustls.alpn = vec!["http/1.1".into()];
     tls
 }
 
-/// Resolves the configured credentials into the wire auth io-webdav
-/// sends. A secret backed by a command is run here, at first use.
+/// Resolves the configured credentials into the auth io-webdav sends.
+///
+/// A secret backed by a command is run here, at first use.
 fn build_auth(config: &CaldavAuthConfig) -> Result<WebdavAuth> {
     Ok(match config {
         CaldavAuthConfig::None => WebdavAuth::None,
@@ -140,8 +137,9 @@ fn build_auth(config: &CaldavAuthConfig) -> Result<WebdavAuth> {
     })
 }
 
-/// Loads the configuration, picks the active account, then opens the
-/// CalDAV client. Bails when the account carries no `[caldav]` block.
+/// Loads the configuration, picks the active account, then connects.
+///
+/// Bails when the account carries no `[caldav]` block.
 pub fn build_caldav_client(
     printer: &mut impl Printer,
     config_paths: &[PathBuf],

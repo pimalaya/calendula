@@ -1,9 +1,9 @@
-//! Wire spellings shared by the `gcal` subcommands.
+//! # Wire spellings
 //!
-//! The Calendar API names its access roles and ACL scope types in
-//! lowerCamelCase, which is what a listing prints and what a flag
-//! takes, so the mapping is written once here rather than in each
-//! command.
+//! The wire names the `gcal` subcommands share. The Calendar API spells
+//! access roles and ACL scope types in lowerCamelCase, which is both
+//! what a listing prints and what a flag takes, so the mapping is
+//! written once here rather than in each command.
 
 use anyhow::{Result, bail};
 use io_gcal::v3::rest::{
@@ -20,9 +20,7 @@ pub fn event_status(status: GcalEventStatus) -> &'static str {
     }
 }
 
-/// A boundary as one printable stamp: the timestamp of a timed
-/// occurrence, the date of an all-day one, empty when it carries
-/// neither.
+/// A boundary as one printable stamp: a timestamp, a date, or empty.
 pub fn boundary(boundary: Option<&GcalEventDateTime>) -> String {
     boundary
         .and_then(|boundary| boundary.date_time.clone().or_else(|| boundary.date.clone()))
@@ -41,8 +39,7 @@ pub fn access_role(role: GcalAccessRole) -> &'static str {
     }
 }
 
-/// Reads an access role from a flag, case-insensitively, naming every
-/// accepted value when it does not match.
+/// Reads an access role from a flag, case-insensitively.
 pub fn parse_access_role(value: &str) -> Result<GcalAccessRole> {
     const ROLES: [GcalAccessRole; 6] = [
         GcalAccessRole::None,
@@ -98,9 +95,9 @@ pub fn parse_scope_type(value: &str) -> Result<GcalAclScopeType> {
     )
 }
 
-/// An iCalendar UTC stamp (`YYYYMMDDTHHMMSSZ`) as the RFC 3339
-/// timestamp the Calendar API takes, so `--from` / `--to` are spelled
-/// the same way across the whole CLI.
+/// An iCalendar UTC stamp as the RFC 3339 timestamp the API takes.
+///
+/// Lets `--from` and `--to` keep one spelling across the whole CLI.
 pub fn rfc3339(stamp: &str) -> String {
     let bytes = stamp.as_bytes();
 
@@ -142,7 +139,6 @@ mod tests {
             assert_eq!(parse_access_role(access_role(role)).unwrap(), role);
         }
 
-        // Case-insensitive, and an unknown value names what is accepted.
         assert_eq!(parse_access_role("OWNER").unwrap(), GcalAccessRole::Owner);
         let err = parse_access_role("admin").unwrap_err().to_string();
         assert!(err.contains("owner"), "unexpected error: {err}");

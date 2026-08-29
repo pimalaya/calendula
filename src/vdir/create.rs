@@ -1,3 +1,8 @@
+//! # Vdir collection create
+//!
+//! The `calendula vdir create` command, making one collection
+//! directory under the configured home directory.
+
 use anyhow::Result;
 use clap::Parser;
 use io_vdir::{collection::VdirCollection, path::VdirPath};
@@ -7,6 +12,9 @@ use crate::vdir::client::VdirClient;
 
 /// Create a vdir collection directory.
 ///
+/// The directory is made under the configured home, and each metadata
+/// flag below writes the marker file vdir reads that value from.
+///
 /// JSON output: `{"message": "..."}`.
 #[derive(Debug, Parser)]
 pub struct VdirCollectionCreateCommand {
@@ -14,18 +22,15 @@ pub struct VdirCollectionCreateCommand {
     #[arg(value_name = "ID")]
     pub id: String,
 
-    /// Optional display name written to the `displayname` metadata
-    /// file.
+    /// Display name, written to the `displayname` marker file.
     #[arg(short, long, value_name = "NAME")]
     pub display_name: Option<String>,
 
-    /// Optional description written to the `description` metadata
-    /// file.
+    /// Description, written to the `description` marker file.
     #[arg(short = 'D', long, value_name = "TEXT")]
     pub description: Option<String>,
 
-    /// Optional hex color (`#RRGGBB`) written to the `color` metadata
-    /// file.
+    /// Hex color (`#RRGGBB`), written to the `color` marker file.
     #[arg(long, value_name = "HEX")]
     pub color: Option<String>,
 }

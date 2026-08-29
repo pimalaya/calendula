@@ -1,3 +1,8 @@
+//! # ACL create
+//!
+//! The `calendula gcal acl create` command, granting one scope a role on a
+//! calendar.
+
 use anyhow::Result;
 use clap::Parser;
 use io_gcal::v3::rest::acl::GcalAclRule;

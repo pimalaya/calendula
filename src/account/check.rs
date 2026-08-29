@@ -1,4 +1,7 @@
-//! The `account check` command, and the account test the wizard reuses.
+//! # Account check
+//!
+//! The `account check` command, and the per-backend test the wizard
+//! reuses on the account it has just built.
 
 use std::{fmt, path::PathBuf};
 
@@ -55,8 +58,10 @@ impl AccountCheckCommand {
 }
 
 /// Exercises every backend of `account_config` that `backend` allows,
-/// one report row each. Shared with the wizard, which tests the account
-/// it just built before printing it.
+/// one report row each.
+///
+/// Shared with the wizard, which tests the account it just built before
+/// printing it.
 pub fn check_account(
     #[allow(unused_variables)] account_config: &AccountConfig,
     #[allow(unused_variables)] backend: Backend,
@@ -94,8 +99,10 @@ pub fn check_account(
     checks
 }
 
-/// Whether every checked backend answered. Only the wizard asks, so it
-/// compiles with the backends the wizard configures.
+/// Whether every checked backend answered.
+///
+/// Only the wizard asks, so it compiles with the backends the wizard
+/// configures.
 #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
 pub fn all_ok(checks: &[BackendCheck]) -> bool {
     !checks.is_empty() && checks.iter().all(|check| check.ok)

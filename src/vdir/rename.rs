@@ -1,3 +1,8 @@
+//! # Vdir collection rename
+//!
+//! The `calendula vdir rename` command, renaming one collection
+//! directory in place.
+
 use anyhow::Result;
 use clap::Parser;
 use io_vdir::path::VdirPath;
@@ -6,6 +11,9 @@ use pimalaya_cli::printer::{Message, Printer};
 use crate::vdir::client::VdirClient;
 
 /// Rename a vdir collection directory.
+///
+/// The id is the directory name, so this renames the directory itself
+/// and leaves the item files inside it untouched.
 ///
 /// JSON output: `{"message": "..."}`.
 #[derive(Debug, Parser)]

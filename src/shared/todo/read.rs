@@ -1,3 +1,8 @@
+//! # Todo read
+//!
+//! The `calendula todo read` command, printing one VTODO as the
+//! calendar stores it.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};

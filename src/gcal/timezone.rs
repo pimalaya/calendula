@@ -1,47 +1,25 @@
-//! VTIMEZONE synthesis from an IANA time zone name.
+//! # VTIMEZONE synthesis
 //!
-//! The Calendar API names a time zone and stops there: a boundary
-//! carries `"timeZone": "America/New_York"`, an IANA Time Zone Database
-//! name, and the resource has no slot for the observances behind it.
-//! iCalendar has the opposite arrangement, RFC 5545 3.2.19 requiring
-//! every `TZID` a document references to resolve to a VTIMEZONE the
-//! same document carries, so a projection that emits the parameter owes
-//! the component. Google's own CalDAV frontend does this expansion
-//! server-side; the REST API leaves it to the caller, which is why the
-//! backend carries a time zone database of its own.
+//! Synthesis of the VTIMEZONE an IANA time zone name stands for. The
+//! Calendar API names a zone and stops there, while RFC 5545 3.2.19
+//! makes every TZID a document references resolve to a VTIMEZONE that
+//! same document carries, so a projection emitting the parameter owes
+//! the component.
 //!
-//! ## The database is bundled, not the host's
+//! Google's CalDAV frontend expands server-side and the REST API leaves
+//! it to the caller, so the `gcal` feature bundles the database through
+//! `jiff/tzdb-bundle-always`: the document of record must read the same
+//! on two machines, and on a container carrying no zoneinfo at all.
 //!
-//! jiff reads the system copy of the database by default, which is the
-//! right choice for an application asking what time it is locally and
-//! the wrong one here. What this module writes is the document of
-//! record: two machines reading the same Google account have to produce
-//! the same bytes for the same event, and a container carrying no
-//! zoneinfo has to produce them at all. The `gcal` feature therefore
-//! turns on `jiff/tzdb-bundle-always`, so the database ships with the
-//! release and the output depends on nothing outside it.
+//! A zone's record runs to hundreds of transitions, so [`vtimezone`]
+//! describes the one era its anchor falls in. The United States moved
+//! its rule in 2007, and an item from 1980 under today's rule would
+//! read an hour out through the weeks between the two onsets.
 //!
-//! ## The era the item names, not the zone's whole past
-//!
-//! A zone's record runs to hundreds of transitions, far too many to
-//! repeat on every event, so [`vtimezone`] describes one era: the one
-//! the item itself falls in. The United States moved its rule in 2007,
-//! so an item from 1980 described by today's rule would read an hour
-//! out through the weeks between the old onset and the new one.
-//!
-//! An observance is therefore built from the transitions bracketing the
-//! anchor, and states a yearly rule only where the transitions that
-//! follow it agree on one. A rule outlives any window a list of dated
-//! onsets could cover, which a recurring event needs; agreement is what
-//! establishes there is a rule to state.
-//!
-//! ## A zone at rest is described as such
-//!
-//! Reading transitions around an anchor would otherwise revive a rule
-//! the zone has abandoned: Hong Kong last shifted in 1979, and an item
-//! from today has no business carrying that summer time. A zone whose
-//! nearest shift is more than [`SETTLED`] from the anchor is described
-//! the way one that never shifted is, by the single offset in force.
+//! An observance states a yearly rule only where the transitions that
+//! follow agree on one, and a zone whose nearest shift is more than
+//! [`SETTLED`] from the anchor is described by its single offset, so
+//! Hong Kong, which last shifted in 1979, carries no summer time today.
 
 use ical::{
     prop::IcalPropKind,
@@ -56,46 +34,41 @@ use jiff::{
 
 use crate::gcal::project::{component, prop, text_prop};
 
-/// Onset given to an observance the zone dates no better itself: one
-/// that never shifts, or one at rest. Its rule has no beginning to
-/// state, and the epoch is the conventional stand-in.
+/// Onset given to an observance the zone dates no better itself.
+///
+/// One that never shifts, or one at rest, has no beginning to state,
+/// and the epoch is the conventional stand-in.
 const EPOCH: civil::DateTime = civil::DateTime::constant(1970, 1, 1, 0, 0, 0, 0);
 
-/// How far the nearest shift must be from the anchor before the zone
-/// counts as settled. Two years clears the annual pair comfortably
-/// while still catching a zone that gave daylight saving up decades
-/// ago.
+/// How far the nearest shift must be before the zone counts as settled.
+///
+/// Two years clears the annual pair while still catching a zone that
+/// gave daylight saving up decades ago.
 const SETTLED: SignedDuration = SignedDuration::from_hours(24 * 365 * 2);
 
-/// Following transitions of one kind that must fall on the same rule
-/// before the observance states one, rather than standing as a single
-/// dated onset.
+/// Following transitions that must agree before a rule is stated.
 const AGREEING_TRANSITIONS: usize = 2;
 
-/// Transitions read on each side of the anchor before giving up on
-/// finding one of a given kind. A zone shifting at all shifts twice a
-/// year, so a handful is generous, and it keeps the search over a zone
-/// that never shifts bounded.
+/// Transitions read on each side of the anchor before giving up.
+///
+/// A zone shifting at all shifts twice a year, so a handful is
+/// generous, and it bounds the search over a zone that never shifts.
 const SEARCH_SPAN: usize = 8;
 
 /// Whether an IANA name resolves to a zone this module can rebuild.
 ///
-/// What it guards is the projection's right to drop a VTIMEZONE on the
-/// way in: one that can be rebuilt from its name is regenerated on
-/// every read and need not be stashed, and one that cannot has to be
-/// kept verbatim or it is gone for good.
+/// Guards the projection's right to drop a VTIMEZONE on the way in: one
+/// rebuildable from its name need not be stashed, one that is not has
+/// to be kept verbatim or it is gone for good.
 pub fn is_known(tzid: &str) -> bool {
     TimeZone::get(tzid).is_ok()
 }
 
-/// Projects an IANA time zone name onto the VTIMEZONE component a
-/// document referencing it needs, or nothing when the name is not one
-/// the database knows.
+/// The VTIMEZONE a document naming this IANA zone owes.
 ///
-/// `anchor` is the instant the description is built around, in Unix
-/// seconds, and is normally the start of the item that names the zone.
-/// A zone is only obliged to be right about the times its item can
-/// reach, and anchoring keeps the component to the era in force there.
+/// Nothing comes back for a name the database does not know. `anchor`
+/// is the instant described around, in Unix seconds, normally the item
+/// start: a zone need only be right about times its item can reach.
 pub fn vtimezone(tzid: &str, anchor: i64) -> Option<IcalCst<'static>> {
     let zone = TimeZone::get(tzid).ok()?;
     let anchor = Timestamp::from_second(anchor).ok()?;
@@ -112,10 +85,9 @@ pub fn vtimezone(tzid: &str, anchor: i64) -> Option<IcalCst<'static>> {
 
 /// The observances describing the zone around `anchor`.
 ///
-/// Nothing at all comes back when none can be built. A VTIMEZONE short
-/// of an observance would be worse than none, the document then
-/// claiming a definition it does not carry, so the whole component is
-/// dropped and the TZID goes back to standing alone.
+/// Nothing comes back when none can be built: a VTIMEZONE short of an
+/// observance claims a definition it does not carry, so the whole
+/// component is dropped and the TZID goes back to standing alone.
 fn observances(zone: &TimeZone, anchor: Timestamp) -> Option<Vec<IcalCst<'static>>> {
     if settled(zone, anchor) {
         let info = zone.to_offset_info(anchor);
@@ -170,9 +142,9 @@ fn observances(zone: &TimeZone, anchor: Timestamp) -> Option<Vec<IcalCst<'static
 
 /// Whether the zone holds one offset over the years around `anchor`.
 ///
-/// Asked of the neighbouring transitions rather than by sampling the
-/// offset a year either side: a year apart lands in the same season, so
-/// a zone shifting every spring would read as settled.
+/// Asked of the neighbouring transitions rather than by sampling a year
+/// either side, which lands in the same season and would read a zone
+/// shifting every spring as settled.
 fn settled(zone: &TimeZone, anchor: Timestamp) -> bool {
     let recent = zone
         .preceding(anchor)
@@ -187,9 +159,10 @@ fn settled(zone: &TimeZone, anchor: Timestamp) -> bool {
     !recent && !upcoming
 }
 
-/// The transition installing the wanted kind of offset that stands at
-/// `anchor`: the latest one at or before it, or the earliest later one
-/// when the zone has no history of that kind yet.
+/// The transition installing the wanted kind of offset at `anchor`.
+///
+/// The latest one at or before it, or the earliest later one when the
+/// zone has no history of that kind yet.
 fn nearest<'t>(zone: &'t TimeZone, anchor: Timestamp, dst: Dst) -> Option<TimeZoneTransition<'t>> {
     let standing = zone
         .preceding(anchor)
@@ -207,26 +180,20 @@ fn nearest<'t>(zone: &'t TimeZone, anchor: Timestamp, dst: Dst) -> Option<TimeZo
 ///
 /// Read a moment earlier rather than off the previous transition, so a
 /// zone whose record starts at `at` still answers.
-///
-/// NOTE: a whole second earlier, not the nanosecond it is tempting to
-/// step back. A lookup against the recorded transitions resolves at
-/// second granularity, so a sub-second step lands inside the second the
-/// transition happens on and answers with the offset it installed, not
-/// the one it replaced. No zone shifts twice within a second, so the
-/// wider step reads nothing else by mistake.
 fn offset_before(zone: &TimeZone, at: Timestamp) -> Option<Offset> {
+    // NOTE: a whole second, not a nanosecond: lookups resolve at second
+    // granularity, so a shorter step lands inside the transition's own
+    // second and answers with the offset it installed, not the earlier
+    // one. No zone shifts twice within a second.
     let before = at.checked_sub(SignedDuration::from_secs(1)).ok()?;
     Some(zone.to_offset(before))
 }
 
-/// The yearly rule the onset at `at` repeats on, when the following
-/// transitions of the same kind fall on the same month, week of the
-/// month, weekday and local time.
+/// The yearly rule the onset at `at` repeats on.
 ///
-/// Stated as a rule rather than a list of dated onsets because a
-/// recurring event outlives any window a list could enumerate, and an
-/// occurrence past the end of it would resolve against the last
-/// observance and drift by the daylight offset.
+/// Stated only where the following transitions agree on month, week,
+/// weekday and time, and as a rule rather than dated onsets, which a
+/// recurring event outlives: past the end it would drift by an hour.
 fn yearly_rule(zone: &TimeZone, at: Timestamp, dst: Dst, onset: civil::DateTime) -> Option<String> {
     let ordinal = week_of_month(onset);
 
@@ -249,8 +216,7 @@ fn yearly_rule(zone: &TimeZone, at: Timestamp, dst: Dst, onset: civil::DateTime)
     (agreeing == AGREEING_TRANSITIONS).then(|| recurrence(onset.month(), ordinal, onset.weekday()))
 }
 
-/// One STANDARD or DAYLIGHT observance: the offset it leaves, the
-/// offset it installs, when it takes effect and the rule it repeats on.
+/// One STANDARD or DAYLIGHT observance.
 fn observance(
     name: &'static str,
     from: Offset,
@@ -274,8 +240,8 @@ fn observance(
     }
 
     // NOTE: RFC 5545 3.6.5 states an observance DTSTART in the local
-    // time before its transition, which is the offset the observance
-    // leaves, so the onset is read in `from` and needs no shifting.
+    // time before its transition, the offset it leaves, so the onset is
+    // read in `from` and needs no shifting.
     observance.push(prop(
         IcalPropKind::DtStart,
         IcalValue::DateTime(IcalDateTime(stamp(onset).into())),
@@ -291,13 +257,11 @@ fn observance(
     observance
 }
 
-/// Which occurrence of its weekday within the month a local date-time
-/// falls on, as iCalendar counts them: 1 through 4 from the start, or
-/// -1 for the last whatever the month's length.
+/// Which occurrence of its weekday in the month a date-time falls on.
 ///
-/// A fifth occurrence is reported as the last one, since that is what
-/// it is, and the rule then stays right in the months holding only
-/// four.
+/// As iCalendar counts them: 1 through 4 from the start, -1 for the
+/// last. A fifth occurrence is the last one, which keeps the rule right
+/// in the months holding only four.
 fn week_of_month(onset: civil::DateTime) -> i8 {
     let day = onset.day();
     let last = onset.date().last_of_month().day();
@@ -336,9 +300,10 @@ fn stamp(onset: civil::DateTime) -> String {
     )
 }
 
-/// An offset as the iCalendar `±HHMM(SS)` form, widened for the handful
-/// of historical zones running on a whole number of neither minutes nor
-/// hours.
+/// An offset as the iCalendar `±HHMM(SS)` form.
+///
+/// The seconds are stated only for the handful of historical zones
+/// running on a whole number of neither minutes nor hours.
 fn utc_offset(offset: Offset) -> String {
     let total = offset.seconds();
     let sign = if total < 0 { '-' } else { '+' };
@@ -361,9 +326,10 @@ mod tests {
 
     use super::*;
 
-    /// Zones spanning the shapes a rule can take: both hemispheres, a
-    /// half-hour shift, a rule counted from the last week of a month
-    /// rather than the first, and zones that never shift at all.
+    /// Zones spanning the shapes a rule can take.
+    ///
+    /// Both hemispheres, a half-hour shift, a rule counted from the
+    /// last week of a month rather than the first, and zones at rest.
     const ZONES: &[&str] = &[
         "America/New_York",
         "America/Santiago",
@@ -389,12 +355,10 @@ mod tests {
             .as_second()
     }
 
-    /// A generated zone, read back through the resolver ical-rs runs on
-    /// the observances alone.
+    /// A generated zone, read back through the ical-rs resolver.
     ///
     /// Nothing of this module survives the round trip but the bytes, so
-    /// what the assertions weigh is the document rather than the code
-    /// that wrote it.
+    /// the assertions weigh the document, not the code that wrote it.
     fn resolved(tzid: &str, local: (i16, i8, i8, i8, i8)) -> IcalOffset {
         let (year, month, day, hour, minute) = local;
 
@@ -417,11 +381,11 @@ mod tests {
     }
 
     /// A civil time under a generated zone resolves to the offset the
-    /// database itself puts in force at the instant that time then
-    /// names, which is the whole claim a VTIMEZONE makes.
+    /// database itself puts in force at the instant it names, which is
+    /// the whole claim a VTIMEZONE makes.
     ///
-    /// The sweep reaches back over the rule changes of the last half
-    /// century, since the anchor is what selects the era described.
+    /// The sweep spans half a century of rule changes, since the anchor
+    /// selects the era described.
     #[test]
     fn a_generated_zone_answers_what_the_database_does() {
         let mut checked = 0;
@@ -434,7 +398,7 @@ mod tests {
                     let local = (year, month, 15, 12, 0);
 
                     // NOTE: a sample the clock skips or repeats has no
-                    // single answer to compare, and the two that do are
+                    // single answer to compare; the two that do are
                     // pinned by their own case.
                     let Some(offset) = resolved(tzid, local).unambiguous() else {
                         continue;
@@ -457,9 +421,8 @@ mod tests {
     }
 
     /// The United States moved its rule in 2007, so an item from before
-    /// it must not be described by the rule that replaced it: every
-    /// occurrence in the weeks between the two onsets would read an
-    /// hour out.
+    /// it must not be described by the rule that replaced it: the weeks
+    /// between the two onsets would read an hour out.
     #[test]
     fn the_observances_describe_the_era_the_item_names() {
         let modern = vtimezone("America/New_York", at(2024, 7, 14))
@@ -477,8 +440,7 @@ mod tests {
 
     /// Hong Kong last shifted in 1979, so an item from today must not
     /// carry that observance: the offset has been +0800 throughout
-    /// living memory. While it was still shifting, it is described as
-    /// shifting.
+    /// living memory. While it still shifted, it is described shifting.
     #[test]
     fn a_zone_that_gave_daylight_saving_up_is_not_described_by_its_ghost() {
         let settled = vtimezone("Asia/Hong_Kong", at(2026, 8, 14))
@@ -515,11 +477,10 @@ mod tests {
         );
     }
 
-    /// Lord Howe shifts by thirty minutes rather than an hour, so its
-    /// offsets need the minutes field to say anything at all, and
-    /// Kolkata never shifts, so it states one observance and no rule. A
-    /// name Google could never send resolves to nothing at all, rather
-    /// than to a zone made up on the spot.
+    /// Lord Howe shifts by half an hour, so its offsets need the
+    /// minutes field to say anything at all, and Kolkata never shifts,
+    /// so it states one observance and no rule. A name the database
+    /// does not know resolves to nothing, not to a zone made up.
     #[test]
     fn a_half_hour_shift_and_a_fixed_zone_keep_their_shapes() {
         let anchor = at(2026, 8, 14);

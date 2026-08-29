@@ -1,22 +1,22 @@
+//! # Table style
+//!
 //! The `comfy_table` preset mapper shared by every listing.
 //!
-//! `comfy_table` v8 dropped the positional preset string in favour of a
-//! typed [`TableStyle`] builder. The `table.preset` config option keeps
-//! accepting the v7 string, so a configuration written against
-//! calendula 0.1 stays valid; this module maps one onto the other.
+//! `comfy_table` v8 dropped the positional preset string in favour of a typed
+//! [`TableStyle`] builder. The `table.preset` config option keeps accepting
+//! the v7 string, so a configuration written against calendula 0.1 stays
+//! valid; this module maps one onto the other.
 
 use pimalaya_cli::table::{ContentLineStyle, LineStyle, TableStyle};
 
-/// The default preset, equivalent to `comfy_table` v7's
-/// `UTF8_FULL_CONDENSED`: full UTF-8 borders with no divider between
-/// rows.
+/// The default preset, `comfy_table` v7's `UTF8_FULL_CONDENSED`: full UTF-8
+/// borders with no divider between rows.
 pub const DEFAULT_PRESET: &str = "││──╞═╪╡┆    ┬┴┌┐└┘";
 
 /// How many table components a preset string can style.
 const COMPONENTS: usize = 19;
 
-/// Maps a `comfy_table` v7 positional preset string onto a
-/// [`TableStyle`].
+/// Maps a `comfy_table` v7 positional preset string onto a [`TableStyle`].
 ///
 /// Each character styles one component, in the order of the v7
 /// `TableComponent` enum:
@@ -34,10 +34,9 @@ const COMPONENTS: usize = 19;
 ///  9 horizontal lines
 /// ```
 ///
-/// A space means "do not draw this component", and so does a component
-/// left out of a short string, both matching v7 where an unset
-/// component rendered blank. Characters past the nineteenth are
-/// ignored.
+/// A space leaves a component undrawn, and so does one a short string leaves
+/// out, both matching v7 where an unset component rendered blank. Characters
+/// past the nineteenth are ignored.
 pub fn style_from_preset(preset: &str) -> TableStyle {
     let mut chars = [None; COMPONENTS];
 
@@ -88,9 +87,9 @@ mod tests {
 
     use super::{DEFAULT_PRESET, style_from_preset};
 
-    // The v7 preset strings, checked against the v8 constants that
-    // replaced them. Equality across all six line styles is what proves
-    // the character-to-builder-slot mapping.
+    // NOTE: equality against the v8 constants that replaced the v7 preset
+    // strings, across all six line styles, is what proves the
+    // character-to-builder-slot mapping.
 
     #[test]
     fn the_default_preset_is_utf8_full_condensed() {

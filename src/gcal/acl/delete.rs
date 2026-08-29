@@ -1,3 +1,7 @@
+//! # ACL delete
+//!
+//! The `calendula gcal acl delete` command, revoking one sharing rule.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};

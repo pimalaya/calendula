@@ -1,3 +1,8 @@
+//! # Settings
+//!
+//! The `calendula gcal settings` command, showing the account's own Calendar
+//! settings.
+
 use std::fmt;
 
 use anyhow::Result;
@@ -13,9 +18,9 @@ use crate::gcal::client::GcalClient;
 
 /// Show the account's own Calendar settings.
 ///
-/// These are what a Google client renders with (the account's time
-/// zone, which day its weeks start on, its date format), and none of
-/// them belongs to a calendar, so no shared command can carry them.
+/// These are what a Google client renders with: the account's time zone,
+/// which day its weeks start on, its date format. None belongs to a
+/// calendar, so no shared command can carry them.
 ///
 /// JSON output: `{"settings": [{"id", "value"}]}`.
 #[derive(Debug, Parser)]
@@ -53,8 +58,10 @@ impl GcalSettingsCommand {
 /// The rendered settings listing.
 #[derive(Clone, Debug, Serialize)]
 pub struct SettingsTable {
+    /// The table style the account configured.
     #[serde(skip)]
     pub style: TableStyle,
+    /// The account settings, one row each.
     #[serde(rename = "settings")]
     pub rows: Vec<SettingRow>,
 }

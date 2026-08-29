@@ -1,3 +1,8 @@
+//! # Quick add
+//!
+//! The `calendula gcal quick-add` command, creating an event from a
+//! sentence Google parses server-side.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};
@@ -6,10 +11,10 @@ use crate::gcal::client::GcalClient;
 
 /// Create an event from a sentence.
 ///
-/// The text is parsed server-side, so "Lunch with Ada tomorrow at
-/// noon" becomes a dated event without a hand-written iCalendar. What
-/// Google understands is its own business, which is why this cannot be
-/// a shared command.
+/// The text is parsed server-side, so "Lunch with Ada tomorrow at noon"
+/// becomes a dated event without a hand-written iCalendar. What Google
+/// understands is its own business, which is why this cannot be a shared
+/// command.
 ///
 /// JSON output: `{"message": "..."}`.
 #[derive(Debug, Parser)]

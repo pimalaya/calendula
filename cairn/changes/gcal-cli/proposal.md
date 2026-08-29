@@ -9,9 +9,15 @@ created: 2026-08-09
 
 ## Why
 
-Every other backend has a family exposing what only it has: `caldav` discovers endpoints and lists collections with their ctag, sync token and accepted component kinds; `vdir` renames a collection; `pimdir` reports how much of a store is downloaded. gcal landed with a backend and no family, so the whole half of the Calendar API that iCalendar cannot express stayed unreachable, and the shared surface was the only way in.
+Every other backend has a family exposing what only it has: `caldav` discovers endpoints and lists collections with their ctag, sync token and accepted component kinds; `vdir` renames a collection; `pimdir` reports how much of a store is downloaded.
 
-That half is not marginal. Free/busy is how a calendar answers "when are you available", and it is a query, not a resource: no component family can carry it. ACL is how a Google calendar is shared, which is the difference between a personal calendar and a team one. Quick add is the fastest path from a sentence to an event. Instances expand a recurring series, which the shared API deliberately does not do (it returns the series, since that is what round-trips). None of these belongs in a least-common-denominator surface, and all of them are one io-gcal call away.
+gcal landed with a backend and no family, so the whole half of the Calendar API that iCalendar cannot express stayed unreachable, and the shared surface was the only way in.
+
+That half is not marginal. Free/busy is how a calendar answers "when are you available", and it is a query, not a resource: no component family can carry it.
+
+ACL is how a Google calendar is shared, which is the difference between a personal calendar and a team one. Quick add is the fastest path from a sentence to an event.
+
+Instances expand a recurring series, which the shared API deliberately does not do (it returns the series, since that is what round-trips). None of these belongs in a least-common-denominator surface, and all of them are one io-gcal call away.
 
 ## What
 

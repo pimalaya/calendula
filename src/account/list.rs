@@ -1,3 +1,8 @@
+//! # Account list
+//!
+//! The `account list` command, printing every account the configuration
+//! declares as a table.
+
 use std::{fmt, path::PathBuf};
 
 use anyhow::Result;
@@ -63,8 +68,11 @@ impl AccountListCommand {
 /// The per-column colors an account listing renders with.
 #[derive(Clone, Copy, Debug)]
 struct AccountColors {
+    /// Color of the NAME column.
     name: Color,
+    /// Color of the BACKENDS column.
     backends: Color,
+    /// Color of the DEFAULT column.
     default: Color,
 }
 
@@ -114,12 +122,16 @@ impl AccountRow {
 /// The rendered account listing.
 #[derive(Clone, Debug, Serialize)]
 pub struct AccountsTable {
+    /// The `comfy_table` style the configured preset maps to.
     #[serde(skip)]
     pub style: TableStyle,
+    /// How the columns spread over the terminal width.
     #[serde(skip)]
     pub arrangement: ContentArrangement,
+    /// The per-column colors.
     #[serde(skip)]
     colors: AccountColors,
+    /// One row per account, sorted by name.
     pub accounts: Vec<AccountRow>,
 }
 

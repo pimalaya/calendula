@@ -9,7 +9,9 @@ created: 2026-08-28
 
 Bare `calendula` ran the wizard unconditionally, reading no configuration first. A user with four accounts in `~/.calendularc` typing `calendula` was dropped into a first-run flow, and there was no other way to reach the wizard, since it had no command of its own.
 
-himalaya and cardamum settled this differently and settled it together: the wizard is a `configure` command, and it is *offered* from the two places nothing can happen without a configuration, a bare invocation finding none and a command needing an account finding none. calendula is the odd one out, and the divergence is user-visible on the very first thing a user types.
+himalaya and cardamum settled this differently and settled it together: the wizard is a `configure` command, and it is *offered* from the two places nothing can happen without a configuration, a bare invocation finding none and a command needing an account finding none.
+
+calendula is the odd one out, and the divergence is user-visible on the very first thing a user types.
 
 ## What changes
 

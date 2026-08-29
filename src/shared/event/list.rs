@@ -1,3 +1,8 @@
+//! # Event list
+//!
+//! The `calendula event list` command, rendering the VEVENTs of a
+//! calendar as a table.
+
 use std::fmt;
 
 use anyhow::Result;
@@ -56,8 +61,8 @@ impl EventListCommand {
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         let range = CalendarTimeRange::from_days(self.from, self.to)?;
 
-        // A window should return every match, so the default page-size
-        // cap only applies to the unfiltered listing.
+        // NOTE: a window must return every match, so the default
+        // page-size cap only applies to the unfiltered listing.
         let page_size = match range {
             Some(_) => self.page_size,
             None => self
@@ -95,14 +100,18 @@ struct EventColors {
 /// The rendered event listing.
 #[derive(Clone, Debug, Serialize)]
 pub struct Events {
+    /// The table preset the account configures.
     #[serde(skip)]
     pub style: TableStyle,
+    /// How the table spreads its columns over the terminal.
     #[serde(skip)]
     pub arrangement: ContentArrangement,
+    /// The `--max-width` cap, when one was given.
     #[serde(skip)]
     pub max_width: Option<u16>,
     #[serde(skip)]
     colors: EventColors,
+    /// The listed events, in the order the backend returned them.
     pub events: Vec<Event>,
 }
 

@@ -1,3 +1,8 @@
+//! # ACL update
+//!
+//! The `calendula gcal acl update` command, changing the role an existing
+//! rule grants.
+
 use anyhow::Result;
 use clap::Parser;
 use io_gcal::v3::rest::acl::GcalAclRule;

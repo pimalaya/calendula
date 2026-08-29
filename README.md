@@ -140,11 +140,15 @@ The configuration is loaded from the first existing path among:
 - `$HOME/.config/calendula/config.toml`
 - `$HOME/.calendularc`
 
-Override the path with `calendula -c <PATH>` or `CALENDULA_CONFIG=<PATH>`. Multiple paths can be passed at once, separated by `:`; the first is the base and the rest are deep-merged on top, which is how a public configuration and a private one stay separate files. The full field reference lives in [config.sample.toml](./config.sample.toml).
+Override the path with `calendula -c <PATH>` or `CALENDULA_CONFIG=<PATH>`; multiple paths can be passed at once, separated by `:`. The first is the base and the rest are deep-merged on top. The full field reference lives in [config.sample.toml](./config.sample.toml).
 
-Run `calendula configure` to launch the wizard. It asks one question, taking an email address, a server URL, or a local folder path, and the shape of what you type decides the rest. An address is discovered: every reachable server is offered, and picking one prompts only its credentials. A URL is taken as the CalDAV context root, which is how a self-hosted server publishing no SRV record gets configured. A folder is detected as a vdir home or a pimdir store.
+Run `calendula configure` to launch the wizard. It asks one question, taking an email address, a server URL or a local folder path, and the shape of what you type decides the rest.
 
-The wizard tests the account before showing you anything, then offers to save it: to a new configuration file, or appended to the one you already have, leaving its comments and formatting untouched. A first run with no configuration is offered the wizard by a bare `calendula` or by any command needing an account; once you have one, bare `calendula` prints the help.
+An address is discovered: every reachable server is offered, and picking one prompts only its credentials. A URL is taken as the CalDAV context root, which is how a self-hosted server publishing no SRV record gets configured. A folder is detected as a vdir home or a pimdir store.
+
+The wizard tests the account before showing you anything, then offers to save it: to a new configuration file, or appended to the one you already have, leaving its comments and formatting untouched.
+
+A bare `calendula` finding no configuration offers the wizard, as does any command needing an account; once you have one, bare `calendula` prints the help.
 
 Redirect it instead to keep the document yourself:
 
@@ -183,9 +187,17 @@ gcal.auth.token.command = ["ortie", "token", "show"]
 calendar.default = "example@gmail.com"
 ```
 
-Google stores events as JSON and exposes no iCalendar representation of one, so calendula synthesizes the document you read and re-projects what you write. Properties with a well-defined iCalendar slot are authoritative in both directions; Google-only fields (the event colour, the guest permissions, working-location and out-of-office blocks) survive an update untouched; provider-scoped ones surface as read-only `X-GOOGLE-*` properties; and everything else is stashed verbatim on the server so it round-trips instead of being dropped on the next write. Only events project: a VTODO or VJOURNAL is refused by name, since Google models neither.
+Google stores events as JSON and exposes no iCalendar representation of one, so calendula synthesizes the document you read and re-projects what you write.
 
-Google is also reachable over CalDAV, but only in a crippled form: bearer tokens are the sole authentication, `MKCALENDAR` is refused outright, and the discovery entry point is off-spec, so each calendar has to be addressed by hand and none can be created. If you want it anyway, set `caldav.home` to the base URL and make the calendar id the `<CALENDAR-ID>/events` segment:
+Properties with a well-defined iCalendar slot are authoritative in both directions, and provider-scoped ones surface as read-only `X-GOOGLE-*` properties.
+
+Google-only fields (the event colour, the guest permissions, working-location and out-of-office blocks) survive an update untouched, and everything else is stashed verbatim on the server so it round-trips instead of being dropped on the next write.
+
+Only events project: a VTODO or VJOURNAL is refused by name, since Google models neither.
+
+Google is also reachable over CalDAV, but only in a crippled form: bearer tokens are the sole authentication, `MKCALENDAR` is refused outright, and the discovery entry point is off-spec, so each calendar has to be addressed by hand and none can be created.
+
+If you want it anyway, set `caldav.home` to the base URL and make the calendar id the `<CALENDAR-ID>/events` segment:
 
 ```toml
 [accounts.example]
@@ -246,7 +258,9 @@ vdir.home-dir = "~/.local/share/vdirsyncer/calendars"
 calendar.default = "personal"
 ```
 
-A [pimdir](https://github.com/pimalaya/pimdir) store is the offline cache a sync engine fills: a SQLite index plus content-addressed bodies, shared with the other Pimalaya clients reading the same store. It is a cache, not a server, so calendars come from the sync and the collection verbs refuse here. Writes are staged for the next sync to push:
+A [pimdir](https://github.com/pimalaya/pimdir) store is the offline cache a sync engine fills: a SQLite index plus content-addressed bodies, shared with the other Pimalaya clients reading the same store.
+
+It is a cache, not a server, so calendars come from the sync and the collection verbs refuse here. Writes are staged for the next sync to push:
 
 ```toml
 [accounts.cached]

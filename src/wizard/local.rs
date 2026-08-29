@@ -1,12 +1,12 @@
-//! Local backend wizard.
+//! # Local backend wizard
 //!
-//! A typed path pointing at an existing folder configures a local
-//! backend. The kind is auto-detected from the directory's own markers:
-//! a pimdir store carries its SQLite index and blob tree, a vdir home
-//! carries one subdirectory per calendar. When detection is
-//! inconclusive (an empty or ambiguous directory) and both backends are
-//! compiled in, the user picks; otherwise the sole compiled backend is
-//! used.
+//! A typed path pointing at an existing folder configures a local backend,
+//! its kind auto-detected from the directory's own markers: a pimdir store
+//! carries its SQLite index and blob tree, a vdir home one subdirectory per
+//! calendar.
+//!
+//! When detection is inconclusive and both backends are compiled in, the user
+//! picks; otherwise the sole compiled backend is used.
 
 use std::path::{Path, PathBuf};
 
@@ -27,15 +27,16 @@ const PIMDIR_OBJECTS: &str = "objects";
 
 /// A configured local backend.
 pub enum Local {
+    /// A vdir home, one directory per calendar.
     #[cfg(feature = "vdir")]
     Vdir(VdirConfig),
+    /// A pimdir store, the offline store a sync fills.
     #[cfg(feature = "pimdir")]
     Pimdir(PimdirConfig),
 }
 
-/// Configures a local backend rooted at `root`, auto-detecting its kind
-/// from the on-disk markers and prompting only when that is
-/// inconclusive.
+/// Configures a local backend rooted at `root`, auto-detecting its kind from
+/// the on-disk markers and prompting only when that is inconclusive.
 pub fn configure(root: PathBuf) -> Result<Local> {
     match detect(&root) {
         Some(local) => Ok(local),
@@ -45,9 +46,9 @@ pub fn configure(root: PathBuf) -> Result<Local> {
 
 /// Detects the backend kind from `root`'s markers.
 ///
-/// pimdir is tested first and on its index file, which is unambiguous:
-/// a vdir home is just directories, so anything holding a `pimdir.db`
-/// is a store rather than a home that happens to contain one.
+/// pimdir is tested first, on its index file: a vdir home is just
+/// directories, so anything holding a `pimdir.db` is a store rather than a
+/// home that happens to contain one.
 #[cfg_attr(
     not(all(feature = "vdir", feature = "pimdir")),
     allow(unused_variables)
@@ -71,9 +72,11 @@ fn detect(root: &Path) -> Option<Local> {
     None
 }
 
-/// Whether `root` holds at least one vdir collection: a subdirectory
-/// carrying an item or a metadata marker. An empty directory is
-/// deliberately not a match, so the ambiguous case reaches the prompt.
+/// Whether `root` holds at least one vdir collection: a subdirectory carrying
+/// an item or a metadata marker.
+///
+/// An empty directory is deliberately not a match, so the ambiguous case
+/// reaches the prompt.
 #[cfg(feature = "vdir")]
 fn has_collection(root: &Path) -> bool {
     let Ok(entries) = root.read_dir() else {
@@ -170,8 +173,8 @@ mod tests {
     #[cfg(all(feature = "vdir", feature = "pimdir"))]
     #[test]
     fn a_store_inside_a_home_still_reads_as_a_store() {
-        // A pimdir root also holds subdirectories, so testing vdir first
-        // would misread every store as a home.
+        // NOTE: a pimdir root also holds subdirectories, so testing vdir
+        // first would misread every store as a home.
         let root = scratch("both");
         fs::write(root.join(PIMDIR_INDEX), b"").unwrap();
         let collection = root.join("personal");

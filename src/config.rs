@@ -1,10 +1,12 @@
-//! The TOML configuration schema.
+//! # Configuration
 //!
-//! A configuration is a top-level block of rendering options plus one
-//! `[accounts.<name>]` block per account, each carrying an optional
-//! sub-block per backend. The global block is folded under the selected
-//! account at load time, so a value set once at the top applies
-//! everywhere it is not overridden.
+//! The TOML schema: a top-level block of rendering options, plus one
+//! `[accounts.<name>]` block per account carrying a sub-block per
+//! backend.
+//!
+//! The global block is folded under the selected account at load time,
+//! so a value set once at the top applies everywhere it is not
+//! overridden.
 //!
 //! `deny_unknown_fields` is set on the leaf blocks but deliberately not
 //! on [`Config`] and [`AccountConfig`], so a future TUI reading the same
@@ -24,31 +26,34 @@ use pimalaya_config::toml::shell_expanded_string;
 use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider};
 use serde::{Deserialize, Serialize};
 
-/// Global configuration.
-///
-/// Represents the whole TOML user's configuration file.
-/// `deny_unknown_fields` is intentionally omitted so future TUI fields
-/// can coexist; today only `[accounts.*]` plus the global rendering
-/// sections are consumed.
+/// The whole configuration file: global options and every account.
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Config {
+    /// Where an attachment or an export is written.
     pub downloads_dir: Option<PathBuf>,
+    /// Table rendering options shared by every list command.
     #[serde(default)]
     pub table: TableConfig,
+    /// `calendar` command options.
     #[serde(default)]
     pub calendar: CalendarConfig,
+    /// `event` command options.
     #[serde(default)]
     pub event: EventConfig,
+    /// `todo` command options.
     #[serde(default)]
     pub todo: TodoConfig,
+    /// `journal` command options.
     #[serde(default)]
     pub journal: JournalConfig,
+    /// `item` command options.
     #[serde(default)]
     pub item: ItemConfig,
-    /// `account list` rendering options (global only).
+    /// `account list` rendering options, read from this block only.
     #[serde(default)]
     pub account: AccountListingConfig,
+    /// One `[accounts.<name>]` block per account.
     pub accounts: HashMap<String, AccountConfig>,
 }
 
@@ -74,38 +79,33 @@ impl TomlConfig for Config {
 }
 
 #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
-/// The order the groups of a generated account read in: what the
-/// account is first, then the backend it reads calendars from, and last
-/// the rendering options.
+/// Reading order of a generated account's groups.
 ///
-/// A key outside this list still renders, after the ones listed, so a
-/// field added to [`AccountConfig`] can never go missing from a
-/// generated document just because nobody updated this table.
+/// What the account is, then the backend it reads calendars from, then
+/// the rendering options. An unlisted key still renders, after these,
+/// so a new [`AccountConfig`] field can never go missing from one.
 const RENDER_ORDER: [&str; 10] = [
     "default", "vdir", "pimdir", "caldav", "gcal", "calendar", "event", "todo", "journal", "item",
 ];
 
 #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
-/// The keys naming what a backend group points at, lifted to the top of
-/// their group. Serialized alphabetically, `caldav.server` would read
+/// Keys naming what a backend group points at, lifted to its top.
+///
+/// Serialized alphabetically, `caldav.server` would otherwise read
 /// under the `caldav.auth` credential authenticating against it.
 const ENDPOINT_KEYS: [&str; 5] = ["discover", "server", "home", "home-dir", "root"];
 
 #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
 impl AccountConfig {
-    /// Renders this account as an `[accounts.<name>]` block, ready to be
-    /// written to a configuration file or appended to one.
+    /// Renders this account as an `[accounts.<name>]` block.
     ///
-    /// The serializer decides what is written, so a defaulted field is
-    /// omitted and nothing is listed here twice. What this adds is
-    /// reading order, the flattened dotted keys coming out alphabetically
-    /// and running every group together: the groups are reordered
-    /// ([`RENDER_ORDER`]), the endpoint is lifted to the top of its own
-    /// ([`ENDPOINT_KEYS`]), and a blank line separates them.
+    /// The serializer decides what is written; this restores the
+    /// reading order alphabetical dotted keys lose: groups reordered
+    /// per [`RENDER_ORDER`], endpoint first per [`ENDPOINT_KEYS`].
     pub fn render(&self, name: &str) -> Result<String> {
         // NOTE: borrowed rather than built into a `Config`, which would
-        // mean cloning the account to render it. The emitter only looks
-        // for an `accounts` table, so any shape carrying one will do.
+        // mean cloning the account. The emitter only wants an
+        // `accounts` table, so any shape carrying one will do.
         #[derive(Serialize)]
         struct AccountDocument<'a> {
             accounts: HashMap<&'a str, &'a AccountConfig>,
@@ -167,39 +167,49 @@ impl AccountConfig {
     }
 }
 
-/// The documented sample configuration: every field a user can write by
-/// hand, pointed at wherever this crate says a configuration is missing
-/// or incomplete.
+/// The documented sample configuration, named wherever this crate
+/// reports a missing or an incomplete one.
 pub const CONFIG_SAMPLE_URL: &str =
     "https://github.com/pimalaya/calendula/blob/master/config.sample.toml";
 
-/// Account configuration.
+/// One account: the backends it reads calendars from, plus whatever it
+/// overrides of the global rendering options.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct AccountConfig {
+    /// Whether a command given no `-a/--account` picks this account.
     #[serde(default)]
     pub default: bool,
-
+    /// Where an attachment or an export is written.
     pub downloads_dir: Option<PathBuf>,
+    /// Table rendering options shared by every list command.
     #[serde(default)]
     pub table: TableConfig,
+    /// `calendar` command options.
     #[serde(default)]
     pub calendar: CalendarConfig,
+    /// `event` command options.
     #[serde(default)]
     pub event: EventConfig,
+    /// `todo` command options.
     #[serde(default)]
     pub todo: TodoConfig,
+    /// `journal` command options.
     #[serde(default)]
     pub journal: JournalConfig,
+    /// `item` command options.
     #[serde(default)]
     pub item: ItemConfig,
-
+    /// vdir backend: one local directory per calendar.
     #[cfg(feature = "vdir")]
     pub vdir: Option<VdirConfig>,
+    /// pimdir backend: a local store a sync engine fills.
     #[cfg(feature = "pimdir")]
     pub pimdir: Option<PimdirConfig>,
+    /// CalDAV backend: a remote calendar home-set.
     #[cfg(feature = "caldav")]
     pub caldav: Option<CaldavConfig>,
+    /// Google Calendar backend, over the vendor API.
     #[cfg(feature = "gcal")]
     pub gcal: Option<GcalConfig>,
 }
@@ -211,24 +221,31 @@ pub struct CalendarConfig {
     /// Calendar id used by `event` and `item` commands when their
     /// `-k/--calendar` flag is omitted.
     pub default: Option<String>,
-
+    /// `calendar list` options.
     #[serde(default)]
     pub list: CalendarListConfig,
 }
 
+/// `calendar list` options.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CalendarListConfig {
+    /// Per-column colors of the rendered table.
     #[serde(default)]
     pub table: CalendarListTableConfig,
 }
 
+/// Per-column colors of the `calendar list` table.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CalendarListTableConfig {
+    /// Color of the ID column, red by default.
     pub id_color: Option<Color>,
+    /// Color of the NAME column, green by default.
     pub name_color: Option<Color>,
+    /// Color of the DESCRIPTION column, uncolored by default.
     pub description_color: Option<Color>,
+    /// Color of the COLOR column, uncolored by default.
     pub color_color: Option<Color>,
 }
 
@@ -236,25 +253,33 @@ pub struct CalendarListTableConfig {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct EventConfig {
+    /// `event list` options.
     #[serde(default)]
     pub list: EventListConfig,
 }
 
+/// `event list` options.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct EventListConfig {
-    /// Default `-s/--page-size` value for `events list`.
+    /// Default `-s/--page-size` value for `event list`, 25 when unset.
     pub page_size: Option<u32>,
+    /// Per-column colors of the rendered table.
     #[serde(default)]
     pub table: EventListTableConfig,
 }
 
+/// Per-column colors of the `event list` table.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct EventListTableConfig {
+    /// Color of the ID column, red by default.
     pub id_color: Option<Color>,
+    /// Color of the SUMMARY column, green by default.
     pub summary_color: Option<Color>,
+    /// Color of the START column, dark yellow by default.
     pub start_color: Option<Color>,
+    /// Color of the END column, dark yellow by default.
     pub end_color: Option<Color>,
 }
 
@@ -262,25 +287,33 @@ pub struct EventListTableConfig {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TodoConfig {
+    /// `todo list` options.
     #[serde(default)]
     pub list: TodoListConfig,
 }
 
+/// `todo list` options.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TodoListConfig {
-    /// Default `-s/--page-size` value for `todos list`.
+    /// Default `-s/--page-size` value for `todo list`, 25 when unset.
     pub page_size: Option<u32>,
+    /// Per-column colors of the rendered table.
     #[serde(default)]
     pub table: TodoListTableConfig,
 }
 
+/// Per-column colors of the `todo list` table.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TodoListTableConfig {
+    /// Color of the ID column, red by default.
     pub id_color: Option<Color>,
+    /// Color of the SUMMARY column, green by default.
     pub summary_color: Option<Color>,
+    /// Color of the DUE column, dark yellow by default.
     pub due_color: Option<Color>,
+    /// Color of the STATUS column, uncolored by default.
     pub status_color: Option<Color>,
 }
 
@@ -288,24 +321,32 @@ pub struct TodoListTableConfig {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct JournalConfig {
+    /// `journal list` options.
     #[serde(default)]
     pub list: JournalListConfig,
 }
 
+/// `journal list` options.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct JournalListConfig {
-    /// Default `-s/--page-size` value for `journals list`.
+    /// Default `-s/--page-size` value for `journal list`, 25 when
+    /// unset.
     pub page_size: Option<u32>,
+    /// Per-column colors of the rendered table.
     #[serde(default)]
     pub table: JournalListTableConfig,
 }
 
+/// Per-column colors of the `journal list` table.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct JournalListTableConfig {
+    /// Color of the ID column, red by default.
     pub id_color: Option<Color>,
+    /// Color of the SUMMARY column, green by default.
     pub summary_color: Option<Color>,
+    /// Color of the START column, dark yellow by default.
     pub start_color: Option<Color>,
 }
 
@@ -313,24 +354,31 @@ pub struct JournalListTableConfig {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ItemConfig {
+    /// `item list` options.
     #[serde(default)]
     pub list: ItemListConfig,
 }
 
+/// `item list` options.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ItemListConfig {
-    /// Default `-s/--page-size` value for `items list`.
+    /// Default `-s/--page-size` value for `item list`, 25 when unset.
     pub page_size: Option<u32>,
+    /// Per-column colors of the rendered table.
     #[serde(default)]
     pub table: ItemListTableConfig,
 }
 
+/// Per-column colors of the `item list` table.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ItemListTableConfig {
+    /// Color of the ID column, red by default.
     pub id_color: Option<Color>,
+    /// Color of the ETAG column, uncolored by default.
     pub etag_color: Option<Color>,
+    /// Color of the SIZE column, uncolored by default.
     pub size_color: Option<Color>,
 }
 
@@ -338,22 +386,29 @@ pub struct ItemListTableConfig {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct AccountListingConfig {
+    /// `account list` options.
     #[serde(default)]
     pub list: AccountListingListConfig,
 }
 
+/// `account list` options.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct AccountListingListConfig {
+    /// Per-column colors of the rendered table.
     #[serde(default)]
     pub table: AccountListingTableConfig,
 }
 
+/// Per-column colors of the `account list` table.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct AccountListingTableConfig {
+    /// Color of the NAME column, green by default.
     pub name_color: Option<Color>,
+    /// Color of the BACKENDS column, blue by default.
     pub backends_color: Option<Color>,
+    /// Color of the DEFAULT column, uncolored by default.
     pub default_color: Option<Color>,
 }
 
@@ -368,12 +423,16 @@ pub struct TableConfig {
     pub arrangement: Option<TableArrangementConfig>,
 }
 
+/// How a table spreads its columns over the terminal width.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum TableArrangementConfig {
+    /// Fit the content to the terminal width. The default.
     #[default]
     Dynamic,
+    /// Fit the content to the terminal width, always filling it.
     DynamicFullWidth,
+    /// Leave every column at its natural width.
     Disabled,
 }
 
@@ -410,11 +469,11 @@ pub struct PimdirConfig {
     /// The store directory, holding the SQLite index and the blob
     /// tree. Shell-expanded before use.
     pub root: PathBuf,
-    /// The account whose collections this client reads (pimdir SPEC
-    /// 9.2), the name the sync engine groups them under.
+    /// The account whose collections this client reads, the name the
+    /// sync engine groups them under (pimdir SPEC 9.2).
     ///
     /// Usually left unset: a store synced by one account is read as
-    /// that one. Set it only for a store several accounts share, where
+    /// that one. Set it for a store several accounts share, where
     /// guessing would show the wrong calendar set.
     #[serde(default)]
     pub account: Option<String>,
@@ -422,18 +481,18 @@ pub struct PimdirConfig {
 
 /// CalDAV backend configuration.
 ///
-/// Locating the calendar home-set takes exactly one of three routes,
-/// from most to least discovery: `discover` resolves a bare domain,
-/// `server` names the context root to walk from, and `home` pins the
-/// home-set outright.
+/// Locating the calendar home-set takes one of three routes, from most
+/// to least discovery: `discover` resolves a bare domain, `server`
+/// names the context root to walk from, `home` pins the home-set.
 #[cfg(feature = "caldav")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CaldavConfig {
     /// Bare domain resolved to a context root through RFC 6764 SRV
-    /// records and the `.well-known` path. Convenient, but it costs
-    /// DNS and HTTP round-trips on every run; prefer `server` once the
-    /// answer is known.
+    /// records and the `.well-known` path.
+    ///
+    /// It costs DNS and HTTP round-trips on every run: prefer `server`
+    /// once the answer is known.
     pub discover: Option<String>,
     /// DAV context root. Principal and calendar-home-set discovery
     /// start here, skipping the `.well-known` step.
@@ -491,11 +550,9 @@ pub struct GcalConfig {
 
 /// Google Calendar authentication configuration.
 ///
-/// A struct rather than an enumeration of kinds: the Calendar API
-/// accepts an OAuth 2.0 bearer token and nothing else, so there is
-/// nothing to choose between. It still nests under `auth`, so every
-/// backend across the Pimalaya CLIs spells its credentials the same
-/// way.
+/// A struct rather than an enumeration of kinds: the Calendar API takes
+/// an OAuth 2.0 bearer token and nothing else. It still nests under
+/// `auth`, so every Pimalaya backend spells its credentials alike.
 #[cfg(feature = "gcal")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
@@ -511,29 +568,42 @@ pub struct GcalAuthConfig {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TlsConfig {
+    /// TLS implementation. Unset takes the first compiled in, rustls
+    /// before native-tls.
     pub provider: Option<TlsProviderConfig>,
+    /// rustls options, ignored when native-tls is the provider.
     #[serde(default)]
     pub rustls: RustlsConfig,
+    /// PEM certificate to trust, pinned to the server's leaf under
+    /// rustls and taken as a root certificate under native-tls.
     pub cert: Option<PathBuf>,
 }
 
+/// Which TLS implementation carries the connection.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum TlsProviderConfig {
+    /// The pure-Rust rustls stack.
     Rustls,
+    /// The platform's own TLS stack.
     NativeTls,
 }
 
+/// rustls-specific options.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct RustlsConfig {
+    /// Crypto provider. Unset prefers ring, else aws-lc-rs.
     pub crypto: Option<RustlsCryptoConfig>,
 }
 
+/// Which cryptographic provider backs rustls.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum RustlsCryptoConfig {
+    /// The aws-lc-rs provider.
     Aws,
+    /// The ring provider.
     Ring,
 }
 

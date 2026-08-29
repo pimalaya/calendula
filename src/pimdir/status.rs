@@ -1,3 +1,5 @@
+//! # Pimdir status
+//!
 //! The `pimdir status` command and the report it renders.
 
 use std::fmt;
@@ -13,8 +15,9 @@ use crate::pimdir::backend::PimdirBackend;
 ///
 /// Shows the account this client reads, every account the store groups
 /// collections under, and one row per calendar with how many of its
-/// items carry a local body and how many creations are still queued. A
-/// calendar whose items list but do not read is waiting on a sync to
+/// items carry a local body and how many creations are still queued.
+///
+/// A calendar whose items list but do not read is waiting on a sync to
 /// hydrate them, and this is where to see that coming.
 ///
 /// JSON output: `{"account", "accounts", "calendars": [{"id", "name",
@@ -50,8 +53,10 @@ pub struct PimdirCalendarStatus {
     pub total: usize,
     /// How many of those carry a local body.
     pub hydrated: usize,
-    /// How many creations are queued for it, which have no public id
-    /// until the store's owner applies them and so list nowhere else.
+    /// How many creations are queued for it.
+    ///
+    /// They carry no public id until the store's owner applies them,
+    /// so they list nowhere else.
     pub queued: usize,
 }
 

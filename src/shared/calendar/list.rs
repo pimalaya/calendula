@@ -1,3 +1,8 @@
+//! # Calendar list
+//!
+//! The `calendar list` command, printing the account's calendars as a
+//! table.
+
 use std::fmt;
 
 use anyhow::Result;
@@ -12,11 +17,10 @@ use crate::shared::{calendar::Calendar, client::CalendarClient};
 
 /// List the calendars of the active account.
 ///
-/// Every backend serves this the same way; use the protocol-specific
-/// listings when you need what only one backend exposes.
+/// Every backend serves this the same way; use the protocol-specific listings
+/// when you need what only one backend exposes.
 ///
-/// JSON output: `{"calendars": [{"id", "name", "description",
-/// "color"}]}`.
+/// JSON output: `{"calendars": [{"id", "name", "description", "color"}]}`.
 #[derive(Debug, Parser)]
 pub struct CalendarListCommand {
     /// Maximum width of the rendered table, in terminal columns.

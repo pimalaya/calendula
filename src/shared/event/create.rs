@@ -1,3 +1,8 @@
+//! # Event create
+//!
+//! The `calendula event create` command, storing one VEVENT into the
+//! selected calendar.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};
@@ -6,12 +11,14 @@ use crate::shared::{arg::CalendarIdArg, client::CalendarClient, ical::IcalArg};
 
 /// Create a new event from an iCalendar source.
 ///
+/// The source is stored as given, so it carries the UID the event is
+/// addressed by afterwards.
+///
 /// JSON output: `{"message": "..."}`.
 #[derive(Debug, Parser)]
 pub struct EventCreateCommand {
     #[command(flatten)]
     pub calendar: CalendarIdArg,
-
     #[command(flatten)]
     pub ical: IcalArg,
 }

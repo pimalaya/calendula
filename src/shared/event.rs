@@ -1,12 +1,14 @@
-//! VEVENT projection over the shared items, plus the `event` command
+//! # Event
+//!
+//! The VEVENT projection over the shared items, and the `event` command
 //! family built on it.
 //!
-//! A calendar collection mixes component kinds, so the `event`
-//! commands read the same items the `item` commands do and keep only
-//! the VEVENTs. [`Event`] is that projection: the few fields a listing
-//! or an agenda renders, pulled out of the iCalendar bytes with
-//! ical-rs. The bytes themselves are never rewritten, so a projection
-//! is read-only and lossy by design.
+//! A calendar collection mixes component kinds, so the `event` commands read
+//! the same items the `item` commands do and keep only the VEVENTs. [`Event`]
+//! is that projection, the few fields a listing or an agenda renders.
+//!
+//! The bytes themselves are never rewritten, so a projection is read-only and
+//! lossy by design.
 
 pub mod agenda;
 pub mod cli;
@@ -28,10 +30,9 @@ use crate::shared::item::CalendarItem;
 
 /// A VEVENT projected out of a [`CalendarItem`]'s iCalendar bytes.
 ///
-/// The time fields keep their iCalendar wire spelling (`YYYYMMDD` for a
-/// date, `YYYYMMDDTHHMMSS` with an optional `Z` for a date-time), so
-/// what a listing prints is what the calendar carries. Parsing them
-/// into a [`NaiveDateTime`] is a separate, fallible step.
+/// The time fields keep their iCalendar wire spelling, so what a listing
+/// prints is what the calendar carries. Parsing one into a [`NaiveDateTime`]
+/// is a separate, fallible step.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Event {
@@ -39,8 +40,7 @@ pub struct Event {
     pub id: String,
     /// The event's SUMMARY, empty when it carries none.
     pub summary: String,
-    /// The event's DESCRIPTION, empty when it carries none. Used as
-    /// the agenda label when the summary is missing.
+    /// The event's DESCRIPTION, the agenda label when the summary is empty.
     #[serde(skip)]
     pub description: String,
     /// The event's DTSTART, verbatim.
@@ -52,10 +52,9 @@ pub struct Event {
 impl Event {
     /// Projects every VEVENT carried by `item`, in source order.
     ///
-    /// An item whose bytes do not parse yields no event rather than an
-    /// error: a listing showing the rest of a calendar is more useful
-    /// than one refusing to render because a single resource is
-    /// malformed.
+    /// An item whose bytes do not parse yields no event rather than an error,
+    /// so one malformed resource does not stop the rest of the calendar from
+    /// rendering.
     pub fn project(item: &CalendarItem) -> Vec<Self> {
         let Ok(cst) = IcalCst::parse(&item.contents) else {
             return Vec::new();
@@ -84,8 +83,7 @@ impl Event {
             .collect()
     }
 
-    /// The label an agenda cell shows: the summary, falling back to the
-    /// description.
+    /// The label an agenda cell shows: the summary, then the description.
     pub fn label(&self) -> &str {
         if self.summary.is_empty() {
             &self.description
@@ -94,8 +92,7 @@ impl Event {
         }
     }
 
-    /// The event's start as a date-time, midnight for a date-only
-    /// DTSTART. `None` when DTSTART is absent or unparseable.
+    /// The event's start as a date-time, midnight for a date-only DTSTART.
     pub fn start_at(&self) -> Option<NaiveDateTime> {
         parse_stamp(&self.start)
     }
@@ -103,10 +100,9 @@ impl Event {
 
 /// Parses an iCalendar DATE or DATE-TIME into a [`NaiveDateTime`].
 ///
-/// A trailing `Z` (UTC) and a leading `TZID=` parameter are both
-/// already stripped by the lens, which hands over the value alone. A
-/// floating or zoned stamp is read as-is: calendula renders what the
-/// calendar wrote rather than resolving time zones.
+/// The lens already strips a trailing `Z` and a leading `TZID=` parameter, so
+/// only the value arrives here. A floating or zoned stamp is read as-is:
+/// calendula renders what the calendar wrote rather than resolving zones.
 fn parse_stamp(stamp: &str) -> Option<NaiveDateTime> {
     let stamp = stamp.trim_end_matches('Z');
     let (date, time) = match stamp.split_once('T') {

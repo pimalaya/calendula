@@ -9,7 +9,9 @@ created: 2026-08-08
 
 ## Why
 
-calendula carried a root ARCHITECTURE.md, the per-repo architecture document the org convention retired in favour of the crate header plus a cairn folder. Nothing recorded why a decision was taken, and nothing forced the written design to follow the code. The three landing changes in this release (dropping io-calendar, adding pimdir, rewriting the wizard) all change behaviour, so they need somewhere to be proposed, folded and logged.
+calendula carried a root ARCHITECTURE.md, the per-repo architecture document the org convention retired in favour of the crate header plus a cairn folder. Nothing recorded why a decision was taken, and nothing forced the written design to follow the code.
+
+The three landing changes in this release (dropping io-calendar, adding pimdir, rewriting the wizard) all change behaviour, so they need somewhere to be proposed, folded and logged.
 
 ## What
 

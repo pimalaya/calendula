@@ -1,12 +1,15 @@
-//! iCalendar item types shared by every backend, plus the `item`
-//! command family built on them.
+//! # Item
 //!
-//! [`CalendarItem`] is the raw view of a calendar object resource: an
-//! id, an optional entity tag, and the iCalendar bytes verbatim.
-//! calendula never rewrites those bytes, so what a backend stored is
-//! what a read returns. [`CalendarTimeRange`] narrows a listing to a
-//! window; CalDAV pushes it server-side while the local backends apply
-//! it after parsing.
+//! The iCalendar object resource shared by every backend, and the `item`
+//! command family built on it.
+//!
+//! [`CalendarItem`] is the raw view: an id, an optional entity tag, and the
+//! bytes verbatim. calendula never rewrites those bytes, so what a backend
+//! stored is what a read returns.
+//!
+//! [`CalendarTimeRange`] narrows a listing to a day window, pushed down to
+//! the server where the protocol defines such a filter and applied after
+//! parsing otherwise.
 
 pub mod cli;
 pub mod create;
@@ -21,14 +24,12 @@ use serde::{Deserialize, Serialize};
 
 /// A calendar object resource: one iCalendar file.
 ///
-/// The contents mix component kinds (VEVENT, VTODO, VJOURNAL); the
-/// `event` command family filters them, the `item` family does not.
+/// The contents mix component kinds (VEVENT, VTODO, VJOURNAL): the component
+/// families filter them, the `item` family does not.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct CalendarItem {
-    /// Backend-specific identifier: the file stem (vdir), the last
-    /// path segment of the resource href verbatim (CalDAV), or the
-    /// store-assigned public id (pimdir).
+    /// Backend-specific identifier the other commands address it by.
     pub id: String,
     /// The calendar the item lives in.
     pub calendar_id: String,
@@ -42,9 +43,9 @@ pub struct CalendarItem {
 
 /// An inclusive day window narrowing a listing.
 ///
-/// Both bounds are optional, so a range may be open on either side.
-/// The stored values are iCalendar UTC date-times (RFC 5545 3.3.5), the
-/// form the CalDAV `time-range` filter takes (RFC 4791 9.9).
+/// Both bounds are optional, so a range may be open on either side. The
+/// stored values are iCalendar UTC date-times (RFC 5545 3.3.5), the form the
+/// CalDAV `time-range` filter takes (RFC 4791 9.9).
 #[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct CalendarTimeRange {
@@ -57,10 +58,11 @@ pub struct CalendarTimeRange {
 }
 
 impl CalendarTimeRange {
-    /// Builds a range from inclusive `--from` / `--to` days, mapping
-    /// `to` onto the exclusive upper bound the wire format wants (the
-    /// day after, at midnight). Returns `None` when both bounds are
-    /// absent, and bails when they cross.
+    /// Builds a range from the inclusive `--from` and `--to` days.
+    ///
+    /// `to` maps onto the exclusive upper bound the wire format wants, the
+    /// day after at midnight. Two absent bounds give `None`, and crossed
+    /// ones bail.
     pub fn from_days(from: Option<NaiveDate>, to: Option<NaiveDate>) -> Result<Option<Self>> {
         if let (Some(from), Some(to)) = (from, to)
             && to < from
@@ -82,16 +84,12 @@ impl CalendarTimeRange {
         }))
     }
 
-    /// Whether `stamp` (an iCalendar date or date-time, in any time
-    /// zone form) falls inside the range. Comparison is lexicographic
-    /// on the leading `YYYYMMDD`, which is enough for a day window and
-    /// keeps the CLI out of time-zone resolution.
+    /// Whether an iCalendar date or date-time falls inside the range.
     ///
-    /// The local backends need it to filter a listing, and so do the
-    /// `todo` and `journal` families whatever the backend: a
-    /// server-side range filter is defined against a component's start
-    /// and end (RFC 4791 9.9), which a todo and a journal entry do not
-    /// both carry.
+    /// Comparison is lexicographic on the leading `YYYYMMDD`, enough for a
+    /// day window and keeping the CLI out of time-zone resolution. The `todo`
+    /// and `journal` families need it whatever the backend: a server-side
+    /// filter wants a start and an end (RFC 4791 9.9) they lack.
     pub fn contains(&self, stamp: &str) -> bool {
         let day = &stamp[..stamp.len().min(8)];
 
@@ -110,8 +108,8 @@ impl CalendarTimeRange {
         true
     }
 
-    /// The CalDAV `time-range` element (RFC 4791 9.9) for this range,
-    /// nested inside a component filter by the caller.
+    /// The CalDAV `time-range` element (RFC 4791 9.9) for this range, which
+    /// the caller nests inside a component filter.
     #[cfg(feature = "caldav")]
     pub fn to_caldav_filter(&self) -> String {
         let mut filter = String::from("<C:time-range");
@@ -148,8 +146,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(range.start.as_deref(), Some("20260801T000000Z"));
-        // The upper bound is exclusive on the wire, so the whole of the
-        // 31st stays inside the window.
+        // NOTE: the upper bound is exclusive on the wire, so the whole of
+        // the 31st stays inside the window.
         assert_eq!(range.end.as_deref(), Some("20260901T000000Z"));
     }
 

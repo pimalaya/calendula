@@ -1,3 +1,8 @@
+//! # Vdir collection delete
+//!
+//! The `calendula vdir delete` command, removing one collection
+//! directory and everything inside it.
+
 use anyhow::Result;
 use clap::Parser;
 use io_vdir::path::VdirPath;
@@ -5,7 +10,10 @@ use pimalaya_cli::printer::{Message, Printer};
 
 use crate::vdir::client::VdirClient;
 
-/// Delete a vdir collection (recursively removes its directory).
+/// Delete a vdir collection.
+///
+/// Removes the collection directory and every item file in it, without
+/// asking and without a trash to recover them from.
 ///
 /// JSON output: `{"message": "..."}`.
 #[derive(Debug, Parser)]

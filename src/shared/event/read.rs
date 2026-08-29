@@ -1,3 +1,8 @@
+//! # Event read
+//!
+//! The `calendula event read` command, printing one VEVENT as the
+//! calendar stores it.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};

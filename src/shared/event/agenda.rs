@@ -1,3 +1,13 @@
+//! # Agenda
+//!
+//! The `calendula event agenda` command, drawing a cal(1)-style grid of
+//! the selected calendar and listing the events its days hold.
+//!
+//! The grid is a port of util-linux cal, so it keeps cal's Julian
+//! calendar for the dates before the reform year `--reform` sets. That
+//! is why the day arithmetic here is hand-rolled: chrono only knows the
+//! proleptic Gregorian calendar.
+
 use std::{
     collections::BTreeMap,
     fmt::{self, Write},
@@ -23,10 +33,11 @@ const NUMBER_MISSING_DAYS: i32 = 11;
 const YDAY_AFTER_MISSING: i32 = 258;
 const DEFAULT_REFORM_YEAR: i32 = 1752;
 
-/// Display a calendar view alla cal.
+/// Display a calendar grid and the events it holds.
 ///
-/// This command allows you to display a calendar/agenda view like
-/// does the Unix cal tool.
+/// The grid follows cal(1): the current month by default, with the days
+/// carrying an event highlighted. Every collected event is then listed
+/// by start time under the grid.
 ///
 /// JSON output: an object mapping each start datetime to the labels of
 /// every event starting at it.
@@ -35,7 +46,11 @@ pub struct EventAgendaCommand {
     #[command(flatten)]
     calendar: CalendarIdArg,
 
-    /// Show the calendar at the given date.
+    /// Date the calendar is drawn at. Defaults to today.
+    ///
+    /// Accepts `YEAR`, `MONTH YEAR` or `DAY MONTH YEAR`, the month
+    /// being a number or an English name. A lone year shows the whole
+    /// year.
     #[arg(name = "DATE")]
     date_args: Vec<String>,
 
@@ -47,7 +62,7 @@ pub struct EventAgendaCommand {
     #[arg(short = '3', long)]
     three: bool,
 
-    /// Display number of months, starting from the month containing
+    /// Display that many months, starting from the month containing
     /// the date.
     #[arg(short = 'n', long)]
     months: Option<u32>,
@@ -64,23 +79,25 @@ pub struct EventAgendaCommand {
     #[arg(short = 'm', long)]
     monday: bool,
 
-    /// Use day-of-year numbering for all calendars. These are also
-    /// called ordinal days. Ordinal days range from 1 to 366. This
-    /// option does not switch from the Gregorian to the Julian
-    /// calendar system, that is controlled by the --reform option.
+    /// Use day-of-year (ordinal) numbering, from 1 to 366.
+    ///
+    /// This does not switch between the Gregorian and the Julian
+    /// calendar system: `--reform` is what controls that.
     #[arg(short = 'j', long)]
     julian: bool,
 
-    /// This option sets the adoption date of the Gregorian calendar
-    /// reform. Calendar dates previous to reform use the Julian
-    /// calendar system. Calendar dates after reform use the Gregorian
-    /// calendar system.
+    /// Adoption date of the Gregorian calendar reform.
+    ///
+    /// Dates before it use the Julian calendar system, dates after it
+    /// the Gregorian one. Accepts `1752` (the default), `gregorian`,
+    /// `iso` or `julian`.
     #[arg(long)]
     reform: Option<String>,
 
-    /// Display the proleptic Gregorian calendar exclusively. This
-    /// option does not affect week numbers and the first day of the
-    /// week. See --reform below.
+    /// Display the proleptic Gregorian calendar exclusively.
+    ///
+    /// Week numbers and the first day of the week are left untouched;
+    /// see `--reform`.
     #[arg(long)]
     iso: bool,
 
@@ -92,11 +109,10 @@ pub struct EventAgendaCommand {
     #[arg(short = 'Y', long)]
     twelve: bool,
 
-    /// Display week numbers in the calendar according to the US or
-    /// ISO-8601 format. If a number is specified, the requested week
-    /// in the desired or current year will be printed and its number
-    /// highlighted. The number may be ignored if month is also
-    /// specified.
+    /// Display week numbers in the calendar.
+    ///
+    /// The numbering follows ISO-8601 when the week starts on Monday,
+    /// and the US format otherwise.
     #[arg(short = 'w', long)]
     week: bool,
 
@@ -137,7 +153,6 @@ impl EventAgendaCommand {
             events: BTreeMap::new(),
         };
 
-        // Reform year
         if self.iso
             || self.reform.as_deref() == Some("iso")
             || self.reform.as_deref() == Some("gregorian")
@@ -149,7 +164,6 @@ impl EventAgendaCommand {
             ctl.reform_year = i32::MAX;
         }
 
-        // Week options
         if self.monday {
             ctl.weekstart = 1;
         }
@@ -157,7 +171,6 @@ impl EventAgendaCommand {
             ctl.weekstart = 0;
         }
 
-        // Display options
         if self.julian {
             ctl.day_width = DAY_LEN + 1;
         }
@@ -190,7 +203,6 @@ impl EventAgendaCommand {
 
         match self.date_args.len() {
             3 => {
-                // day month year
                 ctl.req.day = self.date_args[0].parse().unwrap_or(1);
                 ctl.req.month = parse_month(&self.date_args[1]);
                 ctl.req.year = self.date_args[2].parse().unwrap_or(now.year());
@@ -201,12 +213,10 @@ impl EventAgendaCommand {
                 ctl.req.day = day_in_year(&ctl, ctl.req.day, ctl.req.month, ctl.req.year);
             }
             2 => {
-                // month year
                 ctl.req.month = parse_month(&self.date_args[0]);
                 ctl.req.year = self.date_args[1].parse().unwrap_or(now.year());
             }
             1 => {
-                // year only: show whole year
                 ctl.req.year = self.date_args[0].parse().unwrap_or(now.year());
                 if ctl.req.year < 1 {
                     bail!("Illegal year value: use positive integer");
@@ -220,7 +230,6 @@ impl EventAgendaCommand {
                 }
             }
             _ => {
-                // no arguments: current month
                 ctl.req.day = now.ordinal() as i32;
                 ctl.req.month = now.month() as usize;
                 ctl.req.year = now.year();
@@ -266,6 +275,7 @@ impl EventAgendaCommand {
     }
 }
 
+/// The rendering options a run resolved, plus the events it collects.
 #[derive(Clone)]
 struct CalControl {
     reform_year: i32,
@@ -286,6 +296,7 @@ struct CalControl {
     events: BTreeMap<NaiveDateTime, Vec<AgendaEvent>>,
 }
 
+/// The date the calendar is drawn at, as the arguments resolved it.
 #[derive(Clone)]
 struct CalRequest {
     day: i32,
@@ -294,6 +305,7 @@ struct CalRequest {
     start_month: usize,
 }
 
+/// One month of the grid: its six week rows and their week numbers.
 #[derive(Clone)]
 struct CalMonth {
     days: [i32; MAXDAYS],
@@ -421,6 +433,8 @@ fn week_number(day: i32, month: usize, year: i32, ctl: &CalControl) -> i32 {
 
     let yday = day_in_year(ctl, day, m, year);
 
+    // NOTE: yday still counts the 11 days the reform year dropped, so
+    // the offset takes them back out before the week is divided.
     if year == ctl.reform_year && yday >= YDAY_AFTER_MISSING {
         fday -= NUMBER_MISSING_DAYS;
     }
@@ -469,6 +483,8 @@ fn cal_fill_month(month: &mut CalMonth, ctl: &CalControl) {
             continue;
         }
         if j < month_days {
+            // NOTE: the reform year has no September 3 to 13, so the
+            // grid jumps the 11 dropped days instead of drawing them.
             if month.year == ctl.reform_year
                 && month.month == REFORMATION_MONTH
                 && (j == 3 || j == 247)
@@ -614,7 +630,9 @@ fn cal_output_months(grid: &mut String, months: &[CalMonth], ctl: &mut CalContro
                         && day == today.day() as i32;
 
                     let (y, mm, dd) = if ctl.julian {
-                        // NOTE: convert julian day to actual date
+                        // NOTE: --julian fills the grid with ordinal
+                        // days, so the calendar date has to be
+                        // recovered before an event can match it.
                         let mut julian_day = day;
                         let leap = leap_year(ctl, m.year);
                         let mut month_idx = 1;
@@ -732,7 +750,9 @@ fn cal_vert_output_months(
                         && day == today.day() as i32;
 
                     let (y, mm, dd) = if ctl.julian {
-                        // NOTE: convert julian day to actual date
+                        // NOTE: --julian fills the grid with ordinal
+                        // days, so the calendar date has to be
+                        // recovered before an event can match it.
                         let mut julian_day = day;
                         let leap = leap_year(ctl, m.year);
                         let mut month_idx = 1;
@@ -806,13 +826,12 @@ fn cal_vert_output_months(
     Ok(())
 }
 
-/// Marks the day `(y, m, d)` when any projected event starts on it,
-/// recording every such event into `ctl.events` so the rendering
-/// carries them beside the grid.
+/// Whether an event starts on the day `(y, m, d)`, collecting all of
+/// them into `ctl.events`.
 ///
-/// An instant holds all the events starting at it rather than the last
-/// one seen: two unrelated meetings at 09:00 are two meetings, and so
-/// are two resources a collection holds under one `UID`.
+/// An instant keeps every event starting at it rather than the last one
+/// seen: two unrelated meetings at 09:00 are two meetings, and so are
+/// two resources a collection holds under one `UID`.
 fn collect_events(ctl: &mut CalControl, y: i32, m: u32, d: u32) -> bool {
     let starting: Vec<(NaiveDateTime, AgendaEvent)> = ctl
         .all_events
@@ -920,17 +939,18 @@ fn yearly(grid: &mut String, ctl: &mut CalControl) -> fmt::Result {
 /// One event the agenda collected while painting the grid.
 #[derive(Clone)]
 struct AgendaEvent {
-    /// The id of the item the event was projected from, which is what
-    /// addresses it: two resources of one calendar may carry one `UID`
-    /// and are told apart by their ids alone.
+    /// The id of the item the event was projected from.
+    ///
+    /// Two resources of one calendar may carry one `UID`, so the id is
+    /// what tells them apart.
     id: String,
     /// What the agenda prints for the event: its summary, falling back
     /// to its description.
     label: String,
 }
 
-/// The agenda output: the rendered ncal-style grid plus every VEVENT
-/// collected while painting it, grouped by DTSTART.
+/// The agenda output: the drawn grid, plus the events it holds grouped
+/// by DTSTART.
 ///
 /// An instant holds every event starting at it, so a calendar holding
 /// two meetings at 09:00 renders two lines and reports two labels.
@@ -940,12 +960,12 @@ pub struct Agenda {
 }
 
 impl Agenda {
-    /// Takes the grid and the collected events, ordering the events at
+    /// Takes the grid and the collected events, ordering the events of
     /// one instant by label then by item id.
     ///
-    /// The order is total and stable, so the same calendar renders the
-    /// same way twice: the label alone leaves two copies of one event
-    /// tied, and the id breaks that tie.
+    /// Two copies of one event share a label, so the id is what breaks
+    /// the tie and makes the order total: the same calendar renders the
+    /// same way twice.
     fn new(grid: String, mut events: BTreeMap<NaiveDateTime, Vec<AgendaEvent>>) -> Self {
         for at_instant in events.values_mut() {
             at_instant.sort_by(|a, b| a.label.cmp(&b.label).then_with(|| a.id.cmp(&b.id)));
@@ -960,9 +980,6 @@ impl fmt::Display for Agenda {
         write!(f, "{}", self.grid)?;
 
         for (date, events) in &self.events {
-            // The instant is printed once and the events line up under
-            // it, so a duplicated pair reads as two events rather than
-            // as two rows that happen to repeat a time.
             let stamp = date.format("%b %d, %R").to_string();
             let padding = " ".repeat(stamp.len() + 2);
 
@@ -1053,8 +1070,8 @@ mod tests {
         );
     }
 
-    /// Two copies of one event carry one label, so the label alone
-    /// leaves them tied and the item id is what orders them.
+    /// Two copies of one event share a label, so only the id orders
+    /// them.
     #[test]
     fn two_events_sharing_a_label_are_ordered_by_their_ids() {
         let agenda = agenda(vec![
@@ -1069,8 +1086,8 @@ mod tests {
         assert_eq!(ids, ["1", "2"]);
     }
 
-    /// A lone event prints the line it always printed; only its JSON
-    /// value became a list.
+    /// A lone event still prints one line: only its JSON value became a
+    /// list.
     #[test]
     fn a_lone_event_renders_as_one_line() {
         let agenda = agenda(vec![(instant(9), "1", "Stand-up")]);

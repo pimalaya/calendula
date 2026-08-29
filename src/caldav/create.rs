@@ -1,3 +1,8 @@
+//! # CalDAV calendar create
+//!
+//! The `calendula caldav create` command, issuing MKCALENDAR under the
+//! resolved calendar home-set.
+
 use anyhow::Result;
 use clap::Parser;
 use io_webdav::rfc4791::calendar::CaldavCalendar;
@@ -27,8 +32,10 @@ pub struct CaldavCalendarCreateCommand {
     pub color: Option<String>,
 
     /// Component kinds the calendar accepts (RFC 4791 5.2.3), such as
-    /// VEVENT or VTODO. Repeat the flag for several. A server fixes
-    /// this at creation and refuses to change it afterwards.
+    /// VEVENT or VTODO. Repeat the flag for several.
+    ///
+    /// A server fixes this at creation and refuses to change it
+    /// afterwards.
     #[arg(long = "component", value_name = "KIND")]
     pub components: Vec<String>,
 

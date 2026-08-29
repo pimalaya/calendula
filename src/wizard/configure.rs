@@ -1,19 +1,17 @@
-//! Command generating an account.
+//! # Account configure
 //!
-//! The wizard generates, it never edits: it discovers an account from
-//! one prompt ([`super::discover`]), tests it, then hands the resulting
-//! `[accounts.<name>]` table back as a file to create, a block to
-//! append, or a document on stdout.
+//! The `calendula configure` command. The wizard generates and never edits:
+//! it discovers an account from one prompt (see [`super::discover`]), tests
+//! it, then hands the `[accounts.<name>]` table back as a file to create, a
+//! block to append, or a document on stdout.
 //!
-//! It runs from `calendula configure`, and from the offer a bare
-//! `calendula` or a command needing an account raises. That offer is the
-//! only place the wizard introduces itself: the command asked for by
-//! name goes straight to the prompts.
+//! It also runs from the offer a bare `calendula`, or a command needing an
+//! account, raises: that offer is the only place the wizard introduces
+//! itself, the command asked for by name going straight to the prompts.
 //!
-//! Appending is a plain text append rather than a re-serialization, so
-//! comments, ordering and hand-written formatting come out untouched.
-//! Two rules guard it: the account name must be free, since two
-//! `[accounts.<name>]` tables make the whole document fail to parse, and
+//! Appending is a plain text append, not a re-serialization, so comments and
+//! formatting come out untouched. Two rules guard it: the account name must
+//! be free, two `[accounts.<name>]` tables failing the whole document, and
 //! the generated account claims the default only when no other does.
 
 use std::{
@@ -36,23 +34,21 @@ use crate::{
 
 /// Configure an account interactively.
 ///
-/// This command discovers a provider's settings from an email address
-/// (or a server URL, or a local folder path), tests the connection, then
-/// saves the resulting account to the configuration file, appends it to
-/// the one already there, or prints it for you to place by hand.
-/// Anything discovery does not cover is written by hand.
+/// Discovers a provider's settings from an email address, a server URL or a
+/// local folder path, tests the connection, then saves the resulting account
+/// to the configuration file, appends it to the one already there, or prints
+/// it for you to place by hand. Anything discovery does not cover is written
+/// by hand.
 #[derive(Debug, Parser)]
 pub struct ConfigureCommand;
 
 impl ConfigureCommand {
     /// Runs the wizard, then saves, appends or prints the account.
     ///
-    /// No welcome: whoever typed the command knows what it does. The
-    /// account name is not asked either, being only the TOML table key.
-    ///
-    /// A redirected stdout and the JSON output both stay
-    /// non-interactive: the document goes to stdout and no file is
-    /// touched. The prompts render on stderr, so they stay out of it.
+    /// No welcome, and no name prompt: the name is only the TOML table key.
+    /// A redirected stdout or the JSON output stays non-interactive, the
+    /// document going to stdout with no file touched and the prompts on
+    /// stderr.
     pub fn execute(self, printer: &mut impl Printer, config_paths: &[PathBuf]) -> Result<()> {
         if !stdin().is_terminal() {
             bail!(
@@ -89,19 +85,19 @@ impl ConfigureCommand {
     }
 }
 
-/// What a configuration already on disk constrains in the generated
-/// account: the names it takes, and whether one of its accounts claims
-/// the default.
+/// What a configuration already on disk constrains in the generated account:
+/// the names it takes, and whether one of its accounts claims the default.
 struct ExistingConfig {
     names: Vec<String>,
     has_default: bool,
 }
 
 impl ExistingConfig {
-    /// Reads the configuration at the given path, or `None` when no file
-    /// is there. A file that fails to parse is an error rather than a
-    /// `None`, since appending to a broken document would bury the
-    /// actual problem under a second one.
+    /// Reads the configuration at `path`, or `None` when no file is there.
+    ///
+    /// A file that fails to parse is an error rather than a `None`, since
+    /// appending to a broken document would bury the actual problem under a
+    /// second one.
     fn read(path: &Path) -> Result<Option<Self>> {
         if !path.exists() {
             return Ok(None);
@@ -130,18 +126,18 @@ pub struct GeneratedConfig {
 
 impl fmt::Display for GeneratedConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // NOTE: the trailing newline terminates the document, and it is
-        // also what flushes the line-buffered stdout.
+        // NOTE: the trailing newline terminates the document, and also
+        // flushes the line-buffered stdout.
         writeln!(f, "{}", self.document.trim_end())
     }
 }
 
-/// Frames calendula, names the configuration file that is missing, and
-/// points at the sample for everything the wizard does not cover.
+/// Frames calendula, names the missing configuration file, and points at the
+/// sample for everything the wizard does not cover.
 ///
-/// Printed before the offer, so the wizard introduces itself to someone
-/// who did not ask for it; `configure` skips it. On stderr, so a
-/// redirected stdout holds the document alone.
+/// Printed before the offer, so the wizard introduces itself to someone who
+/// did not ask for it; `configure` skips it. On stderr, so a redirected
+/// stdout holds the document alone.
 pub fn print_welcome(path: &Path) {
     eprintln!();
     eprintln!("Welcome to calendula, the CLI to manage calendars.");
@@ -164,12 +160,12 @@ pub fn print_welcome(path: &Path) {
     eprintln!();
 }
 
-/// The name discovery proposes, suffixed until the configuration does
-/// not already hold it.
+/// The name discovery proposes, suffixed until the configuration does not
+/// already hold it.
 ///
-/// Not prompted: the name is only the TOML table key. It still has to be
-/// free, a second `[accounts.<name>]` table making the whole document
-/// fail to parse, and taking the working accounts down with it.
+/// Not prompted, the name being only the TOML table key. It still has to be
+/// free: a second `[accounts.<name>]` table makes the whole document fail to
+/// parse, taking the working accounts down with it.
 fn account_name(base: &str, existing: Option<&ExistingConfig>) -> String {
     let taken = existing
         .map(|config| config.names.as_slice())
@@ -192,8 +188,8 @@ fn account_name(base: &str, existing: Option<&ExistingConfig>) -> String {
     }
 }
 
-/// Offers to write the generated account to a configuration file that
-/// does not exist yet, printing it instead when the offer is declined.
+/// Offers to write the generated account to a configuration file that does
+/// not exist yet, printing it instead when the offer is declined.
 fn save_or_print(printer: &mut impl Printer, path: &Path, config: GeneratedConfig) -> Result<()> {
     let prompt = format!("Save this account to {}?", path.display());
 
@@ -217,8 +213,8 @@ fn save_or_print(printer: &mut impl Printer, path: &Path, config: GeneratedConfi
     Ok(())
 }
 
-/// Offers to append the generated account to the configuration file
-/// already there, printing it instead when the offer is declined.
+/// Offers to append the generated account to the configuration file already
+/// there, printing it instead when the offer is declined.
 fn append_or_print(printer: &mut impl Printer, path: &Path, config: GeneratedConfig) -> Result<()> {
     let prompt = format!("Append account `{}` to {}?", config.name, path.display());
 
@@ -231,8 +227,8 @@ fn append_or_print(printer: &mut impl Printer, path: &Path, config: GeneratedCon
         .open(path)
         .with_context(|| format!("Open the config file {}", path.display()))?;
 
-    // NOTE: the leading newline separates the two tables, and terminates
-    // the last line when the file ends without one.
+    // NOTE: the leading newline separates the two tables, and terminates the
+    // last line when the file ends without one.
     write!(file, "\n{config}")
         .with_context(|| format!("Append to the config file {}", path.display()))?;
 
@@ -241,9 +237,10 @@ fn append_or_print(printer: &mut impl Printer, path: &Path, config: GeneratedCon
     Ok(())
 }
 
-/// Tells where the account landed, under which name, and what to run
-/// next. The name matters because it was never asked for: an account
-/// that did not claim the default is only reachable through `-a`.
+/// Tells where the account landed, under which name, and what to run next.
+///
+/// The name matters because it was never asked for: an account that did not
+/// claim the default is only reachable through `-a`.
 fn print_saved(path: &Path, config: &GeneratedConfig) {
     let name = &config.name;
 
@@ -278,7 +275,7 @@ mod tests {
     }
 
     /// A minimal account naming a vdir home, the one backend needing no
-    /// network to describe.
+    /// network to describe it.
     #[cfg(feature = "vdir")]
     fn account(default: bool) -> AccountConfig {
         AccountConfig {
@@ -307,8 +304,8 @@ mod tests {
             Some(Path::new("/tmp/calendars"))
         );
 
-        // NOTE: a generated document holds what was configured, every
-        // other field being left at its default.
+        // NOTE: a generated document holds what was configured, every other
+        // field being left at its default.
         assert!(!document.contains("caldav"));
         assert!(!document.contains("table"));
 
@@ -323,7 +320,7 @@ mod tests {
         let path = config_path();
 
         // NOTE: no trailing newline, the shape an appended block has to
-        // survive without merging into the last line.
+        // survive without merging into the last line of the file.
         fs::write(
             &path,
             "# my accounts\n[accounts.work]\ndefault = true\nvdir.home-dir = \"/tmp/work\"",

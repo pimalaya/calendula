@@ -1,3 +1,8 @@
+//! # Item list
+//!
+//! The `item list` command, printing every iCalendar object of a calendar
+//! as a table, whatever its component kind.
+
 use std::fmt;
 
 use anyhow::Result;
@@ -12,11 +17,10 @@ use crate::shared::{arg::CalendarIdArg, client::CalendarClient, item::CalendarIt
 
 /// List the raw iCalendar items of a calendar.
 ///
-/// Every component kind is listed, VEVENT included; use `event list`
-/// for the events-only view with its summary and time columns.
+/// Every component kind is listed, VEVENT included; use `event list` for the
+/// events-only view with its summary and time columns.
 ///
-/// JSON output: `{"items": [{"id", "calendar-id", "etag",
-/// "contents"}]}`.
+/// JSON output: `{"items": [{"id", "calendar-id", "etag", "contents"}]}`.
 #[derive(Debug, Parser)]
 pub struct ItemListCommand {
     #[command(flatten)]
@@ -109,9 +113,10 @@ impl fmt::Display for Items {
     }
 }
 
-/// The size column: the item's octets, or a dash when the backend
-/// listed the item without a local body (a pimdir cache that has not
-/// downloaded it yet).
+/// The size column: the item's octets, or a dash when it has no body.
+///
+/// A backend may list an item without one, a pimdir cache that has not
+/// downloaded it yet being the usual case.
 fn size_of(item: &CalendarItem) -> String {
     if item.contents.is_empty() {
         return String::from("-");

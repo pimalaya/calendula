@@ -1,13 +1,12 @@
-//! CalDAV adapter for the shared cross-protocol client.
+//! # CalDAV backend
 //!
-//! Projects [`io_webdav`]'s RFC 4791 calendars and calendar object
-//! resources onto calendula's own shared types, over a connected
-//! [`WebdavClientStd`] whose calendar home-set is already resolved.
+//! The shared-API adapter over a connected [`WebdavClientStd`], whose
+//! calendar home-set is already resolved. It projects RFC 4791
+//! calendars and calendar object resources onto the shared types.
 //!
-//! Item ids are the resource names the server returned, verbatim:
-//! io-webdav neither appends nor strips a file extension, so an id a
-//! listing showed addresses the same resource on every verb. Because
-//! the server owns the query, a [`CalendarTimeRange`] is pushed down as
+//! Item ids are the resource names the server returned verbatim, so an
+//! id a listing showed addresses the same resource on every verb. The
+//! server owns the query, so a [`CalendarTimeRange`] is pushed down as
 //! an RFC 4791 `time-range` filter rather than applied locally.
 
 use anyhow::{Context, Result, anyhow};
@@ -33,8 +32,7 @@ pub struct CaldavBackend {
 }
 
 impl CaldavBackend {
-    /// Connects to the server and walks the discovery chain, so the
-    /// calendar home-set is cached before any command runs.
+    /// Connects and walks the discovery chain, caching the home-set.
     pub fn new(config: CaldavConfig) -> Result<Self> {
         Ok(Self {
             client: connect_and_resolve(&config)?,
@@ -67,9 +65,10 @@ impl CaldavBackend {
         Ok(id.to_owned())
     }
 
-    /// Rewrites a calendar's properties through PROPPATCH, reading the
-    /// current ones first so an untouched field is written back
-    /// unchanged.
+    /// Rewrites a calendar's properties through PROPPATCH.
+    ///
+    /// Reads the current ones first, so a field the patch leaves
+    /// untouched is written back unchanged.
     pub fn update_calendar(&mut self, id: &str, patch: CalendarDiff) -> Result<()> {
         let mut calendar = self
             .client
@@ -100,8 +99,9 @@ impl CaldavBackend {
         Ok(())
     }
 
-    /// Lists items through a `calendar-query` REPORT, narrowing the
-    /// query server-side when a range is given.
+    /// Lists items through a `calendar-query` REPORT.
+    ///
+    /// A range narrows the query server-side rather than locally.
     pub fn list_items(
         &mut self,
         calendar_id: &str,
@@ -134,8 +134,10 @@ impl CaldavBackend {
         })
     }
 
-    /// PUTs a new resource. The server may name the resource itself, in
-    /// which case the id it reported wins over the one asked for.
+    /// PUTs a new resource.
+    ///
+    /// A server may name the resource itself, in which case the id it
+    /// reported wins over the one asked for.
     pub fn create_item(&mut self, calendar_id: &str, contents: Vec<u8>) -> Result<String> {
         let id = format!("{}.ics", new_resource_name(&contents));
         let created = self.client.create_item(calendar_id, &id, contents)?;
@@ -162,11 +164,10 @@ impl CaldavBackend {
     }
 }
 
-/// The VCALENDAR child filter a listing sends: every component kind
-/// when no range is asked for, or a VEVENT `time-range` when one is.
+/// The VCALENDAR child filter a listing sends.
 ///
-/// A range only narrows VEVENTs, since RFC 4791 9.9 defines the
-/// overlap test against a component's own start and end, and a VTODO or
+/// A range narrows to VEVENT alone: RFC 4791 9.9 defines the overlap
+/// test against a component's own start and end, so a VTODO or
 /// VJOURNAL without them would be dropped for the wrong reason.
 fn comp_filter(range: Option<&CalendarTimeRange>) -> String {
     match range {
@@ -178,8 +179,9 @@ fn comp_filter(range: Option<&CalendarTimeRange>) -> String {
     }
 }
 
-/// Projects a CalDAV calendar onto the shared [`Calendar`], falling
-/// back to the collection id when the server sets no display name.
+/// Projects a CalDAV calendar onto the shared [`Calendar`].
+///
+/// The collection id stands in when the server sets no display name.
 fn calendar_from(calendar: CaldavCalendar) -> Calendar {
     Calendar {
         name: calendar
@@ -192,8 +194,7 @@ fn calendar_from(calendar: CaldavCalendar) -> Calendar {
     }
 }
 
-/// Projects a CalDAV multistatus entry onto the shared
-/// [`CalendarItem`].
+/// Projects a CalDAV multistatus entry onto the shared [`CalendarItem`].
 fn item_from(calendar_id: &str, entry: CaldavItemEntry) -> CalendarItem {
     CalendarItem {
         id: entry.id,
@@ -203,13 +204,11 @@ fn item_from(calendar_id: &str, entry: CaldavItemEntry) -> CalendarItem {
     }
 }
 
-/// Derives the resource name a create PUTs to from the item's own UID,
-/// so a resource is addressable by the identity its content already
-/// carries. Falls back to a content digest when the bytes carry no UID.
+/// Derives the resource name a create PUTs to from the item's `UID`.
 ///
-/// The name is only a proposal: a server that names the resource itself
-/// reports its choice in the `Location` header, and io-webdav returns
-/// that instead.
+/// A content digest stands in when the bytes carry none. Only a
+/// proposal: a server naming the resource itself reports its choice in
+/// `Location`, which io-webdav returns instead.
 fn new_resource_name(contents: &[u8]) -> String {
     let uid = IcalCst::parse(contents).ok().and_then(|cst| {
         cst.components::<VEVENT>()
@@ -224,8 +223,9 @@ fn new_resource_name(contents: &[u8]) -> String {
     }
 }
 
-/// Whether a UID can be used verbatim as a URL path segment: no empty
-/// value, no separator, and nothing needing percent-encoding.
+/// Whether a `UID` can be a URL path segment verbatim.
+///
+/// No empty value, no separator, nothing needing percent-encoding.
 fn is_safe_segment(uid: &str) -> bool {
     !uid.is_empty()
         && uid.len() <= 128
@@ -234,8 +234,7 @@ fn is_safe_segment(uid: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@'))
 }
 
-/// A 64-bit FNV-1a digest, the fallback resource name for content
-/// carrying no usable UID.
+/// A 64-bit FNV-1a digest, the fallback name for a `UID`-less body.
 fn fnv1a(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
 
@@ -297,7 +296,6 @@ mod tests {
         assert_eq!(name.len(), 16);
         assert!(name.chars().all(|c| c.is_ascii_hexdigit()));
 
-        // Deterministic, so the same bytes always propose the same name.
         assert_eq!(name, new_resource_name(slashed.as_bytes()));
         assert_ne!(name, new_resource_name(b"other bytes entirely"));
     }

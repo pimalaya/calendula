@@ -1,3 +1,8 @@
+//! # Instances
+//!
+//! The `calendula gcal instances` command, expanding a recurring event into
+//! its occurrences.
+
 use std::fmt;
 
 use anyhow::Result;
@@ -17,10 +22,10 @@ use crate::{
 
 /// Expand a recurring event into its occurrences.
 ///
-/// The shared listing returns the series rather than its instances,
-/// since the series is what round-trips through the projection. This
-/// asks the server to expand it, which is the only way to see the
-/// moved and cancelled occurrences a rule alone does not describe.
+/// The shared listing returns the series rather than its instances, since
+/// the series is what round-trips through the projection. This asks the
+/// server to expand it, the only way to see the moved and cancelled
+/// occurrences a rule alone does not describe.
 ///
 /// JSON output: `{"instances": [{"id", "summary", "start", "end",
 /// "status", "original-start"}]}`.
@@ -94,8 +99,10 @@ impl GcalInstancesCommand {
 /// The rendered instance listing.
 #[derive(Clone, Debug, Serialize)]
 pub struct InstancesTable {
+    /// The table style the account configured.
     #[serde(skip)]
     pub style: TableStyle,
+    /// The occurrences of the series, one row each.
     #[serde(rename = "instances")]
     pub rows: Vec<InstanceRow>,
 }
@@ -106,8 +113,7 @@ pub struct InstancesTable {
 pub struct InstanceRow {
     /// The instance identifier, which addresses this occurrence alone.
     pub id: String,
-    /// The title, inherited from the series unless the occurrence
-    /// overrides it.
+    /// The title, inherited from the series unless overridden.
     pub summary: String,
     /// The start of the occurrence.
     pub start: String,
@@ -115,8 +121,7 @@ pub struct InstanceRow {
     pub end: String,
     /// `confirmed`, `tentative` or `cancelled`.
     pub status: &'static str,
-    /// Where the recurrence rule placed the occurrence, set when it has
-    /// since been moved.
+    /// Where the recurrence rule placed it, set once it has been moved.
     pub original_start: String,
 }
 

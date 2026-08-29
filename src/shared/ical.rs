@@ -1,3 +1,8 @@
+//! # iCalendar source
+//!
+//! The positional iCalendar argument the create and update commands of
+//! every component family take.
+
 use std::{
     fs,
     io::{Read, stdin},
@@ -7,20 +12,19 @@ use std::{
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 
-/// Positional iCalendar source shared by the `event`/`item` create and
-/// update commands.
+/// The iCalendar source a create or update command writes.
 #[derive(Debug, Parser)]
 pub struct IcalArg {
-    /// A path to an iCalendar file, raw iCalendar contents, or `-` for
-    /// stdin.
+    /// A path to an iCalendar file, raw iCalendar contents, or `-` for stdin.
     #[arg(value_name = "ICAL")]
     pub ical: String,
 }
 
 impl IcalArg {
-    /// Resolves the source into raw iCalendar bytes: `-` reads stdin, an
-    /// existing file is read, otherwise the value is treated as literal
-    /// iCalendar contents.
+    /// Resolves the source into raw iCalendar bytes.
+    ///
+    /// `-` reads stdin and an existing path is read as a file, otherwise the
+    /// value is taken as literal iCalendar contents.
     pub fn read(self) -> Result<Vec<u8>> {
         if self.ical == "-" {
             let mut buf = Vec::new();

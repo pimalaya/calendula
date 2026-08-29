@@ -1,3 +1,7 @@
+//! # Journal command
+//!
+//! The `journal` command family, the VJOURNAL view over a calendar.
+
 use anyhow::Result;
 use clap::Subcommand;
 use pimalaya_cli::printer::Printer;
@@ -10,8 +14,7 @@ use crate::shared::{
     },
 };
 
-/// Shared API to manage VJOURNAL items: list, read, create, update,
-/// delete.
+/// Shared API to manage VJOURNAL items.
 #[derive(Debug, Subcommand)]
 pub enum JournalCommand {
     #[command(visible_alias = "ls")]

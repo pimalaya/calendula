@@ -1,3 +1,8 @@
+//! # Event update
+//!
+//! The `calendula event update` command, replacing one VEVENT of the
+//! selected calendar.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};
@@ -5,6 +10,11 @@ use pimalaya_cli::printer::{Message, Printer};
 use crate::shared::{arg::CalendarIdArg, client::CalendarClient, ical::IcalArg};
 
 /// Overwrite an existing event from an iCalendar source.
+///
+/// The whole component is replaced, so the source has to carry every
+/// property the event keeps: what it omits is dropped. Use `--if-match`
+/// to gate the write on a previously-read ETag when the backend
+/// supports optimistic concurrency.
 ///
 /// JSON output: `{"message": "..."}`.
 #[derive(Debug, Parser)]

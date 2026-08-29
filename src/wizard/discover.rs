@@ -1,24 +1,17 @@
-//! Configuration wizard.
+//! # Configuration wizard
 //!
-//! Run on bare `calendula` (no subcommand), and proposed by
-//! `cli::resolve_config` when no configuration file is found. It opens
-//! with a welcome banner on stderr, then either saves the resulting
-//! account to a file (offered when writing to a terminal) or prints it
-//! as a ready-to-save TOML document on stdout, so `calendula > <config>`
-//! works as the write-back when stdout is redirected.
+//! Discovers one account from a single prompt and tests it, where it lands
+//! being [`super::configure`]'s business.
 //!
-//! One prompt takes an email address, a server URL, or a local folder
-//! path, and its shape orients the setup:
+//! The prompt takes an email address, a server URL or a local folder path,
+//! and its shape orients the setup: an address or bare domain runs
+//! io-pim-discovery's parallel search over the RFC 6764 CalDAV lookup, a
+//! folder is a vdir home or pimdir store, told apart by its own markers.
 //!
-//! An email or a bare domain runs io-pim-discovery's parallel discovery
-//! and every reachable CalDAV service becomes one selectable entry;
-//! picking one then prompts its authentication method among those
-//! advertised. A `caldav://` or HTTP-family URL names the context root
-//! outright, which is how a self-hosted server publishing neither an
-//! SRV record nor a `.well-known` redirect gets configured: that is
-//! calendula's one deliberate deviation from himalaya's wizard, whose
-//! providers are near-universally discoverable. An existing folder is a
-//! local vdir home or pimdir store, told apart by its own markers.
+//! A `caldav://` or HTTP-family URL names the context root outright, which is
+//! calendula's one deliberate deviation from himalaya's wizard: a self-hosted
+//! Radicale or Baikal publishes neither an SRV record nor a `.well-known`
+//! redirect, so nothing else reaches it.
 //!
 //! calendula runs no OAuth 2.0 grant itself: a grant only unlocks the
 //! external token brokers behind the API-token prompt.
@@ -49,8 +42,8 @@ use crate::{
 /// The endpoint prompt label.
 const ENDPOINT_PROMPT: &str = "Email, server or folder:";
 
-/// The backend config a flow produced, folded into a fresh
-/// [`AccountConfig`] afterwards.
+/// The backend config a flow produced, folded into a fresh [`AccountConfig`]
+/// afterwards.
 enum Chosen {
     #[cfg(feature = "caldav")]
     Caldav(Box<CaldavConfig>),
@@ -60,13 +53,12 @@ enum Chosen {
     Pimdir(PimdirConfig),
 }
 
-/// Discovers one account from a single prompt, tests it, and hands back
-/// its name and configuration.
+/// Discovers one account from a single prompt, tests it, and hands back its
+/// name and configuration.
 ///
 /// It generates and nothing more: where the account lands is
-/// [`configure`](super::configure)'s business, and no welcome renders
-/// here, whoever reached this point having already been told what the
-/// wizard is.
+/// [`configure`](super::configure)'s business, and no welcome renders here,
+/// whoever reached this point having been told what the wizard is.
 pub fn run() -> Result<(String, AccountConfig)> {
     let input = prompt::text::<&str>(ENDPOINT_PROMPT, None)?;
     let input = input.trim();
@@ -75,15 +67,13 @@ pub fn run() -> Result<(String, AccountConfig)> {
         bail!("Empty input: enter an email address, a server URL, or a folder path");
     }
 
-    // NOTE: the account name is only the TOML table key, so it is
-    // derived from the input rather than prompted; renaming it is
-    // editing that key.
+    // NOTE: the account name is only the TOML table key, so it is derived
+    // from the input rather than prompted.
     let account_name = default_account_name(input);
     let account = build_account(&account_name, input)?;
 
-    // Test before printing: a bad credential or endpoint stops the
-    // wizard here, rather than yielding a configuration that cannot
-    // connect.
+    // NOTE: testing here stops a bad credential or endpoint from yielding
+    // a configuration that cannot connect.
     let spinner = Spinner::start("Testing account configuration");
     let checks = check_account(&account, Backend::Auto);
 
@@ -109,11 +99,11 @@ pub fn run() -> Result<(String, AccountConfig)> {
     Ok((account_name, account))
 }
 
-/// Orients the setup from the input shape, then folds the chosen
-/// backend into a fresh [`AccountConfig`].
+/// Orients the setup from the input shape, then folds the chosen backend into
+/// a fresh [`AccountConfig`].
 ///
-/// The account is left non-default here: whether it claims the default
-/// depends on what the configuration it joins already holds, which is
+/// The account is left non-default: whether it claims the default depends on
+/// what the configuration it joins already holds, which is
 /// [`configure`](super::configure)'s to decide.
 fn build_account(account_name: &str, input: &str) -> Result<AccountConfig> {
     let chosen = if is_path(input) {
@@ -141,10 +131,11 @@ fn build_account(account_name: &str, input: &str) -> Result<AccountConfig> {
     Ok(account)
 }
 
-/// Runs the discovery flow for an email address or a bare domain:
-/// search the CalDAV services reachable from it, let the user pick one,
-/// then configure it. When nothing is discovered the wizard stops and
-/// points at the sample configuration.
+/// Runs the discovery flow for an email address or a bare domain.
+///
+/// Searches the CalDAV services reachable from it, lets the user pick one and
+/// configures it; discovering nothing stops the wizard at the documented
+/// sample rather than a hand-entry flow.
 #[cfg(feature = "caldav")]
 fn configure_discovery(account_name: &str, input: &str) -> Result<Chosen> {
     let email = if input.contains('@') {
@@ -175,8 +166,8 @@ fn configure_discovery(_account_name: &str, input: &str) -> Result<Chosen> {
     bail!("`{input}` looks like an address, but no network backend is compiled in")
 }
 
-/// Configures a typed server URL: the context root is taken as given
-/// and only the credentials are prompted.
+/// Configures a typed server URL: the context root is taken as given and only
+/// the credentials are prompted.
 #[cfg(feature = "caldav")]
 fn configure_manual(account_name: &str, server: Url) -> Result<Chosen> {
     let config = caldav::configure_manual(account_name, server)?;
@@ -188,12 +179,12 @@ fn configure_manual(_account_name: &str, server: Url) -> Result<Chosen> {
     bail!("`{server}` is a server URL, but no network backend is compiled in")
 }
 
-/// Stops the wizard when discovery found nothing for `input`: it says
-/// where to go next and errors out, rather than dropping into a
-/// hand-entry flow for fields nobody knows.
 #[cfg(feature = "caldav")]
 use crate::config::CONFIG_SAMPLE_URL;
 
+/// Stops the wizard when discovery found nothing for `input`: it says where
+/// to go next and errors out, rather than dropping into a hand-entry flow for
+/// fields nobody knows.
 #[cfg(feature = "caldav")]
 fn stop_undiscovered(input: &str) -> Result<Chosen> {
     bail!(
@@ -227,11 +218,11 @@ fn configure_local(input: &str) -> Result<Chosen> {
     bail!("`{input}` looks like a folder path, but no local backend is compiled in")
 }
 
-/// The server URL a `scheme://` input names, or `None` when the input
-/// is an address or a bare domain to discover from.
+/// The server URL a `scheme://` input names, or `None` when the input is an
+/// address or a bare domain to discover from.
 ///
-/// `caldav` and `caldavs` are accepted as aliases for `http` and
-/// `https`, since that is how a DAV endpoint is often written down.
+/// `caldav` and `caldavs` are accepted as aliases for `http` and `https`,
+/// since that is how a DAV endpoint is often written down.
 fn server_url(input: &str) -> Result<Option<Url>> {
     if !input.contains("://") {
         return Ok(None);
@@ -251,9 +242,8 @@ fn server_url(input: &str) -> Result<Option<Url>> {
     }
 }
 
-/// Proposes an account name from the input shape: the first label of
-/// the domain of an address, host or bare domain, or the folder name of
-/// a local path.
+/// Proposes an account name from the input shape: the first domain label of
+/// an address, host or bare domain, or the folder name of a local path.
 fn default_account_name(input: &str) -> String {
     if is_path(input) {
         let raw = input.strip_prefix("file://").unwrap_or(input);

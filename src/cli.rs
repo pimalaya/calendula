@@ -1,4 +1,7 @@
-//! The command tree and its single dispatch point.
+//! # CLI
+//!
+//! The command tree calendula serves and its single dispatch point,
+//! plus the configuration loading every command starts from.
 
 use std::{
     io::{IsTerminal, stdin},
@@ -53,11 +56,10 @@ pub struct CalendulaCli {
 
     /// Override the default configuration file path.
     ///
-    /// The given paths are shell-expanded then canonicalized when
-    /// applicable. Several paths can be passed at once, separated by
-    /// `:` like `$PATH` in a POSIX shell: the first one is the base and
-    /// the rest are deep-merged on top, which is how a public
-    /// configuration and a private one stay separate files.
+    /// Paths are shell-expanded then canonicalized. Several can be
+    /// passed at once, `:`-delimited like `$PATH`, and are deep-merged
+    /// left to right: that is how a public configuration and a private
+    /// one stay separate files.
     #[arg(short, long = "config", global = true, env = "CALENDULA_CONFIG")]
     #[arg(value_name = "PATH", value_parser = path_parser, value_delimiter = ':')]
     pub config_paths: Vec<PathBuf>,
@@ -65,14 +67,14 @@ pub struct CalendulaCli {
     pub account: AccountFlag,
     /// Force a specific backend for the cross-protocol commands.
     ///
-    /// Only the shared commands (`calendar`, `event`, `item`) read it;
+    /// Only the shared commands (`calendar`, `event`, `item`) read it:
     /// the protocol-specific subcommands each already name their
-    /// backend and ignore it.
+    /// backend.
     ///
     /// With `auto`, the first configured backend wins, in calendula's
-    /// priority order (vdir, pimdir, caldav, gcal). With an explicit
-    /// value, only that backend is used, and the command bails when the
-    /// account carries no matching block.
+    /// priority order (vdir, pimdir, caldav, gcal). Any other value
+    /// pins that one, and the command bails when the account carries
+    /// no matching block.
     #[arg(short, long, global = true, default_value_t)]
     pub backend: Backend,
     #[command(flatten)]
@@ -81,9 +83,8 @@ pub struct CalendulaCli {
     pub log: LogFlags,
 }
 
-/// Every command calendula serves, in three groups: the shared
-/// cross-protocol API, the protocol-specific escape hatches, and the
-/// meta commands.
+/// Every command calendula serves: the shared cross-protocol API, the
+/// protocol-specific escape hatches, then the meta commands.
 #[derive(Debug, Subcommand)]
 pub enum CalendulaCommand {
     #[command(subcommand, visible_alias = "cal", alias = "calendars")]
@@ -96,7 +97,6 @@ pub enum CalendulaCommand {
     Journal(JournalCommand),
     #[command(subcommand, alias = "items")]
     Item(ItemCommand),
-
     #[cfg(feature = "caldav")]
     #[command(subcommand)]
     Caldav(CaldavCommand),
@@ -109,7 +109,6 @@ pub enum CalendulaCommand {
     #[cfg(feature = "vdir")]
     #[command(subcommand)]
     Vdir(VdirCommand),
-
     /// Configure an account interactively.
     #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
     #[command(visible_alias = "wizard")]
@@ -125,8 +124,8 @@ pub enum CalendulaCommand {
 /// The global config and the active account's, for a shared command.
 ///
 /// A free function rather than a closure, so the printer it needs for
-/// the offer is borrowed for the length of the call rather than for the
-/// length of the dispatch.
+/// the offer is borrowed for the length of the call rather than of the
+/// whole dispatch.
 fn configs(
     printer: &mut impl Printer,
     config_paths: &[PathBuf],
@@ -144,10 +143,9 @@ fn configs(
 /// Loads the configuration from the merged `config_paths`, or explains
 /// how to get one.
 ///
-/// A missing configuration raises the offer rather than an error, and
-/// the command carries on either way: the wizard may print the account
-/// instead of writing it, so having run it proves nothing, and the
-/// lookup is repeated before failing the ordinary way.
+/// A missing configuration raises the offer rather than an error. The
+/// wizard may print the account instead of writing it, so having run
+/// it proves nothing: the lookup is repeated before failing.
 pub fn load_config(printer: &mut impl Printer, config_paths: &[PathBuf]) -> Result<Config> {
     if let Some(config) = Config::from_paths_or_default(config_paths)? {
         return Ok(config);
@@ -171,13 +169,13 @@ pub fn load_config(printer: &mut impl Printer, config_paths: &[PathBuf]) -> Resu
     }
 }
 
-/// Welcomes, then offers to generate a first configuration. Returns
+/// Welcomes, then offers to generate a first configuration, returning
 /// whether the wizard ran.
 ///
 /// Raised from the two places nothing can happen without a
 /// configuration: a bare invocation, and a command needing an account.
-/// It is a hook rather than a gate, so what happens after a declined
-/// offer is the caller's business.
+/// A hook rather than a gate, so a declined offer is the caller's
+/// business.
 #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
 pub fn offer_configuration(
     printer: &mut impl Printer,
@@ -195,9 +193,10 @@ pub fn offer_configuration(
     Ok(true)
 }
 
-/// A build carrying no wizard-capable backend has nothing to walk the
-/// user through, so it says so by name rather than offering an empty
-/// flow.
+/// Reports that this build carries no wizard-capable backend.
+///
+/// Nothing to walk the user through, so it names the missing features
+/// rather than offering an empty flow.
 #[cfg(not(any(feature = "caldav", feature = "vdir", feature = "pimdir")))]
 pub fn offer_configuration(
     _printer: &mut impl Printer,
@@ -215,6 +214,8 @@ pub fn offer_configuration(
 }
 
 impl CalendulaCommand {
+    /// Runs the subcommand against the account `-a` names, or the
+    /// default one.
     pub fn execute(
         self,
         printer: &mut impl Printer,

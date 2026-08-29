@@ -1,3 +1,8 @@
+//! # Calendar command
+//!
+//! The `calendar` command family, the portable view over the collections
+//! an account holds.
+
 use anyhow::Result;
 use clap::Subcommand;
 use pimalaya_cli::printer::Printer;

@@ -1,3 +1,8 @@
+//! # Todo create
+//!
+//! The `calendula todo create` command, storing one VTODO into the
+//! selected calendar.
+
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};
@@ -14,7 +19,6 @@ use crate::shared::{arg::CalendarIdArg, client::CalendarClient, ical::IcalArg};
 pub struct TodoCreateCommand {
     #[command(flatten)]
     pub calendar: CalendarIdArg,
-
     #[command(flatten)]
     pub ical: IcalArg,
 }

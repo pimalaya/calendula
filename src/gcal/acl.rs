@@ -1,10 +1,12 @@
-//! The `gcal acl` subcommands: the sharing rules of a calendar.
+//! # ACL
 //!
-//! A rule grants one scope (a single user, a group, a whole domain, or
-//! everyone) one role. Its id is `<scope type>:<scope value>`, minted
-//! by the API, so the write verbs take the scope and the role as flags
-//! and derive the id rather than asking a caller to spell a composite
-//! key by hand.
+//! The `calendula gcal acl` subcommands, over the sharing rules of a
+//! calendar.
+//!
+//! A rule grants one scope (a user, a group, a domain, or everyone) one
+//! role. Its id is `<scope type>:<scope value>`, minted by the API, so the
+//! write verbs take scope and role as flags and derive the id rather than
+//! asking a caller to spell a composite key by hand.
 
 pub mod create;
 pub mod delete;
@@ -55,7 +57,7 @@ pub struct GcalAclRuleArgs {
     pub scope: String,
 
     /// The address of the user or group, or the name of the domain.
-    /// Omitted for the `default` scope, which designates everyone.
+    /// Omitted for the `default` scope, which is everyone.
     #[arg(long, value_name = "VALUE")]
     pub value: Option<String>,
 

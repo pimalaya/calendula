@@ -1,15 +1,15 @@
-//! Cross-protocol [`CalendarClient`] for the shared subcommands
-//! (`calendar`, `event`, `item`).
+//! # Calendar client
 //!
-//! One variant per compiled-in backend (vdir, pimdir, CalDAV, gcal); a
-//! value always holds exactly one, picked from the account
-//! configuration by the `--backend` flag. Each shared-API method
-//! dispatches to the active backend's matching method, and the
-//! per-backend glue lives in that protocol module's backend submodule.
+//! The cross-protocol dispatcher the shared commands run on.
 //!
-//! The shared surface is a strict least-common-denominator: an
-//! operation only appears here when every backend can serve it.
-//! Anything narrower belongs to a protocol-specific subcommand.
+//! One variant per compiled-in backend, a value always holding exactly one,
+//! picked from the account configuration by the `--backend` flag. Each method
+//! dispatches to the active backend, whose glue lives in that protocol
+//! module's backend submodule.
+//!
+//! The surface is a strict least-common-denominator: an operation only
+//! appears here when every backend can serve it, and anything narrower
+//! belongs to a protocol-specific subcommand.
 
 use anyhow::{Result, bail};
 
@@ -23,15 +23,14 @@ use crate::{
     },
 };
 
-/// Cross-protocol calendar client bundling the active backend and the
-/// merged runtime [`Account`].
+/// The active backend bundled with the merged runtime [`Account`].
 pub struct CalendarClient {
     inner: BackendClient,
+    /// The account the command runs against, config already merged.
     pub account: Account,
 }
 
-/// The active backend of a [`CalendarClient`]: exactly one of the
-/// compiled-in per-backend glue clients.
+/// Exactly one of the compiled-in per-backend glue clients.
 enum BackendClient {
     #[cfg(feature = "vdir")]
     Vdir(crate::vdir::backend::VdirBackend),
@@ -44,11 +43,12 @@ enum BackendClient {
 }
 
 impl CalendarClient {
-    /// Builds the client from the account configuration: the first
-    /// configured backend allowed by `backend` wins, in calendula's
-    /// priority order (vdir, pimdir, CalDAV, gcal), so a local store is
-    /// preferred over a network round-trip and a protocol-standard
-    /// server over a vendor API.
+    /// Builds the client from the account configuration.
+    ///
+    /// The first configured backend `backend` allows wins, in calendula's
+    /// priority order: vdir, pimdir, CalDAV, gcal. That order prefers a
+    /// local store to a network round-trip, and a protocol-standard server
+    /// to a vendor API.
     pub fn new(
         config: Config,
         #[allow(unused_mut)] mut account_config: AccountConfig,
@@ -119,12 +119,10 @@ impl CalendarClient {
         }
     }
 
-    /// Creates a calendar under `id`, carrying `name` and optionally a
-    /// description and a color.
+    /// Creates a calendar under `id`, with a name and optional decorations.
     ///
-    /// Returns the identifier the backend actually assigned, which is
-    /// `id` everywhere the backend lets the caller name a collection,
-    /// and a server-minted one where it does not.
+    /// Returns the identifier the backend actually assigned: `id` wherever
+    /// it lets the caller name a collection, a server-minted one elsewhere.
     pub fn create_calendar(
         &mut self,
         id: &str,
@@ -144,8 +142,8 @@ impl CalendarClient {
         }
     }
 
-    /// Applies a partial update to the calendar `id`. Fields left as
-    /// `None` in `patch` are preserved.
+    /// Applies a partial update to the calendar `id`, preserving the fields
+    /// left as `None` in `patch`.
     pub fn update_calendar(&mut self, id: &str, patch: CalendarDiff) -> Result<()> {
         match &mut self.inner {
             #[cfg(feature = "vdir")]
@@ -173,13 +171,11 @@ impl CalendarClient {
         }
     }
 
-    /// Lists the items of `calendar_id`, optionally narrowed to
-    /// `range`. `page` is 1-indexed and defaults to the first page;
-    /// `page_size = None` returns the whole window.
+    /// Lists the items of `calendar_id`, optionally narrowed to `range`.
     ///
-    /// The server-backed backends push `range` down (CalDAV as a
-    /// `time-range` filter, gcal as `timeMin` / `timeMax`); the local
-    /// backends parse each item and filter after the fact.
+    /// `page` is 1-indexed and `page_size = None` returns the whole window.
+    /// A server-backed backend pushes `range` down where its protocol
+    /// defines such a filter; the others parse and filter after the fact.
     pub fn list_items(
         &mut self,
         calendar_id: &str,
@@ -213,8 +209,7 @@ impl CalendarClient {
         }
     }
 
-    /// Stores raw iCalendar bytes as a new item of `calendar_id`.
-    /// Returns the identifier the backend assigned.
+    /// Stores raw iCalendar bytes as a new item, returning the id assigned.
     pub fn create_item(&mut self, calendar_id: &str, contents: Vec<u8>) -> Result<String> {
         match &mut self.inner {
             #[cfg(feature = "vdir")]
@@ -230,9 +225,8 @@ impl CalendarClient {
 
     /// Replaces the contents of `item_id` inside `calendar_id`.
     ///
-    /// `if_match` is the entity tag to gate the write on; pass `None`
-    /// to overwrite unconditionally. Backends with no guard concept
-    /// ignore it.
+    /// `if_match` is the entity tag to gate the write on, `None` overwriting
+    /// unconditionally. A backend with no guard concept ignores it.
     pub fn update_item(
         &mut self,
         calendar_id: &str,
@@ -277,8 +271,8 @@ impl CalendarClient {
 
 /// 1-indexed pagination over an in-memory list.
 ///
-/// `page_size = None` returns the whole slice; a size of zero, or a
-/// page past the end, returns nothing.
+/// `page_size = None` returns the whole slice, while a size of zero or a page
+/// past the end returns nothing.
 pub fn paginate<T>(items: Vec<T>, page: Option<u32>, page_size: Option<u32>) -> Vec<T> {
     let Some(size) = page_size else {
         return items;
@@ -312,7 +306,7 @@ mod tests {
         assert!(paginate(items(), Some(9), Some(2)).is_empty());
         assert!(paginate(items(), None, Some(0)).is_empty());
 
-        // A page of zero is clamped to the first page rather than
+        // NOTE: a page of zero is clamped to the first page rather than
         // underflowing the skip.
         assert_eq!(paginate(items(), Some(0), Some(2)), vec![1, 2]);
     }
