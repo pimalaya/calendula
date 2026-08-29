@@ -27,6 +27,7 @@ use io_gcal::v3::{
     },
 };
 use log::warn;
+use pimalaya_config::secret::SecretResolver;
 
 use crate::{
     config::GcalConfig,
@@ -48,9 +49,12 @@ pub struct GcalBackend {
 
 impl GcalBackend {
     /// Connects to the Calendar API with the configured bearer token.
-    pub fn new(config: GcalConfig) -> Result<Self> {
+    ///
+    /// The token is resolved through `resolver`, so an account naming
+    /// one credential command from several of its backends spawns it once.
+    pub fn new(config: GcalConfig, resolver: &mut SecretResolver) -> Result<Self> {
         Ok(Self {
-            client: connect(&config)?,
+            client: connect(&config, resolver)?,
         })
     }
 

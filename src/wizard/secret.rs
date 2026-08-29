@@ -7,11 +7,9 @@
 //! TOML array; a custom command is a shell string. calendula only reads a
 //! secret, so a missing one surfaces when the account is tested right after.
 
-use std::process::Command;
-
 use anyhow::{Result, bail};
 use pimalaya_cli::wizard::keyring::{self, SecretChoice};
-use pimalaya_config::{command::shell, secret::Secret};
+use pimalaya_config::{command::CommandConfig, secret::Secret};
 
 /// Prompts for a password through the shared keyring picker.
 ///
@@ -29,6 +27,7 @@ pub fn configure_token(label: &str, key_default: &str, oauth: bool) -> Result<Se
     to_secret(keyring::prompt_token(label, key_default, oauth)?)
 }
 
+/// Turns a picker choice into the [`Secret`] the configuration stores.
 fn to_secret(choice: SecretChoice) -> Result<Secret> {
     Ok(match choice {
         SecretChoice::Command(argv) => command_secret(argv)?,
@@ -37,21 +36,21 @@ fn to_secret(choice: SecretChoice) -> Result<Secret> {
     })
 }
 
-/// Builds a command secret from an argv, the form a known keyring provider
-/// or token broker yields. It serializes back as a TOML array.
+/// Builds a [`Secret::Command`] from an argv, the form a known keyring
+/// provider or token broker yields. It serializes back as a TOML array.
 fn command_secret(argv: Vec<String>) -> Result<Secret> {
     let Some((program, args)) = argv.split_first() else {
         bail!("Empty command for secret");
     };
 
-    let mut command = Command::new(program);
-    command.args(args);
-
-    Ok(Secret::Command(command))
+    Ok(Secret::Command(CommandConfig::Argv {
+        program: program.clone(),
+        args: args.to_vec(),
+    }))
 }
 
-/// Builds a command secret from a shell command line, the form a user typed
-/// by hand. It serializes back as a TOML string.
+/// Builds a [`Secret::Command`] from a shell command line, the form a user
+/// typed by hand. It serializes back as a TOML string.
 fn shell_secret(line: &str) -> Result<Secret> {
     let line = line.trim();
 
@@ -59,7 +58,7 @@ fn shell_secret(line: &str) -> Result<Secret> {
         bail!("Empty shell command for secret");
     }
 
-    Ok(Secret::Command(shell(line)))
+    Ok(Secret::Command(CommandConfig::Shell(line.to_owned())))
 }
 
 #[cfg(test)]
@@ -67,8 +66,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_empty_command_is_rejected_rather_than_stored() {
+    fn empty_command_secret_is_rejected() {
         assert!(command_secret(Vec::new()).is_err());
+    }
+
+    #[test]
+    fn blank_shell_secret_is_rejected() {
         assert!(shell_secret("   ").is_err());
     }
 }

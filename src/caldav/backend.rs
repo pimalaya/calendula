@@ -15,9 +15,10 @@ use io_webdav::{
     client::WebdavClientStd,
     rfc4791::{calendar::CaldavCalendar, item::CaldavItemEntry},
 };
+use pimalaya_config::secret::SecretResolver;
 
 use crate::{
-    caldav::client::connect_and_resolve,
+    caldav::client::connect,
     config::CaldavConfig,
     shared::{
         calendar::{Calendar, CalendarDiff},
@@ -35,7 +36,7 @@ impl CaldavBackend {
     /// Connects and walks the discovery chain, caching the home-set.
     pub fn new(config: CaldavConfig) -> Result<Self> {
         Ok(Self {
-            client: connect_and_resolve(&config)?,
+            client: connect(&config, &mut SecretResolver::new())?,
         })
     }
 

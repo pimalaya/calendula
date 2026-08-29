@@ -49,5 +49,14 @@ A CalDAV password, a CalDAV token or a gcal token SHALL be a secret read from th
 
 calendula SHALL NOT write a secret anywhere: an OAuth 2.0 token broker is a command like any other, and a missing value surfaces when the account is tested. Google expires an access token within the hour, so a token broker is the practical answer there rather than a stored value.
 
+### Requirement: A credential command runs once per account
+Every secret an account resolves in one run SHALL go through a single resolver, so a command two of its backend blocks name is spawned once and its value handed to both. A `pass` or `gpg` entry shared by `caldav` and `gcal` therefore costs one unlock per account check, not one per backend.
+
+Distinctness is the configured command's own shape, and never crosses the two of them: a shell line and the argv spelling that runs it through the platform shell are two commands.
+
+The resolver holds plaintext for as long as it lives, so it SHALL be built where the backends of one account are assembled and dropped with them, never held for the life of the process and never stored on a client.
+
+A caller opening a single backend SHALL keep resolving through a resolver of its own, so the shape stays the same everywhere and nothing outlives its account.
+
 ### Requirement: Table rendering keeps its preset string
 The `table.preset` option SHALL keep accepting the comfy-table v7 positional preset string, mapped onto the v8 typed style, so a configuration written against an earlier calendula stays valid. A character left out of a short string, or written as a space, SHALL leave its component undrawn.

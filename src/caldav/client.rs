@@ -17,7 +17,7 @@ use io_pim_discovery::{
 };
 use io_webdav::{client::WebdavClientStd, rfc4918::WebdavAuth};
 use pimalaya_cli::printer::Printer;
-use pimalaya_config::toml::TomlConfig;
+use pimalaya_config::{secret::SecretResolver, toml::TomlConfig};
 use pimalaya_stream::tls::Tls;
 use secrecy::ExposeSecret;
 use url::Url;
@@ -60,13 +60,15 @@ impl DerefMut for CaldavClient {
     }
 }
 
-/// Opens a connected CalDAV client and walks the discovery chain.
+/// Opens a connected CalDAV client and walks the discovery chain,
+/// resolving the credential through `resolver` so a command another
+/// backend of the same account names too is spawned once.
 ///
 /// Follows whichever route the config sets: `home` pins the home-set
 /// and skips discovery, `server` names the context root the principal
 /// walk starts from, `discover` resolves a bare domain to it (RFC 6764).
-pub fn connect_and_resolve(config: &CaldavConfig) -> Result<WebdavClientStd> {
-    let auth = build_auth(&config.auth)?;
+pub fn connect(config: &CaldavConfig, resolver: &mut SecretResolver) -> Result<WebdavClientStd> {
+    let auth = build_auth(&config.auth, resolver)?;
     let tls = build_tls(config);
 
     if let Some(home) = &config.home {
@@ -122,16 +124,17 @@ fn build_tls(config: &CaldavConfig) -> Tls {
 
 /// Resolves the configured credentials into the auth io-webdav sends.
 ///
-/// A secret backed by a command is run here, at first use.
-fn build_auth(config: &CaldavAuthConfig) -> Result<WebdavAuth> {
+/// A secret backed by a command is run here, at first use, unless
+/// `resolver` already holds what that same command answered.
+fn build_auth(config: &CaldavAuthConfig, resolver: &mut SecretResolver) -> Result<WebdavAuth> {
     Ok(match config {
         CaldavAuthConfig::None => WebdavAuth::None,
         CaldavAuthConfig::Basic { username, password } => WebdavAuth::Basic(HttpAuthBasic {
             username: username.clone(),
-            password: password.clone().get()?,
+            password: resolver.resolve(password.clone())?,
         }),
         CaldavAuthConfig::Bearer { token } => {
-            let token = token.clone().get()?;
+            let token = resolver.resolve(token.clone())?;
             WebdavAuth::Bearer(HttpAuthBearer::new(token.expose_secret()))
         }
     })
@@ -156,7 +159,7 @@ pub fn build_caldav_client(
         .ok_or_else(|| anyhow!("CalDAV configuration is missing for account `{name}`"))?;
 
     let account = Account::from(config).merge(Account::from(account_config));
-    let inner = connect_and_resolve(&caldav_config)?;
+    let inner = connect(&caldav_config, &mut SecretResolver::new())?;
 
     Ok(CaldavClient::new(inner, account))
 }

@@ -8,6 +8,8 @@ use std::{fmt, path::PathBuf};
 use anyhow::{Result, anyhow, bail};
 use clap::Parser;
 use pimalaya_cli::printer::Printer;
+#[cfg(any(feature = "caldav", feature = "gcal"))]
+use pimalaya_config::secret::SecretResolver;
 use pimalaya_config::toml::TomlConfig;
 use serde::Serialize;
 
@@ -62,11 +64,19 @@ impl AccountCheckCommand {
 ///
 /// Shared with the wizard, which tests the account it just built before
 /// printing it.
+///
+/// The credentials go through one resolver for the whole account, so an
+/// account whose CalDAV and gcal blocks name the same command unlocks a
+/// `pass` or `gpg` entry once rather than once per backend. It is
+/// dropped with the check, holding plaintext while it lives.
 pub fn check_account(
     #[allow(unused_variables)] account_config: &AccountConfig,
     #[allow(unused_variables)] backend: Backend,
 ) -> Vec<BackendCheck> {
     let mut checks = Vec::new();
+
+    #[cfg(any(feature = "caldav", feature = "gcal"))]
+    let mut resolver = SecretResolver::new();
 
     #[cfg(feature = "vdir")]
     if backend.allows_vdir()
@@ -86,14 +96,20 @@ pub fn check_account(
     if backend.allows_caldav()
         && let Some(config) = account_config.caldav.clone()
     {
-        checks.push(BackendCheck::from("caldav", check_caldav(config)));
+        checks.push(BackendCheck::from(
+            "caldav",
+            check_caldav(config, &mut resolver),
+        ));
     }
 
     #[cfg(feature = "gcal")]
     if backend.allows_gcal()
         && let Some(config) = account_config.gcal.clone()
     {
-        checks.push(BackendCheck::from("gcal", check_gcal(config)));
+        checks.push(BackendCheck::from(
+            "gcal",
+            check_gcal(config, &mut resolver),
+        ));
     }
 
     checks
@@ -139,8 +155,8 @@ fn check_pimdir(config: crate::config::PimdirConfig) -> Result<()> {
 /// Connecting and resolving the calendar home-set exercises DNS,
 /// TLS, authentication and the discovery chain in one go.
 #[cfg(feature = "caldav")]
-fn check_caldav(config: crate::config::CaldavConfig) -> Result<()> {
-    crate::caldav::client::connect_and_resolve(&config)?;
+fn check_caldav(config: crate::config::CaldavConfig, resolver: &mut SecretResolver) -> Result<()> {
+    crate::caldav::client::connect(&config, resolver)?;
     Ok(())
 }
 
@@ -148,8 +164,8 @@ fn check_caldav(config: crate::config::CaldavConfig) -> Result<()> {
 /// opens the TLS connection and exercises the authorization in one go,
 /// which a bare connect would not.
 #[cfg(feature = "gcal")]
-fn check_gcal(config: crate::config::GcalConfig) -> Result<()> {
-    crate::gcal::backend::GcalBackend::new(config)?.list_calendars()?;
+fn check_gcal(config: crate::config::GcalConfig, resolver: &mut SecretResolver) -> Result<()> {
+    crate::gcal::backend::GcalBackend::new(config, resolver)?.list_calendars()?;
     Ok(())
 }
 

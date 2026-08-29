@@ -12,6 +12,7 @@
 //! belongs to a protocol-specific subcommand.
 
 use anyhow::{Result, bail};
+use pimalaya_config::secret::SecretResolver;
 
 use crate::{
     account::context::Account,
@@ -92,7 +93,7 @@ impl CalendarClient {
             && let Some(gcal_config) = account_config.gcal.take()
         {
             use crate::gcal::backend::GcalBackend;
-            let client = GcalBackend::new(gcal_config)?;
+            let client = GcalBackend::new(gcal_config, &mut SecretResolver::new())?;
             inner = Some(BackendClient::Gcal(Box::new(client)));
         }
 

@@ -97,6 +97,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A credential command named by two backends of one account is now run once per account instead of once per backend.
+
+  `account check` and the wizard's connection test both exercise every backend the account configures, so a `pass` or `gpg` entry shared by its `caldav` and `gcal` blocks was unlocked twice. One resolver now serves the whole check, hands the value of a command it already ran to every backend naming it, and is dropped with the check.
+
 - `--config` now reaches the wizard.
 
   It was passed to every subcommand and dropped on the one path where a user is most likely to pass it, so a wizard run under `--config <path>` neither read nor wrote that path.

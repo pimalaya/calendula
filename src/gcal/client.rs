@@ -15,7 +15,7 @@ use std::{
 use anyhow::{Result, anyhow};
 use io_gcal::v3::client::{GcalClientStd, GcalClientStdConnectOptions};
 use pimalaya_cli::printer::Printer;
-use pimalaya_config::toml::TomlConfig;
+use pimalaya_config::{secret::SecretResolver, toml::TomlConfig};
 use pimalaya_stream::tls::Tls;
 use secrecy::ExposeSecret;
 
@@ -68,14 +68,16 @@ pub fn build_gcal_client(
         .ok_or_else(|| anyhow!("Google Calendar configuration is missing for account `{name}`"))?;
 
     let account = Account::from(config).merge(Account::from(account_config));
-    let inner = connect(&gcal_config)?;
+    let inner = connect(&gcal_config, &mut SecretResolver::new())?;
 
     Ok(GcalClient::new(inner, account))
 }
 
-/// Opens a connected Google Calendar client.
-pub fn connect(config: &GcalConfig) -> Result<GcalClientStd> {
-    let token = config.auth.token.clone().get()?;
+/// Opens a connected Google Calendar client, resolving the bearer token
+/// through `resolver` so a command another backend of the same account
+/// names too is spawned once.
+pub fn connect(config: &GcalConfig, resolver: &mut SecretResolver) -> Result<GcalClientStd> {
+    let token = resolver.resolve(config.auth.token.clone())?;
     let options = GcalClientStdConnectOptions {
         tls: build_tls(config),
     };
