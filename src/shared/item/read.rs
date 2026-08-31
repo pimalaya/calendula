@@ -2,9 +2,13 @@
 //!
 //! The `item read` command, printing one iCalendar object verbatim.
 
+use std::fmt;
+
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::printer::{Message, Printer};
+use pimalaya_cli::printer::Printer;
+use schemars::JsonSchema;
+use serde::Serialize;
 
 use crate::shared::{arg::CalendarIdArg, client::CalendarClient};
 
@@ -12,7 +16,7 @@ use crate::shared::{arg::CalendarIdArg, client::CalendarClient};
 ///
 /// The raw iCalendar bytes are printed verbatim on stdout.
 ///
-/// JSON output: `{"message": "..."}`, carrying the raw iCalendar.
+/// JSON output: `{"contents"}`, carrying the raw iCalendar.
 #[derive(Debug, Parser)]
 pub struct ItemReadCommand {
     #[command(flatten)]
@@ -28,6 +32,20 @@ impl ItemReadCommand {
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         let item = client.get_item(&calendar_id, &self.item_id)?;
         let contents = String::from_utf8_lossy(&item.contents).into_owned();
-        printer.out(Message::new(contents))
+        printer.out(ItemReadOutput { contents })
+    }
+}
+
+/// The read item, as the calendar stores it.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemReadOutput {
+    /// The raw iCalendar bytes, lossily decoded as UTF-8.
+    pub contents: String,
+}
+
+impl fmt::Display for ItemReadOutput {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "{}", self.contents.trim_end())
     }
 }

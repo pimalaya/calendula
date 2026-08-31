@@ -11,6 +11,7 @@ use pimalaya_cli::{
     printer::Printer,
     table::{Cell, Color, Row, Table, TableStyle},
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::caldav::client::CaldavClient;
@@ -21,8 +22,8 @@ use crate::caldav::client::CaldavClient;
 /// collection change tag, the sync token an incremental sync starts
 /// from, and the component kinds the server accepts.
 ///
-/// JSON output: `{"calendars": [{"id", "display-name", "description",
-/// "color", "components", "ctag", "sync-token"}]}`.
+/// JSON output: `{"calendars": [{"id", "displayName", "description",
+/// "color", "components", "ctag", "syncToken"}]}`.
 #[derive(Debug, Parser)]
 pub struct CaldavCalendarListCommand;
 
@@ -45,7 +46,7 @@ impl CaldavCalendarListCommand {
             })
             .collect();
 
-        printer.out(CalendarsTable {
+        printer.out(CaldavCalendarListOutput {
             style,
             name_color,
             rows,
@@ -54,8 +55,9 @@ impl CaldavCalendarListCommand {
 }
 
 /// The rendered CalDAV calendar listing.
-#[derive(Clone, Debug, Serialize)]
-pub struct CalendarsTable {
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CaldavCalendarListOutput {
     /// The table style the account renders with.
     #[serde(skip)]
     pub style: TableStyle,
@@ -68,8 +70,8 @@ pub struct CalendarsTable {
 }
 
 /// One CalDAV calendar with the properties only CalDAV carries.
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct CalendarRow {
     /// The last path segment of the collection URL.
     pub id: String,
@@ -89,7 +91,7 @@ pub struct CalendarRow {
     pub sync_token: Option<String>,
 }
 
-impl fmt::Display for CalendarsTable {
+impl fmt::Display for CaldavCalendarListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut table = Table::new();
 

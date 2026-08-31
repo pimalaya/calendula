@@ -17,11 +17,12 @@ pub mod list;
 pub mod read;
 pub mod update;
 
-use ical::tree::{
+use ical::{
     component::vjournal::VJOURNAL,
-    cst::IcalCst,
     prop::{dtstart::DTSTART, status::STATUS, summary::SUMMARY},
+    tree::cst::IcalCst,
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::shared::item::CalendarItem;
@@ -30,8 +31,8 @@ use crate::shared::item::CalendarItem;
 ///
 /// DTSTART keeps its iCalendar wire spelling, so what a listing prints is
 /// what the calendar carries.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct Journal {
     /// The id of the item the entry was projected from.
     pub id: String,

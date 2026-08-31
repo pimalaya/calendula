@@ -19,11 +19,12 @@ pub mod read;
 pub mod update;
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-use ical::tree::{
+use ical::{
     component::vevent::VEVENT,
-    cst::IcalCst,
     prop::{description::DESCRIPTION, dtend::DTEND, dtstart::DTSTART, summary::SUMMARY},
+    tree::cst::IcalCst,
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::shared::item::CalendarItem;
@@ -33,8 +34,8 @@ use crate::shared::item::CalendarItem;
 /// The time fields keep their iCalendar wire spelling, so what a listing
 /// prints is what the calendar carries. Parsing one into a [`NaiveDateTime`]
 /// is a separate, fallible step.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct Event {
     /// The id of the item the event was projected from.
     pub id: String,

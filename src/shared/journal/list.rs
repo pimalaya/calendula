@@ -12,6 +12,7 @@ use pimalaya_cli::{
     printer::Printer,
     table::{Cell, Color, ContentArrangement, Row, Table, TableStyle},
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::shared::{
@@ -78,7 +79,7 @@ impl JournalListCommand {
             .filter(|journal| dated_within(journal, range.as_ref()))
             .collect();
 
-        printer.out(Journals {
+        printer.out(JournalListOutput {
             style: client.account.table_style(),
             arrangement: client.account.table_arrangement(),
             max_width: self.max_width,
@@ -112,8 +113,9 @@ struct JournalColors {
 }
 
 /// The rendered journal listing.
-#[derive(Clone, Debug, Serialize)]
-pub struct Journals {
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct JournalListOutput {
     #[serde(skip)]
     pub style: TableStyle,
     #[serde(skip)]
@@ -125,7 +127,7 @@ pub struct Journals {
     pub journals: Vec<Journal>,
 }
 
-impl fmt::Display for Journals {
+impl fmt::Display for JournalListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut table = Table::new();
 

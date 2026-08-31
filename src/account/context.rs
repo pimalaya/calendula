@@ -7,11 +7,8 @@
 //! an unset field stays distinguishable from a set one and the global
 //! block keeps overriding nothing it did not name.
 
-use std::{env::temp_dir, path::PathBuf};
-
 use anyhow::{Result, bail};
 use crossterm::style::Color;
-use dirs::download_dir;
 use pimalaya_cli::table::{Color as TableColor, ContentArrangement, TableStyle};
 
 use crate::{
@@ -29,8 +26,6 @@ const DEFAULT_LIST_PAGE_SIZE: u32 = 25;
 /// each still unset until an accessor supplies its default.
 #[derive(Debug, Default)]
 pub struct Account {
-    /// Where an attachment or export is written.
-    pub downloads_dir: Option<PathBuf>,
     /// `comfy_table` preset name every table renders with.
     pub table_preset: Option<String>,
     /// Column-arrangement strategy every table renders with.
@@ -62,7 +57,6 @@ impl Account {
     /// Folds `other`'s set fields on top of `self`.
     pub fn merge(self, other: Self) -> Self {
         Self {
-            downloads_dir: other.downloads_dir.or(self.downloads_dir),
             table_preset: other.table_preset.or(self.table_preset),
             table_arrangement: other.table_arrangement.or(self.table_arrangement),
 
@@ -87,19 +81,6 @@ impl Account {
             ),
             items_list_table: merge_item_table(self.items_list_table, other.items_list_table),
         }
-    }
-
-    /// The configured downloads directory, else the XDG one, else the
-    /// temporary directory.
-    #[allow(dead_code)]
-    pub fn downloads_dir(&self) -> PathBuf {
-        self.downloads_dir
-            .as_ref()
-            .and_then(|dir| dir.to_str())
-            .and_then(|dir| shellexpand::full(dir).ok())
-            .map(|dir| PathBuf::from(dir.to_string()))
-            .or_else(download_dir)
-            .unwrap_or_else(temp_dir)
     }
 
     /// The table style the configured preset name maps to.
@@ -307,7 +288,6 @@ fn merge_item_table(base: ItemListTableConfig, over: ItemListTableConfig) -> Ite
 impl From<Config> for Account {
     fn from(config: Config) -> Self {
         Self {
-            downloads_dir: config.downloads_dir,
             table_preset: config.table.preset,
             table_arrangement: config.table.arrangement,
             events_list_page_size: config.event.list.page_size,
@@ -327,7 +307,6 @@ impl From<Config> for Account {
 impl From<AccountConfig> for Account {
     fn from(config: AccountConfig) -> Self {
         Self {
-            downloads_dir: config.downloads_dir,
             table_preset: config.table.preset,
             table_arrangement: config.table.arrangement,
             events_list_page_size: config.event.list.page_size,

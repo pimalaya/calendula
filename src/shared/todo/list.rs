@@ -12,6 +12,7 @@ use pimalaya_cli::{
     printer::Printer,
     table::{Cell, Color, ContentArrangement, Row, Table, TableStyle},
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::shared::{
@@ -30,7 +31,7 @@ use crate::shared::{
 /// is returned.
 ///
 /// JSON output: `{"todos": [{"id", "summary", "due", "status",
-/// "priority", "percent-complete"}]}`.
+/// "priority", "percentComplete"}]}`.
 #[derive(Debug, Parser)]
 pub struct TodoListCommand {
     #[command(flatten)]
@@ -82,7 +83,7 @@ impl TodoListCommand {
             .filter(|todo| due_within(todo, range.as_ref()))
             .collect();
 
-        printer.out(Todos {
+        printer.out(TodoListOutput {
             style: client.account.table_style(),
             arrangement: client.account.table_arrangement(),
             max_width: self.max_width,
@@ -119,8 +120,9 @@ struct TodoColors {
 }
 
 /// The rendered todo listing.
-#[derive(Clone, Debug, Serialize)]
-pub struct Todos {
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TodoListOutput {
     /// The table preset the account configures.
     #[serde(skip)]
     pub style: TableStyle,
@@ -136,7 +138,7 @@ pub struct Todos {
     pub todos: Vec<Todo>,
 }
 
-impl fmt::Display for Todos {
+impl fmt::Display for TodoListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut table = Table::new();
 

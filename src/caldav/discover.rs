@@ -8,6 +8,7 @@ use std::fmt;
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::Printer;
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::caldav::client::CaldavClient;
@@ -18,7 +19,7 @@ use crate::caldav::client::CaldavClient;
 /// current-user-principal, then the calendar home-set, printing each
 /// URL it resolves.
 ///
-/// JSON output: `{"principal", "calendar_home_set"}`.
+/// JSON output: `{"principal", "calendarHomeSet"}`.
 #[derive(Debug, Parser)]
 pub struct CaldavDiscoverCommand;
 
@@ -27,7 +28,7 @@ impl CaldavDiscoverCommand {
         let principal = client.current_user_principal()?;
         let home = client.calendar_home_set()?;
 
-        printer.out(DiscoveryReport {
+        printer.out(CaldavDiscoverOutput {
             principal: principal.to_string(),
             calendar_home_set: home.to_string(),
         })
@@ -35,15 +36,16 @@ impl CaldavDiscoverCommand {
 }
 
 /// The URLs the discovery chain resolved.
-#[derive(Clone, Debug, Serialize)]
-pub struct DiscoveryReport {
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CaldavDiscoverOutput {
     /// The principal the server reports for these credentials.
     pub principal: String,
     /// The collection the principal files its calendars under.
     pub calendar_home_set: String,
 }
 
-impl fmt::Display for DiscoveryReport {
+impl fmt::Display for CaldavDiscoverOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Principal: {}", self.principal)?;
         writeln!(f, "Calendar home-set: {}", self.calendar_home_set)?;

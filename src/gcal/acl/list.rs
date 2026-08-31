@@ -12,6 +12,7 @@ use pimalaya_cli::{
     printer::Printer,
     table::{Cell, Row, Table, TableStyle},
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::gcal::{client::GcalClient, render};
@@ -64,13 +65,14 @@ impl GcalAclListCommand {
             }
         }
 
-        printer.out(RulesTable { style, rows })
+        printer.out(GcalAclListOutput { style, rows })
     }
 }
 
 /// The rendered ACL listing.
-#[derive(Clone, Debug, Serialize)]
-pub struct RulesTable {
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GcalAclListOutput {
     /// The table style the account configured.
     #[serde(skip)]
     pub style: TableStyle,
@@ -80,8 +82,8 @@ pub struct RulesTable {
 }
 
 /// One access control rule.
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct RuleRow {
     /// The rule identifier, `<scope type>:<scope value>`.
     pub id: String,
@@ -93,7 +95,7 @@ pub struct RuleRow {
     pub role: Option<&'static str>,
 }
 
-impl fmt::Display for RulesTable {
+impl fmt::Display for GcalAclListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut table = Table::new();
 

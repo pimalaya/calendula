@@ -13,6 +13,7 @@ use pimalaya_cli::{
     printer::Printer,
     table::{Cell, Row, Table, TableStyle},
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::{
@@ -87,13 +88,14 @@ impl GcalFreeBusyCommand {
             })
             .collect();
 
-        printer.out(FreeBusyTable { style, rows })
+        printer.out(GcalFreeBusyOutput { style, rows })
     }
 }
 
 /// The rendered free/busy answer.
-#[derive(Clone, Debug, Serialize)]
-pub struct FreeBusyTable {
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GcalFreeBusyOutput {
     /// The table style the account configured.
     #[serde(skip)]
     pub style: TableStyle,
@@ -103,8 +105,8 @@ pub struct FreeBusyTable {
 }
 
 /// The busy periods of one queried calendar.
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct CalendarBusy {
     /// The calendar the periods belong to.
     pub id: String,
@@ -115,8 +117,8 @@ pub struct CalendarBusy {
 }
 
 /// One busy period, as the RFC 3339 bounds the API reports.
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct BusyPeriod {
     /// The start of the period.
     pub start: String,
@@ -124,7 +126,7 @@ pub struct BusyPeriod {
     pub end: String,
 }
 
-impl fmt::Display for FreeBusyTable {
+impl fmt::Display for GcalFreeBusyOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut table = Table::new();
 

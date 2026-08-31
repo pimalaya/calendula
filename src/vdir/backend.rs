@@ -35,13 +35,11 @@ pub struct VdirBackend {
 impl VdirBackend {
     /// Opens the backend on the configured home directory.
     ///
-    /// The path is expanded first, `~` and environment variables
-    /// alike. Nothing is checked here, so a missing home surfaces on
-    /// the first operation.
+    /// The path arrives shell-expanded, [`VdirConfig::home_dir`] doing
+    /// it at deserialize. Nothing is checked here, so a missing home
+    /// surfaces on the first operation.
     pub fn new(config: VdirConfig) -> Self {
-        let root = shellexpand::full(&config.home_dir.to_string_lossy())
-            .map(|home| VdirPath::new(home.into_owned()))
-            .unwrap_or_else(|_| VdirPath::new(config.home_dir.to_string_lossy().into_owned()));
+        let root = VdirPath::new(config.home_dir.to_string_lossy().into_owned());
 
         Self {
             client: VdirClient::new(root.clone()),

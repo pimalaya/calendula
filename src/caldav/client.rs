@@ -78,7 +78,7 @@ pub fn connect(config: &CaldavConfig, resolver: &mut SecretResolver) -> Result<W
     }
 
     let server = match &config.server {
-        Some(server) => server.clone(),
+        Some(server) => parse_server(server)?,
         None => {
             let domain = config
                 .discover
@@ -92,6 +92,21 @@ pub fn connect(config: &CaldavConfig, resolver: &mut SecretResolver) -> Result<W
     client.calendar_home_set()?;
 
     Ok(client)
+}
+
+/// Parses a `server` config string into a [`Url`].
+///
+/// Accepts a full URL, a bare domain, or `domain:port`; anything
+/// without an explicit `http` or `https` scheme defaults to `https://`,
+/// since `url` would otherwise read the leading label of `domain:port`
+/// as the scheme.
+pub fn parse_server(server: &str) -> Result<Url> {
+    let url = match Url::parse(server) {
+        Ok(url) if matches!(url.scheme(), "http" | "https") => url,
+        _ => Url::parse(&format!("https://{server}"))?,
+    };
+
+    Ok(url)
 }
 
 /// Resolves a bare domain to a CalDAV context root through RFC 6764.
@@ -117,9 +132,7 @@ pub fn resolver() -> Url {
 /// WebDAV speaks HTTP/1.1 only, so the ALPN list pins it rather than
 /// letting a server negotiate HTTP/2.
 fn build_tls(config: &CaldavConfig) -> Tls {
-    let mut tls: Tls = config.tls.clone().into();
-    tls.rustls.alpn = vec!["http/1.1".into()];
-    tls
+    config.tls.clone().into_tls(vec!["http/1.1".into()])
 }
 
 /// Resolves the configured credentials into the auth io-webdav sends.
@@ -162,4 +175,31 @@ pub fn build_caldav_client(
     let inner = connect(&caldav_config, &mut SecretResolver::new())?;
 
     Ok(CaldavClient::new(inner, account))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_server;
+
+    /// Every spelling a user writes a context root in resolves, and a
+    /// bare authority takes `https` rather than reading its first label
+    /// as a scheme.
+    #[test]
+    fn a_bare_authority_defaults_to_https_and_a_full_url_is_kept() {
+        let parsed = |server| parse_server(server).unwrap().to_string();
+
+        assert_eq!(
+            parsed("https://dav.example.org/dav/"),
+            "https://dav.example.org/dav/"
+        );
+        assert_eq!(
+            parsed("http://dav.example.org:8008/"),
+            "http://dav.example.org:8008/"
+        );
+        assert_eq!(parsed("example.org"), "https://example.org/");
+        assert_eq!(
+            parsed("dav.example.org:8443"),
+            "https://dav.example.org:8443/"
+        );
+    }
 }

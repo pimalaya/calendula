@@ -7,6 +7,7 @@ use std::fmt;
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::Printer;
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::pimdir::backend::PimdirBackend;
@@ -32,8 +33,9 @@ impl PimdirStatusCommand {
 }
 
 /// What a store holds, as `pimdir status` reports it.
-#[derive(Clone, Debug, Serialize)]
-pub struct PimdirStatus {
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PimdirStatusOutput {
     /// The account this client reads, `None` in a store grouping none.
     pub account: Option<String>,
     /// Every account the store groups collections under.
@@ -42,8 +44,9 @@ pub struct PimdirStatus {
     pub calendars: Vec<PimdirCalendarStatus>,
 }
 
-/// One calendar's row in a [`PimdirStatus`].
-#[derive(Clone, Debug, Serialize)]
+/// One calendar's row in a [`PimdirStatusOutput`].
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct PimdirCalendarStatus {
     /// The collection id.
     pub id: String,
@@ -60,7 +63,7 @@ pub struct PimdirCalendarStatus {
     pub queued: usize,
 }
 
-impl fmt::Display for PimdirStatus {
+impl fmt::Display for PimdirStatusOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f)?;
 

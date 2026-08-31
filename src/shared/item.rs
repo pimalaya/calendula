@@ -20,14 +20,15 @@ pub mod update;
 
 use anyhow::{Result, bail};
 use chrono::NaiveDate;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// A calendar object resource: one iCalendar file.
 ///
 /// The contents mix component kinds (VEVENT, VTODO, VJOURNAL): the component
 /// families filter them, the `item` family does not.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct CalendarItem {
     /// Backend-specific identifier the other commands address it by.
     pub id: String,
@@ -46,8 +47,8 @@ pub struct CalendarItem {
 /// Both bounds are optional, so a range may be open on either side. The
 /// stored values are iCalendar UTC date-times (RFC 5545 3.3.5), the form the
 /// CalDAV `time-range` filter takes (RFC 4791 9.9).
-#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct CalendarTimeRange {
     /// Inclusive lower bound, as `YYYYMMDDTHHMMSSZ`.
     #[serde(default)]

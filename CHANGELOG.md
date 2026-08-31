@@ -95,6 +95,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Adopted the [Cairn](https://github.com/pimalaya/cairn) convention: cairn/spec holds the living specification (backends, commands, config, wizard, packaging), cairn/changes the proposals, cairn/log the dated history.
 
+- Added `json-schema`, printing the JSON Schema of a command's `--json` payload (aliased `json-schemas`).
+
+  Every data command now hands the printer a named `*Output` type registered in the schema map, so a consumer can validate what it reads instead of guessing. Passing `--dir` writes one file per command; passing none prints the single schema named on the command line.
+
+- Added `gcal.alpn`, the ALPN identifiers offered during the Google Calendar TLS handshake.
+
+  Unset offers `http/1.1`, the only HTTP version io-http speaks; an empty list skips ALPN negotiation and a non-empty one replaces the default. Only rustls reads it, native-tls ignoring ALPN altogether.
+
 ### Changed
 
 - A credential command named by two backends of one account is now run once per account instead of once per backend.
@@ -177,7 +185,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Relicensed from AGPL-3.0-only to dual MIT OR Apache-2.0.
 
+- `caldav.server` now takes a bare authority as well as a full URL.
+
+  A bare domain (`dav.example.org`) or a `domain:port` pair is accepted and defaults to `https`, which is how the sibling products spell the same key. Every URL that worked before still works.
+
+- **BREAKING**: the four `read` commands answer `{"contents": "..."}` instead of `{"message": "..."}` under `--json`.
+
+  `Message` carries a confirmation, not data, so `event read`, `todo read`, `journal read` and `item read` now return a payload of their own. The plain-text output is unchanged.
+
+- **BREAKING**: every `--json` payload key is camelCase now.
+
+  `caldav discover` renamed its `calendar_home_set` key to `calendarHomeSet` and `vdir list` its `display_name` to `displayName`; the keys added this cycle read `syncToken`, `timeZone`, `accessRole`, `defaultReminders`, `originalStart`, `calendarId` and `percentComplete`. Every other key is a single word and is unchanged.
+
+  That is the spelling of the wire formats calendula sits over, the Calendar API answering `accessRole` and `timeZone`, and it is the one shape a jq path addresses without quoting.
+
+  The configuration vocabulary stays kebab-case: a TOML document is written by a person, not by a script. The plain-text output of every command is unchanged.
+
+- A wizard-generated account no longer writes a `default = false` line, the rest of the family omitting it too.
+
+### Removed
+
+- Removed the `downloads-dir` option, which was read by nothing.
+
+  It was declared globally and per account, merged into the runtime account and exposed through an accessor no command called. calendula downloads no attachment, so there was nothing to point it at.
+
 ### Fixed
+
+- Fixed `tls.cert` never expanding a `~` or an environment variable, so `cert = "~/ca.pem"` looked for a literal `./~/ca.pem` under the working directory.
+
+  Every path the configuration carries is now expanded when it is read rather than at each use, which is what `vdir.home-dir` and `pimdir.root` already did by hand at five separate call sites.
 
 - Fixed the pimdir backend refusing an unknown calendar without saying which ones the account holds.
 

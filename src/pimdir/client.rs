@@ -46,12 +46,11 @@ impl PimdirClient {
     /// The store must exist: a reader creates nothing, the schema being
     /// the owner's to write, so a root holding no store fails here
     /// rather than listing an empty calendar set.
+    ///
+    /// The root arrives shell-expanded, [`PimdirConfig::root`] doing it
+    /// at deserialize.
     pub fn new(config: PimdirConfig) -> Result<Self> {
-        // NOTE: `root` carries the raw `~/…` verbatim, and opening it
-        // unexpanded would look for a store under the cwd.
-        let root = shellexpand::full(&config.root.to_string_lossy())
-            .map(|expanded| PathBuf::from(expanded.into_owned()))
-            .unwrap_or_else(|_| config.root.clone());
+        let root = config.root.clone();
 
         let reader = PimdirReader::open(&root)
             .map(PimdirReader::with_pending)

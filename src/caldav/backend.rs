@@ -10,7 +10,7 @@
 //! an RFC 4791 `time-range` filter rather than applied locally.
 
 use anyhow::{Context, Result, anyhow};
-use ical::tree::{component::vevent::VEVENT, cst::IcalCst, prop::uid::UID};
+use ical::{component::vevent::VEVENT, prop::uid::UID, tree::cst::IcalCst};
 use io_webdav::{
     client::WebdavClientStd,
     rfc4791::{calendar::CaldavCalendar, item::CaldavItemEntry},

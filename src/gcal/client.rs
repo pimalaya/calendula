@@ -19,7 +19,11 @@ use pimalaya_config::{secret::SecretResolver, toml::TomlConfig};
 use pimalaya_stream::tls::Tls;
 use secrecy::ExposeSecret;
 
-use crate::{account::context::Account, cli::load_config, config::GcalConfig};
+use crate::{
+    account::context::Account,
+    cli::load_config,
+    config::{GcalConfig, default_gcal_alpn},
+};
 
 /// A connected client bundled with the merged runtime [`Account`].
 pub struct GcalClient {
@@ -87,10 +91,9 @@ pub fn connect(config: &GcalConfig, resolver: &mut SecretResolver) -> Result<Gca
 
 /// The TLS profile the backend connects with.
 ///
-/// io-http speaks HTTP/1.1 only, so the ALPN list pins it rather than
-/// letting Google negotiate HTTP/2.
+/// The account's `gcal.alpn` wins, else [`default_gcal_alpn`] pins the
+/// HTTP/1.1 io-http is the only client for.
 fn build_tls(config: &GcalConfig) -> Tls {
-    let mut tls: Tls = config.tls.clone().into();
-    tls.rustls.alpn = vec!["http/1.1".into()];
-    tls
+    let alpn = config.alpn.clone().unwrap_or_else(default_gcal_alpn);
+    config.tls.clone().into_tls(alpn)
 }

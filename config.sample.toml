@@ -159,7 +159,8 @@ vdir.home-dir = "~/.local/share/vdirsyncer/calendars"
 # 1. `caldav.home`: pre-resolved calendar home set URL; every discovery step is
 #    skipped. Fastest, least safe.
 # 2. `caldav.server`: principal + home-set discovery start from the given
-#    context root. Skips domain resolution.
+#    context root. Skips domain resolution. Takes a full URL, a bare domain or
+#    `domain:port`, a bare authority defaulting to `https`.
 # 3. `caldav.discover`: a bare domain resolved to a server URL at runtime
 #    through RFC 6764 SRV records and `.well-known`, then principal + home-set
 #    discovery. Convenient but adds DNS + HTTP round-trips on every run.
@@ -184,10 +185,11 @@ caldav.auth.basic.password.command = "pass show example"
 #caldav.auth.bearer.token.command = "ortie token show"
 #caldav.auth.bearer.token.raw = "oauth2-token"
 
-# TLS configuration.
+# TLS configuration. The certificate path is shell-expanded, so `~` and
+# environment variables both work.
 #caldav.tls.provider = "rustls"
 #caldav.tls.rustls.crypto = "ring"
-#caldav.tls.cert = "/etc/ssl/certs/ca-certificates.crt"
+#caldav.tls.cert = "~/.local/share/ca-certificates/dav.crt"
 
 # --------------------------------------------------------------------------------
 # Google Calendar backend
@@ -218,7 +220,12 @@ caldav.auth.basic.password.command = "pass show example"
 #gcal.auth.token.command = ["ortie", "token", "show"]
 #gcal.auth.token.raw = "oauth2-token"
 
-# TLS configuration.
+# ALPN identifiers offered during the TLS handshake. Unset offers `http/1.1`,
+# the only version io-http speaks; an empty list skips ALPN negotiation.
+#gcal.alpn = ["http/1.1"]
+
+# TLS configuration. The certificate path is shell-expanded, so `~` and
+# environment variables both work.
 #gcal.tls.provider = "rustls"
 #gcal.tls.rustls.crypto = "ring"
-#gcal.tls.cert = "/etc/ssl/certs/ca-certificates.crt"
+#gcal.tls.cert = "~/.local/share/ca-certificates/google.crt"

@@ -12,6 +12,7 @@ use pimalaya_cli::{
     printer::Printer,
     table::{Cell, Color, Row, Table, TableStyle},
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::gcal::{client::GcalClient, render};
@@ -24,8 +25,8 @@ use crate::gcal::{client::GcalClient, render};
 /// inherits.
 ///
 /// JSON output: `{"calendars": [{"id", "summary", "description",
-/// "time-zone", "access-role", "primary", "selected", "color",
-/// "default-reminders"}]}`.
+/// "timeZone", "accessRole", "primary", "selected", "color",
+/// "defaultReminders"}]}`.
 #[derive(Debug, Parser)]
 pub struct GcalCalendarListCommand {
     /// Include the calendars hidden from the list.
@@ -73,7 +74,7 @@ impl GcalCalendarListCommand {
             }
         }
 
-        printer.out(CalendarsTable {
+        printer.out(GcalCalendarListOutput {
             style,
             name_color,
             rows,
@@ -82,8 +83,9 @@ impl GcalCalendarListCommand {
 }
 
 /// The rendered Google calendar listing.
-#[derive(Clone, Debug, Serialize)]
-pub struct CalendarsTable {
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GcalCalendarListOutput {
     /// The table style the account configured.
     #[serde(skip)]
     pub style: TableStyle,
@@ -96,8 +98,8 @@ pub struct CalendarsTable {
 }
 
 /// One calendar list entry, with the properties only Google carries.
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct CalendarRow {
     /// The calendar identifier, an address for a primary or secondary one.
     pub id: String,
@@ -120,7 +122,7 @@ pub struct CalendarRow {
     pub default_reminders: Vec<String>,
 }
 
-impl fmt::Display for CalendarsTable {
+impl fmt::Display for GcalCalendarListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut table = Table::new();
 

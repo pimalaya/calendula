@@ -20,18 +20,39 @@ use crossterm::style::Color;
 use pimalaya_cli::table::ContentArrangement;
 #[cfg(any(feature = "caldav", feature = "gcal"))]
 use pimalaya_config::secret::Secret;
-use pimalaya_config::toml::TomlConfig;
 #[cfg(feature = "caldav")]
 use pimalaya_config::toml::shell_expanded_string;
+#[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+use pimalaya_config::toml::to_string;
+use pimalaya_config::toml::{TomlConfig, shell_expanded_path};
+#[cfg(any(feature = "caldav", feature = "gcal"))]
 use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider};
+#[cfg(any(feature = "caldav", feature = "gcal"))]
+use serde::Deserializer;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "caldav")]
+use url::Url;
+
+/// Skips a field equal to its type's default, so a wizard-generated
+/// account omits a defaulted scalar rather than spelling it out.
+fn is_default<T: Default + PartialEq>(value: &T) -> bool {
+    *value == T::default()
+}
+
+/// Expands a leading tilde and any shell variable in an optional path,
+/// as [`shell_expanded_path`] does for a mandatory one.
+///
+/// TODO: drop this for `pimalaya_config::toml::opt_shell_expanded_path`
+/// once pimalaya-config ships an optional variant.
+#[cfg(any(feature = "caldav", feature = "gcal"))]
+fn opt_shell_expanded_path<'de, D: Deserializer<'de>>(de: D) -> Result<Option<PathBuf>, D::Error> {
+    shell_expanded_path(de).map(Some)
+}
 
 /// The whole configuration file: global options and every account.
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Config {
-    /// Where an attachment or an export is written.
-    pub downloads_dir: Option<PathBuf>,
     /// Table rendering options shared by every list command.
     #[serde(default)]
     pub table: TableConfig,
@@ -114,7 +135,7 @@ impl AccountConfig {
         let document = AccountDocument {
             accounts: HashMap::from([(name, self)]),
         };
-        let rendered = pimalaya_config::toml::to_string(&document)?;
+        let rendered = to_string(&document)?;
 
         let (header, body) = match rendered.split_once('\n') {
             Some((header, body)) => (header, body),
@@ -178,10 +199,8 @@ pub const CONFIG_SAMPLE_URL: &str =
 #[serde(rename_all = "kebab-case")]
 pub struct AccountConfig {
     /// Whether a command given no `-a/--account` picks this account.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub default: bool,
-    /// Where an attachment or an export is written.
-    pub downloads_dir: Option<PathBuf>,
     /// Table rendering options shared by every list command.
     #[serde(default)]
     pub table: TableConfig,
@@ -452,8 +471,9 @@ impl From<TableArrangementConfig> for ContentArrangement {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct VdirConfig {
     /// Filesystem path of the vdir home: the directory holding one
-    /// subdirectory per calendar. Shell-expanded before use, so `~`
-    /// and environment variables both work.
+    /// subdirectory per calendar. Shell-expanded at load, so `~` and
+    /// environment variables both work.
+    #[serde(deserialize_with = "shell_expanded_path")]
     pub home_dir: PathBuf,
 }
 
@@ -467,7 +487,8 @@ pub struct VdirConfig {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct PimdirConfig {
     /// The store directory, holding the SQLite index and the blob
-    /// tree. Shell-expanded before use.
+    /// tree. Shell-expanded at load.
+    #[serde(deserialize_with = "shell_expanded_path")]
     pub root: PathBuf,
     /// The account whose collections this client reads, the name the
     /// sync engine groups them under (pimdir SPEC 9.2).
@@ -496,10 +517,13 @@ pub struct CaldavConfig {
     pub discover: Option<String>,
     /// DAV context root. Principal and calendar-home-set discovery
     /// start here, skipping the `.well-known` step.
-    pub server: Option<url::Url>,
+    ///
+    /// Accepts a full URL, a bare domain or `domain:port`, a bare
+    /// authority defaulting to `https`.
+    pub server: Option<String>,
     /// Pre-resolved calendar home-set URL, skipping every discovery
     /// step.
-    pub home: Option<url::Url>,
+    pub home: Option<Url>,
     /// TLS configuration.
     #[serde(default)]
     pub tls: TlsConfig,
@@ -544,8 +568,23 @@ pub struct GcalConfig {
     /// TLS configuration.
     #[serde(default)]
     pub tls: TlsConfig,
+    /// ALPN identifiers offered during the TLS handshake.
+    ///
+    /// Unset offers [`default_gcal_alpn`], an empty list skips ALPN
+    /// negotiation and a non-empty one replaces the default. Only
+    /// rustls reads it, native-tls ignoring ALPN altogether.
+    pub alpn: Option<Vec<String>>,
     /// Authentication configuration.
     pub auth: GcalAuthConfig,
+}
+
+/// ALPN identifiers gcal offers when `gcal.alpn` names none.
+///
+/// io-http speaks HTTP/1.1 only, so the default pins it rather than
+/// letting Google negotiate HTTP/2 on a connection nothing can read.
+#[cfg(feature = "gcal")]
+pub fn default_gcal_alpn() -> Vec<String> {
+    vec![String::from("http/1.1")]
 }
 
 /// Google Calendar authentication configuration.
@@ -565,6 +604,7 @@ pub struct GcalAuthConfig {
 }
 
 /// SSL/TLS configuration.
+#[cfg(any(feature = "caldav", feature = "gcal"))]
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TlsConfig {
@@ -574,12 +614,16 @@ pub struct TlsConfig {
     /// rustls options, ignored when native-tls is the provider.
     #[serde(default)]
     pub rustls: RustlsConfig,
-    /// PEM certificate to trust, pinned to the server's leaf under
-    /// rustls and taken as a root certificate under native-tls.
+    /// PEM certificate to trust, shell-expanded at load.
+    ///
+    /// Pinned to the server's leaf under rustls and taken as a root
+    /// certificate under native-tls.
+    #[serde(default, deserialize_with = "opt_shell_expanded_path")]
     pub cert: Option<PathBuf>,
 }
 
 /// Which TLS implementation carries the connection.
+#[cfg(any(feature = "caldav", feature = "gcal"))]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum TlsProviderConfig {
@@ -590,6 +634,7 @@ pub enum TlsProviderConfig {
 }
 
 /// rustls-specific options.
+#[cfg(any(feature = "caldav", feature = "gcal"))]
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct RustlsConfig {
@@ -598,6 +643,7 @@ pub struct RustlsConfig {
 }
 
 /// Which cryptographic provider backs rustls.
+#[cfg(any(feature = "caldav", feature = "gcal"))]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum RustlsCryptoConfig {
@@ -607,21 +653,103 @@ pub enum RustlsCryptoConfig {
     Ring,
 }
 
-impl From<TlsConfig> for Tls {
-    fn from(config: TlsConfig) -> Self {
+#[cfg(any(feature = "caldav", feature = "gcal"))]
+impl TlsConfig {
+    /// Builds the runtime [`Tls`] handle the connect helpers expect,
+    /// folding in the protocol-level `alpn` list.
+    ///
+    /// The TOML schema never exposes `tls.rustls.alpn` directly, the
+    /// per-backend `alpn` field standing for it. An empty list skips
+    /// ALPN, so every caller says what it negotiates.
+    pub fn into_tls(self, alpn: Vec<String>) -> Tls {
         Tls {
-            provider: config.provider.map(|config| match config {
+            provider: self.provider.map(|provider| match provider {
                 TlsProviderConfig::Rustls => TlsProvider::Rustls,
                 TlsProviderConfig::NativeTls => TlsProvider::NativeTls,
             }),
             rustls: Rustls {
-                crypto: config.rustls.crypto.map(|config| match config {
+                crypto: self.rustls.crypto.map(|crypto| match crypto {
                     RustlsCryptoConfig::Aws => RustlsCrypto::Aws,
                     RustlsCryptoConfig::Ring => RustlsCrypto::Ring,
                 }),
-                alpn: Vec::new(),
+                alpn,
             },
-            cert: config.cert,
+            cert: self.cert,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::env::var;
+
+    use super::*;
+
+    /// The home directory the tilde in a test path stands for.
+    fn home() -> PathBuf {
+        PathBuf::from(var("HOME").expect("HOME must be set to expand a tilde"))
+    }
+
+    /// Expansion happens at deserialize, so no call site can read a
+    /// literal `./~/…` directory under the current one.
+    #[cfg(feature = "vdir")]
+    #[test]
+    fn a_vdir_home_expands_its_tilde_at_deserialize() {
+        let config: VdirConfig = toml::from_str(r#"home-dir = "~/calendars""#).unwrap();
+        assert_eq!(config.home_dir, home().join("calendars"));
+    }
+
+    #[cfg(feature = "pimdir")]
+    #[test]
+    fn a_pimdir_root_expands_its_tilde_at_deserialize() {
+        let config: PimdirConfig = toml::from_str(r#"root = "~/store""#).unwrap();
+        assert_eq!(config.root, home().join("store"));
+    }
+
+    /// The optional path takes the same treatment, and an absent key
+    /// still reaches `None` rather than the deserializer.
+    #[cfg(any(feature = "caldav", feature = "gcal"))]
+    #[test]
+    fn a_tls_certificate_expands_its_tilde_and_stays_optional() {
+        let config: TlsConfig = toml::from_str(r#"cert = "~/ca.pem""#).unwrap();
+        assert_eq!(config.cert, Some(home().join("ca.pem")));
+
+        let config: TlsConfig = toml::from_str("").unwrap();
+        assert_eq!(config.cert, None);
+    }
+
+    /// Every spelling a CalDAV endpoint is written in round-trips: a
+    /// full URL stays one, and a bare authority is kept verbatim for
+    /// the client to resolve.
+    #[cfg(feature = "caldav")]
+    #[test]
+    fn a_caldav_server_takes_a_url_or_a_bare_authority() {
+        for spelling in [
+            "https://dav.example.org/dav/",
+            "http://dav.example.org:8008/",
+            "example.org",
+            "dav.example.org:8443",
+        ] {
+            let document = format!("server = \"{spelling}\"\nauth = \"none\"");
+            let config: CaldavConfig = toml::from_str(&document).unwrap();
+            assert_eq!(config.server.as_deref(), Some(spelling));
+        }
+    }
+
+    /// The wizard writes no `default = false` line, the rest of the
+    /// family omitting it too.
+    #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+    #[test]
+    fn a_rendered_account_spells_the_default_flag_only_when_it_is_set() {
+        let mut account = AccountConfig::default();
+        assert!(!account.render("personal").unwrap().contains("default ="));
+
+        account.default = true;
+        assert!(
+            account
+                .render("personal")
+                .unwrap()
+                .contains("default = true")
+        );
     }
 }

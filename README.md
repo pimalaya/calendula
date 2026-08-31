@@ -31,7 +31,7 @@ CLI to manage calendars.
 - **Discovery**: an email address is enough to find a provider's server, through SRV records, `.well-known` and the provider configuration documents.
 - **Interactive wizard**: `calendula configure` discovers an account, tests it, and saves it; a first run with no configuration is offered it.
 - **Multi-account**: one TOML file, one block per account, several files deep-merged when you want secrets apart.
-- **JSON output**: every command switches to JSON with `--json`, for scripts and other tools.
+- **JSON output**: every command switches to JSON with `--json`, for scripts and other tools, and `calendula json-schema` describes the shape each one returns.
 - Full standard, blocking client with **TLS** support:
   - [Rustls](https://crates.io/crates/rustls) with ring crypto (requires `rustls-ring` feature, enabled by default)
   - [Rustls](https://crates.io/crates/rustls) with aws crypto (requires `rustls-aws` feature)
@@ -262,7 +262,7 @@ Run `calendula pimdir status` to see which account you are reading, how much of 
 
 ## Usage
 
-Run `calendula --help` for the full command tree, and `calendula <command> --help` for any subcommand's arguments and its JSON output shape (printed when the global `--json` flag is set).
+Run `calendula --help` for the full command tree, and `calendula <command> --help` for any subcommand's arguments and its JSON output shape (printed when the global `--json` flag is set). `calendula json-schema --dir ./schemas` writes the JSON Schema of every `--json` payload.
 
 A few real command lines:
 

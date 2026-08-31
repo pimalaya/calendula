@@ -11,6 +11,7 @@ use pimalaya_cli::{
     printer::Printer,
     table::{Cell, Row, Table, TableStyle},
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::gcal::client::GcalClient;
@@ -44,13 +45,14 @@ impl GcalColorsCommand {
             })
             .collect();
 
-        printer.out(ColorsTable { style, rows })
+        printer.out(GcalColorsOutput { style, rows })
     }
 }
 
 /// The rendered palettes.
-#[derive(Clone, Debug, Serialize)]
-pub struct ColorsTable {
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GcalColorsOutput {
     /// The table style the account configured.
     #[serde(skip)]
     pub style: TableStyle,
@@ -60,8 +62,8 @@ pub struct ColorsTable {
 }
 
 /// One palette entry.
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ColorRow {
     /// Which palette the entry belongs to: `calendar` or `event`.
     pub palette: &'static str,
@@ -73,7 +75,7 @@ pub struct ColorRow {
     pub foreground: Option<String>,
 }
 
-impl fmt::Display for ColorsTable {
+impl fmt::Display for GcalColorsOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut table = Table::new();
 

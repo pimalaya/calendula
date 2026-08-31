@@ -14,14 +14,15 @@ pub mod delete;
 pub mod list;
 pub mod update;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// A calendar collection.
 ///
 /// Partial-coverage fields stay optional, populated only by the backends that
 /// know them.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct Calendar {
     /// Backend-specific identifier the other commands address it by.
     pub id: String,
@@ -40,8 +41,8 @@ pub struct Calendar {
 /// `None` leaves a field untouched and `Some` replaces it. The nested
 /// `Option` on the clearable fields distinguishes setting a value from
 /// clearing it.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct CalendarDiff {
     /// The new display name.
     #[serde(default)]

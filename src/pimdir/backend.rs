@@ -26,19 +26,23 @@ use chrono::{SecondsFormat, Utc};
 use io_pimdir::{
     PimdirCollection, PimdirItem,
     codec::PimdirAction,
-    conventions::{PimdirDerivation, calendar::PimdirCalendarMeta},
+    conventions::{
+        PimdirDerivation,
+        calendar::{PimdirCalendarMeta, derive as derive_calendar},
+    },
 };
 use io_replica::{object::ReplicaHash, placement::ReplicaFlags};
 use log::warn;
 use pimalaya_cli::printer::Printer;
 use pimalaya_config::toml::TomlConfig;
+use serde_json::from_str;
 
 use crate::{
     cli::load_config,
     config::PimdirConfig,
     pimdir::{
         client::PimdirClient,
-        status::{PimdirCalendarStatus, PimdirStatus},
+        status::{PimdirCalendarStatus, PimdirStatusOutput},
     },
     shared::{
         calendar::{Calendar, CalendarDiff},
@@ -258,7 +262,7 @@ impl PimdirBackend {
 
     /// Collects the accounts and per-calendar hydration state that
     /// `pimdir status` reports.
-    pub fn status(&mut self) -> Result<PimdirStatus> {
+    pub fn status(&mut self) -> Result<PimdirStatusOutput> {
         let accounts = self.client.reader.list_accounts()?;
         let mut calendars = Vec::new();
 
@@ -282,7 +286,7 @@ impl PimdirBackend {
 
         calendars.sort_by(|a, b| a.name.cmp(&b.name));
 
-        Ok(PimdirStatus {
+        Ok(PimdirStatusOutput {
             account: self.client.account.clone(),
             accounts,
             calendars,
@@ -445,7 +449,7 @@ impl PimdirBackend {
 /// the same item arriving through a sync one item rather than two. A
 /// queued action carries no sort key: the format leaves it to the sync.
 fn derive(contents: &[u8]) -> PimdirDerivation {
-    io_pimdir::conventions::calendar::derive(contents)
+    derive_calendar(contents)
 }
 
 /// The enqueue timestamp, RFC 3339 as the queue column expects.
@@ -483,7 +487,7 @@ fn in_range(item: &CalendarItem, stored: &PimdirItem, range: &CalendarTimeRange)
 fn summary_of(item: &PimdirItem) -> PimdirCalendarMeta {
     item.meta
         .as_ref()
-        .and_then(|meta| serde_json::from_str(&meta.0).ok())
+        .and_then(|meta| from_str(&meta.0).ok())
         .unwrap_or_default()
 }
 

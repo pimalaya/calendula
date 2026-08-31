@@ -22,20 +22,25 @@
 //! Google stamps them itself, so an incoming CREATED or LAST-MODIFIED is
 //! consumed rather than written.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    mem::take,
+};
 
 use anyhow::{Result, anyhow, bail};
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use ical::{
+    component::vevent::VEVENT,
     param::IcalParam,
-    prop::{IcalProp, IcalPropKind, IcalPropName},
+    prop::{
+        IcalProp, IcalPropKind, IcalPropName, action::ACTION, trigger::TRIGGER,
+        tzid::TZID as TZID_PROP,
+    },
     tree::{
         codec::Codec,
-        component::vevent::VEVENT,
         cst::{IcalCst, IcalItem},
         line::IcalLine,
         param::{cn::CN, cutype::CUTYPE, partstat::PARTSTAT, role::ROLE, tzid::TZID, value::VALUE},
-        prop::{action::ACTION, trigger::TRIGGER, tzid::TZID as TZID_PROP},
     },
     value::{IcalValue, datetime::IcalDateTime, integer::IcalInteger, text::IcalText},
 };
@@ -1164,7 +1169,7 @@ fn chunk_into(private: &mut BTreeMap<String, String>, prefix: &str, lines: &[Str
 
     for character in kept.join("\n").chars() {
         if chunk.len() + character.len_utf8() > MAX_STASH_CHUNK {
-            private.insert(format!("{prefix}{index}"), std::mem::take(&mut chunk));
+            private.insert(format!("{prefix}{index}"), take(&mut chunk));
             index += 1;
         }
         chunk.push(character);

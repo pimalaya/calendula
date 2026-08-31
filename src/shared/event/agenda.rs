@@ -1,4 +1,4 @@
-//! # Agenda
+//! # Event agenda
 //!
 //! The `calendula event agenda` command, drawing a cal(1)-style grid of
 //! the selected calendar and listing the events its days hold.
@@ -9,6 +9,7 @@
 //! proleptic Gregorian calendar.
 
 use std::{
+    borrow::Cow,
     collections::BTreeMap,
     fmt::{self, Write},
 };
@@ -17,6 +18,7 @@ use anyhow::{Result, bail};
 use chrono::{Datelike, Local, NaiveDateTime};
 use clap::Parser;
 use pimalaya_cli::printer::Printer;
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Serialize, Serializer, ser::SerializeMap};
 
 use crate::shared::{arg::CalendarIdArg, client::CalendarClient, event::Event};
@@ -271,7 +273,7 @@ impl EventAgendaCommand {
             monthly(&mut grid, &mut ctl)?;
         }
 
-        printer.out(Agenda::new(grid, ctl.events))
+        printer.out(EventAgendaOutput::new(grid, ctl.events))
     }
 }
 
@@ -954,12 +956,12 @@ struct AgendaEvent {
 ///
 /// An instant holds every event starting at it, so a calendar holding
 /// two meetings at 09:00 renders two lines and reports two labels.
-pub struct Agenda {
+pub struct EventAgendaOutput {
     grid: String,
     events: BTreeMap<NaiveDateTime, Vec<AgendaEvent>>,
 }
 
-impl Agenda {
+impl EventAgendaOutput {
     /// Takes the grid and the collected events, ordering the events of
     /// one instant by label then by item id.
     ///
@@ -975,7 +977,7 @@ impl Agenda {
     }
 }
 
-impl fmt::Display for Agenda {
+impl fmt::Display for EventAgendaOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.grid)?;
 
@@ -995,7 +997,7 @@ impl fmt::Display for Agenda {
     }
 }
 
-impl Serialize for Agenda {
+impl Serialize for EventAgendaOutput {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -1011,9 +1013,23 @@ impl Serialize for Agenda {
     }
 }
 
+/// Describes exactly what the hand-written [`Serialize`] above emits,
+/// an instant keyed to the labels of the events starting at it, so the
+/// printed shape and the published schema cannot drift apart.
+impl JsonSchema for EventAgendaOutput {
+    fn schema_name() -> Cow<'static, str> {
+        Cow::Borrowed("EventAgendaOutput")
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        <BTreeMap<String, Vec<String>> as JsonSchema>::json_schema(generator)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::NaiveDate;
+    use serde_json::to_string;
 
     use super::*;
 
@@ -1024,7 +1040,7 @@ mod tests {
             .unwrap()
     }
 
-    fn agenda(collected: Vec<(NaiveDateTime, &str, &str)>) -> Agenda {
+    fn agenda(collected: Vec<(NaiveDateTime, &str, &str)>) -> EventAgendaOutput {
         let mut events: BTreeMap<NaiveDateTime, Vec<AgendaEvent>> = BTreeMap::new();
 
         for (start, id, label) in collected {
@@ -1036,7 +1052,7 @@ mod tests {
             events.entry(start).or_default().push(event);
         }
 
-        Agenda::new(String::new(), events)
+        EventAgendaOutput::new(String::new(), events)
     }
 
     #[test]
@@ -1065,7 +1081,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            serde_json::to_string(&agenda).unwrap(),
+            to_string(&agenda).unwrap(),
             r#"{"2026-08-14T09:00:00":["Pre demo MINIS","Pre demo woonies"]}"#
         );
     }
@@ -1094,7 +1110,7 @@ mod tests {
 
         assert_eq!(agenda.to_string(), "Aug 14, 09:00: Stand-up\n");
         assert_eq!(
-            serde_json::to_string(&agenda).unwrap(),
+            to_string(&agenda).unwrap(),
             r#"{"2026-08-14T09:00:00":["Stand-up"]}"#
         );
     }

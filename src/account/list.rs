@@ -12,6 +12,7 @@ use pimalaya_cli::{
     printer::Printer,
     table::{Cell, Color, ContentArrangement, Row, Table, TableStyle},
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::{
@@ -56,7 +57,7 @@ impl AccountListCommand {
             .collect();
         accounts.sort_by(|a, b| a.name.cmp(&b.name));
 
-        printer.out(AccountsTable {
+        printer.out(AccountListOutput {
             style,
             arrangement,
             colors,
@@ -76,8 +77,9 @@ struct AccountColors {
     default: Color,
 }
 
-/// One account's row in an [`AccountsTable`].
-#[derive(Clone, Debug, Serialize)]
+/// One account's row in an [`AccountListOutput`].
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct AccountRow {
     /// The `[accounts.<name>]` table key.
     pub name: String,
@@ -120,8 +122,9 @@ impl AccountRow {
 }
 
 /// The rendered account listing.
-#[derive(Clone, Debug, Serialize)]
-pub struct AccountsTable {
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountListOutput {
     /// The `comfy_table` style the configured preset maps to.
     #[serde(skip)]
     pub style: TableStyle,
@@ -135,7 +138,7 @@ pub struct AccountsTable {
     pub accounts: Vec<AccountRow>,
 }
 
-impl fmt::Display for AccountsTable {
+impl fmt::Display for AccountListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut table = Table::new();
 

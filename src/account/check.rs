@@ -11,6 +11,7 @@ use pimalaya_cli::printer::Printer;
 #[cfg(any(feature = "caldav", feature = "gcal"))]
 use pimalaya_config::secret::SecretResolver;
 use pimalaya_config::toml::TomlConfig;
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::{
@@ -52,7 +53,7 @@ impl AccountCheckCommand {
             bail!("No backend matching `{backend}` is configured for this account");
         }
 
-        printer.out(CheckReport {
+        printer.out(AccountCheckOutput {
             account: name,
             backends,
         })
@@ -126,18 +127,15 @@ pub fn all_ok(checks: &[BackendCheck]) -> bool {
 
 /// The vdir home has to be a directory that exists: everything else is
 /// a per-collection concern a command reports on its own.
+///
+/// The path arrives shell-expanded, `VdirConfig::home_dir` doing it at
+/// deserialize.
 #[cfg(feature = "vdir")]
 fn check_vdir(config: crate::config::VdirConfig) -> Result<()> {
-    use std::path::PathBuf;
-
-    let home = shellexpand::full(&config.home_dir.to_string_lossy())
-        .map(|home| PathBuf::from(home.into_owned()))
-        .unwrap_or_else(|_| config.home_dir.clone());
-
-    if !home.is_dir() {
+    if !config.home_dir.is_dir() {
         bail!(
             "vdir home `{}` does not exist or is not a directory",
-            home.display()
+            config.home_dir.display()
         );
     }
 
@@ -170,8 +168,9 @@ fn check_gcal(config: crate::config::GcalConfig, resolver: &mut SecretResolver) 
 }
 
 /// What `account check` reports.
-#[derive(Clone, Debug, Serialize)]
-pub struct CheckReport {
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountCheckOutput {
     /// The account that was checked.
     pub account: String,
     /// One row per checked backend.
@@ -179,7 +178,8 @@ pub struct CheckReport {
 }
 
 /// One backend's verdict.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct BackendCheck {
     /// The backend name, as `--backend` spells it.
     pub backend: &'static str,
@@ -206,7 +206,7 @@ impl BackendCheck {
     }
 }
 
-impl fmt::Display for CheckReport {
+impl fmt::Display for AccountCheckOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Account: {}", self.account)?;
 

@@ -12,6 +12,7 @@
 //! belongs to a protocol-specific subcommand.
 
 use anyhow::{Result, bail};
+#[cfg(feature = "gcal")]
 use pimalaya_config::secret::SecretResolver;
 
 use crate::{

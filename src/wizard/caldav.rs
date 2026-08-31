@@ -101,7 +101,7 @@ fn prompt_auth(
 fn config(server: Url, auth: CaldavAuthConfig) -> CaldavConfig {
     CaldavConfig {
         discover: None,
-        server: Some(server),
+        server: Some(server.to_string()),
         home: None,
         tls: Default::default(),
         auth,

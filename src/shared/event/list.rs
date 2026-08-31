@@ -12,6 +12,7 @@ use pimalaya_cli::{
     printer::Printer,
     table::{Cell, Color, ContentArrangement, Row, Table, TableStyle},
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::shared::{
@@ -73,7 +74,7 @@ impl EventListCommand {
         let items = client.list_items(&calendar_id, self.page, page_size, range.as_ref())?;
         let events = items.iter().flat_map(Event::project).collect();
 
-        printer.out(Events {
+        printer.out(EventListOutput {
             style: client.account.table_style(),
             arrangement: client.account.table_arrangement(),
             max_width: self.max_width,
@@ -98,8 +99,9 @@ struct EventColors {
 }
 
 /// The rendered event listing.
-#[derive(Clone, Debug, Serialize)]
-pub struct Events {
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EventListOutput {
     /// The table preset the account configures.
     #[serde(skip)]
     pub style: TableStyle,
@@ -115,7 +117,7 @@ pub struct Events {
     pub events: Vec<Event>,
 }
 
-impl fmt::Display for Events {
+impl fmt::Display for EventListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut table = Table::new();
 

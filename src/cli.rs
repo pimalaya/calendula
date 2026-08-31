@@ -15,7 +15,7 @@ use pimalaya_cli::prompt;
 use pimalaya_cli::{
     clap::{
         args::{AccountFlag, JsonFlag, LogFlags},
-        commands::{CompletionCommand, ManualCommand},
+        commands::{CompletionCommand, JsonSchemaCommand, ManualCommand},
         parsers::path_parser,
     },
     long_version,
@@ -38,6 +38,7 @@ use crate::{
     account::cli::AccountCommand,
     backend::Backend,
     config::{AccountConfig, CONFIG_SAMPLE_URL, Config},
+    json_schema,
     shared::{
         calendar::cli::CalendarCommand, client::CalendarClient, event::cli::EventCommand,
         item::cli::ItemCommand, journal::cli::JournalCommand, todo::cli::TodoCommand,
@@ -119,6 +120,8 @@ pub enum CalendulaCommand {
     Completion(CompletionCommand),
     #[command(alias = "manuals")]
     Manual(ManualCommand),
+    #[command(alias = "json-schemas")]
+    JsonSchema(JsonSchemaCommand),
 }
 
 /// The global config and the active account's, for a shared command.
@@ -286,6 +289,7 @@ impl CalendulaCommand {
             Self::Account(cmd) => cmd.execute(printer, config_paths, account_name, backend),
             Self::Completion(cmd) => cmd.execute(printer, CalendulaCli::command()),
             Self::Manual(cmd) => cmd.execute(printer, CalendulaCli::command()),
+            Self::JsonSchema(cmd) => cmd.execute(printer, json_schema::schemas()),
         }
     }
 }

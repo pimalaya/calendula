@@ -7,10 +7,12 @@ use std::fmt;
 
 use anyhow::Result;
 use clap::Parser;
+use humansize::{BINARY, format_size};
 use pimalaya_cli::{
     printer::Printer,
     table::{Cell, Color, ContentArrangement, Row, Table, TableStyle},
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::shared::{arg::CalendarIdArg, client::CalendarClient, item::CalendarItem};
@@ -20,7 +22,7 @@ use crate::shared::{arg::CalendarIdArg, client::CalendarClient, item::CalendarIt
 /// Every component kind is listed, VEVENT included; use `event list` for the
 /// events-only view with its summary and time columns.
 ///
-/// JSON output: `{"items": [{"id", "calendar-id", "etag", "contents"}]}`.
+/// JSON output: `{"items": [{"id", "calendarId", "etag", "contents"}]}`.
 #[derive(Debug, Parser)]
 pub struct ItemListCommand {
     #[command(flatten)]
@@ -47,7 +49,7 @@ impl ItemListCommand {
             .or(Some(client.account.items_list_page_size()));
         let items = client.list_items(&calendar_id, self.page, page_size, None)?;
 
-        printer.out(Items {
+        printer.out(ItemListOutput {
             style: client.account.table_style(),
             arrangement: client.account.table_arrangement(),
             max_width: self.max_width,
@@ -70,8 +72,9 @@ struct ItemColors {
 }
 
 /// The rendered item listing.
-#[derive(Clone, Debug, Serialize)]
-pub struct Items {
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemListOutput {
     #[serde(skip)]
     pub style: TableStyle,
     #[serde(skip)]
@@ -83,7 +86,7 @@ pub struct Items {
     pub items: Vec<CalendarItem>,
 }
 
-impl fmt::Display for Items {
+impl fmt::Display for ItemListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut table = Table::new();
 
@@ -122,5 +125,5 @@ fn size_of(item: &CalendarItem) -> String {
         return String::from("-");
     }
 
-    humansize::format_size(item.contents.len() as u64, humansize::BINARY)
+    format_size(item.contents.len() as u64, BINARY)
 }

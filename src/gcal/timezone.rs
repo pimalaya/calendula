@@ -320,8 +320,8 @@ fn utc_offset(offset: Offset) -> String {
 mod tests {
     use ical::{
         recur::IcalRecurDateTime,
-        timezone::{IcalOffset, IcalTimezone},
         tree::cst::IcalCst,
+        tz::{IcalTz, IcalTzOffset},
     };
 
     use super::*;
@@ -359,7 +359,7 @@ mod tests {
     ///
     /// Nothing of this module survives the round trip but the bytes, so
     /// the assertions weigh the document, not the code that wrote it.
-    fn resolved(tzid: &str, local: (i16, i8, i8, i8, i8)) -> IcalOffset {
+    fn resolved(tzid: &str, local: (i16, i8, i8, i8, i8)) -> IcalTzOffset {
         let (year, month, day, hour, minute) = local;
 
         let raw = format!(
@@ -368,7 +368,7 @@ mod tests {
         );
 
         let cst = IcalCst::parse(&raw).expect("parse");
-        let zone = IcalTimezone::of_calendar(&cst.decode(), tzid).expect("a VTIMEZONE");
+        let zone = IcalTz::of_calendar(&cst.decode(), tzid).expect("a VTIMEZONE");
 
         zone.resolve(IcalRecurDateTime {
             year: i32::from(year),
@@ -463,14 +463,14 @@ mod tests {
     fn the_two_local_times_that_are_not_one_instant_are_reported_as_such() {
         assert_eq!(
             resolved("America/New_York", (2024, 3, 10, 2, 30)),
-            IcalOffset::Gap {
+            IcalTzOffset::Gap {
                 before: -18000,
                 after: -14400
             }
         );
         assert_eq!(
             resolved("America/New_York", (2024, 11, 3, 1, 30)),
-            IcalOffset::Fold {
+            IcalTzOffset::Fold {
                 earlier: -14400,
                 later: -18000
             }

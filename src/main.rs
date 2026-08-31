@@ -131,6 +131,7 @@ mod cli;
 mod config;
 #[cfg(feature = "gcal")]
 mod gcal;
+mod json_schema;
 #[cfg(feature = "pimdir")]
 mod pimdir;
 mod shared;

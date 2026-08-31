@@ -133,12 +133,12 @@ fn pick(root: PathBuf) -> Result<Local> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{env::temp_dir, fs};
 
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("calendula-wizard-local-{name}"));
+        let dir = temp_dir().join(format!("calendula-wizard-local-{name}"));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir

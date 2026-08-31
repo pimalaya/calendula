@@ -110,3 +110,11 @@ All data and errors SHALL go to stdout through the printer, with `--json` switch
 Each command's doc comment SHALL be its help text: the first paragraph is what `-h` shows, and the full text, ending with the command's JSON output shape, is what `--help` shows.
 
 `calendula <command> --help` is therefore the canonical usage reference for both humans and agents, which is why the README documents no per-command usage.
+
+### Requirement: Every data command returns a named output type
+A command answering with data SHALL hand the printer a `*Output` type deriving `Display`, `Serialize` and `JsonSchema`, named after its command path. `Message` carries a confirmation and never data.
+
+Every key of such a payload SHALL be camelCase, the spelling of the wire formats calendula sits over and the one a jq path addresses without quoting. The configuration schema stays kebab-case, being a TOML document a person writes rather than machine surface.
+
+### Requirement: The output schema is published
+`calendula json-schema` SHALL print the JSON Schema of a named command's `--json` payload, or write one file per command under `--dir`. The registry SHALL be gated by the same cargo features as the commands it names, so it stays coherent under any feature combination.

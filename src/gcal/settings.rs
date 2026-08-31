@@ -12,6 +12,7 @@ use pimalaya_cli::{
     printer::Printer,
     table::{Cell, Row, Table, TableStyle},
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::gcal::client::GcalClient;
@@ -51,13 +52,14 @@ impl GcalSettingsCommand {
             }
         }
 
-        printer.out(SettingsTable { style, rows })
+        printer.out(GcalSettingsOutput { style, rows })
     }
 }
 
 /// The rendered settings listing.
-#[derive(Clone, Debug, Serialize)]
-pub struct SettingsTable {
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GcalSettingsOutput {
     /// The table style the account configured.
     #[serde(skip)]
     pub style: TableStyle,
@@ -67,8 +69,8 @@ pub struct SettingsTable {
 }
 
 /// One user setting.
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct SettingRow {
     /// The setting id, such as `timezone` or `weekStart`.
     pub id: String,
@@ -76,7 +78,7 @@ pub struct SettingRow {
     pub value: String,
 }
 
-impl fmt::Display for SettingsTable {
+impl fmt::Display for GcalSettingsOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut table = Table::new();
 

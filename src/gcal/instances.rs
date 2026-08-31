@@ -13,6 +13,7 @@ use pimalaya_cli::{
     printer::Printer,
     table::{Cell, Row, Table, TableStyle},
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::{
@@ -28,7 +29,7 @@ use crate::{
 /// occurrences a rule alone does not describe.
 ///
 /// JSON output: `{"instances": [{"id", "summary", "start", "end",
-/// "status", "original-start"}]}`.
+/// "status", "originalStart"}]}`.
 #[derive(Debug, Parser)]
 pub struct GcalInstancesCommand {
     /// The calendar holding the series. Falls back to
@@ -92,13 +93,14 @@ impl GcalInstancesCommand {
             }
         }
 
-        printer.out(InstancesTable { style, rows })
+        printer.out(GcalInstancesOutput { style, rows })
     }
 }
 
 /// The rendered instance listing.
-#[derive(Clone, Debug, Serialize)]
-pub struct InstancesTable {
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GcalInstancesOutput {
     /// The table style the account configured.
     #[serde(skip)]
     pub style: TableStyle,
@@ -108,8 +110,8 @@ pub struct InstancesTable {
 }
 
 /// One occurrence of a recurring series.
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct InstanceRow {
     /// The instance identifier, which addresses this occurrence alone.
     pub id: String,
@@ -125,7 +127,7 @@ pub struct InstanceRow {
     pub original_start: String,
 }
 
-impl fmt::Display for InstancesTable {
+impl fmt::Display for GcalInstancesOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut table = Table::new();
 
