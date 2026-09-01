@@ -23,6 +23,7 @@ use std::{io::Write, path::PathBuf};
 
 use anyhow::{Result, anyhow, bail};
 use chrono::{SecondsFormat, Utc};
+use ical::component::IcalComponentKind;
 use io_pimdir::{
     PimdirCollection, PimdirItem,
     codec::PimdirAction,
@@ -48,7 +49,8 @@ use crate::{
         calendar::{Calendar, CalendarDiff},
         client::paginate,
         event::Event,
-        item::{CalendarItem, CalendarTimeRange},
+        ical::holds_kind,
+        item::{CalendarItem, CalendarItemQuery, CalendarTimeRange},
     },
 };
 
@@ -152,9 +154,7 @@ impl PimdirBackend {
     pub fn list_items(
         &mut self,
         calendar_id: &str,
-        page: Option<u32>,
-        page_size: Option<u32>,
-        range: Option<&CalendarTimeRange>,
+        query: CalendarItemQuery<'_>,
     ) -> Result<Vec<CalendarItem>> {
         self.known_collection(calendar_id)?;
 
@@ -163,7 +163,13 @@ impl PimdirBackend {
         for stored in self.scan_items(calendar_id)? {
             let item = self.item_from(calendar_id, &stored)?;
 
-            if let Some(range) = range
+            if let Some(kind) = query.kind
+                && !is_kind(&item, &stored, kind)
+            {
+                continue;
+            }
+
+            if let Some(range) = query.range
                 && !in_range(&item, &stored, range)
             {
                 continue;
@@ -172,7 +178,7 @@ impl PimdirBackend {
             items.push(item);
         }
 
-        Ok(paginate(items, page, page_size))
+        Ok(paginate(items, query.page, query.page_size))
     }
 
     /// Reads one item's bytes from its content-addressed blob.
@@ -462,6 +468,22 @@ fn now() -> String {
 /// A hydrated item is answered from its own bytes, which is exact. One
 /// with no local body falls back to the DTSTART its summary carries,
 /// the whole point of a summary beside the pointer.
+/// Whether a stored item is of `kind`.
+///
+/// A body the sync has not downloaded still answers, the `v: 1` summary
+/// naming the component a reader renders the resource as (pimdir SPEC
+/// Annex A.3), so an availability-aware listing stays one.
+fn is_kind(item: &CalendarItem, stored: &PimdirItem, kind: IcalComponentKind) -> bool {
+    if !item.contents.is_empty() {
+        return holds_kind(&item.contents, kind);
+    }
+
+    summary_of(stored)
+        .component
+        .as_deref()
+        .is_some_and(|component| component.eq_ignore_ascii_case(&kind))
+}
+
 fn in_range(item: &CalendarItem, stored: &PimdirItem, range: &CalendarTimeRange) -> bool {
     if !item.contents.is_empty() {
         return Event::project(item)

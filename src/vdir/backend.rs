@@ -9,6 +9,7 @@
 //! and a [`CalendarTimeRange`] filters after parsing, never pushed down.
 
 use anyhow::{Context, Result, anyhow};
+use ical::component::IcalComponentKind;
 use io_vdir::{
     client::VdirClient,
     collection::VdirCollection,
@@ -22,7 +23,8 @@ use crate::{
         calendar::{Calendar, CalendarDiff},
         client::paginate,
         event::Event,
-        item::{CalendarItem, CalendarTimeRange},
+        ical::holds_kind,
+        item::{CalendarItem, CalendarItemQuery, CalendarTimeRange},
     },
 };
 
@@ -112,9 +114,7 @@ impl VdirBackend {
     pub fn list_items(
         &mut self,
         calendar_id: &str,
-        page: Option<u32>,
-        page_size: Option<u32>,
-        range: Option<&CalendarTimeRange>,
+        query: CalendarItemQuery<'_>,
     ) -> Result<Vec<CalendarItem>> {
         let items = self.client.list_items(self.path(calendar_id))?;
 
@@ -122,10 +122,11 @@ impl VdirBackend {
             .into_iter()
             .filter(|item| item.kind == VdirItemKind::Ical)
             .map(|item| item_from(calendar_id, item))
-            .filter(|item| in_range(item, range))
+            .filter(|item| is_kind(item, query.kind))
+            .filter(|item| in_range(item, query.range))
             .collect();
 
-        Ok(paginate(items, page, page_size))
+        Ok(paginate(items, query.page, query.page_size))
     }
 
     /// Reads one item's bytes off disk.
@@ -208,6 +209,11 @@ fn item_from(calendar_id: &str, item: VdirItem) -> CalendarItem {
 ///
 /// An item carrying no event is kept only when no range was asked for,
 /// so a filtered listing never shows an undated resource.
+/// Whether an item is of `kind`, every item passing when none is named.
+fn is_kind(item: &CalendarItem, kind: Option<IcalComponentKind>) -> bool {
+    kind.is_none_or(|kind| holds_kind(&item.contents, kind))
+}
+
 fn in_range(item: &CalendarItem, range: Option<&CalendarTimeRange>) -> bool {
     let Some(range) = range else {
         return true;

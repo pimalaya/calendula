@@ -16,7 +16,11 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::shared::{
-    arg::CalendarIdArg, client::CalendarClient, event::Event, item::CalendarTimeRange,
+    arg::CalendarIdArg,
+    client::CalendarClient,
+    event::Event,
+    ical::IcalFamily,
+    item::{CalendarItemQuery, CalendarTimeRange},
 };
 
 /// List the events of a calendar.
@@ -71,7 +75,15 @@ impl EventListCommand {
                 .or(Some(client.account.events_list_page_size())),
         };
 
-        let items = client.list_items(&calendar_id, self.page, page_size, range.as_ref())?;
+        let items = client.list_items(
+            &calendar_id,
+            CalendarItemQuery {
+                page: self.page,
+                page_size,
+                range: range.as_ref(),
+                kind: IcalFamily::Event.kind(),
+            },
+        )?;
         let events = items.iter().flat_map(Event::project).collect();
 
         printer.out(EventListOutput {

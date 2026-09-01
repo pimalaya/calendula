@@ -171,6 +171,27 @@ fn missing_dtstart(ical: &Ical<'_>) -> Vec<String> {
         .collect()
 }
 
+/// Whether an item carries a component of `kind`.
+///
+/// Only the two backends that narrow a listing after parsing it read
+/// this; CalDAV pushes the kind down and gcal models one kind only.
+///
+/// The projections are keyed on a marker type, which a listing narrowing
+/// by a kind it only knows at runtime cannot use, so this reads the
+/// decoded component names instead. Bytes that do not parse carry
+/// nothing, which is what a projection makes of them too.
+#[cfg(any(feature = "vdir", feature = "pimdir"))]
+pub fn holds_kind(contents: &[u8], kind: IcalComponentKind) -> bool {
+    let Ok(cst) = IcalCst::parse(contents) else {
+        return false;
+    };
+
+    cst.decode()
+        .components
+        .iter()
+        .any(|component| component.name.eq_ignore_ascii_case(&kind))
+}
+
 /// Mints an item carrying nothing but its identity and what it owes.
 ///
 /// This is what a create starts from when it is given no source, and it
@@ -252,6 +273,11 @@ fn prop(kind: IcalPropKind, value: IcalValue<'static>) -> IcalProp<'static> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(feature = "vdir", feature = "pimdir"))]
+    use ical::component::IcalComponentKind;
+
+    #[cfg(any(feature = "vdir", feature = "pimdir"))]
+    use super::holds_kind;
     use super::{IcalFamily, blank_item, check, read_source};
 
     #[test]
@@ -281,6 +307,31 @@ mod tests {
         assert!(err.contains("event"), "{err}");
         assert!(err.contains("todo"), "{err}");
         assert!(err.contains("journal"), "{err}");
+    }
+
+    #[cfg(any(feature = "vdir", feature = "pimdir"))]
+    #[test]
+    fn an_item_answers_the_kind_it_carries_and_no_other() {
+        let item = |kind: &str| {
+            format!(
+                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//x//y//EN\r\n\
+                 BEGIN:{kind}\r\nUID:a\r\nDTSTAMP:20260101T000000Z\r\n\
+                 DTSTART:20260101T000000Z\r\nEND:{kind}\r\nEND:VCALENDAR\r\n"
+            )
+        };
+
+        assert!(holds_kind(
+            item("VTODO").as_bytes(),
+            IcalComponentKind::VTodo
+        ));
+        assert!(!holds_kind(
+            item("VTODO").as_bytes(),
+            IcalComponentKind::VEvent
+        ));
+
+        // NOTE: bytes that carry nothing readable carry no kind either,
+        // which is what a projection makes of them too.
+        assert!(!holds_kind(b"not an ical", IcalComponentKind::VEvent));
     }
 
     #[test]

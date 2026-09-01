@@ -60,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A component listing narrows by kind before it paginates, so a page of `event list`, `todo list` or `journal list` holds that family. The page used to be taken over items of every kind and projected afterwards, so a calendar of thirty events and one todo answered `todo list` with an empty table. CalDAV pushes the kind down as an RFC 4791 `comp-filter` with the window nested inside it, gcal answers a non-VEVENT kind without a round-trip, and pimdir reads the kind off the stored summary when the body is not local.
 - A composed VEVENT carrying no DTSTART is refused rather than sent. RFC 5545 3.6.1 requires it unless the calendar specifies a METHOD, which is a condition on the calendar that a per-component property list cannot state, and SabreDAV denormalizes DTSTART into its index on write and answers HTTP 500 rather than naming it.
 - A source holding nothing but whitespace is refused, naming where it was read from, rather than handed to a backend as an empty body.
 - `--config` reaches the wizard, which used to drop it on the one path where a user is most likely to pass it.

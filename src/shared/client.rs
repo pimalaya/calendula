@@ -26,7 +26,7 @@ use crate::{
     config::{AccountConfig, Config},
     shared::{
         calendar::{Calendar, CalendarDiff},
-        item::{CalendarItem, CalendarTimeRange},
+        item::{CalendarItem, CalendarItemQuery},
     },
 };
 
@@ -234,27 +234,26 @@ impl CalendarClient {
         }
     }
 
-    /// Lists the items of `calendar_id`, optionally narrowed to `range`.
+    /// Lists the items of `calendar_id`, narrowed by `query`.
     ///
-    /// `page` is 1-indexed and `page_size = None` returns the whole window.
-    /// A server-backed backend pushes `range` down where its protocol
-    /// defines such a filter; the others parse and filter after the fact.
+    /// A backend SHALL narrow by kind and by range before it paginates, so
+    /// a page of a component family holds that family. A server-backed
+    /// backend pushes both down where its protocol defines such a filter;
+    /// the others parse and filter after the fact.
     pub fn list_items(
         &mut self,
         calendar_id: &str,
-        page: Option<u32>,
-        page_size: Option<u32>,
-        range: Option<&CalendarTimeRange>,
+        query: CalendarItemQuery<'_>,
     ) -> Result<Vec<CalendarItem>> {
         match self.open()? {
             #[cfg(feature = "vdir")]
-            BackendClient::Vdir(client) => client.list_items(calendar_id, page, page_size, range),
+            BackendClient::Vdir(client) => client.list_items(calendar_id, query),
             #[cfg(feature = "caldav")]
-            BackendClient::Caldav(client) => client.list_items(calendar_id, page, page_size, range),
+            BackendClient::Caldav(client) => client.list_items(calendar_id, query),
             #[cfg(feature = "pimdir")]
-            BackendClient::Pimdir(client) => client.list_items(calendar_id, page, page_size, range),
+            BackendClient::Pimdir(client) => client.list_items(calendar_id, query),
             #[cfg(feature = "gcal")]
-            BackendClient::Gcal(client) => client.list_items(calendar_id, page, page_size, range),
+            BackendClient::Gcal(client) => client.list_items(calendar_id, query),
         }
     }
 

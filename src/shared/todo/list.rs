@@ -16,7 +16,11 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::shared::{
-    arg::CalendarIdArg, client::CalendarClient, item::CalendarTimeRange, todo::Todo,
+    arg::CalendarIdArg,
+    client::CalendarClient,
+    ical::IcalFamily,
+    item::{CalendarItemQuery, CalendarTimeRange},
+    todo::Todo,
 };
 
 /// List the todos of a calendar.
@@ -76,7 +80,15 @@ impl TodoListCommand {
         // it is applied here rather than pushed down: a server-side
         // filter is defined against a component's start and end, and a
         // todo carries neither.
-        let items = client.list_items(&calendar_id, self.page, page_size, None)?;
+        let items = client.list_items(
+            &calendar_id,
+            CalendarItemQuery {
+                page: self.page,
+                page_size,
+                kind: IcalFamily::Todo.kind(),
+                ..Default::default()
+            },
+        )?;
         let todos = items
             .iter()
             .flat_map(Todo::project)

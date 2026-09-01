@@ -21,6 +21,7 @@ pub mod update;
 
 use anyhow::{Result, bail};
 use chrono::NaiveDate;
+use ical::component::IcalComponentKind;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +42,25 @@ pub struct CalendarItem {
     /// Raw iCalendar bytes, exactly as the backend stored them.
     #[serde(default)]
     pub contents: Vec<u8>,
+}
+
+/// What narrows an item listing, and in which order.
+///
+/// The kind is applied before the page, so a page of a component family
+/// is a page of that family: filtering after paginating would make a
+/// listing show the VTODOs among the first 25 items of any kind, which
+/// is nothing at all on a calendar of events.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CalendarItemQuery<'a> {
+    /// 1-indexed page, `None` being the first.
+    pub page: Option<u32>,
+    /// Items per page, `None` returning the whole window.
+    pub page_size: Option<u32>,
+    /// Day window the item's own dates are read against.
+    pub range: Option<&'a CalendarTimeRange>,
+    /// Component kind to keep, `None` keeping every kind, which is what
+    /// the raw `item` family asks for.
+    pub kind: Option<IcalComponentKind>,
 }
 
 /// An inclusive day window narrowing a listing.

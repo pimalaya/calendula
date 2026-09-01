@@ -21,7 +21,10 @@ use pimalaya_cli::printer::Printer;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Serialize, Serializer, ser::SerializeMap};
 
-use crate::shared::{arg::CalendarIdArg, client::CalendarClient, event::Event};
+use crate::shared::{
+    arg::CalendarIdArg, client::CalendarClient, event::Event, ical::IcalFamily,
+    item::CalendarItemQuery,
+};
 
 const DAYS_IN_WEEK: usize = 7;
 const MAXDAYS: usize = 42;
@@ -128,7 +131,13 @@ impl EventAgendaCommand {
         let now = Local::now();
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
-        let items = client.list_items(&calendar_id, None, None, None)?;
+        let items = client.list_items(
+            &calendar_id,
+            CalendarItemQuery {
+                kind: IcalFamily::Event.kind(),
+                ..Default::default()
+            },
+        )?;
         let all_events: Vec<Event> = items.iter().flat_map(Event::project).collect();
 
         let mut ctl = CalControl {

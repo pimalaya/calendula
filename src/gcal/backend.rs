@@ -15,6 +15,7 @@
 //! requested window reaches.
 
 use anyhow::{Context, Result, bail};
+use ical::component::IcalComponentKind;
 use io_gcal::v3::{
     client::GcalClientStd,
     rest::{
@@ -35,7 +36,7 @@ use crate::{
     shared::{
         calendar::{Calendar, CalendarDiff},
         client::paginate,
-        item::{CalendarItem, CalendarTimeRange},
+        item::{CalendarItem, CalendarItemQuery},
     },
 };
 
@@ -156,13 +157,22 @@ impl GcalBackend {
     pub fn list_items(
         &mut self,
         calendar_id: &str,
-        page: Option<u32>,
-        page_size: Option<u32>,
-        range: Option<&CalendarTimeRange>,
+        query: CalendarItemQuery<'_>,
     ) -> Result<Vec<CalendarItem>> {
+        // NOTE: Google models a VEVENT and nothing else, so any other
+        // kind is answered without a round-trip rather than by filtering
+        // a listing that could never hold one.
+        if query
+            .kind
+            .is_some_and(|kind| kind != IcalComponentKind::VEvent)
+        {
+            return Ok(Vec::new());
+        }
+
+        let range = query.range;
         let time_min = range.and_then(|range| range.start.as_deref()).map(rfc3339);
         let time_max = range.and_then(|range| range.end.as_deref()).map(rfc3339);
-        let wanted = window(page, page_size);
+        let wanted = window(query.page, query.page_size);
 
         let mut events = Vec::new();
         let mut page_token: Option<String> = None;
@@ -189,7 +199,11 @@ impl GcalBackend {
             }
         }
 
-        Ok(paginate(resources(calendar_id, &events), page, page_size))
+        Ok(paginate(
+            resources(calendar_id, &events),
+            query.page,
+            query.page_size,
+        ))
     }
 
     /// Reads one event, with the exceptions of a series folded into it.

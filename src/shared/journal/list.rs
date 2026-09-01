@@ -16,7 +16,11 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::shared::{
-    arg::CalendarIdArg, client::CalendarClient, item::CalendarTimeRange, journal::Journal,
+    arg::CalendarIdArg,
+    client::CalendarClient,
+    ical::IcalFamily,
+    item::{CalendarItemQuery, CalendarTimeRange},
+    journal::Journal,
 };
 
 /// List the journal entries of a calendar.
@@ -72,7 +76,15 @@ impl JournalListCommand {
         // NOTE: a server-side range filter is defined against a component's
         // start and end (RFC 4791 9.9), and a journal entry carries no end,
         // so the window is applied after parsing rather than pushed down.
-        let items = client.list_items(&calendar_id, self.page, page_size, None)?;
+        let items = client.list_items(
+            &calendar_id,
+            CalendarItemQuery {
+                page: self.page,
+                page_size,
+                kind: IcalFamily::Journal.kind(),
+                ..Default::default()
+            },
+        )?;
         let journals = items
             .iter()
             .flat_map(Journal::project)

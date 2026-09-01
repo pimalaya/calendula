@@ -15,7 +15,11 @@ use pimalaya_cli::{
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::shared::{arg::CalendarIdArg, client::CalendarClient, item::CalendarItem};
+use crate::shared::{
+    arg::CalendarIdArg,
+    client::CalendarClient,
+    item::{CalendarItem, CalendarItemQuery},
+};
 
 /// List the raw iCalendar items of a calendar.
 ///
@@ -47,7 +51,14 @@ impl ItemListCommand {
         let page_size = self
             .page_size
             .or(Some(client.account.items_list_page_size()));
-        let items = client.list_items(&calendar_id, self.page, page_size, None)?;
+        let items = client.list_items(
+            &calendar_id,
+            CalendarItemQuery {
+                page: self.page,
+                page_size,
+                ..Default::default()
+            },
+        )?;
 
         printer.out(ItemListOutput {
             style: client.account.table_style(),

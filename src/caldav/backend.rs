@@ -23,7 +23,7 @@ use crate::{
     shared::{
         calendar::{Calendar, CalendarDiff},
         client::paginate,
-        item::{CalendarItem, CalendarTimeRange},
+        item::{CalendarItem, CalendarItemQuery},
     },
 };
 
@@ -106,18 +106,16 @@ impl CaldavBackend {
     pub fn list_items(
         &mut self,
         calendar_id: &str,
-        page: Option<u32>,
-        page_size: Option<u32>,
-        range: Option<&CalendarTimeRange>,
+        query: CalendarItemQuery<'_>,
     ) -> Result<Vec<CalendarItem>> {
-        let entries = self.client.list_items(calendar_id, &comp_filter(range))?;
+        let entries = self.client.list_items(calendar_id, &comp_filter(&query))?;
 
         let items = entries
             .into_iter()
             .map(|entry| item_from(calendar_id, entry))
             .collect();
 
-        Ok(paginate(items, page, page_size))
+        Ok(paginate(items, query.page, query.page_size))
     }
 
     /// Reads one item's raw iCalendar bytes plus its entity tag.
@@ -170,14 +168,21 @@ impl CaldavBackend {
 /// A range narrows to VEVENT alone: RFC 4791 9.9 defines the overlap
 /// test against a component's own start and end, so a VTODO or
 /// VJOURNAL without them would be dropped for the wrong reason.
-fn comp_filter(range: Option<&CalendarTimeRange>) -> String {
-    match range {
-        Some(range) => format!(
-            "<C:comp-filter name=\"VEVENT\">{}</C:comp-filter>",
-            range.to_caldav_filter()
-        ),
-        None => String::new(),
-    }
+fn comp_filter(query: &CalendarItemQuery<'_>) -> String {
+    let Some(kind) = query.kind else {
+        return String::new();
+    };
+
+    // NOTE: RFC 4791 9.7.1 nests a time-range inside the component it
+    // narrows, so the window travels with the kind. The raw `item`
+    // family names no kind and carries no window either, which is why
+    // one never escapes without the other.
+    let range = query
+        .range
+        .map(|range| range.to_caldav_filter())
+        .unwrap_or_default();
+
+    format!("<C:comp-filter name=\"{}\">{range}</C:comp-filter>", &*kind)
 }
 
 /// Projects a CalDAV calendar onto the shared [`Calendar`].
@@ -249,22 +254,36 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use ical::component::IcalComponentKind;
+
     use super::*;
+    use crate::shared::item::CalendarTimeRange;
 
     #[test]
-    fn no_range_asks_for_every_component_kind() {
-        assert_eq!(comp_filter(None), "");
+    fn naming_no_kind_asks_for_every_component_kind() {
+        assert_eq!(comp_filter(&CalendarItemQuery::default()), "");
     }
 
     #[test]
-    fn a_range_narrows_the_query_to_overlapping_vevents() {
+    fn a_kind_narrows_the_query_and_the_window_nests_inside_it() {
+        let query = |kind, range| CalendarItemQuery {
+            kind: Some(kind),
+            range,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            comp_filter(&query(IcalComponentKind::VTodo, None)),
+            "<C:comp-filter name=\"VTODO\"></C:comp-filter>"
+        );
+
         let range = CalendarTimeRange {
             start: Some("20260801T000000Z".into()),
             end: Some("20260901T000000Z".into()),
         };
 
         assert_eq!(
-            comp_filter(Some(&range)),
+            comp_filter(&query(IcalComponentKind::VEvent, Some(&range))),
             "<C:comp-filter name=\"VEVENT\">\
              <C:time-range start=\"20260801T000000Z\" end=\"20260901T000000Z\" />\
              </C:comp-filter>"
