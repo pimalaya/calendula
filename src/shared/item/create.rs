@@ -1,32 +1,117 @@
 //! # Item create
 //!
-//! The `item create` command, writing a new iCalendar object into a
+//! The `item create` command, storing one iCalendar object into the selected
 //! calendar.
 
-use anyhow::Result;
-use clap::Parser;
-use pimalaya_cli::printer::{Message, Printer};
+use core::fmt;
 
-use crate::shared::{arg::CalendarIdArg, client::CalendarClient, ical::IcalArg};
+use anyhow::{Result, bail};
+use clap::Parser;
+use pimalaya_cli::printer::Printer;
+use schemars::JsonSchema;
+use serde::Serialize;
+
+use crate::shared::{
+    arg::{CalendarIdArg, IcalComposerArgs},
+    client::CalendarClient,
+    composer::IcalComposer,
+    ical::{IcalFamily, blank_item, read_source},
+};
 
 /// Create a new iCalendar item from an iCalendar source.
 ///
-/// JSON output: `{"message": "..."}`.
+/// The source and `-i` stack: the source is the item to start from,
+/// and `-i` opens it in the composer. `item` names no component kind, so it mints nothing: with no source the command bails, naming `event`, `todo` and `journal` as the families that can.
+///
+/// The bytes are stored as given, so they carry the UID the item is
+/// addressed by afterwards.
+///
+/// JSON output: `{"id"}`, the identifier the backend assigned.
 #[derive(Debug, Parser)]
 pub struct ItemCreateCommand {
     #[command(flatten)]
     pub calendar: CalendarIdArg,
-
+    /// The composer the item is refined in before it is written.
     #[command(flatten)]
-    pub ical: IcalArg,
+    pub composer: IcalComposerArgs,
+    /// iCalendar to store: a path to a file, raw iCalendar contents, or
+    /// `-` for stdin. Required: `item` mints nothing.
+    #[arg(value_name = "ICAL")]
+    pub ical: Option<String>,
 }
 
 impl ItemCreateCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
-        let calendar_id = client.account.calendar_id(self.calendar.id)?;
-        let contents = self.ical.read()?;
+        if self.ical.is_none() && !self.composer.interactive {
+            bail!("Nothing to create; give an iCalendar, or -i to compose one");
+        }
 
-        let id = client.create_item(&calendar_id, contents)?;
-        printer.out(Message::new(format!("Item `{id}` successfully created")))
+        let calendar_id = client.account.calendar_id(self.calendar.id)?;
+
+        let seed = match &self.ical {
+            Some(source) => read_source(source)?,
+            None => blank_item(IcalFamily::Item)?,
+        };
+
+        if !self.composer.interactive {
+            let id = client.create_item(&calendar_id, seed)?;
+            return printer.out(ItemCreateOutput::Created(ItemCreatedOutput { id }));
+        }
+
+        let composer = IcalComposer {
+            command: client.account.item_composer(self.composer.composer)?,
+        };
+
+        // NOTE: nothing has reached the network yet, the client opening
+        // on the first call that needs it, so the editor runs with no
+        // connection held and the create below opens one.
+        let Some(draft) = composer.edit(printer, &seed)? else {
+            return printer.out(ItemCreateOutput::Abandoned);
+        };
+
+        let created = client.create_item(&calendar_id, draft.contents.clone());
+        let id = draft.finish(created)?;
+
+        printer.out(ItemCreateOutput::Created(ItemCreatedOutput { id }))
+    }
+}
+
+/// What `item create` prints, which is whether it wrote anything.
+///
+/// Untagged, so the write serializes exactly as it would on its own. The
+/// second shape is reachable through `-i` alone, which `--json` refuses
+/// to run.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ItemCreateOutput {
+    /// The item the backend created.
+    Created(ItemCreatedOutput),
+    /// Nothing, the edit having been abandoned.
+    Abandoned,
+}
+
+impl fmt::Display for ItemCreateOutput {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Created(out) => out.fmt(f),
+            Self::Abandoned => writeln!(f, "Item not created"),
+        }
+    }
+}
+
+/// The item the backend created.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemCreatedOutput {
+    /// Backend-assigned identifier of the new item.
+    ///
+    /// On pimdir this is the link id the queued create was staged under,
+    /// the store having no id of its own until a sync applies it.
+    pub id: String,
+}
+
+impl fmt::Display for ItemCreatedOutput {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Item `{}` successfully created", self.id)
     }
 }

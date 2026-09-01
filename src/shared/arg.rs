@@ -1,6 +1,6 @@
-//! # Calendar selector
+//! # Shared arguments
 //!
-//! The `-k/--calendar` argument every shared-API command carries.
+//! Clap arguments reused across the shared API commands.
 
 use clap::Parser;
 
@@ -16,4 +16,20 @@ pub struct CalendarIdArg {
     /// the command bails.
     #[arg(short = 'k', long = "calendar", value_name = "CALENDAR-ID")]
     pub id: Option<String>,
+}
+
+/// The composer a `build`, a `create` or an `update` refines an item in.
+#[derive(Debug, Parser)]
+pub struct IcalComposerArgs {
+    /// Edit the item in the composer before writing it.
+    ///
+    /// Bails when neither `item.composer` nor `--composer` names one.
+    #[arg(short, long)]
+    pub interactive: bool,
+    /// Command the item is edited in, overriding `item.composer`.
+    ///
+    /// A shell line, spawned on the path of a temporary iCalendar file it
+    /// edits in place.
+    #[arg(long, value_name = "COMMAND", requires = "interactive")]
+    pub composer: Option<String>,
 }

@@ -11,13 +11,18 @@
 //! appears here when every backend can serve it, and anything narrower
 //! belongs to a protocol-specific subcommand.
 
+use std::path::PathBuf;
+
 use anyhow::{Result, bail};
+use log::debug;
+use pimalaya_cli::printer::Printer;
 #[cfg(feature = "gcal")]
 use pimalaya_config::secret::SecretResolver;
 
 use crate::{
     account::context::Account,
     backend::Backend,
+    cli::resolve_account,
     config::{AccountConfig, Config},
     shared::{
         calendar::{Calendar, CalendarDiff},
@@ -26,10 +31,31 @@ use crate::{
 };
 
 /// The active backend bundled with the merged runtime [`Account`].
+///
+/// The connection is opened on the first call that needs it and can be
+/// dropped again with [`disconnect`](Self::disconnect). A command running
+/// a composer holds none open while the editor is up: a server closes an
+/// idle connection, and the write landing after a long edit would read
+/// the end of a socket nobody is on the other end of any more.
 pub struct CalendarClient {
-    inner: BackendClient,
+    /// What it takes to open the backend, kept so it can be reopened.
+    config: BackendConfig,
+    /// The open backend, `None` until something needs it.
+    inner: Option<BackendClient>,
     /// The account the command runs against, config already merged.
     pub account: Account,
+}
+
+/// The configuration of the backend a [`CalendarClient`] speaks to.
+enum BackendConfig {
+    #[cfg(feature = "vdir")]
+    Vdir(crate::config::VdirConfig),
+    #[cfg(feature = "caldav")]
+    Caldav(Box<crate::config::CaldavConfig>),
+    #[cfg(feature = "pimdir")]
+    Pimdir(crate::config::PimdirConfig),
+    #[cfg(feature = "gcal")]
+    Gcal(Box<crate::config::GcalConfig>),
 }
 
 /// Exactly one of the compiled-in per-backend glue clients.
@@ -45,71 +71,106 @@ enum BackendClient {
 }
 
 impl CalendarClient {
-    /// Builds the client from the account configuration.
+    /// Selects the backend from the account configuration.
     ///
     /// The first configured backend `backend` allows wins, in calendula's
     /// priority order: vdir, pimdir, CalDAV, gcal. That order prefers a
     /// local store to a network round-trip, and a protocol-standard server
-    /// to a vendor API.
+    /// to a vendor API. Nothing is connected here: the first call that
+    /// needs the network opens it.
     pub fn new(
         config: Config,
         #[allow(unused_mut)] mut account_config: AccountConfig,
         backend: Backend,
     ) -> Result<Self> {
         #[allow(unused_mut)]
-        let mut inner: Option<BackendClient> = None;
+        let mut selected: Option<BackendConfig> = None;
 
         #[cfg(feature = "vdir")]
-        if inner.is_none()
+        if selected.is_none()
             && backend.allows_vdir()
             && let Some(vdir_config) = account_config.vdir.take()
         {
-            use crate::vdir::backend::VdirBackend;
-            inner = Some(BackendClient::Vdir(VdirBackend::new(vdir_config)));
+            selected = Some(BackendConfig::Vdir(vdir_config));
         }
 
         #[cfg(feature = "pimdir")]
-        if inner.is_none()
+        if selected.is_none()
             && backend.allows_pimdir()
             && let Some(pimdir_config) = account_config.pimdir.take()
         {
-            use crate::pimdir::backend::PimdirBackend;
-            let client = PimdirBackend::new(pimdir_config)?;
-            inner = Some(BackendClient::Pimdir(Box::new(client)));
+            selected = Some(BackendConfig::Pimdir(pimdir_config));
         }
 
         #[cfg(feature = "caldav")]
-        if inner.is_none()
+        if selected.is_none()
             && backend.allows_caldav()
             && let Some(caldav_config) = account_config.caldav.take()
         {
-            use crate::caldav::backend::CaldavBackend;
-            let client = CaldavBackend::new(caldav_config)?;
-            inner = Some(BackendClient::Caldav(Box::new(client)));
+            selected = Some(BackendConfig::Caldav(Box::new(caldav_config)));
         }
 
         #[cfg(feature = "gcal")]
-        if inner.is_none()
+        if selected.is_none()
             && backend.allows_gcal()
             && let Some(gcal_config) = account_config.gcal.take()
         {
-            use crate::gcal::backend::GcalBackend;
-            let client = GcalBackend::new(gcal_config, &mut SecretResolver::new())?;
-            inner = Some(BackendClient::Gcal(Box::new(client)));
+            selected = Some(BackendConfig::Gcal(Box::new(gcal_config)));
         }
 
-        let Some(inner) = inner else {
+        let Some(config_) = selected else {
             bail!("No backend matching `{backend}` is configured for this account");
         };
 
         let account = Account::from(config).merge(Account::from(account_config));
 
-        Ok(Self { inner, account })
+        Ok(Self {
+            config: config_,
+            inner: None,
+            account,
+        })
+    }
+
+    /// Resolves the account a shared command runs against, and selects
+    /// the backend serving it.
+    ///
+    /// The four component families call this per subcommand rather than
+    /// once for the whole family, so a `build` reaches neither.
+    pub fn resolve(
+        printer: &mut impl Printer,
+        config_paths: &[PathBuf],
+        account_name: Option<&str>,
+        backend: Backend,
+    ) -> Result<Self> {
+        let (config, account_config) = resolve_account(printer, config_paths, account_name)?;
+
+        Self::new(config, account_config, backend)
+    }
+
+    /// Drops the connection, so the next call opens a fresh one.
+    ///
+    /// Called before a composer runs: an editor session lasts minutes,
+    /// and a server that closed the idle connection meanwhile would fail
+    /// the write that comes after it.
+    pub fn disconnect(&mut self) {
+        if self.inner.take().is_some() {
+            debug!("closing the backend connection");
+        }
+    }
+
+    /// The open backend, opening it when it is not.
+    fn open(&mut self) -> Result<&mut BackendClient> {
+        if self.inner.is_none() {
+            debug!("opening the backend connection");
+            self.inner = Some(self.config.open()?);
+        }
+
+        Ok(self.inner.as_mut().expect("just opened"))
     }
 
     /// Lists every calendar available to the active account.
     pub fn list_calendars(&mut self) -> Result<Vec<Calendar>> {
-        match &mut self.inner {
+        match self.open()? {
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => client.list_calendars(),
             #[cfg(feature = "caldav")]
@@ -132,7 +193,7 @@ impl CalendarClient {
         description: Option<&str>,
         color: Option<&str>,
     ) -> Result<String> {
-        match &mut self.inner {
+        match self.open()? {
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => client.create_calendar(id, name, description, color),
             #[cfg(feature = "caldav")]
@@ -147,7 +208,7 @@ impl CalendarClient {
     /// Applies a partial update to the calendar `id`, preserving the fields
     /// left as `None` in `patch`.
     pub fn update_calendar(&mut self, id: &str, patch: CalendarDiff) -> Result<()> {
-        match &mut self.inner {
+        match self.open()? {
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => client.update_calendar(id, patch),
             #[cfg(feature = "caldav")]
@@ -161,7 +222,7 @@ impl CalendarClient {
 
     /// Deletes the calendar `id` and every item it contains.
     pub fn delete_calendar(&mut self, id: &str) -> Result<()> {
-        match &mut self.inner {
+        match self.open()? {
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => client.delete_calendar(id),
             #[cfg(feature = "caldav")]
@@ -185,7 +246,7 @@ impl CalendarClient {
         page_size: Option<u32>,
         range: Option<&CalendarTimeRange>,
     ) -> Result<Vec<CalendarItem>> {
-        match &mut self.inner {
+        match self.open()? {
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => client.list_items(calendar_id, page, page_size, range),
             #[cfg(feature = "caldav")]
@@ -199,7 +260,7 @@ impl CalendarClient {
 
     /// Fetches the item `item_id` from `calendar_id`.
     pub fn get_item(&mut self, calendar_id: &str, item_id: &str) -> Result<CalendarItem> {
-        match &mut self.inner {
+        match self.open()? {
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => client.get_item(calendar_id, item_id),
             #[cfg(feature = "caldav")]
@@ -213,7 +274,7 @@ impl CalendarClient {
 
     /// Stores raw iCalendar bytes as a new item, returning the id assigned.
     pub fn create_item(&mut self, calendar_id: &str, contents: Vec<u8>) -> Result<String> {
-        match &mut self.inner {
+        match self.open()? {
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => client.create_item(calendar_id, contents),
             #[cfg(feature = "caldav")]
@@ -236,7 +297,7 @@ impl CalendarClient {
         contents: Vec<u8>,
         if_match: Option<&str>,
     ) -> Result<()> {
-        match &mut self.inner {
+        match self.open()? {
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => {
                 client.update_item(calendar_id, item_id, contents, if_match)
@@ -258,7 +319,7 @@ impl CalendarClient {
 
     /// Deletes `item_id` from `calendar_id`.
     pub fn delete_item(&mut self, calendar_id: &str, item_id: &str) -> Result<()> {
-        match &mut self.inner {
+        match self.open()? {
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => client.delete_item(calendar_id, item_id),
             #[cfg(feature = "caldav")]
@@ -267,6 +328,37 @@ impl CalendarClient {
             BackendClient::Pimdir(client) => client.delete_item(calendar_id, item_id),
             #[cfg(feature = "gcal")]
             BackendClient::Gcal(client) => client.delete_item(calendar_id, item_id),
+        }
+    }
+}
+
+impl BackendConfig {
+    /// Opens the backend this configuration describes.
+    fn open(&self) -> Result<BackendClient> {
+        match self {
+            #[cfg(feature = "vdir")]
+            Self::Vdir(config) => {
+                use crate::vdir::backend::VdirBackend;
+                Ok(BackendClient::Vdir(VdirBackend::new(config.clone())))
+            }
+            #[cfg(feature = "pimdir")]
+            Self::Pimdir(config) => {
+                use crate::pimdir::backend::PimdirBackend;
+                let client = PimdirBackend::new(config.clone())?;
+                Ok(BackendClient::Pimdir(Box::new(client)))
+            }
+            #[cfg(feature = "caldav")]
+            Self::Caldav(config) => {
+                use crate::caldav::backend::CaldavBackend;
+                let client = CaldavBackend::new(config.as_ref().clone())?;
+                Ok(BackendClient::Caldav(Box::new(client)))
+            }
+            #[cfg(feature = "gcal")]
+            Self::Gcal(config) => {
+                use crate::gcal::backend::GcalBackend;
+                let client = GcalBackend::new(config.as_ref().clone(), &mut SecretResolver::new())?;
+                Ok(BackendClient::Gcal(Box::new(client)))
+            }
         }
     }
 }

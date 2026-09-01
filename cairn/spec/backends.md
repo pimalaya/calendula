@@ -143,3 +143,8 @@ What stays unique is the key and the public id: `(collection, link_id)` still na
 RFC 4791 4.1 requires the `UID` to be unique in the collection and servers do not always enforce it. The two copies need not even be the same event: a verified case held two different meetings under one `UID`. Resolving an identity to whichever row came first would hide one of them.
 
 This is a second resource, not a second component: every component sharing a `UID` still lives in one resource, so each of the two items holds its own whole recurrence set.
+
+### Requirement: The connection is opened by the call that needs it
+`CalendarClient` SHALL select its backend from the account configuration without connecting, and open on the first call that needs the network. A command running a composer SHALL hold no connection open while the editor is up: a server closes an idle connection, and a write landing after a long edit would read the end of a socket nobody is on the other end of any more.
+
+An `update -i`, which has to read the item before the editor, SHALL drop that connection before spawning the composer, the write afterwards opening a fresh one.

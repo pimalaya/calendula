@@ -72,3 +72,8 @@ The runtime TLS profile SHALL be built through `TlsConfig::into_tls(alpn)`, neve
 
 ### Requirement: A defaulted scalar is not written back
 A generated account SHALL omit a scalar equal to its type's default, `default = false` first among them, so what the wizard writes is what the user chose rather than the whole schema.
+
+### Requirement: The composer is a command, not a library
+`item.composer` SHALL hold the command an item is edited through, at the top level and per account, as a shell line or an argv list. calendula SHALL spawn it rather than embed an editor: what edits an iCalendar is the user's choice, and a terminal editor, a graphical one and a purpose-built one are all one configuration line apart.
+
+The key SHALL sit under `item` rather than under a component family: the four families are views over the same resources, and what is edited is an iCalendar object, which is what `item` names.

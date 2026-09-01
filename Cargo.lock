@@ -183,6 +183,7 @@ dependencies = [
  "chrono",
  "clap",
  "crossterm",
+ "getrandom 0.4.3",
  "humansize",
  "ical-rs",
  "io-gcal",

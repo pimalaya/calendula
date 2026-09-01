@@ -45,6 +45,15 @@
 # Default page size for `items list`, resolved the same way.
 #item.list.page-size = 50
 
+# Command an item is edited through, spawned on the path of a temporary
+# iCalendar file it edits in place. `-i/--interactive` on `build`, `create`
+# and `update` opens it; `--composer <COMMAND>` overrides it for one run.
+#
+# A shell line, or an argv list, the path appended as the last argument:
+# `composer = "tcal edit"` runs `tcal edit <PATH>`.
+#item.composer = "vim"
+#item.composer = ["tcal", "edit"]
+
 # --------------------------------------------------------------------------------
 # Table rendering: calendars list
 # --------------------------------------------------------------------------------

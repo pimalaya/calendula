@@ -10,6 +10,7 @@
 //! The bytes themselves are never rewritten, so a projection is read-only and
 //! lossy by design.
 
+pub mod build;
 pub mod cli;
 pub mod create;
 pub mod delete;

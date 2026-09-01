@@ -128,8 +128,9 @@ pub enum CalendulaCommand {
 ///
 /// A free function rather than a closure, so the printer it needs for
 /// the offer is borrowed for the length of the call rather than of the
-/// whole dispatch.
-fn configs(
+/// whole dispatch, and public so a family resolves its own account per
+/// subcommand: `build` resolves none at all.
+pub fn resolve_account(
     printer: &mut impl Printer,
     config_paths: &[PathBuf],
     account_name: Option<&str>,
@@ -228,40 +229,16 @@ impl CalendulaCommand {
     ) -> Result<()> {
         match self {
             Self::Calendar(cmd) => {
-                let (config, account_config) = configs(printer, config_paths, account_name)?;
-                cmd.execute(
-                    printer,
-                    CalendarClient::new(config, account_config, backend)?,
-                )
+                let client = CalendarClient::resolve(printer, config_paths, account_name, backend)?;
+                cmd.execute(printer, client)
             }
-            Self::Event(cmd) => {
-                let (config, account_config) = configs(printer, config_paths, account_name)?;
-                cmd.execute(
-                    printer,
-                    CalendarClient::new(config, account_config, backend)?,
-                )
-            }
-            Self::Todo(cmd) => {
-                let (config, account_config) = configs(printer, config_paths, account_name)?;
-                cmd.execute(
-                    printer,
-                    CalendarClient::new(config, account_config, backend)?,
-                )
-            }
-            Self::Journal(cmd) => {
-                let (config, account_config) = configs(printer, config_paths, account_name)?;
-                cmd.execute(
-                    printer,
-                    CalendarClient::new(config, account_config, backend)?,
-                )
-            }
-            Self::Item(cmd) => {
-                let (config, account_config) = configs(printer, config_paths, account_name)?;
-                cmd.execute(
-                    printer,
-                    CalendarClient::new(config, account_config, backend)?,
-                )
-            }
+
+            // NOTE: the four component families resolve per subcommand,
+            // `build` reaching no backend and so needing no account.
+            Self::Event(cmd) => cmd.execute(printer, config_paths, account_name, backend),
+            Self::Todo(cmd) => cmd.execute(printer, config_paths, account_name, backend),
+            Self::Journal(cmd) => cmd.execute(printer, config_paths, account_name, backend),
+            Self::Item(cmd) => cmd.execute(printer, config_paths, account_name, backend),
 
             #[cfg(feature = "caldav")]
             Self::Caldav(cmd) => {

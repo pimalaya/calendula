@@ -10,6 +10,7 @@
 use anyhow::{Result, bail};
 use crossterm::style::Color;
 use pimalaya_cli::table::{Color as TableColor, ContentArrangement, TableStyle};
+use pimalaya_config::command::CommandConfig;
 
 use crate::{
     config::{
@@ -41,6 +42,9 @@ pub struct Account {
     /// Fallback calendar id for `event` and `item` commands when their
     /// `-k/--calendar` flag is omitted.
     pub calendar_default: Option<String>,
+    /// Command an item is edited through, spawned on the path of a
+    /// temporary iCalendar file.
+    pub item_composer: Option<CommandConfig>,
     /// Per-column colors of the `calendar list` table.
     pub calendars_list_table: CalendarListTableConfig,
     /// Per-column colors of the `event list` table.
@@ -68,6 +72,7 @@ impl Account {
             items_list_page_size: other.items_list_page_size.or(self.items_list_page_size),
 
             calendar_default: other.calendar_default.or(self.calendar_default),
+            item_composer: other.item_composer.or(self.item_composer),
 
             calendars_list_table: merge_calendar_table(
                 self.calendars_list_table,
@@ -126,6 +131,25 @@ impl Account {
         }
 
         bail!("Missing calendar id; pass -k/--calendar or set calendar.default")
+    }
+
+    /// Resolves the composer an item is edited through.
+    ///
+    /// The flag wins, taken as a shell line, then the `item.composer`
+    /// config, otherwise this bails naming both ways of setting one.
+    pub fn item_composer(&self, flag: Option<String>) -> Result<CommandConfig> {
+        if let Some(line) = flag {
+            return Ok(CommandConfig::Shell(line));
+        }
+
+        let Some(composer) = self.item_composer.clone() else {
+            bail!(
+                "No composer configured; set item.composer or pass --composer <COMMAND>, \
+                 which is spawned on the path of the iCalendar to edit"
+            )
+        };
+
+        Ok(composer)
     }
 
     /// Color of the ID column of `calendar list`, red by default.
@@ -295,6 +319,7 @@ impl From<Config> for Account {
             journals_list_page_size: config.journal.list.page_size,
             items_list_page_size: config.item.list.page_size,
             calendar_default: config.calendar.default,
+            item_composer: config.item.composer,
             calendars_list_table: config.calendar.list.table,
             events_list_table: config.event.list.table,
             todos_list_table: config.todo.list.table,
@@ -314,6 +339,7 @@ impl From<AccountConfig> for Account {
             journals_list_page_size: config.journal.list.page_size,
             items_list_page_size: config.item.list.page_size,
             calendar_default: config.calendar.default,
+            item_composer: config.item.composer,
             calendars_list_table: config.calendar.list.table,
             events_list_table: config.event.list.table,
             todos_list_table: config.todo.list.table,

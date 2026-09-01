@@ -8,11 +8,14 @@
 //! serve it; what only one of them exposes lives in its protocol module.
 
 pub mod arg;
+pub mod build;
 pub mod calendar;
 pub mod client;
+pub mod composer;
 pub mod event;
 pub mod ical;
 pub mod item;
 pub mod journal;
 pub mod table;
 pub mod todo;
+pub mod uuid;

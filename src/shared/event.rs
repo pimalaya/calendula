@@ -11,6 +11,7 @@
 //! lossy by design.
 
 pub mod agenda;
+pub mod build;
 pub mod cli;
 pub mod create;
 pub mod delete;

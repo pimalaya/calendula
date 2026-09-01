@@ -24,7 +24,10 @@ use pimalaya_config::secret::Secret;
 use pimalaya_config::toml::shell_expanded_string;
 #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
 use pimalaya_config::toml::to_string;
-use pimalaya_config::toml::{TomlConfig, shell_expanded_path};
+use pimalaya_config::{
+    command::CommandConfig,
+    toml::{TomlConfig, shell_expanded_path},
+};
 #[cfg(any(feature = "caldav", feature = "gcal"))]
 use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider};
 #[cfg(any(feature = "caldav", feature = "gcal"))]
@@ -369,10 +372,20 @@ pub struct JournalListTableConfig {
     pub start_color: Option<Color>,
 }
 
-/// Item-level rendering options.
+/// Item-level options.
+///
+/// The composer lives here rather than under a component family: the
+/// four families are views over the same items, and what is edited is an
+/// iCalendar object, which is what `item` names.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ItemConfig {
+    /// Command an item is edited through, spawned on the path of a
+    /// temporary iCalendar file it edits in place.
+    ///
+    /// A shell line or an argv list, the path appended as its last
+    /// argument: `composer = "tcal edit"` runs `tcal edit <PATH>`.
+    pub composer: Option<CommandConfig>,
     /// `item list` options.
     #[serde(default)]
     pub list: ItemListConfig,

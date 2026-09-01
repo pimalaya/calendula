@@ -28,6 +28,8 @@ CLI to manage calendars.
 - **vdir**: read and write a local [vdir](https://vdirsyncer.pimutils.org/en/stable/vdir.html) home, one directory per calendar.
 - **pimdir**: read and stage writes against a local [pimdir](https://github.com/pimalaya/pimdir) store, the offline cache a sync engine fills.
 - **Agenda view**: `event agenda` draws a cal(1)-style grid marking the days that carry an event.
+- **Composer**: `-i/--interactive` on `build`, `create` and `update` opens the item in the command `item.composer` names, your editor included, and what it leaves in the file is the decision.
+- **Build without an account**: `<family> build` applies a source and the composer and prints the iCalendar rather than sending it, on a machine holding no configuration at all.
 - **Discovery**: an email address is enough to find a provider's server, through SRV records, `.well-known` and the provider configuration documents.
 - **Interactive wizard**: `calendula configure` discovers an account, tests it, and saves it; a first run with no configuration is offered it.
 - **Multi-account**: one TOML file, one block per account, several files deep-merged when you want secrets apart.
@@ -273,6 +275,9 @@ calendula event agenda -3
 calendula todo list --calendar tasks
 calendula journal list --calendar notes
 calendula item read --calendar personal event-1.ics
+calendula event build -i -o event.ics
+calendula event create --calendar personal -i
+calendula todo update --calendar tasks -i todo-1.ics
 calendula pimdir status
 calendula gcal free-busy --from 2026-08-10 --to 2026-08-14
 calendula gcal quick-add "Lunch with Ada tomorrow at noon"

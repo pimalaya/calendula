@@ -11,6 +11,7 @@
 //! the server where the protocol defines such a filter and applied after
 //! parsing otherwise.
 
+pub mod build;
 pub mod cli;
 pub mod create;
 pub mod delete;

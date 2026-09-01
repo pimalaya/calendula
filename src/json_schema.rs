@@ -6,7 +6,8 @@
 //!
 //! Only a data command appears: a command answering a confirmation
 //! prints a `Message`, whose shape is the printer's rather than
-//! calendula's.
+//! calendula's. A `build`, a `create` and an `update` answer data too,
+//! an abandoned edit being an outcome they report.
 //!
 //! Protocol-specific entries are gated behind the same cargo features as
 //! their command modules, so the registry stays coherent under any
@@ -82,6 +83,55 @@ pub fn schemas() -> BTreeMap<String, Value> {
     insert!(
         "calendula-item-read",
         crate::shared::item::read::ItemReadOutput
+    );
+
+    insert!(
+        "calendula-event-build",
+        crate::shared::build::IcalBuildOutput
+    );
+    insert!(
+        "calendula-event-create",
+        crate::shared::event::create::EventCreateOutput
+    );
+    insert!(
+        "calendula-event-update",
+        crate::shared::event::update::EventUpdateOutput
+    );
+    insert!(
+        "calendula-todo-build",
+        crate::shared::build::IcalBuildOutput
+    );
+    insert!(
+        "calendula-todo-create",
+        crate::shared::todo::create::TodoCreateOutput
+    );
+    insert!(
+        "calendula-todo-update",
+        crate::shared::todo::update::TodoUpdateOutput
+    );
+    insert!(
+        "calendula-journal-build",
+        crate::shared::build::IcalBuildOutput
+    );
+    insert!(
+        "calendula-journal-create",
+        crate::shared::journal::create::JournalCreateOutput
+    );
+    insert!(
+        "calendula-journal-update",
+        crate::shared::journal::update::JournalUpdateOutput
+    );
+    insert!(
+        "calendula-item-build",
+        crate::shared::build::IcalBuildOutput
+    );
+    insert!(
+        "calendula-item-create",
+        crate::shared::item::create::ItemCreateOutput
+    );
+    insert!(
+        "calendula-item-update",
+        crate::shared::item::update::ItemUpdateOutput
     );
 
     #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
