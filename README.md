@@ -2,8 +2,8 @@
 
 CLI to manage calendars.
 
-> [!IMPORTANT]
-> This README documents Calendula v0.2.0. If you are running v0.1.0, refer to the [v0.1.0 README](https://github.com/pimalaya/calendula/blob/v0.1.0/README.md). The [MIGRATION.md](./MIGRATION.md) guide walks v0.1 users through the breaking changes.
+> [!CAUTION]
+> Calendula is `v0.x`: expect breaking changes between releases until it stabilises.
 
 ## Table of contents
 
@@ -12,6 +12,7 @@ CLI to manage calendars.
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Usage](#usage)
+- [Migration](./MIGRATION.md)
 - [AI policy](https://github.com/pimalaya/.github/blob/master/AI_POLICY.md)
 - [License](#license)
 - [Social](#social)

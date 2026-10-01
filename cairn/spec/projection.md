@@ -6,7 +6,7 @@ status: current
 
 # iCalendar projection
 
-CalDAV, vdir and pimdir speak iCalendar natively. Google Calendar does not: for that backend the shared `CalendarItem.contents` is an iCalendar document of record calendula synthesizes from the Google event and re-projects on the way back ([gcal](../../src/gcal/project.rs)).
+CalDAV, vdir and pimdir speak iCalendar natively. Google Calendar does not: for that backend the shared `CalendarItem.contents` is an iCalendar document of record calendula synthesizes from the Google event and re-projects on the way back ([gcal](https://docs.rs/io-gcal/latest/io_gcal/v3/rest/events/ical/) (io-gcal's `ical` feature)).
 
 The policy is ported from cardamum's spec of the same name, so both products treat provider quirks identically.
 

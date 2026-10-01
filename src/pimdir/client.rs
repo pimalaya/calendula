@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
-use io_pimdir::{PimdirBlobs, PimdirProducer, PimdirReader};
+use io_pimdir::client::{blobs::PimdirBlobs, producer::PimdirProducer, reader::PimdirReader};
 
 use crate::config::PimdirConfig;
 

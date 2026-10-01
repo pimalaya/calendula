@@ -78,7 +78,7 @@ The kind SHALL travel with the page and the window as one query, so no backend c
 
 The raw `item` family names no kind and SHALL keep every one, which is what makes it the unfiltered view.
 
-A pimdir item whose body is not local SHALL answer its kind from the stored `v: 1` summary, which names the component a reader renders the resource as, so narrowing by kind keeps the listing availability-aware.
+A pimdir item whose body is not local SHALL answer its kind from the summary table the store filed it in (event, task or journal), which names the component a reader renders the resource as, so narrowing by kind keeps the listing availability-aware.
 
 ### Requirement: A component window is applied locally
 `event list` pushes its window down where the backend can narrow server-side. `todo list` and `journal list` SHALL apply theirs after parsing instead.

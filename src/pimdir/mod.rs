@@ -18,7 +18,7 @@
 //! collections its source does not have.
 //!
 //! [pimdir]: https://github.com/pimalaya/pimdir
-//! [`PimdirReader`]: io_pimdir::PimdirReader
+//! [`PimdirReader`]: io_pimdir::client::reader::PimdirReader
 
 pub mod backend;
 pub mod cli;

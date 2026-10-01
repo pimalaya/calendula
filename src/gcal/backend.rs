@@ -32,7 +32,7 @@ use pimalaya_config::secret::SecretResolver;
 
 use crate::{
     config::GcalConfig,
-    gcal::{client::connect, project, render::rfc3339},
+    gcal::{client::connect, render::rfc3339},
     shared::{
         calendar::{Calendar, CalendarDiff},
         client::paginate,
@@ -273,7 +273,7 @@ impl GcalBackend {
     /// event's `iCalUID` and the resource keeps the identity it already
     /// had; one carrying none is inserted, and Google mints both ids itself.
     pub fn create_item(&mut self, calendar_id: &str, contents: Vec<u8>) -> Result<String> {
-        let event = project::to_event(&contents)?;
+        let event = GcalEvent::from_ical(&contents)?;
 
         let created = match event.ical_uid.as_deref().filter(|uid| !uid.is_empty()) {
             Some(_) => {
@@ -302,13 +302,13 @@ impl GcalBackend {
         contents: Vec<u8>,
         if_match: Option<&str>,
     ) -> Result<()> {
-        let projected = project::to_event(&contents)?;
+        let projected = GcalEvent::from_ical(&contents)?;
         let current = self
             .client
             .event_get(calendar_id, item_id, None, None)?
             .response;
 
-        let event = project::merge(&current, projected);
+        let event = projected.merge(&current);
         let params = GcalEventUpdateParams::default();
 
         self.client
@@ -406,13 +406,16 @@ fn item_from(calendar_id: &str, event: &GcalEvent, exceptions: &[&GcalEvent]) ->
         id: event.id.clone().unwrap_or_default(),
         calendar_id: calendar_id.to_owned(),
         etag: event.etag.clone(),
-        contents: project::set_to_ical(event, exceptions).into_bytes(),
+        contents: event.to_ical_series(exceptions).into_bytes(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use io_gcal::v3::rest::events::GcalEventDateTime;
+
+    use crate::shared::event::Event;
 
     #[test]
     fn an_exception_files_with_its_master_rather_than_beside_it() {
@@ -439,6 +442,28 @@ mod tests {
 
         let series = String::from_utf8(items[0].contents.clone()).unwrap();
         assert_eq!(series.matches("BEGIN:VEVENT").count(), 2);
+    }
+
+    #[test]
+    fn the_synthesized_document_feeds_the_shared_event_projection() {
+        let at = |stamp: &str| GcalEventDateTime {
+            date_time: Some(stamp.to_owned()),
+            ..Default::default()
+        };
+        let event = GcalEvent {
+            id: Some(String::from("event-1")),
+            summary: Some(String::from("Stand-up")),
+            start: Some(at("2026-08-14T09:00:00Z")),
+            end: Some(at("2026-08-14T10:00:00Z")),
+            ..Default::default()
+        };
+
+        let events = Event::project(&item_from("primary", &event, &[]));
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].summary, "Stand-up");
+        assert_eq!(events[0].start, "20260814T090000Z");
+        assert_eq!(events[0].end, "20260814T100000Z");
     }
 
     #[test]

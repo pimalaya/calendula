@@ -20,8 +20,6 @@ pub mod colors;
 pub mod free_busy;
 pub mod instances;
 pub mod move_event;
-pub mod project;
 pub mod quick_add;
 pub mod render;
 pub mod settings;
-pub mod timezone;

@@ -5,12 +5,14 @@
 //!
 //! An item whose body is not local still lists, carrying no bytes; only
 //! a read of it reports "body not fetched", the cue to sync rather than
-//! a data-loss error.
+//! a data-loss error. Its kind and its date answer from the typed
+//! summary the store keeps beside the row (pimdir STORAGE Annex A).
 //!
 //! Writes append one action to the store's queue (pimdir SPEC 15.1):
 //! the body reaches the blob tree first, then the row pinning it. The
-//! owner, a sync, applies and pushes it, while the reader folds the
-//! pending queue over its reads so a staged change shows before that.
+//! owner, a sync, derives the summary from that body, applies and
+//! pushes it, while the reader folds the pending queue over its reads
+//! so a staged change shows before that.
 //!
 //! Calendars come from the sync, so the collection verbs (create,
 //! update, delete) are not served here: a cache does not invent
@@ -22,21 +24,20 @@
 use std::{io::Write, path::PathBuf};
 
 use anyhow::{Result, anyhow, bail};
-use chrono::{SecondsFormat, Utc};
 use ical::component::IcalComponentKind;
 use io_pimdir::{
-    PimdirCollection, PimdirItem,
+    client::reader::{PimdirCollection, PimdirItem},
     codec::PimdirAction,
-    conventions::{
-        PimdirDerivation,
-        calendar::{PimdirCalendarMeta, derive as derive_calendar},
+    object::PimdirObject,
+    placement::PimdirFlags,
+    summary::{
+        PimdirSummary,
+        calendar::{PimdirTime, derive},
     },
 };
-use io_replica::{object::ReplicaHash, placement::ReplicaFlags};
 use log::warn;
 use pimalaya_cli::printer::Printer;
 use pimalaya_config::toml::TomlConfig;
-use serde_json::from_str;
 
 use crate::{
     cli::load_config,
@@ -211,25 +212,24 @@ impl PimdirBackend {
 
     /// Stages a locally-authored item as an `add` the next sync pushes.
     ///
-    /// Returns the item's link id, its `UID`: a queued create carries
-    /// no public `seq` until the store's owner applies it, so there is
-    /// no store-assigned id to report yet.
+    /// Returns the item's link id, its `UID` under the store's own
+    /// derivation (pimdir STORAGE Annex A.3): a queued create carries no
+    /// public `seq` until the store's owner applies it, so there is no
+    /// store-assigned id to report yet.
     pub fn create_item(&mut self, calendar_id: &str, contents: Vec<u8>) -> Result<String> {
         self.known_collection(calendar_id)?;
 
-        let derived = derive(&contents);
-        let (hash, size) = self.stage_body(&contents)?;
+        let link_id = derive(&contents).link_id;
+        let object = self.stage_body(&contents)?;
 
         let action = PimdirAction::Add {
-            link_id: Some(derived.link_id.clone()),
-            flags: ReplicaFlags::default(),
-            object: Some(hash),
-            meta: Some(derived.meta),
-            handle: None,
+            link_id: Some(link_id.clone()),
+            flags: PimdirFlags::default(),
+            object: Some(object.hash.clone()),
         };
-        self.enqueue(calendar_id, &action, Some(size))?;
+        self.enqueue(calendar_id, &action, Some(&object))?;
 
-        Ok(derived.link_id.0)
+        Ok(link_id.0)
     }
 
     /// Stages a body replacement as an `update` the next sync pushes.
@@ -247,15 +247,13 @@ impl PimdirBackend {
         self.known_collection(calendar_id)?;
 
         let seq = self.item(calendar_id, item_id)?.seq;
-        let derived = derive(&contents);
-        let (hash, size) = self.stage_body(&contents)?;
+        let object = self.stage_body(&contents)?;
 
         let action = PimdirAction::Update {
             seq,
-            object: hash,
-            meta: Some(derived.meta),
+            object: object.hash.clone(),
         };
-        self.enqueue(calendar_id, &action, Some(size))
+        self.enqueue(calendar_id, &action, Some(&object))
     }
 
     /// Stages a `remove` action: a tombstone, then a server-side delete.
@@ -342,7 +340,8 @@ impl PimdirBackend {
         )
     }
 
-    /// Pulls every live item of a collection by keyset paging.
+    /// Pulls every live item of a collection by keyset paging, each
+    /// with its summary joined.
     ///
     /// In the order the store maintains for calendars, start ascending.
     fn scan_items(&self, calendar_id: &str) -> Result<Vec<PimdirItem>> {
@@ -350,7 +349,7 @@ impl PimdirBackend {
         let mut cursor: Option<(String, i64)> = None;
 
         loop {
-            let page = self.client.reader.list_items_page_asc(
+            let page = self.client.reader.list_summaries(
                 calendar_id,
                 cursor.as_ref().map(|(key, seq)| (key.as_str(), *seq)),
                 SCAN_BATCH,
@@ -415,11 +414,11 @@ impl PimdirBackend {
         })
     }
 
-    /// Writes a body into the blob tree, returning its hash and size.
+    /// Writes a body into the blob tree, returning the object it indexes.
     ///
     /// Durable before anything references it (pimdir SPEC 14), so the
     /// queue row appended next pins a body that is already there.
-    fn stage_body(&self, contents: &[u8]) -> Result<(ReplicaHash, u64)> {
+    fn stage_body(&self, contents: &[u8]) -> Result<PimdirObject> {
         // NOTE: the hash is the store's, from `store_meta.hash_algo`,
         // never one this crate picks: a body named under another
         // algorithm is one no read ever finds.
@@ -428,7 +427,10 @@ impl PimdirBackend {
         writer.write_all(contents)?;
         let size = writer.commit(&hash)?;
 
-        Ok((hash, size))
+        Ok(PimdirObject {
+            hash,
+            size: size as usize,
+        })
     }
 
     /// Appends one action to a collection's queue.
@@ -438,52 +440,41 @@ impl PimdirBackend {
         &self,
         calendar_id: &str,
         action: &PimdirAction,
-        object_size: Option<u64>,
+        object: Option<&PimdirObject>,
     ) -> Result<()> {
         self.client
             .producer()?
-            .enqueue(calendar_id, action, object_size, &now())
+            .enqueue(calendar_id, action, object)
             .map_err(|err| anyhow!("Stage the pimdir action: {err}"))?;
 
         Ok(())
     }
 }
 
-/// The item's link id and `v: 1` summary (pimdir SPEC Annex A.3).
-///
-/// Deriving them the format's way is what keeps an item staged here and
-/// the same item arriving through a sync one item rather than two. A
-/// queued action carries no sort key: the format leaves it to the sync.
-fn derive(contents: &[u8]) -> PimdirDerivation {
-    derive_calendar(contents)
-}
-
-/// The enqueue timestamp, RFC 3339 as the queue column expects.
-fn now() -> String {
-    Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
-}
-
-/// Whether an item falls inside `range`.
-///
-/// A hydrated item is answered from its own bytes, which is exact. One
-/// with no local body falls back to the DTSTART its summary carries,
-/// the whole point of a summary beside the pointer.
 /// Whether a stored item is of `kind`.
 ///
-/// A body the sync has not downloaded still answers, the `v: 1` summary
-/// naming the component a reader renders the resource as (pimdir SPEC
-/// Annex A.3), so an availability-aware listing stays one.
+/// A body the sync has not downloaded still answers: the summary table
+/// the store filed it in names the component a reader renders the
+/// resource as (pimdir STORAGE Annex A.3 to A.5), so an
+/// availability-aware listing stays one.
 fn is_kind(item: &CalendarItem, stored: &PimdirItem, kind: IcalComponentKind) -> bool {
     if !item.contents.is_empty() {
         return holds_kind(&item.contents, kind);
     }
 
-    summary_of(stored)
-        .component
-        .as_deref()
-        .is_some_and(|component| component.eq_ignore_ascii_case(&kind))
+    match &stored.summary {
+        Some(PimdirSummary::Event(_)) => kind == IcalComponentKind::VEvent,
+        Some(PimdirSummary::Task(_)) => kind == IcalComponentKind::VTodo,
+        Some(PimdirSummary::Journal(_)) => kind == IcalComponentKind::VJournal,
+        _ => false,
+    }
 }
 
+/// Whether an item falls inside `range`.
+///
+/// A hydrated item is answered from its own bytes, which is exact. One
+/// with no local body falls back to the start its summary carries, the
+/// whole point of a summary beside the pointer.
 fn in_range(item: &CalendarItem, stored: &PimdirItem, range: &CalendarTimeRange) -> bool {
     if !item.contents.is_empty() {
         return Event::project(item)
@@ -491,38 +482,19 @@ fn in_range(item: &CalendarItem, stored: &PimdirItem, range: &CalendarTimeRange)
             .any(|event| range.contains(&event.start));
     }
 
-    let meta = summary_of(stored);
-
-    // NOTE: DTSTART then DUE, the same order the sort key takes, so a
-    // to-do carrying only a due date still answers a date question.
-    meta.dtstart
-        .as_deref()
-        .or(meta.due.as_deref())
-        .map(|start| range.contains(&stamp_of(start)))
-        .unwrap_or(false)
+    start_of(stored).is_some_and(|start| range.contains(&start.value))
 }
 
-/// Reads a stored item's `v: 1` summary, or an empty one.
-///
-/// An item never projected, or written to a shape this version cannot
-/// read, falls back: blank columns beat a listing that fails.
-fn summary_of(item: &PimdirItem) -> PimdirCalendarMeta {
-    item.meta
-        .as_ref()
-        .and_then(|meta| from_str(&meta.0).ok())
-        .unwrap_or_default()
-}
-
-/// Folds a summary stamp into the leading `YYYYMMDD` a range compares.
-///
-/// The digits lead in both an iCalendar value and an RFC 3339 one, so
-/// a summary written by any connector answers as parsed bytes do.
-fn stamp_of(rfc3339: &str) -> String {
-    rfc3339
-        .chars()
-        .filter(char::is_ascii_digit)
-        .take(8)
-        .collect()
+/// The time a summary answers a date question with: `DTSTART`, then
+/// `DUE` for a to-do carrying no start. Verbatim, so its leading day
+/// compares as a parsed body's `DTSTART` does.
+fn start_of(stored: &PimdirItem) -> Option<&PimdirTime> {
+    match stored.summary.as_ref()? {
+        PimdirSummary::Event(event) => event.dtstart.as_ref(),
+        PimdirSummary::Task(task) => task.dtstart.as_ref().or(task.due.as_ref()),
+        PimdirSummary::Journal(journal) => journal.dtstart.as_ref(),
+        PimdirSummary::Mail(_) | PimdirSummary::Contact(_) => None,
+    }
 }
 
 /// The message a collection verb refuses with, naming the way out.
@@ -536,7 +508,10 @@ fn unsupported(verb: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use io_replica::placement::{ReplicaLevel, ReplicaLinkId, ReplicaMeta};
+    use io_pimdir::{
+        placement::{PimdirLevel, PimdirLinkId},
+        summary::calendar::{PimdirEventSummary, PimdirJournalSummary, PimdirTaskSummary},
+    };
 
     use super::*;
 
@@ -545,29 +520,6 @@ mod tests {
         let message = unsupported("create");
         assert!(message.contains("offline cache"));
         assert!(message.contains("sync"));
-    }
-
-    #[test]
-    fn a_summary_stamp_folds_onto_the_day_the_range_compares() {
-        assert_eq!(stamp_of("2026-08-14T09:00:00Z"), "20260814");
-        assert_eq!(stamp_of(""), "");
-    }
-
-    /// A staged add links under the bare `UID` (pimdir SPEC Annex A.3),
-    /// which is what a synced copy carries.
-    ///
-    /// So an add naming an identity the collection already holds parks
-    /// (pimdir SPEC 15.3) instead of being filed under a key its
-    /// producer never asked for.
-    #[test]
-    fn an_added_item_links_the_way_the_store_spells_it() {
-        let raw = b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:party@example.org\r\n\
-                    SUMMARY:Party\r\nDTSTART:20260814T090000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
-        let derived = derive(raw);
-
-        assert_eq!(derived.link_id.0, "party@example.org");
-        assert!(derived.meta.0.contains("\"v\":1"));
-        assert!(derived.meta.0.contains("Party"));
     }
 
     /// One calendar may hold two resources carrying one `UID` (pimdir
@@ -598,8 +550,8 @@ mod tests {
         // NOTE: the identity the two bodies state is one string, so it
         // names both of them and addresses neither.
         assert_eq!(
-            derive(&woonies.contents).link_id.0,
-            derive(&minis.contents).link_id.0
+            derive(&woonies.contents).link_id,
+            derive(&minis.contents).link_id
         );
 
         let events: Vec<Event> = [&woonies, &minis]
@@ -620,26 +572,76 @@ mod tests {
             start: Some("20260801T000000Z".into()),
             end: Some("20260901T000000Z".into()),
         };
-        let item = CalendarItem {
+        let event = |start: &str| {
+            stored(PimdirSummary::Event(PimdirEventSummary {
+                dtstart: Some(time(start)),
+                ..Default::default()
+            }))
+        };
+        let task = |due: &str| {
+            stored(PimdirSummary::Task(PimdirTaskSummary {
+                due: Some(time(due)),
+                ..Default::default()
+            }))
+        };
+        let dateless = stored(PimdirSummary::Journal(PimdirJournalSummary::default()));
+
+        assert!(in_range(
+            &undownloaded(),
+            &event("20260814T090000Z"),
+            &range
+        ));
+        assert!(!in_range(
+            &undownloaded(),
+            &event("20260914T090000Z"),
+            &range
+        ));
+        assert!(in_range(&undownloaded(), &task("20260814"), &range));
+        assert!(!in_range(&undownloaded(), &dateless, &range));
+    }
+
+    #[test]
+    fn an_undownloaded_item_answers_its_kind_from_its_summary() {
+        let task = stored(PimdirSummary::Task(PimdirTaskSummary::default()));
+        let bare = PimdirItem {
+            summary: None,
+            ..task.clone()
+        };
+
+        assert!(is_kind(&undownloaded(), &task, IcalComponentKind::VTodo));
+        assert!(!is_kind(&undownloaded(), &task, IcalComponentKind::VEvent));
+        assert!(!is_kind(&undownloaded(), &bare, IcalComponentKind::VTodo));
+    }
+
+    /// The shared view of an item the sync has not hydrated.
+    fn undownloaded() -> CalendarItem {
+        CalendarItem {
             id: "1".into(),
             calendar_id: "personal".into(),
             etag: None,
             contents: Vec::new(),
-        };
-        let stored = |start: &str| PimdirItem {
+        }
+    }
+
+    /// A stored row at the `Meta` tier carrying `summary`.
+    fn stored(summary: PimdirSummary) -> PimdirItem {
+        PimdirItem {
             seq: 1,
-            link_id: ReplicaLinkId("party@example.org".into()),
-            flags: ReplicaFlags::default(),
-            meta: Some(ReplicaMeta(format!(
-                "{{\"v\":1,\"summary\":\"x\",\"dtstart\":\"{start}\"}}"
-            ))),
+            link_id: PimdirLinkId("party@example.org".into()),
+            flags: PimdirFlags::default(),
             sort_key: String::new(),
             object: None,
-            level: ReplicaLevel::Meta,
+            level: PimdirLevel::Meta,
+            summary: Some(summary),
             retention: None,
-        };
+        }
+    }
 
-        assert!(in_range(&item, &stored("20260814T090000Z"), &range));
-        assert!(!in_range(&item, &stored("20260914T090000Z"), &range));
+    /// A summary time carrying `value` verbatim.
+    fn time(value: &str) -> PimdirTime {
+        PimdirTime {
+            value: value.into(),
+            ..Default::default()
+        }
     }
 }

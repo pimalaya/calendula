@@ -63,7 +63,7 @@ vdir SHALL adapt io-vdir. A collection directory is a calendar and its metadata 
 vdir has no entity tag, so `if_match` SHALL be ignored rather than refused. An update SHALL read the current metadata before writing, so a field the patch leaves untouched survives.
 
 ### Requirement: pimdir backend
-pimdir SHALL adapt io-pimdir over io-replica. The store is an offline cache a sync engine fills, not a server: reads project the store's items and writes are queue actions a later sync applies and propagates.
+pimdir SHALL adapt io-pimdir, the store and the sync engine in one crate. The store is an offline cache a sync engine fills, not a server: reads project the store's items and writes are queue actions a later sync applies and propagates.
 
 Collections come from the sync, so `create_calendar`, `update_calendar` and `delete_calendar` SHALL refuse with a message pointing at the account the store syncs.
 
@@ -125,13 +125,13 @@ The pimdir backend SHALL name a body it writes with the hash the store records i
 The pimdir backend SHALL expand `~` and environment variables on `pimdir.root` before opening the store and its blob reader. Opening the raw path would create an empty store at a literal `./~/…` relative to the working directory and silently return an empty calendar list.
 
 ### Requirement: The text/calendar summary convention
-The link id, the `v: 1` summary and the sort key a pimdir write records SHALL be derived by `io_pimdir::conventions::calendar`, the format's own derivations (pimdir SPEC Annex A.3), so an item calendula stages links and summarises exactly as the same item arriving through a sync.
+A pimdir item's summary SHALL be the typed row of the store's event, task or journal table (pimdir STORAGE Annex A.3 to A.5), derived by `io_pimdir::summary::calendar`, the format's own derivation, so an item calendula stages links and summarises exactly as the same item arriving through a sync.
 
-The link id is the bare `UID`, with nothing prepended.
+The link id is the bare `UID`, with nothing prepended, and the one derivation calendula runs: a queued create reports it, having no public id yet, and states it on the action so the reported id and the filed key agree by construction.
 
-A queued action carries no sort key: the format leaves the key to the sync that pushes the write, and a producer deriving one would order an item the connector is about to reorder.
+A queued action carries no summary and no sort key: the store's owner derives both from the body when it applies the action, and a producer deriving them would restate what the owner is about to derive.
 
-calendula SHALL read that summary to answer a date question about an item whose body is not local: `dtstart`, then `due` for a to-do carrying no start.
+calendula SHALL read that row to answer a date question about an item whose body is not local: `dtstart`, then `due` for a to-do carrying no start, the value verbatim so its leading day compares as a parsed `DTSTART` does. It SHALL read the row's table as the item's kind.
 
 ### Requirement: A UID is not an address
 The pimdir backend SHALL NOT assume an item's link id is the `UID` its body carries, nor that a `UID` identifies at most one item in a calendar.

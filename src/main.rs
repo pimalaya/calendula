@@ -13,8 +13,8 @@
 //!
 //! [`io_webdav`] carries the CalDAV coroutines (RFC 4791 over RFC 4918),
 //! [`io_gcal`] the Google Calendar API v3 ones, [`io_vdir`] the local vdir
-//! filesystem, [`io_pimdir`] and [`io_replica`] the offline store and the
-//! sync engine model behind it.
+//! filesystem, [`io_pimdir`] the offline store and the sync engine that
+//! fills it.
 //!
 //! [`io_http`] is the request and response state machines WebDAV and the REST
 //! clients run on, `io_pim_discovery` the RFC 6764 CalDAV discovery, and
@@ -43,10 +43,10 @@
 //! Google does not: it holds a JSON event and exposes no per-event iCalendar
 //! representation.
 //!
-//! So [`gcal::project`] synthesizes [`shared::item::CalendarItem`]'s contents
-//! on read and re-projects them on write, stashing whatever the projection
-//! neither manages nor mints so it survives a round-trip. The policy is
-//! written down in cairn/spec/projection.md.
+//! So io-gcal's `ical` feature synthesizes [`shared::item::CalendarItem`]'s
+//! contents on read and re-projects them on write, stashing whatever the
+//! projection neither manages nor mints so it survives a round-trip. The
+//! policy is written down in cairn/spec/projection.md.
 //!
 //! ## Three command families
 //!
