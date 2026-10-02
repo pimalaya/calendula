@@ -25,6 +25,9 @@ use ical::component::IcalComponentKind;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(feature = "vdir", feature = "msgraph"))]
+use crate::shared::event::Event;
+
 /// A calendar object resource: one iCalendar file.
 ///
 /// The contents mix component kinds (VEVENT, VTODO, VJOURNAL): the component
@@ -42,6 +45,25 @@ pub struct CalendarItem {
     /// Raw iCalendar bytes, exactly as the backend stored them.
     #[serde(default)]
     pub contents: Vec<u8>,
+}
+
+#[cfg(any(feature = "vdir", feature = "msgraph"))]
+impl CalendarItem {
+    /// Whether one of the item's events starts within `range`, every item
+    /// passing when none is named.
+    ///
+    /// The filter of a backend that cannot narrow a listing server-side.
+    /// An item carrying no event is kept only when no range was asked for,
+    /// so a filtered listing never shows an undated resource.
+    pub fn starts_within(&self, range: Option<&CalendarTimeRange>) -> bool {
+        let Some(range) = range else {
+            return true;
+        };
+
+        Event::project(self)
+            .iter()
+            .any(|event| range.contains(&event.start))
+    }
 }
 
 /// What narrows an item listing, and in which order.

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added the Microsoft Graph backend, `msgraph`, in the default feature set: Outlook and Microsoft 365 calendars through the Graph API, events synthesized as iCalendar both ways by io-msgraph's `ical` feature, a recurring series with its exceptions as one item.
+
+  Graph keeps no calendar description nor RGB colour, so naming either is refused; only the series master is written back.
+
 - Added a composer, the command `item.composer` names, opened by `-i/--interactive` on `build`, `create` and `update`: it is spawned on the path of a temporary iCalendar file with every stream inherited, and what it leaves there is the decision. Changed bytes are the item, an emptied or untouched file is an edit given up on, and a non-zero exit is a failure. `--composer <COMMAND>` overrides it for one run and requires `-i`; `--json` refuses to spawn one. What a composer wrote is validated against RFC 5545 first, printing its violations and offering a re-edit, and a composed item that cannot be written keeps its file and names it in the error. An iCalendar given on the command line is never checked.
 - Added `build` to the four families, the create pipeline stopped before the write: it prints the iCalendar, reaches no backend and reads no configuration unless `-i` needs the configured composer. `-o/--output <PATH>` captures it, `-i` owning stdout, and an abandoned build prints nothing at exit 0.
 - Added `item.composer`, a shell line or an argv list, at the top level and per account.
@@ -32,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Forwarded `vendored` to io-pimdir, which now links the system SQLite by default: the store needs sqlite3 on the machine, or `vendored` to build one from source, the way `vendored` already covers OpenSSL.
+- Forwarded `vendored` to io-pimdir and turned it on by default, so `cargo install` builds SQLite from source and needs none on the machine. Drop it to link the system SQLite and save about 1 MB; it also vendors OpenSSL when `native-tls` is on. The Nix builds still link the store's SQLite.
 
 - **BREAKING**: every `--json` payload key is camelCase, and the four `read` commands answer `{"contents"}` rather than the printer's `{"message"}`. `caldav discover` renamed `calendar_home_set` to `calendarHomeSet` and `vdir list` `display_name` to `displayName`. The configuration vocabulary stays kebab-case, and every command's plain-text output is unchanged.
 - **BREAKING**: item ids are the resource names a CalDAV server returned, verbatim, io-webdav no longer appending nor stripping `.ics`. That fixes read, update and delete addressing the wrong resource whenever an id did not end in `.ics`, and a create returning an unusable id when the server named the resource itself. Scripts pinning a hand-built id need updating.
@@ -61,6 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed `downloads-dir`, read by nothing: calendula downloads no attachment.
 
 ### Fixed
+
+- Fixed CalDAV discovery settling on a URL with no DAV server behind it, such as a web page: every candidate must now answer a `PROPFIND`, and discovery fails otherwise rather than configure it (io-pim-discovery 0.8).
 
 - A component listing narrows by kind before it paginates, so a page of `event list`, `todo list` or `journal list` holds that family. The page used to be taken over items of every kind and projected afterwards, so a calendar of thirty events and one todo answered `todo list` with an empty table. CalDAV pushes the kind down as an RFC 4791 `comp-filter` with the window nested inside it, gcal answers a non-VEVENT kind without a round-trip, and pimdir reads the kind off the stored summary when the body is not local.
 - A composed VEVENT carrying no DTSTART is refused rather than sent. RFC 5545 3.6.1 requires it unless the calendar specifies a METHOD, which is a condition on the calendar that a per-component property list cannot state, and SabreDAV denormalizes DTSTART into its index on write and answers HTTP 500 rather than naming it.

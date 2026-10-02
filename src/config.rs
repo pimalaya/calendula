@@ -18,7 +18,7 @@ use std::{collections::HashMap, path::PathBuf};
 use anyhow::Result;
 use crossterm::style::Color;
 use pimalaya_cli::table::ContentArrangement;
-#[cfg(any(feature = "caldav", feature = "gcal"))]
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use pimalaya_config::secret::Secret;
 #[cfg(feature = "caldav")]
 use pimalaya_config::toml::shell_expanded_string;
@@ -28,9 +28,9 @@ use pimalaya_config::{
     command::CommandConfig,
     toml::{TomlConfig, shell_expanded_path},
 };
-#[cfg(any(feature = "caldav", feature = "gcal"))]
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider};
-#[cfg(any(feature = "caldav", feature = "gcal"))]
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use serde::Deserializer;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "caldav")]
@@ -47,7 +47,7 @@ fn is_default<T: Default + PartialEq>(value: &T) -> bool {
 ///
 /// TODO: drop this for `pimalaya_config::toml::opt_shell_expanded_path`
 /// once pimalaya-config ships an optional variant.
-#[cfg(any(feature = "caldav", feature = "gcal"))]
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 fn opt_shell_expanded_path<'de, D: Deserializer<'de>>(de: D) -> Result<Option<PathBuf>, D::Error> {
     shell_expanded_path(de).map(Some)
 }
@@ -108,8 +108,9 @@ impl TomlConfig for Config {
 /// What the account is, then the backend it reads calendars from, then
 /// the rendering options. An unlisted key still renders, after these,
 /// so a new [`AccountConfig`] field can never go missing from one.
-const RENDER_ORDER: [&str; 10] = [
-    "default", "vdir", "pimdir", "caldav", "gcal", "calendar", "event", "todo", "journal", "item",
+const RENDER_ORDER: [&str; 11] = [
+    "default", "vdir", "pimdir", "caldav", "gcal", "msgraph", "calendar", "event", "todo",
+    "journal", "item",
 ];
 
 #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
@@ -234,6 +235,9 @@ pub struct AccountConfig {
     /// Google Calendar backend, over the vendor API.
     #[cfg(feature = "gcal")]
     pub gcal: Option<GcalConfig>,
+    /// Microsoft Graph backend, over the vendor API.
+    #[cfg(feature = "msgraph")]
+    pub msgraph: Option<MsgraphConfig>,
 }
 
 /// Calendar-level options.
@@ -616,8 +620,53 @@ pub struct GcalAuthConfig {
     pub token: Secret,
 }
 
+/// Microsoft Graph backend configuration.
+///
+/// The API endpoint is fixed: the calendar owner, a token and a TLS
+/// profile are the whole block.
+#[cfg(feature = "msgraph")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MsgraphConfig {
+    /// Graph user id, `me` by default: the authenticated user.
+    #[serde(default = "default_msgraph_user_id")]
+    pub user_id: String,
+    /// TLS configuration.
+    #[serde(default)]
+    pub tls: TlsConfig,
+    /// ALPN identifiers offered during the TLS handshake, unset offering
+    /// [`default_msgraph_alpn`].
+    pub alpn: Option<Vec<String>>,
+    /// Authentication configuration.
+    pub auth: MsgraphAuthConfig,
+}
+
+/// The Graph user a block names when it names none: the authenticated one.
+#[cfg(feature = "msgraph")]
+fn default_msgraph_user_id() -> String {
+    String::from("me")
+}
+
+/// ALPN identifiers msgraph offers when `msgraph.alpn` names none, pinning
+/// the HTTP/1.1 io-http speaks.
+#[cfg(feature = "msgraph")]
+pub fn default_msgraph_alpn() -> Vec<String> {
+    vec![String::from("http/1.1")]
+}
+
+/// Microsoft Graph authentication configuration: an OAuth 2.0 bearer token
+/// and nothing else, calendula running no OAuth flow itself.
+#[cfg(feature = "msgraph")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MsgraphAuthConfig {
+    /// The token, read from the configuration or from the standard output
+    /// of a command, a token broker such as ortie.
+    pub token: Secret,
+}
+
 /// SSL/TLS configuration.
-#[cfg(any(feature = "caldav", feature = "gcal"))]
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TlsConfig {
@@ -636,7 +685,7 @@ pub struct TlsConfig {
 }
 
 /// Which TLS implementation carries the connection.
-#[cfg(any(feature = "caldav", feature = "gcal"))]
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum TlsProviderConfig {
@@ -647,7 +696,7 @@ pub enum TlsProviderConfig {
 }
 
 /// rustls-specific options.
-#[cfg(any(feature = "caldav", feature = "gcal"))]
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct RustlsConfig {
@@ -656,7 +705,7 @@ pub struct RustlsConfig {
 }
 
 /// Which cryptographic provider backs rustls.
-#[cfg(any(feature = "caldav", feature = "gcal"))]
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum RustlsCryptoConfig {
@@ -666,7 +715,7 @@ pub enum RustlsCryptoConfig {
     Ring,
 }
 
-#[cfg(any(feature = "caldav", feature = "gcal"))]
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 impl TlsConfig {
     /// Builds the runtime [`Tls`] handle the connect helpers expect,
     /// folding in the protocol-level `alpn` list.
@@ -721,7 +770,7 @@ mod tests {
 
     /// The optional path takes the same treatment, and an absent key
     /// still reaches `None` rather than the deserializer.
-    #[cfg(any(feature = "caldav", feature = "gcal"))]
+    #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
     #[test]
     fn a_tls_certificate_expands_its_tilde_and_stays_optional() {
         let config: TlsConfig = toml::from_str(r#"cert = "~/ca.pem""#).unwrap();

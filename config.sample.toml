@@ -119,7 +119,7 @@ default = true
 #
 # An account may carry several backend blocks. The shared commands (`calendar`,
 # `event`, `item`) use the first configured one in calendula's priority order:
-# vdir, pimdir, caldav, gcal, which prefers a local read to a network round-trip
+# vdir, pimdir, caldav, gcal, msgraph, which prefers a local read to a network round-trip
 # and a protocol-standard server to a vendor API.
 #
 # Pass `-b/--backend <name>` to pin one instead; the protocol-specific commands
@@ -238,3 +238,19 @@ caldav.auth.basic.password.command = "pass show example"
 #gcal.tls.provider = "rustls"
 #gcal.tls.rustls.crypto = "ring"
 #gcal.tls.cert = "~/.local/share/ca-certificates/google.crt"
+
+# --------------------------------------------------------------------------------
+# Microsoft Graph backend (Outlook, Microsoft 365)
+#
+# Calendar ids are the ones `calendula calendar list` shows. Graph mints the id
+# of a calendar it creates, and keeps no description nor RGB colour. Only the
+# series master of a recurring event is written back. The token needs the
+# `Calendars.ReadWrite` scope.
+# --------------------------------------------------------------------------------
+
+# The calendar owner, `me` by default.
+#msgraph.user-id = "me"
+
+# Bearer authentication (RFC 6750), the only kind Graph takes.
+#msgraph.auth.token.command = ["ortie", "token", "show"]
+#msgraph.auth.token.raw = "oauth2-token"

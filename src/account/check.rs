@@ -8,7 +8,7 @@ use std::{fmt, path::PathBuf};
 use anyhow::{Result, anyhow, bail};
 use clap::Parser;
 use pimalaya_cli::printer::Printer;
-#[cfg(any(feature = "caldav", feature = "gcal"))]
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use pimalaya_config::secret::SecretResolver;
 use pimalaya_config::toml::TomlConfig;
 use schemars::JsonSchema;
@@ -76,7 +76,7 @@ pub fn check_account(
 ) -> Vec<BackendCheck> {
     let mut checks = Vec::new();
 
-    #[cfg(any(feature = "caldav", feature = "gcal"))]
+    #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
     let mut resolver = SecretResolver::new();
 
     #[cfg(feature = "vdir")]
@@ -100,6 +100,16 @@ pub fn check_account(
         checks.push(BackendCheck::from(
             "caldav",
             check_caldav(config, &mut resolver),
+        ));
+    }
+
+    #[cfg(feature = "msgraph")]
+    if backend.allows_msgraph()
+        && let Some(config) = account_config.msgraph.clone()
+    {
+        checks.push(BackendCheck::from(
+            "msgraph",
+            check_msgraph(config, &mut resolver),
         ));
     }
 
@@ -161,6 +171,15 @@ fn check_caldav(config: crate::config::CaldavConfig, resolver: &mut SecretResolv
 /// Listing the calendars is the check: it resolves the token secret,
 /// opens the TLS connection and exercises the authorization in one go,
 /// which a bare connect would not.
+#[cfg(feature = "msgraph")]
+fn check_msgraph(
+    config: crate::config::MsgraphConfig,
+    resolver: &mut SecretResolver,
+) -> Result<()> {
+    crate::msgraph::backend::MsgraphBackend::new(config, resolver)?.list_calendars()?;
+    Ok(())
+}
+
 #[cfg(feature = "gcal")]
 fn check_gcal(config: crate::config::GcalConfig, resolver: &mut SecretResolver) -> Result<()> {
     crate::gcal::backend::GcalBackend::new(config, resolver)?.list_calendars()?;

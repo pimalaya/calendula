@@ -15,10 +15,13 @@ use io_pim_discovery::{
     rfc6764::{client::DiscoveryWebdavClientStd, service::DiscoveryDavService},
     shared::dns::system_resolver,
 };
-use io_webdav::{client::WebdavClientStd, rfc4918::WebdavAuth};
+use io_webdav::{
+    client::{WebdavClientStd, WebdavClientStdConnectOptions},
+    rfc4918::WebdavAuth,
+};
 use pimalaya_cli::printer::Printer;
 use pimalaya_config::{secret::SecretResolver, toml::TomlConfig};
-use pimalaya_stream::tls::Tls;
+use pimalaya_stream::{proxy::Proxy, tls::Tls};
 use secrecy::ExposeSecret;
 use url::Url;
 
@@ -72,7 +75,11 @@ pub fn connect(config: &CaldavConfig, resolver: &mut SecretResolver) -> Result<W
     let tls = build_tls(config);
 
     if let Some(home) = &config.home {
-        let mut client = WebdavClientStd::connect(home, &tls, auth)?;
+        let opts = WebdavClientStdConnectOptions {
+            tls,
+            proxy: Proxy::None,
+        };
+        let mut client = WebdavClientStd::connect(home, auth, opts)?;
         client.calendar_home_set = Some(home.clone());
         return Ok(client);
     }
@@ -88,7 +95,11 @@ pub fn connect(config: &CaldavConfig, resolver: &mut SecretResolver) -> Result<W
         }
     };
 
-    let mut client = WebdavClientStd::connect(&server, &tls, auth)?;
+    let opts = WebdavClientStdConnectOptions {
+        tls,
+        proxy: Proxy::None,
+    };
+    let mut client = WebdavClientStd::connect(&server, auth, opts)?;
     client.calendar_home_set()?;
 
     Ok(client)

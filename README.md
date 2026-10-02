@@ -23,6 +23,7 @@ CLI to manage calendars.
 
 - **Shared API**: `calendar`, `event`, `todo`, `journal` and `item` work the same whichever backend serves the account.
 - **One family per component kind**: `event` (VEVENT), `todo` (VTODO) and `journal` (VJOURNAL) each render the columns their kind is read by; `item` keeps the raw, unfiltered view.
+- **Microsoft Graph**: Outlook and Microsoft 365 calendars through the Graph API, the iCalendar document synthesized both ways, Windows time zones read as their IANA names.
 - **Protocol-specific APIs**: `caldav`, `gcal`, `pimdir` and `vdir` each expose what only that backend has.
 - **CalDAV**: talk to any standard calendar server, with basic or bearer authentication.
 - **Google Calendar**: the native API v3, where Google's CalDAV bridge is crippled, with the iCalendar document synthesized both ways. `gcal` adds sharing, free/busy, recurrence expansion and quick add.
@@ -41,7 +42,9 @@ CLI to manage calendars.
   - [Native TLS](https://crates.io/crates/native-tls) (requires `native-tls` feature)
 
 > [!TIP]
-> Each backend sits behind its own cargo feature (`caldav`, `gcal`, `vdir`, `pimdir`), all enabled by default. Build with `--no-default-features` and pick the ones you need.
+> Each backend sits behind its own cargo feature (`caldav`, `gcal`, `msgraph`, `vdir`, `pimdir`), all enabled by default. Build with `--no-default-features` and pick the ones you need.
+>
+> The default `vendored` feature builds SQLite from source; leave it out to link the system one.
 
 ## RFC coverage
 

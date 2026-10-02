@@ -22,9 +22,8 @@ use crate::{
     shared::{
         calendar::{Calendar, CalendarDiff},
         client::paginate,
-        event::Event,
         ical::holds_kind,
-        item::{CalendarItem, CalendarItemQuery, CalendarTimeRange},
+        item::{CalendarItem, CalendarItemQuery},
     },
 };
 
@@ -123,7 +122,7 @@ impl VdirBackend {
             .filter(|item| item.kind == VdirItemKind::Ical)
             .map(|item| item_from(calendar_id, item))
             .filter(|item| is_kind(item, query.kind))
-            .filter(|item| in_range(item, query.range))
+            .filter(|item| item.starts_within(query.range))
             .collect();
 
         Ok(paginate(items, query.page, query.page_size))
@@ -207,19 +206,7 @@ fn item_from(calendar_id: &str, item: VdirItem) -> CalendarItem {
 
 /// Whether an item has at least one VEVENT starting inside `range`.
 ///
-/// An item carrying no event is kept only when no range was asked for,
-/// so a filtered listing never shows an undated resource.
 /// Whether an item is of `kind`, every item passing when none is named.
 fn is_kind(item: &CalendarItem, kind: Option<IcalComponentKind>) -> bool {
     kind.is_none_or(|kind| holds_kind(&item.contents, kind))
-}
-
-fn in_range(item: &CalendarItem, range: Option<&CalendarTimeRange>) -> bool {
-    let Some(range) = range else {
-        return true;
-    };
-
-    Event::project(item)
-        .iter()
-        .any(|event| range.contains(&event.start))
 }

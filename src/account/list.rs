@@ -112,6 +112,10 @@ impl AccountRow {
         if account.gcal.is_some() {
             backends.push("gcal");
         }
+        #[cfg(feature = "msgraph")]
+        if account.msgraph.is_some() {
+            backends.push("msgraph");
+        }
 
         Self {
             name: name.to_owned(),

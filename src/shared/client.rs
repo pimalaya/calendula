@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use anyhow::{Result, bail};
 use log::debug;
 use pimalaya_cli::printer::Printer;
-#[cfg(feature = "gcal")]
+#[cfg(any(feature = "gcal", feature = "msgraph"))]
 use pimalaya_config::secret::SecretResolver;
 
 use crate::{
@@ -56,6 +56,8 @@ enum BackendConfig {
     Pimdir(crate::config::PimdirConfig),
     #[cfg(feature = "gcal")]
     Gcal(Box<crate::config::GcalConfig>),
+    #[cfg(feature = "msgraph")]
+    Msgraph(Box<crate::config::MsgraphConfig>),
 }
 
 /// Exactly one of the compiled-in per-backend glue clients.
@@ -68,6 +70,8 @@ enum BackendClient {
     Pimdir(Box<crate::pimdir::backend::PimdirBackend>),
     #[cfg(feature = "gcal")]
     Gcal(Box<crate::gcal::backend::GcalBackend>),
+    #[cfg(feature = "msgraph")]
+    Msgraph(Box<crate::msgraph::backend::MsgraphBackend>),
 }
 
 impl CalendarClient {
@@ -116,6 +120,14 @@ impl CalendarClient {
             && let Some(gcal_config) = account_config.gcal.take()
         {
             selected = Some(BackendConfig::Gcal(Box::new(gcal_config)));
+        }
+
+        #[cfg(feature = "msgraph")]
+        if selected.is_none()
+            && backend.allows_msgraph()
+            && let Some(msgraph_config) = account_config.msgraph.take()
+        {
+            selected = Some(BackendConfig::Msgraph(Box::new(msgraph_config)));
         }
 
         let Some(config_) = selected else {
@@ -179,6 +191,8 @@ impl CalendarClient {
             BackendClient::Pimdir(client) => client.list_calendars(),
             #[cfg(feature = "gcal")]
             BackendClient::Gcal(client) => client.list_calendars(),
+            #[cfg(feature = "msgraph")]
+            BackendClient::Msgraph(client) => client.list_calendars(),
         }
     }
 
@@ -202,6 +216,8 @@ impl CalendarClient {
             BackendClient::Pimdir(client) => client.create_calendar(id, name, description, color),
             #[cfg(feature = "gcal")]
             BackendClient::Gcal(client) => client.create_calendar(id, name, description, color),
+            #[cfg(feature = "msgraph")]
+            BackendClient::Msgraph(client) => client.create_calendar(id, name, description, color),
         }
     }
 
@@ -217,6 +233,8 @@ impl CalendarClient {
             BackendClient::Pimdir(client) => client.update_calendar(id, patch),
             #[cfg(feature = "gcal")]
             BackendClient::Gcal(client) => client.update_calendar(id, patch),
+            #[cfg(feature = "msgraph")]
+            BackendClient::Msgraph(client) => client.update_calendar(id, patch),
         }
     }
 
@@ -231,6 +249,8 @@ impl CalendarClient {
             BackendClient::Pimdir(client) => client.delete_calendar(id),
             #[cfg(feature = "gcal")]
             BackendClient::Gcal(client) => client.delete_calendar(id),
+            #[cfg(feature = "msgraph")]
+            BackendClient::Msgraph(client) => client.delete_calendar(id),
         }
     }
 
@@ -254,6 +274,8 @@ impl CalendarClient {
             BackendClient::Pimdir(client) => client.list_items(calendar_id, query),
             #[cfg(feature = "gcal")]
             BackendClient::Gcal(client) => client.list_items(calendar_id, query),
+            #[cfg(feature = "msgraph")]
+            BackendClient::Msgraph(client) => client.list_items(calendar_id, query),
         }
     }
 
@@ -268,6 +290,8 @@ impl CalendarClient {
             BackendClient::Pimdir(client) => client.get_item(calendar_id, item_id),
             #[cfg(feature = "gcal")]
             BackendClient::Gcal(client) => client.get_item(calendar_id, item_id),
+            #[cfg(feature = "msgraph")]
+            BackendClient::Msgraph(client) => client.get_item(calendar_id, item_id),
         }
     }
 
@@ -282,6 +306,8 @@ impl CalendarClient {
             BackendClient::Pimdir(client) => client.create_item(calendar_id, contents),
             #[cfg(feature = "gcal")]
             BackendClient::Gcal(client) => client.create_item(calendar_id, contents),
+            #[cfg(feature = "msgraph")]
+            BackendClient::Msgraph(client) => client.create_item(calendar_id, contents),
         }
     }
 
@@ -313,6 +339,10 @@ impl CalendarClient {
             BackendClient::Gcal(client) => {
                 client.update_item(calendar_id, item_id, contents, if_match)
             }
+            #[cfg(feature = "msgraph")]
+            BackendClient::Msgraph(client) => {
+                client.update_item(calendar_id, item_id, contents, if_match)
+            }
         }
     }
 
@@ -327,6 +357,8 @@ impl CalendarClient {
             BackendClient::Pimdir(client) => client.delete_item(calendar_id, item_id),
             #[cfg(feature = "gcal")]
             BackendClient::Gcal(client) => client.delete_item(calendar_id, item_id),
+            #[cfg(feature = "msgraph")]
+            BackendClient::Msgraph(client) => client.delete_item(calendar_id, item_id),
         }
     }
 }
@@ -357,6 +389,13 @@ impl BackendConfig {
                 use crate::gcal::backend::GcalBackend;
                 let client = GcalBackend::new(config.as_ref().clone(), &mut SecretResolver::new())?;
                 Ok(BackendClient::Gcal(Box::new(client)))
+            }
+            #[cfg(feature = "msgraph")]
+            Self::Msgraph(config) => {
+                use crate::msgraph::backend::MsgraphBackend;
+                let client =
+                    MsgraphBackend::new(config.as_ref().clone(), &mut SecretResolver::new())?;
+                Ok(BackendClient::Msgraph(Box::new(client)))
             }
         }
     }

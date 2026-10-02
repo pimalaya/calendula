@@ -25,6 +25,9 @@ pub enum Backend {
     /// The Google Calendar API only.
     #[cfg(feature = "gcal")]
     Gcal,
+    /// The Microsoft Graph API only.
+    #[cfg(feature = "msgraph")]
+    Msgraph,
     /// The local pimdir store only.
     #[cfg(feature = "pimdir")]
     Pimdir,
@@ -44,6 +47,12 @@ impl Backend {
     #[cfg(feature = "gcal")]
     pub fn allows_gcal(self) -> bool {
         matches!(self, Self::Auto | Self::Gcal)
+    }
+
+    /// Whether the msgraph arm of a shared command may run.
+    #[cfg(feature = "msgraph")]
+    pub fn allows_msgraph(self) -> bool {
+        matches!(self, Self::Auto | Self::Msgraph)
     }
 
     /// Whether the pimdir arm of a shared command may run.
@@ -69,6 +78,8 @@ impl FromStr for Backend {
             "caldav" => Ok(Self::Caldav),
             #[cfg(feature = "gcal")]
             "gcal" => Ok(Self::Gcal),
+            #[cfg(feature = "msgraph")]
+            "msgraph" => Ok(Self::Msgraph),
             #[cfg(feature = "pimdir")]
             "pimdir" => Ok(Self::Pimdir),
             #[cfg(feature = "vdir")]
@@ -86,6 +97,8 @@ impl fmt::Display for Backend {
             Self::Caldav => write!(f, "caldav"),
             #[cfg(feature = "gcal")]
             Self::Gcal => write!(f, "gcal"),
+            #[cfg(feature = "msgraph")]
+            Self::Msgraph => write!(f, "msgraph"),
             #[cfg(feature = "pimdir")]
             Self::Pimdir => write!(f, "pimdir"),
             #[cfg(feature = "vdir")]
@@ -106,6 +119,8 @@ mod tests {
             Backend::Caldav,
             #[cfg(feature = "gcal")]
             Backend::Gcal,
+            #[cfg(feature = "msgraph")]
+            Backend::Msgraph,
             #[cfg(feature = "pimdir")]
             Backend::Pimdir,
             #[cfg(feature = "vdir")]

@@ -132,6 +132,8 @@ mod config;
 #[cfg(feature = "gcal")]
 mod gcal;
 mod json_schema;
+#[cfg(feature = "msgraph")]
+mod msgraph;
 #[cfg(feature = "pimdir")]
 mod pimdir;
 mod shared;
