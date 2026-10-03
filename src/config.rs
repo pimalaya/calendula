@@ -20,18 +20,17 @@ use crossterm::style::Color;
 use pimalaya_cli::table::ContentArrangement;
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use pimalaya_config::secret::Secret;
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+use pimalaya_config::toml::opt_shell_expanded_path;
+#[cfg(any(feature = "vdir", feature = "pimdir"))]
+use pimalaya_config::toml::shell_expanded_path;
 #[cfg(feature = "caldav")]
 use pimalaya_config::toml::shell_expanded_string;
 #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
 use pimalaya_config::toml::to_string;
-use pimalaya_config::{
-    command::CommandConfig,
-    toml::{TomlConfig, shell_expanded_path},
-};
+use pimalaya_config::{command::CommandConfig, toml::TomlConfig};
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider};
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
-use serde::Deserializer;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "caldav")]
 use url::Url;
@@ -40,16 +39,6 @@ use url::Url;
 /// account omits a defaulted scalar rather than spelling it out.
 fn is_default<T: Default + PartialEq>(value: &T) -> bool {
     *value == T::default()
-}
-
-/// Expands a leading tilde and any shell variable in an optional path,
-/// as [`shell_expanded_path`] does for a mandatory one.
-///
-/// TODO: drop this for `pimalaya_config::toml::opt_shell_expanded_path`
-/// once pimalaya-config ships an optional variant.
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
-fn opt_shell_expanded_path<'de, D: Deserializer<'de>>(de: D) -> Result<Option<PathBuf>, D::Error> {
-    shell_expanded_path(de).map(Some)
 }
 
 /// The whole configuration file: global options and every account.
