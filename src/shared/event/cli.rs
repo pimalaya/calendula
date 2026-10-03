@@ -17,8 +17,8 @@ use crate::{
         client::CalendarClient,
         event::{
             agenda::EventAgendaCommand, build::EventBuildCommand, create::EventCreateCommand,
-            delete::EventDeleteCommand, list::EventListCommand, read::EventReadCommand,
-            update::EventUpdateCommand,
+            delete::EventDeleteCommand, find::EventFindCommand, list::EventListCommand,
+            read::EventReadCommand, update::EventUpdateCommand,
         },
     },
 };
@@ -31,6 +31,7 @@ pub enum EventCommand {
     #[command(visible_alias = "ls")]
     List(EventListCommand),
     Read(EventReadCommand),
+    Find(EventFindCommand),
     Create(EventCreateCommand),
     Update(EventUpdateCommand),
     Delete(EventDeleteCommand),
@@ -58,6 +59,10 @@ impl EventCommand {
                 cmd.execute(printer, client)
             }
             Self::Read(cmd) => {
+                let client = CalendarClient::resolve(printer, config_paths, account_name, backend)?;
+                cmd.execute(printer, client)
+            }
+            Self::Find(cmd) => {
                 let client = CalendarClient::resolve(printer, config_paths, account_name, backend)?;
                 cmd.execute(printer, client)
             }

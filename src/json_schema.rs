@@ -61,6 +61,10 @@ pub fn schemas() -> BTreeMap<String, Value> {
         crate::shared::event::read::EventReadOutput
     );
     insert!(
+        "calendula-event-find",
+        crate::shared::event::list::EventListOutput
+    );
+    insert!(
         "calendula-todo-list",
         crate::shared::todo::list::TodoListOutput
     );
@@ -187,6 +191,16 @@ pub fn schemas() -> BTreeMap<String, Value> {
     insert!(
         "calendula-pimdir-status",
         crate::pimdir::status::PimdirStatusOutput
+    );
+    #[cfg(feature = "pimdir")]
+    insert!(
+        "calendula-pimdir-reply",
+        crate::shared::note::Noted<crate::pimdir::intent::PimdirIntentOutput>
+    );
+    #[cfg(feature = "pimdir")]
+    insert!(
+        "calendula-pimdir-cancel",
+        crate::shared::note::Noted<crate::pimdir::intent::PimdirIntentOutput>
     );
 
     #[cfg(feature = "vdir")]

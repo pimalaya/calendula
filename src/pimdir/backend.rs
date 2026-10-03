@@ -26,7 +26,7 @@ use std::{io::Write, path::PathBuf};
 use anyhow::{Result, anyhow, bail};
 use ical::component::IcalComponentKind;
 use io_pimdir::{
-    capability::CALENDAR_SCHEDULING,
+    capability::{CALENDAR_CANCEL, CALENDAR_REPLY, CALENDAR_SCHEDULING},
     client::{
         PimdirError,
         reader::{PimdirCollection, PimdirItem},
@@ -42,8 +42,10 @@ use io_pimdir::{
 use log::warn;
 use pimalaya_cli::printer::Printer;
 use pimalaya_config::toml::TomlConfig;
+use serde_json::{Map, Value, json};
 
 use crate::{
+    account::context::Account,
     cli::load_config,
     config::PimdirConfig,
     pimdir::{
@@ -59,6 +61,12 @@ use crate::{
     },
 };
 
+/// The queue kind of a reply to an invitation (pimdir STORAGE Annex B.2).
+const CALENDAR_REPLY_KIND: &str = "calendar-reply";
+
+/// The queue kind of the cancellation of an event the account organises.
+const CALENDAR_CANCEL_KIND: &str = "calendar-cancel";
+
 /// The media type a pimdir collection carries to be a calendar.
 const CALENDAR_KIND: &str = "text/calendar";
 
@@ -71,6 +79,8 @@ pub struct PimdirBackend {
     /// What the writes so far came back with, a capability their source
     /// supports in part (pimdir STORAGE §15.6).
     notes: Vec<String>,
+    /// The `calendar.default` of the account, when built from one.
+    calendar_default: Option<String>,
 }
 
 impl PimdirBackend {
@@ -79,6 +89,7 @@ impl PimdirBackend {
         Ok(Self {
             client: PimdirClient::new(config)?,
             notes: Vec::new(),
+            calendar_default: None,
         })
     }
 
@@ -101,7 +112,20 @@ impl PimdirBackend {
             .take()
             .ok_or_else(|| anyhow!("pimdir configuration is missing for account `{name}`"))?;
 
-        Self::new(pimdir_config)
+        let account = Account::from(config).merge(Account::from(account_config));
+
+        let mut backend = Self::new(pimdir_config)?;
+        backend.calendar_default = account.calendar_default;
+        Ok(backend)
+    }
+
+    /// The calendar a `pimdir` command operates on: the `-k/--calendar`
+    /// flag, then `calendar.default`.
+    pub fn calendar_id(&self, flag: Option<String>) -> Result<String> {
+        flag.or_else(|| self.calendar_default.clone())
+            .ok_or_else(|| {
+                anyhow!("Missing calendar id; pass -k/--calendar or set calendar.default")
+            })
     }
 
     /// Lists the calendar collections.
@@ -471,6 +495,162 @@ impl PimdirBackend {
         Ok(())
     }
 
+    /// Queues the account's reply to an invitation, the `calendar-reply`
+    /// intent (pimdir STORAGE Annex B.2): the performer sends it to the
+    /// organizer with `comment`, and the new `PARTSTAT` arrives with the
+    /// next sync.
+    ///
+    /// `source` picks the performer for this action alone, among several
+    /// able to. Returns the queue row and the performer named in it.
+    pub fn reply(
+        &mut self,
+        calendar_id: &str,
+        item_id: &str,
+        partstat: &str,
+        comment: Option<&str>,
+        source: Option<&str>,
+    ) -> Result<PimdirQueued> {
+        self.known_collection(calendar_id)?;
+
+        let stored = self.item(calendar_id, item_id)?;
+        if let Some(contents) = self.body(&stored)?
+            && !names(&contents, "ORGANIZER")
+        {
+            bail!(
+                "Event `{item_id}` names no ORGANIZER, so it is not an invitation \
+                 and there is nobody to reply to"
+            );
+        }
+
+        let mut payload = Map::new();
+        payload.insert("partstat".into(), json!(partstat));
+        if let Some(comment) = comment {
+            payload.insert("comment".into(), json!(comment));
+        }
+
+        self.intent(
+            calendar_id,
+            stored.seq,
+            CALENDAR_REPLY_KIND,
+            CALENDAR_REPLY,
+            payload,
+            source,
+        )
+    }
+
+    /// Queues the cancellation of an event the account organises, the
+    /// `calendar-cancel` intent (pimdir STORAGE Annex B.2): the performer
+    /// notifies the attendees with `comment`, and the removal arrives
+    /// with the next sync.
+    ///
+    /// An event inviting nobody has nobody to notify: `event delete`
+    /// removes it.
+    pub fn cancel(
+        &mut self,
+        calendar_id: &str,
+        item_id: &str,
+        comment: Option<&str>,
+        source: Option<&str>,
+    ) -> Result<PimdirQueued> {
+        self.known_collection(calendar_id)?;
+
+        let stored = self.item(calendar_id, item_id)?;
+        if let Some(contents) = self.body(&stored)?
+            && !names(&contents, "ATTENDEE")
+        {
+            bail!(
+                "Event `{item_id}` names no ATTENDEE, so there is nobody to notify; \
+                 remove it with `event delete` instead"
+            );
+        }
+
+        let mut payload = Map::new();
+        if let Some(comment) = comment {
+            payload.insert("comment".into(), json!(comment));
+        }
+
+        self.intent(
+            calendar_id,
+            stored.seq,
+            CALENDAR_CANCEL_KIND,
+            CALENDAR_CANCEL,
+            payload,
+            source,
+        )
+    }
+
+    /// Appends an intent addressing item `seq`, anchored on its
+    /// collection (pimdir STORAGE §15.6), naming its performer.
+    ///
+    /// A store whose sources declare nothing predates capabilities, and
+    /// its owner picks the performer as it always did, so the payload
+    /// names none there unless the user did.
+    fn intent(
+        &mut self,
+        calendar_id: &str,
+        seq: i64,
+        kind: &str,
+        capability: &str,
+        mut payload: Map<String, Value>,
+        source: Option<&str>,
+    ) -> Result<PimdirQueued> {
+        let mut producer = self.client.producer()?;
+
+        let declared = producer
+            .capabilities(calendar_id)
+            .map_err(|err| anyhow!("Read the capabilities of `{calendar_id}`: {err}"))?
+            .iter()
+            .any(|source| source.declared.is_some());
+
+        let performer = match (declared, source) {
+            (false, source) => source.map(ToOwned::to_owned),
+            (true, chosen) => match producer.performer(calendar_id, capability, chosen) {
+                Ok(source) => Some(source),
+                Err(PimdirError::Ambiguous { candidates, .. }) => bail!(
+                    "Several sources can perform {capability} for this account ({}): \
+                     choose one with --source",
+                    candidates.join(", "),
+                ),
+                Err(err) => bail!("Find who performs {capability}: {err}"),
+            },
+        };
+
+        payload.insert("v".into(), json!(1));
+        payload.insert("seq".into(), json!(seq));
+        if let Some(performer) = &performer {
+            payload.insert("source".into(), json!(performer));
+        }
+
+        let action = PimdirAction::Unknown {
+            kind: kind.to_owned(),
+            payload: Value::Object(payload).to_string(),
+            object_hash: None,
+        };
+
+        let partials = producer
+            .check(calendar_id, &action)
+            .map_err(|err| anyhow!("Queue {capability}: {err}"))?;
+        let row = producer
+            .enqueue(calendar_id, &action, None)
+            .map_err(|err| anyhow!("Queue {capability}: {err}"))?;
+
+        self.notes.extend(partials.iter().map(ToString::to_string));
+
+        Ok(PimdirQueued {
+            row,
+            seq,
+            source: performer,
+        })
+    }
+
+    /// An item's local body, `None` when the sync has not fetched it.
+    fn body(&self, stored: &PimdirItem) -> Result<Option<Vec<u8>>> {
+        match &stored.object {
+            Some(hash) => Ok(self.client.blobs.get(hash)?),
+            None => Ok(None),
+        }
+    }
+
     /// Takes the notes the writes so far came back with.
     pub fn take_notes(&mut self) -> Vec<String> {
         std::mem::take(&mut self.notes)
@@ -498,14 +678,33 @@ fn is_kind(item: &CalendarItem, stored: &PimdirItem, kind: IcalComponentKind) ->
 
 /// Whether an item falls inside `range`.
 ///
-/// A hydrated item is answered from its own bytes, which is exact. One
-/// with no local body falls back to the start its summary carries, the
-/// whole point of a summary beside the pointer.
+/// A hydrated item is answered from its own bytes, which is exact: an
+/// event starting in it, or an occurrence of a series overlapping it.
+/// One with no local body falls back to the start its summary carries,
+/// the whole point of a summary beside the pointer, and a series the
+/// summary says recurs passes from that start to its `UNTIL`.
 fn in_range(item: &CalendarItem, stored: &PimdirItem, range: &CalendarTimeRange) -> bool {
     if !item.contents.is_empty() {
         return Event::project(item)
             .iter()
-            .any(|event| range.contains(&event.start));
+            .any(|event| range.contains(&event.start))
+            || !Event::occurrences(item, Some(range)).is_empty();
+    }
+
+    if let Some(PimdirSummary::Event(event)) = &stored.summary
+        && event.recurring == Some(true)
+        && let Some(start) = &event.dtstart
+    {
+        let day = |stamp: &str| stamp.get(..8).unwrap_or(stamp).to_owned();
+        let started = range
+            .end
+            .as_deref()
+            .is_none_or(|end| day(&start.value) < day(end));
+        let running = match (event.until.as_deref(), range.start.as_deref()) {
+            (Some(until), Some(from)) => day(until) >= day(from),
+            _ => true,
+        };
+        return started && running;
     }
 
     start_of(stored).is_some_and(|start| range.contains(&start.value))
@@ -521,6 +720,44 @@ fn start_of(stored: &PimdirItem) -> Option<&PimdirTime> {
         PimdirSummary::Journal(journal) => journal.dtstart.as_ref(),
         PimdirSummary::Mail(_) | PimdirSummary::Contact(_) => None,
     }
+}
+
+/// What queueing an intent wrote.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PimdirQueued {
+    /// The queue row, which `pimdir` operator tooling cancels by.
+    pub row: i64,
+    /// The public id of the item the intent addresses.
+    pub seq: i64,
+    /// The source named to perform it, `None` in a store whose sources
+    /// declare nothing.
+    pub source: Option<String>,
+}
+
+/// Whether a VEVENT of `contents` carries the property `name`.
+///
+/// A body that does not parse answers yes: refusing an intent is the
+/// owner's call when the producer cannot read what it addresses.
+fn names(contents: &[u8], name: &str) -> bool {
+    let Ok(cst) = ical::tree::cst::IcalCst::parse(contents) else {
+        return true;
+    };
+    let ical = cst.decode();
+
+    ical.components
+        .iter()
+        .filter(|component| {
+            matches!(
+                component.name,
+                ical::component::IcalComponentName::Kind(IcalComponentKind::VEvent)
+            )
+        })
+        .any(|component| {
+            component
+                .props
+                .iter()
+                .any(|prop| prop.name.eq_ignore_ascii_case(name))
+        })
 }
 
 /// The message a collection verb refuses with, naming the way out.
@@ -669,5 +906,271 @@ mod tests {
             value: value.into(),
             ..Default::default()
         }
+    }
+
+    /// An invitation the account received, with its organizer.
+    const INVITATION: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n\
+        BEGIN:VEVENT\r\nUID:invite@example.org\r\nDTSTAMP:20261001T080000Z\r\n\
+        DTSTART:20261005T090000Z\r\nDTEND:20261005T100000Z\r\nSUMMARY:Review\r\n\
+        ORGANIZER;CN=Alice:mailto:alice@example.org\r\n\
+        ATTENDEE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:bob@example.org\r\n\
+        END:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    /// An event inviting nobody.
+    const ALONE: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n\
+        BEGIN:VEVENT\r\nUID:alone@example.org\r\nDTSTAMP:20261001T080000Z\r\n\
+        DTSTART:20261005T090000Z\r\nSUMMARY:Focus\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    /// A store holding one calendar, `cal`, carrying `bodies` as items a
+    /// sync applied, and the backend over it with their public ids.
+    fn store(bodies: &[&str]) -> (tempfile::TempDir, PimdirBackend, Vec<String>) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = io_pimdir::client::PimdirStore::open(dir.path()).unwrap();
+        store.ensure_collection("cal", CALENDAR_KIND).unwrap();
+        drop(store);
+
+        let config = || PimdirConfig {
+            root: dir.path().to_path_buf(),
+            account: None,
+        };
+
+        let mut backend = PimdirBackend::new(config()).unwrap();
+        for body in bodies {
+            backend
+                .create_item("cal", body.as_bytes().to_vec())
+                .unwrap();
+        }
+
+        let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source("caldav");
+        owner.drain().unwrap();
+        drop(owner);
+
+        let mut backend = PimdirBackend::new(config()).unwrap();
+        let ids = backend
+            .list_items("cal", CalendarItemQuery::default())
+            .unwrap()
+            .into_iter()
+            .map(|item| item.id)
+            .collect();
+
+        (dir, backend, ids)
+    }
+
+    /// The pending queue rows of `cal` as `(kind, payload)`.
+    fn queued(backend: &PimdirBackend) -> Vec<(String, serde_json::Value)> {
+        let producer = backend.client.producer().unwrap();
+        producer
+            .pending_actions("cal")
+            .unwrap()
+            .into_iter()
+            .map(|pending| match pending.action {
+                PimdirAction::Unknown { kind, payload, .. } => {
+                    (kind, serde_json::from_str(&payload).unwrap())
+                }
+                action => panic!("expected an intent, got {action:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_reply_queues_one_calendar_reply_row_with_the_spec_payload() {
+        let (_dir, mut backend, ids) = store(&[INVITATION]);
+
+        let queued_row = backend
+            .reply("cal", &ids[0], "ACCEPTED", Some("See you there"), None)
+            .unwrap();
+
+        let rows = queued(&backend);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, "calendar-reply");
+        assert_eq!(
+            rows[0].1,
+            serde_json::json!({
+                "v": 1,
+                "seq": queued_row.seq,
+                "partstat": "ACCEPTED",
+                "comment": "See you there",
+            })
+        );
+        assert_eq!(queued_row.seq.to_string(), ids[0]);
+        assert_eq!(queued_row.source, None);
+    }
+
+    #[test]
+    fn a_reply_without_comment_carries_no_comment_and_a_chosen_source() {
+        let (_dir, mut backend, ids) = store(&[INVITATION]);
+
+        backend
+            .reply("cal", &ids[0], "DECLINED", None, Some("caldav"))
+            .unwrap();
+
+        let rows = queued(&backend);
+        assert_eq!(
+            rows[0].1,
+            serde_json::json!({
+                "v": 1,
+                "seq": ids[0].parse::<i64>().unwrap(),
+                "partstat": "DECLINED",
+                "source": "caldav",
+            })
+        );
+    }
+
+    #[test]
+    fn a_cancel_queues_one_calendar_cancel_row() {
+        let (_dir, mut backend, ids) = store(&[INVITATION]);
+
+        backend
+            .cancel("cal", &ids[0], Some("Moved to next week"), None)
+            .unwrap();
+
+        let rows = queued(&backend);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, "calendar-cancel");
+        assert_eq!(
+            rows[0].1,
+            serde_json::json!({
+                "v": 1,
+                "seq": ids[0].parse::<i64>().unwrap(),
+                "comment": "Moved to next week",
+            })
+        );
+    }
+
+    #[test]
+    fn an_event_with_nobody_to_answer_or_notify_queues_nothing() {
+        let (_dir, mut backend, ids) = store(&[ALONE]);
+
+        let reply = backend.reply("cal", &ids[0], "ACCEPTED", None, None);
+        assert!(reply.unwrap_err().to_string().contains("ORGANIZER"));
+
+        let cancel = backend.cancel("cal", &ids[0], None, None);
+        assert!(cancel.unwrap_err().to_string().contains("event delete"));
+
+        assert!(queued(&backend).is_empty());
+    }
+
+    #[test]
+    fn an_unknown_event_or_calendar_queues_nothing() {
+        let (_dir, mut backend, _) = store(&[INVITATION]);
+
+        assert!(backend.reply("cal", "999", "ACCEPTED", None, None).is_err());
+        assert!(backend.reply("nope", "1", "ACCEPTED", None, None).is_err());
+        assert!(queued(&backend).is_empty());
+    }
+
+    #[test]
+    fn a_declared_store_names_its_single_performer() {
+        let (dir, mut backend, ids) = store(&[INVITATION]);
+
+        let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source("caldav");
+        let declaration: Vec<_> = io_pimdir::capability::CALENDAR
+            .iter()
+            .map(|name| io_pimdir::capability::PimdirCapability {
+                collection: None,
+                name: name.to_string(),
+                support: io_pimdir::capability::PimdirSupport::Full,
+                detail: None,
+            })
+            .collect();
+        owner.declare("caldav", &declaration).unwrap();
+        drop(owner);
+
+        let queued_row = backend
+            .reply("cal", &ids[0], "TENTATIVE", None, None)
+            .unwrap();
+
+        assert_eq!(queued_row.source.as_deref(), Some("caldav"));
+        assert_eq!(queued(&backend)[0].1["source"], "caldav");
+    }
+
+    #[test]
+    fn a_declared_store_refuses_a_source_lacking_the_capability() {
+        let (dir, mut backend, ids) = store(&[INVITATION]);
+
+        let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source("caldav");
+        let declaration: Vec<_> = io_pimdir::capability::CALENDAR
+            .iter()
+            .map(|name| io_pimdir::capability::PimdirCapability {
+                collection: None,
+                name: name.to_string(),
+                support: match *name == CALENDAR_CANCEL {
+                    true => io_pimdir::capability::PimdirSupport::None,
+                    false => io_pimdir::capability::PimdirSupport::Full,
+                },
+                detail: None,
+            })
+            .collect();
+        owner.declare("caldav", &declaration).unwrap();
+        drop(owner);
+
+        assert!(backend.cancel("cal", &ids[0], None, None).is_err());
+        assert!(queued(&backend).is_empty());
+    }
+
+    #[test]
+    fn a_series_started_before_a_window_lists_in_it() {
+        let series = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n\
+            BEGIN:VEVENT\r\nUID:weekly@example.org\r\nDTSTAMP:20200101T000000Z\r\n\
+            DTSTART:20200106T090000Z\r\nRRULE:FREQ=WEEKLY\r\nSUMMARY:Weekly\r\n\
+            END:VEVENT\r\nEND:VCALENDAR\r\n";
+        let (_dir, mut backend, ids) = store(&[series, ALONE]);
+        let range = CalendarTimeRange {
+            start: Some("20261012T000000Z".into()),
+            end: Some("20261019T000000Z".into()),
+        };
+
+        let items = backend
+            .list_items(
+                "cal",
+                CalendarItemQuery {
+                    range: Some(&range),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, ids[0]);
+        assert_eq!(
+            Event::occurrences(&items[0], Some(&range))[0]
+                .starts_at
+                .as_deref(),
+            Some("2026-10-12T09:00:00+00:00")
+        );
+    }
+
+    #[test]
+    fn an_undownloaded_series_is_windowed_from_its_start_to_its_until() {
+        let range = CalendarTimeRange {
+            start: Some("20261001T000000Z".into()),
+            end: Some("20261101T000000Z".into()),
+        };
+        let series = |until: Option<&str>| {
+            stored(PimdirSummary::Event(PimdirEventSummary {
+                dtstart: Some(time("20200106T090000Z")),
+                recurring: Some(true),
+                until: until.map(Into::into),
+                ..Default::default()
+            }))
+        };
+
+        assert!(in_range(&undownloaded(), &series(None), &range));
+        assert!(in_range(
+            &undownloaded(),
+            &series(Some("20261005T000000Z")),
+            &range
+        ));
+        assert!(!in_range(
+            &undownloaded(),
+            &series(Some("20250101T000000Z")),
+            &range
+        ));
     }
 }

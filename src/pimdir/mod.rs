@@ -23,4 +23,5 @@
 pub mod backend;
 pub mod cli;
 pub mod client;
+pub mod intent;
 pub mod status;

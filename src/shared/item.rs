@@ -49,8 +49,8 @@ pub struct CalendarItem {
 
 #[cfg(any(feature = "vdir", feature = "msgraph"))]
 impl CalendarItem {
-    /// Whether one of the item's events starts within `range`, every item
-    /// passing when none is named.
+    /// Whether one of the item's events starts within `range`, or one of
+    /// its occurrences overlaps it, every item passing when none is named.
     ///
     /// The filter of a backend that cannot narrow a listing server-side.
     /// An item carrying no event is kept only when no range was asked for,
@@ -63,6 +63,7 @@ impl CalendarItem {
         Event::project(self)
             .iter()
             .any(|event| range.contains(&event.start))
+            || !Event::occurrences(self, Some(range)).is_empty()
     }
 }
 

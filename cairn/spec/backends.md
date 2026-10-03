@@ -123,6 +123,13 @@ The body SHALL reach the blob tree through the blob writer, durably, before the 
 
 Because a queued create carries no public id until the owner applies it, `create_item` SHALL report the item's link id instead.
 
+### Requirement: pimdir queues scheduling intents
+`pimdir reply <EVENT-ID> accept|tentative|decline` SHALL append one `calendar-reply` action `{ "v": 1, "source"?, "seq", "partstat": "ACCEPTED"|"TENTATIVE"|"DECLINED", "comment"? }`, and `pimdir cancel <EVENT-ID>` one `calendar-cancel` action `{ "v": 1, "source"?, "seq", "comment"? }` (pimdir STORAGE Annex B.2), anchored on the item's calendar, through the producer and its §15.6 gate, and SHALL touch no item.
+
+`source` SHALL name the performer: `--source` when given, else the single candidate, else the recorded choice; several candidates and no choice SHALL be refused, listing them. A store whose sources declare nothing SHALL get no `source` unless one is given.
+
+A reply to an event naming no `ORGANIZER`, or a cancellation of one naming no `ATTENDEE`, SHALL be refused when its body is local, the latter pointing at `event delete`.
+
 ### Requirement: A pimdir body is named by the store's own hash
 The pimdir backend SHALL name a body it writes with the hash the store records in `store_meta.hash_algo`, read through the handle it holds, and SHALL NOT compute a digest of its own choosing. A body named under the wrong algorithm is a body no read ever finds.
 

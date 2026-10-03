@@ -5,7 +5,8 @@
 //!
 //! A calendar collection mixes component kinds, so the `event` commands read
 //! the same items the `item` commands do and keep only the VEVENTs. [`Event`]
-//! is that projection, the few fields a listing or an agenda renders.
+//! is that projection: what a listing, an agenda or a script reads of an
+//! event, its times resolved to instants ([`expand`]).
 //!
 //! The bytes themselves are never rewritten, so a projection is read-only and
 //! lossy by design.
@@ -15,74 +16,130 @@ pub mod build;
 pub mod cli;
 pub mod create;
 pub mod delete;
+pub mod expand;
+pub mod find;
 pub mod list;
 pub mod read;
 pub mod update;
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-use ical::{
-    component::vevent::VEVENT,
-    prop::{description::DESCRIPTION, dtend::DTEND, dtstart::DTSTART, summary::SUMMARY},
-    tree::cst::IcalCst,
-};
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::shared::item::CalendarItem;
+use crate::shared::item::{CalendarItem, CalendarTimeRange};
 
-/// A VEVENT projected out of a [`CalendarItem`]'s iCalendar bytes.
+/// A VEVENT projected out of a [`CalendarItem`]'s iCalendar bytes, or one
+/// occurrence of a recurring one.
 ///
-/// The time fields keep their iCalendar wire spelling, so what a listing
-/// prints is what the calendar carries. Parsing one into a [`NaiveDateTime`]
-/// is a separate, fallible step.
+/// `start` and `end` keep the iCalendar wire spelling, so what a listing
+/// prints is what the calendar carries; `startsAt` and `endsAt` are the
+/// same times resolved, with their UTC offset.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Event {
     /// The id of the item the event was projected from.
     pub id: String,
+    /// The event's `UID`, empty when it carries none.
+    pub uid: String,
+    /// The instance identity of an occurrence, as a `RECURRENCE-ID`
+    /// carries it: what addresses one occurrence beside `id`. `null` for
+    /// an event that does not recur, and for a series listed whole.
+    pub recurrence_id: Option<String>,
     /// The event's SUMMARY, empty when it carries none.
     pub summary: String,
-    /// The event's DESCRIPTION, the agenda label when the summary is empty.
-    #[serde(skip)]
+    /// The event's DESCRIPTION, empty when it carries none.
     pub description: String,
-    /// The event's DTSTART, verbatim.
+    /// The event's LOCATION, empty when it carries none.
+    pub location: String,
+    /// The start, iCalendar-spelled (`YYYYMMDD`, `YYYYMMDDTHHMMSS[Z]`).
     pub start: String,
-    /// The event's DTEND, verbatim.
+    /// The end, spelled as `start` is: `DTEND`, or the start plus the
+    /// `DURATION`.
     pub end: String,
+    /// Whether the event spans whole days (a `DATE` start).
+    pub all_day: bool,
+    /// The start as RFC 3339 with its UTC offset, or `YYYY-MM-DD` for a
+    /// whole day.
+    pub starts_at: Option<String>,
+    /// The end, spelled as `startsAt` is; a whole day's is exclusive.
+    pub ends_at: Option<String>,
+    /// The zone the start is written in: its `TZID`, `UTC`, or the local
+    /// zone a floating time is read in. `null` for a whole day.
+    pub time_zone: Option<String>,
+    /// Whether the event is a recurring series, one of its occurrences,
+    /// or an override of one.
+    pub recurring: bool,
+    /// The `STATUS` uppercased: `CONFIRMED`, `TENTATIVE`, `CANCELLED`.
+    pub status: Option<String>,
+    /// The `TRANSP` uppercased: `OPAQUE` (busy) or `TRANSPARENT` (free).
+    pub transparency: Option<String>,
+    /// The Outlook busy status (`X-MICROSOFT-CDO-BUSYSTATUS`) uppercased:
+    /// `FREE`, `TENTATIVE`, `BUSY`, `OOF`, `WORKINGELSEWHERE`.
+    pub busy_status: Option<String>,
+    /// The `ORGANIZER`.
+    pub organizer: Option<EventPerson>,
+    /// Every `ATTENDEE`, in document order.
+    pub attendees: Vec<EventAttendee>,
+    /// The join link of an online meeting: a `CONFERENCE`, or the
+    /// vendors' own properties.
+    pub online_meeting_url: Option<String>,
+    /// The start in Unix seconds, for windowing and ordering.
+    #[serde(skip)]
+    pub(crate) start_secs: Option<i64>,
+    /// The end in Unix seconds, for windowing.
+    #[serde(skip)]
+    pub(crate) end_secs: Option<i64>,
+}
+
+/// A calendar user an event names.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EventPerson {
+    /// The address, `mailto:` removed.
+    pub email: String,
+    /// The `CN`, when it carries one.
+    pub name: Option<String>,
+}
+
+/// An `ATTENDEE`.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EventAttendee {
+    /// The address, `mailto:` removed.
+    pub email: String,
+    /// The `CN`, when it carries one.
+    pub name: Option<String>,
+    /// The `PARTSTAT` uppercased, `NEEDS-ACTION` when absent.
+    pub partstat: String,
+    /// The `ROLE` uppercased, `REQ-PARTICIPANT` when absent.
+    pub role: String,
+    /// Whether a reply is expected (`RSVP=TRUE`).
+    pub rsvp: bool,
+    /// The `CUTYPE` uppercased, `INDIVIDUAL` when absent; a `ROOM` or a
+    /// `RESOURCE` is a place or a thing rather than a person.
+    pub cutype: String,
 }
 
 impl Event {
-    /// Projects every VEVENT carried by `item`, in source order.
+    /// Projects every VEVENT carried by `item`, in source order, a series
+    /// once at its own start.
     ///
     /// An item whose bytes do not parse yields no event rather than an error,
     /// so one malformed resource does not stop the rest of the calendar from
     /// rendering.
     pub fn project(item: &CalendarItem) -> Vec<Self> {
-        let Ok(cst) = IcalCst::parse(&item.contents) else {
-            return Vec::new();
-        };
+        expand::project(item)
+    }
 
-        cst.components::<VEVENT>()
-            .map(|vevent| Self {
-                id: item.id.clone(),
-                summary: vevent
-                    .prop::<SUMMARY>()
-                    .map(|text| text.0.into_owned())
-                    .unwrap_or_default(),
-                description: vevent
-                    .prop::<DESCRIPTION>()
-                    .map(|text| text.0.into_owned())
-                    .unwrap_or_default(),
-                start: vevent
-                    .prop::<DTSTART>()
-                    .map(|stamp| stamp.0.into_owned())
-                    .unwrap_or_default(),
-                end: vevent
-                    .prop::<DTEND>()
-                    .map(|stamp| stamp.0.into_owned())
-                    .unwrap_or_default(),
-            })
-            .collect()
+    /// Projects the occurrences of `item`'s events overlapping `range`,
+    /// recurring series expanded, in start order.
+    pub fn occurrences(item: &CalendarItem, range: Option<&CalendarTimeRange>) -> Vec<Self> {
+        expand::occurrences(item, range)
+    }
+
+    /// Projects the one occurrence of `item` that `recurrence_id` names.
+    pub fn occurrence(item: &CalendarItem, recurrence_id: &str) -> Option<Self> {
+        expand::occurrence(item, recurrence_id)
     }
 
     /// The label an agenda cell shows: the summary, then the description.

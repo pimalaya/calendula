@@ -34,7 +34,22 @@ use crate::shared::{
 /// after parsing. A window lifts the default page-size cap, so every
 /// match is returned.
 ///
-/// JSON output: `{"events": [{"id", "summary", "start", "end"}]}`.
+/// A window also expands recurring events: each occurrence overlapping
+/// it lists on its own, at its own times, with the `recurrenceId` that
+/// addresses it beside the item `id`, overrides applied and excluded
+/// dates dropped, in start order. The bounds are UTC midnights, and one
+/// open on its end reaches a year past its start. Without a window a
+/// series lists once, at its first start.
+///
+/// Times resolve through their `TZID`, the calendar's `VTIMEZONE` or
+/// the time-zone database; a floating time is read in the local zone
+/// (`TZ`, then the system's).
+///
+/// JSON output: `{"events": [{"id", "uid", "recurrenceId", "summary",
+/// "description", "location", "start", "end", "allDay", "startsAt",
+/// "endsAt", "timeZone", "recurring", "status", "transparency",
+/// "busyStatus", "organizer": {"email", "name"}, "attendees": [{"email",
+/// "name", "partstat", "role", "rsvp", "cutype"}], "onlineMeetingUrl"}]}`.
 #[derive(Debug, Parser)]
 pub struct EventListCommand {
     #[command(flatten)]
@@ -84,20 +99,19 @@ impl EventListCommand {
                 kind: IcalFamily::Event.kind(),
             },
         )?;
-        let events = items.iter().flat_map(Event::project).collect();
+        let events = match &range {
+            Some(range) => {
+                let mut events: Vec<Event> = items
+                    .iter()
+                    .flat_map(|item| Event::occurrences(item, Some(range)))
+                    .collect();
+                events.sort_by_key(|event| event.start_secs);
+                events
+            }
+            None => items.iter().flat_map(Event::project).collect(),
+        };
 
-        printer.out(EventListOutput {
-            style: client.account.table_style(),
-            arrangement: client.account.table_arrangement(),
-            max_width: self.max_width,
-            colors: EventColors {
-                id: client.account.events_list_table_id_color(),
-                summary: client.account.events_list_table_summary_color(),
-                start: client.account.events_list_table_start_color(),
-                end: client.account.events_list_table_end_color(),
-            },
-            events,
-        })
+        printer.out(EventListOutput::new(&client, self.max_width, events))
     }
 }
 
@@ -127,6 +141,24 @@ pub struct EventListOutput {
     colors: EventColors,
     /// The listed events, in the order the backend returned them.
     pub events: Vec<Event>,
+}
+
+impl EventListOutput {
+    /// A listing of `events`, rendered as the account configures.
+    pub fn new(client: &CalendarClient, max_width: Option<u16>, events: Vec<Event>) -> Self {
+        Self {
+            style: client.account.table_style(),
+            arrangement: client.account.table_arrangement(),
+            max_width,
+            colors: EventColors {
+                id: client.account.events_list_table_id_color(),
+                summary: client.account.events_list_table_summary_color(),
+                start: client.account.events_list_table_start_color(),
+                end: client.account.events_list_table_end_color(),
+            },
+            events,
+        }
+    }
 }
 
 impl fmt::Display for EventListOutput {
