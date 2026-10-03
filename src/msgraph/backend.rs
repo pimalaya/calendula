@@ -11,11 +11,14 @@
 //! calendar's events whole and a [`CalendarTimeRange`] filters them
 //! locally, as on vdir.
 //!
-//! A series is one item, its exceptions read from the instances of its
-//! own date range. Only the series master is written back: an exception
-//! edited here does not push.
+//! A series is one item: its master read by id, the only read Graph
+//! returns its cancelled occurrences on, and its exceptions read from the
+//! instances of its own date range. Only the series master is written
+//! back: an exception edited here does not push.
 //!
 //! [`CalendarTimeRange`]: crate::shared::item::CalendarTimeRange
+
+use std::collections::BTreeMap;
 
 use anyhow::{Context, Result, bail};
 use ical::component::IcalComponentKind;
@@ -199,7 +202,14 @@ impl MsgraphBackend {
         }
 
         let mut items = Vec::new();
-        for event in events {
+        for event in unique(events)? {
+            // NOTE: a listing leaves out cancelledOccurrences, which Graph
+            // returns only on a read of the master by id.
+            let event = if event.event_type == Some(MsgraphEventType::SeriesMaster) {
+                self.event(&event.id)?
+            } else {
+                event
+            };
             let exceptions = self.exceptions(&event)?;
             let item = item_from(calendar_id, &event, &exceptions);
             if item.starts_within(query.range) {
@@ -319,7 +329,7 @@ impl MsgraphBackend {
             page = self.client.events_list_from_link(&next)?.response;
         }
 
-        Ok(exceptions)
+        unique(exceptions)
     }
 }
 
@@ -349,13 +359,35 @@ fn item_from(calendar_id: &str, event: &MsgraphEvent, exceptions: &[MsgraphEvent
     }
 }
 
+/// Drops the events a page boundary repeated, Graph overlapping
+/// consecutive `nextLink` pages; one id read at two revisions is an error.
+fn unique(events: Vec<MsgraphEvent>) -> Result<Vec<MsgraphEvent>> {
+    let mut seen = BTreeMap::new();
+    let mut unique = Vec::with_capacity(events.len());
+
+    for event in events {
+        match seen.get(&event.id) {
+            None => {
+                seen.insert(event.id.clone(), event.change_key.clone());
+                unique.push(event);
+            }
+            Some(change_key) if *change_key == event.change_key => {}
+            Some(_) => bail!(
+                "Event `{}` was listed twice at different revisions by Microsoft Graph",
+                event.id
+            ),
+        }
+    }
+
+    Ok(unique)
+}
+
 /// The window a series' exceptions fall in: its range, an open-ended one
 /// capped past its start.
 fn series_window(master: &MsgraphEvent) -> Option<(String, String)> {
-    let range = &master.recurrence.as_option()?.range;
-    let start = range.start_date.as_deref()?.parse::<Date>().ok()?;
-    let end = match range.end_date.as_deref() {
-        Some(end) => end.parse::<Date>().ok()?,
+    let (start, end) = master.recurrence.as_option()?.bounds()?;
+    let end = match end {
+        Some(end) => end,
         None => start.checked_add(OPEN_SERIES_YEARS.years()).ok()?,
     };
 
@@ -365,4 +397,34 @@ fn series_window(master: &MsgraphEvent) -> Option<(String, String)> {
     };
 
     Some((instant(start)?, instant(end.checked_add(1.day()).ok()?)?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn event(id: &str, change_key: &str) -> MsgraphEvent {
+        MsgraphEvent {
+            id: id.into(),
+            change_key: Some(change_key.into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_event_repeated_across_pages_lists_once() {
+        let events = vec![event("A", "1"), event("B", "1"), event("B", "1")];
+        let ids: Vec<String> = unique(events)
+            .unwrap()
+            .into_iter()
+            .map(|event| event.id)
+            .collect();
+
+        assert_eq!(ids, ["A", "B"]);
+    }
+
+    #[test]
+    fn an_event_repeated_at_another_revision_is_refused() {
+        assert!(unique(vec![event("A", "1"), event("A", "2")]).is_err());
+    }
 }
