@@ -26,7 +26,11 @@ use std::{io::Write, path::PathBuf};
 use anyhow::{Result, anyhow, bail};
 use ical::component::IcalComponentKind;
 use io_pimdir::{
-    client::reader::{PimdirCollection, PimdirItem},
+    capability::CALENDAR_SCHEDULING,
+    client::{
+        PimdirError,
+        reader::{PimdirCollection, PimdirItem},
+    },
     codec::PimdirAction,
     object::PimdirObject,
     placement::PimdirFlags,
@@ -64,6 +68,9 @@ const SCAN_BATCH: usize = 500;
 /// The shared-API glue over a pimdir store.
 pub struct PimdirBackend {
     client: PimdirClient,
+    /// What the writes so far came back with, a capability their source
+    /// supports in part (pimdir STORAGE §15.6).
+    notes: Vec<String>,
 }
 
 impl PimdirBackend {
@@ -71,6 +78,7 @@ impl PimdirBackend {
     pub fn new(config: PimdirConfig) -> Result<Self> {
         Ok(Self {
             client: PimdirClient::new(config)?,
+            notes: Vec::new(),
         })
     }
 
@@ -437,17 +445,35 @@ impl PimdirBackend {
     ///
     /// The producer is opened for this write and dropped with it.
     fn enqueue(
-        &self,
+        &mut self,
         calendar_id: &str,
         action: &PimdirAction,
         object: Option<&PimdirObject>,
     ) -> Result<()> {
-        self.client
-            .producer()?
-            .enqueue(calendar_id, action, object)
-            .map_err(|err| anyhow!("Stage the pimdir action: {err}"))?;
+        let stage = |err: PimdirError| match err {
+            PimdirError::Unsupported(refusal) if refusal.capability == CALENDAR_SCHEDULING => {
+                anyhow!(
+                    "Stage the pimdir action: {refusal}; to write it without notifying \
+                         anyone, first mark its ORGANIZER and ATTENDEE with \
+                         SCHEDULE-AGENT=NONE"
+                )
+            }
+            err => anyhow!("Stage the pimdir action: {err}"),
+        };
 
+        let mut producer = self.client.producer()?;
+        let partials = producer.check(calendar_id, action).map_err(stage)?;
+        producer
+            .enqueue(calendar_id, action, object)
+            .map_err(stage)?;
+
+        self.notes.extend(partials.iter().map(ToString::to_string));
         Ok(())
+    }
+
+    /// Takes the notes the writes so far came back with.
+    pub fn take_notes(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.notes)
     }
 }
 

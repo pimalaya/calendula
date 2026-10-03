@@ -180,6 +180,16 @@ impl CalendarClient {
         Ok(self.inner.as_mut().expect("just opened"))
     }
 
+    /// Takes the notes the writes so far came back with: a capability their
+    /// source supports in part, on pimdir alone.
+    pub fn take_notes(&mut self) -> Vec<String> {
+        match &mut self.inner {
+            #[cfg(feature = "pimdir")]
+            Some(BackendClient::Pimdir(client)) => client.take_notes(),
+            _ => Vec::new(),
+        }
+    }
+
     /// Lists every calendar available to the active account.
     pub fn list_calendars(&mut self) -> Result<Vec<Calendar>> {
         match self.open()? {

@@ -91,11 +91,11 @@ pub fn schemas() -> BTreeMap<String, Value> {
     );
     insert!(
         "calendula-event-create",
-        crate::shared::event::create::EventCreateOutput
+        crate::shared::note::Noted<crate::shared::event::create::EventCreateOutput>
     );
     insert!(
         "calendula-event-update",
-        crate::shared::event::update::EventUpdateOutput
+        crate::shared::note::Noted<crate::shared::event::update::EventUpdateOutput>
     );
     insert!(
         "calendula-todo-build",
@@ -103,11 +103,11 @@ pub fn schemas() -> BTreeMap<String, Value> {
     );
     insert!(
         "calendula-todo-create",
-        crate::shared::todo::create::TodoCreateOutput
+        crate::shared::note::Noted<crate::shared::todo::create::TodoCreateOutput>
     );
     insert!(
         "calendula-todo-update",
-        crate::shared::todo::update::TodoUpdateOutput
+        crate::shared::note::Noted<crate::shared::todo::update::TodoUpdateOutput>
     );
     insert!(
         "calendula-journal-build",
@@ -115,11 +115,11 @@ pub fn schemas() -> BTreeMap<String, Value> {
     );
     insert!(
         "calendula-journal-create",
-        crate::shared::journal::create::JournalCreateOutput
+        crate::shared::note::Noted<crate::shared::journal::create::JournalCreateOutput>
     );
     insert!(
         "calendula-journal-update",
-        crate::shared::journal::update::JournalUpdateOutput
+        crate::shared::note::Noted<crate::shared::journal::update::JournalUpdateOutput>
     );
     insert!(
         "calendula-item-build",
@@ -127,11 +127,11 @@ pub fn schemas() -> BTreeMap<String, Value> {
     );
     insert!(
         "calendula-item-create",
-        crate::shared::item::create::ItemCreateOutput
+        crate::shared::note::Noted<crate::shared::item::create::ItemCreateOutput>
     );
     insert!(
         "calendula-item-update",
-        crate::shared::item::update::ItemUpdateOutput
+        crate::shared::note::Noted<crate::shared::item::update::ItemUpdateOutput>
     );
 
     #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
