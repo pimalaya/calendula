@@ -134,7 +134,10 @@ pub fn schemas() -> BTreeMap<String, Value> {
         crate::shared::note::Noted<crate::shared::item::update::ItemUpdateOutput>
     );
 
-    #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+    #[cfg(all(
+        feature = "wizard",
+        any(feature = "caldav", feature = "vdir", feature = "pimdir")
+    ))]
     insert!(
         "calendula-configure",
         crate::wizard::configure::ConfigureOutput

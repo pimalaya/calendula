@@ -139,7 +139,10 @@ mod pimdir;
 mod shared;
 #[cfg(feature = "vdir")]
 mod vdir;
-#[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+#[cfg(all(
+    feature = "wizard",
+    any(feature = "caldav", feature = "vdir", feature = "pimdir")
+))]
 mod wizard;
 
 use std::{

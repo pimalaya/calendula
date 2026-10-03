@@ -12,7 +12,7 @@ homepage = "https://pimalaya.org"
 repository = "https://github.com/pimalaya/calendula"
 
 [features]
-default = ["rustls-ring", "caldav", "gcal", "msgraph", "vdir", "pimdir", "vendored"]
+default = ["rustls-ring", "caldav", "gcal", "msgraph", "vdir", "pimdir", "vendored", "wizard"]
 native-tls = ["pimalaya-stream/native-tls", "io-pim-discovery/native-tls", "io-webdav?/native-tls", "io-gcal?/native-tls", "io-msgraph?/native-tls"]
 rustls-aws = ["pimalaya-stream/rustls-aws", "io-pim-discovery/rustls-aws", "io-webdav?/rustls-aws", "io-gcal?/rustls-aws", "io-msgraph?/rustls-aws"]
 rustls-ring = ["pimalaya-stream/rustls-ring", "io-pim-discovery/rustls-ring", "io-webdav?/rustls-ring", "io-gcal?/rustls-ring", "io-msgraph?/rustls-ring"]
@@ -22,6 +22,7 @@ msgraph = ["dep:io-msgraph", "dep:jiff", "dep:secrecy", "io-msgraph/client", "io
 vdir = ["dep:io-vdir"]
 pimdir = ["dep:io-pimdir"]
 vendored = ["pimalaya-stream/vendored", "io-webdav?/vendored", "io-gcal?/vendored", "io-msgraph?/vendored", "io-pimdir?/vendored"]
+wizard = ["pimalaya-cli/wizard", "pimalaya-cli/caldav", "pimalaya-cli/spinner"]
 
 [profile.release]
 lto = "fat"
@@ -52,7 +53,7 @@ io-vdir = { version = "0.2", default-features = false, features = ["client", "se
 io-webdav = { version = "0.5", default-features = false, features = ["client"], optional = true }
 jiff = { version = "0.2", default-features = false, features = ["std"], optional = true }
 log = "0.4"
-pimalaya-cli = { version = "0.2", default-features = false, features = ["terminal", "table", "prompt", "spinner", "wizard", "caldav"] }
+pimalaya-cli = { version = "0.2", default-features = false, features = ["terminal", "table", "prompt"] }
 pimalaya-config = { version = "0.2.1", default-features = false, features = ["toml", "secret"] }
 pimalaya-stream = { version = "0.3", default-features = false, features = ["std"] }
 schemars = "1"

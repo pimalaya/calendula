@@ -13,6 +13,15 @@
 
 use std::path::PathBuf;
 
+#[cfg(not(any(
+    feature = "vdir",
+    feature = "caldav",
+    feature = "pimdir",
+    feature = "gcal",
+    feature = "msgraph"
+)))]
+use std::convert::Infallible;
+
 use anyhow::{Result, bail};
 use log::debug;
 use pimalaya_cli::printer::Printer;
@@ -58,6 +67,16 @@ enum BackendConfig {
     Gcal(Box<crate::config::GcalConfig>),
     #[cfg(feature = "msgraph")]
     Msgraph(Box<crate::config::MsgraphConfig>),
+    /// Stands in when no backend is compiled in: never built, so every
+    /// match over the backends stays exhaustive.
+    #[cfg(not(any(
+        feature = "vdir",
+        feature = "caldav",
+        feature = "pimdir",
+        feature = "gcal",
+        feature = "msgraph"
+    )))]
+    Unused(Infallible),
 }
 
 /// Exactly one of the compiled-in per-backend glue clients.
@@ -72,6 +91,16 @@ enum BackendClient {
     Gcal(Box<crate::gcal::backend::GcalBackend>),
     #[cfg(feature = "msgraph")]
     Msgraph(Box<crate::msgraph::backend::MsgraphBackend>),
+    /// Stands in when no backend is compiled in: never built, so every
+    /// match over the backends stays exhaustive.
+    #[cfg(not(any(
+        feature = "vdir",
+        feature = "caldav",
+        feature = "pimdir",
+        feature = "gcal",
+        feature = "msgraph"
+    )))]
+    Unused(Infallible),
 }
 
 impl CalendarClient {
@@ -193,6 +222,14 @@ impl CalendarClient {
     /// Lists every calendar available to the active account.
     pub fn list_calendars(&mut self) -> Result<Vec<Calendar>> {
         match self.open()? {
+            #[cfg(not(any(
+                feature = "vdir",
+                feature = "caldav",
+                feature = "pimdir",
+                feature = "gcal",
+                feature = "msgraph"
+            )))]
+            BackendClient::Unused(never) => match *never {},
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => client.list_calendars(),
             #[cfg(feature = "caldav")]
@@ -218,6 +255,14 @@ impl CalendarClient {
         color: Option<&str>,
     ) -> Result<String> {
         match self.open()? {
+            #[cfg(not(any(
+                feature = "vdir",
+                feature = "caldav",
+                feature = "pimdir",
+                feature = "gcal",
+                feature = "msgraph"
+            )))]
+            BackendClient::Unused(never) => match *never {},
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => client.create_calendar(id, name, description, color),
             #[cfg(feature = "caldav")]
@@ -235,6 +280,14 @@ impl CalendarClient {
     /// left as `None` in `patch`.
     pub fn update_calendar(&mut self, id: &str, patch: CalendarDiff) -> Result<()> {
         match self.open()? {
+            #[cfg(not(any(
+                feature = "vdir",
+                feature = "caldav",
+                feature = "pimdir",
+                feature = "gcal",
+                feature = "msgraph"
+            )))]
+            BackendClient::Unused(never) => match *never {},
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => client.update_calendar(id, patch),
             #[cfg(feature = "caldav")]
@@ -251,6 +304,14 @@ impl CalendarClient {
     /// Deletes the calendar `id` and every item it contains.
     pub fn delete_calendar(&mut self, id: &str) -> Result<()> {
         match self.open()? {
+            #[cfg(not(any(
+                feature = "vdir",
+                feature = "caldav",
+                feature = "pimdir",
+                feature = "gcal",
+                feature = "msgraph"
+            )))]
+            BackendClient::Unused(never) => match *never {},
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => client.delete_calendar(id),
             #[cfg(feature = "caldav")]
@@ -276,6 +337,14 @@ impl CalendarClient {
         query: CalendarItemQuery<'_>,
     ) -> Result<Vec<CalendarItem>> {
         match self.open()? {
+            #[cfg(not(any(
+                feature = "vdir",
+                feature = "caldav",
+                feature = "pimdir",
+                feature = "gcal",
+                feature = "msgraph"
+            )))]
+            BackendClient::Unused(never) => match *never {},
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => client.list_items(calendar_id, query),
             #[cfg(feature = "caldav")]
@@ -292,6 +361,14 @@ impl CalendarClient {
     /// Fetches the item `item_id` from `calendar_id`.
     pub fn get_item(&mut self, calendar_id: &str, item_id: &str) -> Result<CalendarItem> {
         match self.open()? {
+            #[cfg(not(any(
+                feature = "vdir",
+                feature = "caldav",
+                feature = "pimdir",
+                feature = "gcal",
+                feature = "msgraph"
+            )))]
+            BackendClient::Unused(never) => match *never {},
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => client.get_item(calendar_id, item_id),
             #[cfg(feature = "caldav")]
@@ -308,6 +385,14 @@ impl CalendarClient {
     /// Stores raw iCalendar bytes as a new item, returning the id assigned.
     pub fn create_item(&mut self, calendar_id: &str, contents: Vec<u8>) -> Result<String> {
         match self.open()? {
+            #[cfg(not(any(
+                feature = "vdir",
+                feature = "caldav",
+                feature = "pimdir",
+                feature = "gcal",
+                feature = "msgraph"
+            )))]
+            BackendClient::Unused(never) => match *never {},
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => client.create_item(calendar_id, contents),
             #[cfg(feature = "caldav")]
@@ -333,6 +418,14 @@ impl CalendarClient {
         if_match: Option<&str>,
     ) -> Result<()> {
         match self.open()? {
+            #[cfg(not(any(
+                feature = "vdir",
+                feature = "caldav",
+                feature = "pimdir",
+                feature = "gcal",
+                feature = "msgraph"
+            )))]
+            BackendClient::Unused(never) => match *never {},
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => {
                 client.update_item(calendar_id, item_id, contents, if_match)
@@ -359,6 +452,14 @@ impl CalendarClient {
     /// Deletes `item_id` from `calendar_id`.
     pub fn delete_item(&mut self, calendar_id: &str, item_id: &str) -> Result<()> {
         match self.open()? {
+            #[cfg(not(any(
+                feature = "vdir",
+                feature = "caldav",
+                feature = "pimdir",
+                feature = "gcal",
+                feature = "msgraph"
+            )))]
+            BackendClient::Unused(never) => match *never {},
             #[cfg(feature = "vdir")]
             BackendClient::Vdir(client) => client.delete_item(calendar_id, item_id),
             #[cfg(feature = "caldav")]
@@ -377,6 +478,14 @@ impl BackendConfig {
     /// Opens the backend this configuration describes.
     fn open(&self) -> Result<BackendClient> {
         match self {
+            #[cfg(not(any(
+                feature = "vdir",
+                feature = "caldav",
+                feature = "pimdir",
+                feature = "gcal",
+                feature = "msgraph"
+            )))]
+            Self::Unused(never) => match *never {},
             #[cfg(feature = "vdir")]
             Self::Vdir(config) => {
                 use crate::vdir::backend::VdirBackend;

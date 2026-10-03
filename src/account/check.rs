@@ -16,7 +16,7 @@ use serde::Serialize;
 
 use crate::{
     backend::Backend,
-    config::{AccountConfig, Config},
+    config::{AccountConfig, Config, NO_CONFIG_HINT},
 };
 
 /// Validate the account configuration.
@@ -40,7 +40,7 @@ impl AccountCheckCommand {
     ) -> Result<()> {
         let mut config = match Config::from_paths_or_default(config_paths)? {
             Some(config) => config,
-            None => bail!("No configuration found. Run `calendula` to generate one."),
+            None => bail!("No configuration found, {NO_CONFIG_HINT}"),
         };
 
         let (name, account_config) = config
@@ -130,7 +130,10 @@ pub fn check_account(
 ///
 /// Only the wizard asks, so it compiles with the backends the wizard
 /// configures.
-#[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+#[cfg(all(
+    feature = "wizard",
+    any(feature = "caldav", feature = "vdir", feature = "pimdir")
+))]
 pub fn all_ok(checks: &[BackendCheck]) -> bool {
     !checks.is_empty() && checks.iter().all(|check| check.ok)
 }

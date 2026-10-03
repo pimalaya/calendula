@@ -10,7 +10,10 @@ use std::{
 
 use anyhow::{Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
-#[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+#[cfg(all(
+    feature = "wizard",
+    any(feature = "caldav", feature = "vdir", feature = "pimdir")
+))]
 use pimalaya_cli::prompt;
 use pimalaya_cli::{
     clap::{
@@ -31,13 +34,15 @@ use crate::gcal::{cli::GcalCommand, client::build_gcal_client};
 use crate::pimdir::{backend::PimdirBackend, cli::PimdirCommand};
 #[cfg(feature = "vdir")]
 use crate::vdir::{cli::VdirCommand, client::build_vdir_client};
-#[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
-#[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+#[cfg(all(
+    feature = "wizard",
+    any(feature = "caldav", feature = "vdir", feature = "pimdir")
+))]
 use crate::wizard::{self, configure::ConfigureCommand};
 use crate::{
     account::cli::AccountCommand,
     backend::Backend,
-    config::{AccountConfig, CONFIG_SAMPLE_URL, Config},
+    config::{AccountConfig, Config, NO_CONFIG_HINT},
     json_schema,
     shared::{
         calendar::cli::CalendarCommand, client::CalendarClient, event::cli::EventCommand,
@@ -111,7 +116,10 @@ pub enum CalendulaCommand {
     #[command(subcommand)]
     Vdir(VdirCommand),
     /// Configure an account interactively.
-    #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+    #[cfg(all(
+        feature = "wizard",
+        any(feature = "caldav", feature = "vdir", feature = "pimdir")
+    ))]
     #[command(visible_alias = "wizard")]
     Configure(ConfigureCommand),
     #[command(subcommand)]
@@ -166,9 +174,8 @@ pub fn load_config(printer: &mut impl Printer, config_paths: &[PathBuf]) -> Resu
     match Config::from_paths_or_default(config_paths)? {
         Some(config) => Ok(config),
         None => bail!(
-            "No configuration found at {}, run `calendula configure` to generate one \
-             or write it by hand: {CONFIG_SAMPLE_URL}",
-            path.display(),
+            "No configuration found at {}, {NO_CONFIG_HINT}",
+            path.display()
         ),
     }
 }
@@ -180,7 +187,10 @@ pub fn load_config(printer: &mut impl Printer, config_paths: &[PathBuf]) -> Resu
 /// configuration: a bare invocation, and a command needing an account.
 /// A hook rather than a gate, so a declined offer is the caller's
 /// business.
-#[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+#[cfg(all(
+    feature = "wizard",
+    any(feature = "caldav", feature = "vdir", feature = "pimdir")
+))]
 pub fn offer_configuration(
     printer: &mut impl Printer,
     config_paths: &[PathBuf],
@@ -197,11 +207,14 @@ pub fn offer_configuration(
     Ok(true)
 }
 
-/// Reports that this build carries no wizard-capable backend.
+/// Reports that this build carries no wizard.
 ///
 /// Nothing to walk the user through, so it names the missing features
 /// rather than offering an empty flow.
-#[cfg(not(any(feature = "caldav", feature = "vdir", feature = "pimdir")))]
+#[cfg(not(all(
+    feature = "wizard",
+    any(feature = "caldav", feature = "vdir", feature = "pimdir")
+)))]
 pub fn offer_configuration(
     _printer: &mut impl Printer,
     _config_paths: &[PathBuf],
@@ -209,8 +222,9 @@ pub fn offer_configuration(
 ) -> Result<bool> {
     eprintln!();
     eprintln!(
-        "This build carries no wizard-capable backend (caldav, vdir, pimdir); \
-         write a configuration by hand, starting from config.sample.toml"
+        "This build carries no wizard, which needs the `wizard` feature and one of \
+         caldav, vdir or pimdir; write a configuration by hand, starting from \
+         config.sample.toml"
     );
     eprintln!();
 
@@ -261,7 +275,10 @@ impl CalendulaCommand {
                 cmd.execute(printer, client)
             }
 
-            #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+            #[cfg(all(
+                feature = "wizard",
+                any(feature = "caldav", feature = "vdir", feature = "pimdir")
+            ))]
             Self::Configure(cmd) => cmd.execute(printer, config_paths),
             Self::Account(cmd) => cmd.execute(printer, config_paths, account_name, backend),
             Self::Completion(cmd) => cmd.execute(printer, CalendulaCli::command()),

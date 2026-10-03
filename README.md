@@ -44,6 +44,8 @@ CLI to manage calendars.
 > [!TIP]
 > Each backend sits behind its own cargo feature (`caldav`, `gcal`, `msgraph`, `vdir`, `pimdir`), all enabled by default. Build with `--no-default-features` and pick the ones you need.
 >
+> The default `wizard` feature brings the interactive `configure`; leave it out of a scripted or embedded build that never prompts.
+>
 > The default `vendored` feature builds SQLite from source; leave it out to link the system one.
 
 ## RFC coverage

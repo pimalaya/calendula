@@ -14,7 +14,10 @@
 
 use std::{collections::HashMap, path::PathBuf};
 
-#[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+#[cfg(all(
+    feature = "wizard",
+    any(feature = "caldav", feature = "vdir", feature = "pimdir")
+))]
 use anyhow::Result;
 use crossterm::style::Color;
 use pimalaya_cli::table::ContentArrangement;
@@ -26,7 +29,10 @@ use pimalaya_config::toml::opt_shell_expanded_path;
 use pimalaya_config::toml::shell_expanded_path;
 #[cfg(feature = "caldav")]
 use pimalaya_config::toml::shell_expanded_string;
-#[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+#[cfg(all(
+    feature = "wizard",
+    any(feature = "caldav", feature = "vdir", feature = "pimdir")
+))]
 use pimalaya_config::toml::to_string;
 use pimalaya_config::{command::CommandConfig, toml::TomlConfig};
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
@@ -91,7 +97,10 @@ impl TomlConfig for Config {
     }
 }
 
-#[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+#[cfg(all(
+    feature = "wizard",
+    any(feature = "caldav", feature = "vdir", feature = "pimdir")
+))]
 /// Reading order of a generated account's groups.
 ///
 /// What the account is, then the backend it reads calendars from, then
@@ -102,14 +111,20 @@ const RENDER_ORDER: [&str; 11] = [
     "journal", "item",
 ];
 
-#[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+#[cfg(all(
+    feature = "wizard",
+    any(feature = "caldav", feature = "vdir", feature = "pimdir")
+))]
 /// Keys naming what a backend group points at, lifted to its top.
 ///
 /// Serialized alphabetically, `caldav.server` would otherwise read
 /// under the `caldav.auth` credential authenticating against it.
 const ENDPOINT_KEYS: [&str; 5] = ["discover", "server", "home", "home-dir", "root"];
 
-#[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+#[cfg(all(
+    feature = "wizard",
+    any(feature = "caldav", feature = "vdir", feature = "pimdir")
+))]
 impl AccountConfig {
     /// Renders this account as an `[accounts.<name>]` block.
     ///
@@ -183,8 +198,28 @@ impl AccountConfig {
 
 /// The documented sample configuration, named wherever this crate
 /// reports a missing or an incomplete one.
+#[cfg(all(
+    feature = "wizard",
+    any(feature = "caldav", feature = "vdir", feature = "pimdir")
+))]
 pub const CONFIG_SAMPLE_URL: &str =
     "https://github.com/pimalaya/calendula/blob/master/config.sample.toml";
+
+/// How to get a configuration, for the errors meeting none.
+#[cfg(all(
+    feature = "wizard",
+    any(feature = "caldav", feature = "vdir", feature = "pimdir")
+))]
+pub const NO_CONFIG_HINT: &str = "run `calendula configure` to generate one, or write it by hand: \
+     https://github.com/pimalaya/calendula/blob/master/config.sample.toml";
+
+/// How to get a configuration, for the errors meeting none.
+#[cfg(not(all(
+    feature = "wizard",
+    any(feature = "caldav", feature = "vdir", feature = "pimdir")
+)))]
+pub const NO_CONFIG_HINT: &str = "write one by hand: \
+     https://github.com/pimalaya/calendula/blob/master/config.sample.toml";
 
 /// One account: the backends it reads calendars from, plus whatever it
 /// overrides of the global rendering options.
@@ -789,7 +824,10 @@ mod tests {
 
     /// The wizard writes no `default = false` line, the rest of the
     /// family omitting it too.
-    #[cfg(any(feature = "caldav", feature = "vdir", feature = "pimdir"))]
+    #[cfg(all(
+        feature = "wizard",
+        any(feature = "caldav", feature = "vdir", feature = "pimdir")
+    ))]
     #[test]
     fn a_rendered_account_spells_the_default_flag_only_when_it_is_set() {
         let mut account = AccountConfig::default();
