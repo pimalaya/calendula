@@ -49,7 +49,7 @@ impl PimdirPartstat {
 ///
 /// When several sources of the account can send it, pass `--source`.
 ///
-/// JSON output: `{"queued", "calendarId", "eventId", "partstat",
+/// JSON output: `{"queued", "calendarId", "eventId", "recurrenceId", "partstat",
 /// "comment", "source"}`, `queued` being the queue row.
 #[derive(Debug, Parser)]
 pub struct PimdirReplyCommand {
@@ -60,6 +60,12 @@ pub struct PimdirReplyCommand {
     /// Identifier of the event, as `event list` shows it.
     #[arg(value_name = "EVENT-ID")]
     pub event_id: String,
+
+    /// Limit it to one occurrence of a series, by the `recurrenceId` an
+    /// expanded `event list` shows (`YYYYMMDD`, `YYYYMMDDTHHMMSS` or with
+    /// a `Z`, as the series' `DTSTART` is written).
+    #[arg(long, short = 'r', value_name = "RECURRENCE-ID")]
+    pub recurrence_id: Option<String>,
 
     /// The answer.
     #[arg(value_name = "ANSWER", value_enum)]
@@ -83,6 +89,7 @@ impl PimdirReplyCommand {
             &calendar_id,
             &self.event_id,
             partstat,
+            self.recurrence_id.as_deref(),
             self.comment.as_deref(),
             self.source.as_deref(),
         )?;
@@ -91,6 +98,7 @@ impl PimdirReplyCommand {
             queued,
             calendar_id,
             self.event_id,
+            self.recurrence_id,
             Some(partstat),
             self.comment,
         ))
@@ -106,7 +114,7 @@ impl PimdirReplyCommand {
 ///
 /// When several sources of the account can send it, pass `--source`.
 ///
-/// JSON output: `{"queued", "calendarId", "eventId", "partstat",
+/// JSON output: `{"queued", "calendarId", "eventId", "recurrenceId", "partstat",
 /// "comment", "source"}`, `partstat` being `null`.
 #[derive(Debug, Parser)]
 pub struct PimdirCancelCommand {
@@ -117,6 +125,12 @@ pub struct PimdirCancelCommand {
     /// Identifier of the event, as `event list` shows it.
     #[arg(value_name = "EVENT-ID")]
     pub event_id: String,
+
+    /// Limit it to one occurrence of a series, by the `recurrenceId` an
+    /// expanded `event list` shows (`YYYYMMDD`, `YYYYMMDDTHHMMSS` or with
+    /// a `Z`, as the series' `DTSTART` is written).
+    #[arg(long, short = 'r', value_name = "RECURRENCE-ID")]
+    pub recurrence_id: Option<String>,
 
     /// A note for the attendees, sent with the cancellation.
     #[arg(long, short = 'm', value_name = "TEXT")]
@@ -134,6 +148,7 @@ impl PimdirCancelCommand {
         let queued = backend.cancel(
             &calendar_id,
             &self.event_id,
+            self.recurrence_id.as_deref(),
             self.comment.as_deref(),
             self.source.as_deref(),
         )?;
@@ -142,6 +157,7 @@ impl PimdirCancelCommand {
             queued,
             calendar_id,
             self.event_id,
+            self.recurrence_id,
             None,
             self.comment,
         ))
@@ -158,6 +174,8 @@ pub struct PimdirIntentOutput {
     pub calendar_id: String,
     /// The event the intent addresses.
     pub event_id: String,
+    /// The occurrence it is limited to, `null` for the whole series.
+    pub recurrence_id: Option<String>,
     /// The `PARTSTAT` a reply carries, `null` for a cancellation.
     pub partstat: Option<String>,
     /// The comment sent with it.
@@ -172,6 +190,7 @@ impl PimdirIntentOutput {
         queued: PimdirQueued,
         calendar_id: String,
         event_id: String,
+        recurrence_id: Option<String>,
         partstat: Option<&str>,
         comment: Option<String>,
     ) -> Self {
@@ -179,6 +198,7 @@ impl PimdirIntentOutput {
             queued: queued.row,
             calendar_id,
             event_id,
+            recurrence_id,
             partstat: partstat.map(ToOwned::to_owned),
             comment,
             source: queued.source,

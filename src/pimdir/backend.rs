@@ -26,12 +26,16 @@ use std::{io::Write, path::PathBuf};
 use anyhow::{Result, anyhow, bail};
 use ical::component::IcalComponentKind;
 use io_pimdir::{
-    capability::{CALENDAR_CANCEL, CALENDAR_REPLY, CALENDAR_SCHEDULING},
+    capability::{
+        CALENDAR_CANCEL, CALENDAR_CANCEL_OCCURRENCE, CALENDAR_REPLY, CALENDAR_REPLY_OCCURRENCE,
+        CALENDAR_SCHEDULING,
+    },
     client::{
         PimdirError,
         reader::{PimdirCollection, PimdirItem},
     },
     codec::PimdirAction,
+    intent::{PimdirIntentItem, PimdirInvitation, PimdirPartstat},
     object::PimdirObject,
     placement::PimdirFlags,
     summary::{
@@ -42,12 +46,12 @@ use io_pimdir::{
 use log::warn;
 use pimalaya_cli::printer::Printer;
 use pimalaya_config::toml::TomlConfig;
-use serde_json::{Map, Value, json};
 
 use crate::{
     account::context::Account,
     cli::load_config,
     config::PimdirConfig,
+    error::{CodedError, ErrorCode},
     pimdir::{
         client::PimdirClient,
         status::{PimdirCalendarStatus, PimdirStatusOutput},
@@ -60,12 +64,6 @@ use crate::{
         item::{CalendarItem, CalendarItemQuery, CalendarTimeRange},
     },
 };
-
-/// The queue kind of a reply to an invitation (pimdir STORAGE Annex B.2).
-const CALENDAR_REPLY_KIND: &str = "calendar-reply";
-
-/// The queue kind of the cancellation of an event the account organises.
-const CALENDAR_CANCEL_KIND: &str = "calendar-cancel";
 
 /// The media type a pimdir collection carries to be a calendar.
 const CALENDAR_KIND: &str = "text/calendar";
@@ -220,10 +218,14 @@ impl PimdirBackend {
         let stored = self.item(calendar_id, item_id)?;
 
         let Some(hash) = stored.object else {
-            bail!(
-                "Item `{item_id}` in calendar `{calendar_id}` is not downloaded yet \
-                 (body not fetched); run a sync to hydrate it"
-            );
+            return Err(CodedError::new(
+                ErrorCode::BodyPending,
+                format!(
+                    "Item `{item_id}` in calendar `{calendar_id}` is not downloaded yet \
+                     (body not fetched); run a sync to hydrate it"
+                ),
+            )
+            .into());
         };
 
         let contents = self.client.blobs.get(&hash)?.ok_or_else(|| {
@@ -511,6 +513,9 @@ impl PimdirBackend {
     /// organizer with `comment`, and the new `PARTSTAT` arrives with the
     /// next sync.
     ///
+    /// `recurrence_id` limits it to one occurrence of a series, spelled
+    /// as the item's `RECURRENCE-ID` would be (the series' `DTSTART`
+    /// form), and needs a performer declaring `calendar.reply.occurrence`.
     /// `source` picks the performer for this action alone, among several
     /// able to. Returns the queue row and the performer named in it.
     pub fn reply(
@@ -518,33 +523,35 @@ impl PimdirBackend {
         calendar_id: &str,
         item_id: &str,
         partstat: &str,
+        recurrence_id: Option<&str>,
         comment: Option<&str>,
         source: Option<&str>,
     ) -> Result<PimdirQueued> {
         self.known_collection(calendar_id)?;
 
-        let stored = self.item(calendar_id, item_id)?;
-        if let Some(contents) = self.body(&stored)?
-            && !names(&contents, "ORGANIZER")
-        {
-            bail!(
-                "Event `{item_id}` names no ORGANIZER, so it is not an invitation \
-                 and there is nobody to reply to"
-            );
-        }
+        let partstat = PimdirPartstat::parse(partstat)
+            .ok_or_else(|| anyhow!("Invalid PARTSTAT `{partstat}` for a reply"))?;
 
-        let mut payload = Map::new();
-        payload.insert("partstat".into(), json!(partstat));
-        if let Some(comment) = comment {
-            payload.insert("comment".into(), json!(comment));
+        let stored = self.item(calendar_id, item_id)?;
+        if let Some(contents) = self.body(&stored)? {
+            if !names(&contents, "ORGANIZER") {
+                bail!(
+                    "Event `{item_id}` names no ORGANIZER, so it is not an invitation \
+                     and there is nobody to reply to"
+                );
+            }
+            check_occurrence(calendar_id, &stored, &contents, recurrence_id)?;
         }
 
         self.intent(
             calendar_id,
-            stored.seq,
-            CALENDAR_REPLY_KIND,
-            CALENDAR_REPLY,
-            payload,
+            PimdirInvitation {
+                source: None,
+                item: PimdirIntentItem::Seq(stored.seq),
+                partstat: Some(partstat),
+                comment: comment.map(ToOwned::to_owned),
+                recurrence_id: recurrence_id.map(ToOwned::to_owned),
+            },
             source,
         )
     }
@@ -554,44 +561,46 @@ impl PimdirBackend {
     /// notifies the attendees with `comment`, and the removal arrives
     /// with the next sync.
     ///
-    /// An event inviting nobody has nobody to notify: `event delete`
-    /// removes it.
+    /// `recurrence_id` limits it to one occurrence, as for
+    /// [`reply`](Self::reply), and needs `calendar.cancel.occurrence`. An
+    /// event inviting nobody has nobody to notify: `event delete` removes
+    /// it.
     pub fn cancel(
         &mut self,
         calendar_id: &str,
         item_id: &str,
+        recurrence_id: Option<&str>,
         comment: Option<&str>,
         source: Option<&str>,
     ) -> Result<PimdirQueued> {
         self.known_collection(calendar_id)?;
 
         let stored = self.item(calendar_id, item_id)?;
-        if let Some(contents) = self.body(&stored)?
-            && !names(&contents, "ATTENDEE")
-        {
-            bail!(
-                "Event `{item_id}` names no ATTENDEE, so there is nobody to notify; \
-                 remove it with `event delete` instead"
-            );
-        }
-
-        let mut payload = Map::new();
-        if let Some(comment) = comment {
-            payload.insert("comment".into(), json!(comment));
+        if let Some(contents) = self.body(&stored)? {
+            if !names(&contents, "ATTENDEE") {
+                bail!(
+                    "Event `{item_id}` names no ATTENDEE, so there is nobody to notify; \
+                     remove it with `event delete` instead"
+                );
+            }
+            check_occurrence(calendar_id, &stored, &contents, recurrence_id)?;
         }
 
         self.intent(
             calendar_id,
-            stored.seq,
-            CALENDAR_CANCEL_KIND,
-            CALENDAR_CANCEL,
-            payload,
+            PimdirInvitation {
+                source: None,
+                item: PimdirIntentItem::Seq(stored.seq),
+                partstat: None,
+                comment: comment.map(ToOwned::to_owned),
+                recurrence_id: recurrence_id.map(ToOwned::to_owned),
+            },
             source,
         )
     }
 
-    /// Appends an intent addressing item `seq`, anchored on its
-    /// collection (pimdir STORAGE §15.6), naming its performer.
+    /// Appends an invitation intent, anchored on its collection (pimdir
+    /// STORAGE §15.6), naming its performer.
     ///
     /// A store whose sources declare nothing predates capabilities, and
     /// its owner picks the performer as it always did, so the payload
@@ -599,12 +608,17 @@ impl PimdirBackend {
     fn intent(
         &mut self,
         calendar_id: &str,
-        seq: i64,
-        kind: &str,
-        capability: &str,
-        mut payload: Map<String, Value>,
+        mut invitation: PimdirInvitation,
         source: Option<&str>,
     ) -> Result<PimdirQueued> {
+        let capability = match invitation.partstat {
+            Some(_) => CALENDAR_REPLY,
+            None => CALENDAR_CANCEL,
+        };
+        let PimdirIntentItem::Seq(seq) = invitation.item else {
+            bail!("An invitation intent of calendula names a stored item");
+        };
+
         let mut producer = self.client.producer()?;
 
         let declared = producer
@@ -613,7 +627,7 @@ impl PimdirBackend {
             .iter()
             .any(|source| source.declared.is_some());
 
-        let performer = match (declared, source) {
+        invitation.source = match (declared, source) {
             (false, source) => source.map(ToOwned::to_owned),
             (true, chosen) => match producer.performer(calendar_id, capability, chosen) {
                 Ok(source) => Some(source),
@@ -626,24 +640,35 @@ impl PimdirBackend {
             },
         };
 
-        payload.insert("v".into(), json!(1));
-        payload.insert("seq".into(), json!(seq));
-        if let Some(performer) = &performer {
-            payload.insert("source".into(), json!(performer));
-        }
+        let action = invitation
+            .to_action()
+            .map_err(|err| anyhow!("Queue {capability}: {err}"))?;
 
-        let action = PimdirAction::Unknown {
-            kind: kind.to_owned(),
-            payload: Value::Object(payload).to_string(),
-            object_hash: None,
+        let refuse = |err: PimdirError| match err {
+            PimdirError::Unsupported(refusal)
+                if refusal.capability == CALENDAR_REPLY_OCCURRENCE
+                    || refusal.capability == CALENDAR_CANCEL_OCCURRENCE =>
+            {
+                let who = match refusal.source.is_empty() {
+                    true => "no source of this store declares it".to_owned(),
+                    false => format!("source {} does not support it", refusal.source),
+                };
+                anyhow::Error::from(CodedError::new(
+                    ErrorCode::OccurrenceUnsupported,
+                    format!(
+                        "{OCCURRENCE_UNSUPPORTED}: {capability} needs {}, and {who}; omit \
+                         --recurrence-id to act on the whole series",
+                        refusal.capability,
+                    ),
+                ))
+            }
+            err => anyhow!("Queue {capability}: {err}"),
         };
 
-        let partials = producer
-            .check(calendar_id, &action)
-            .map_err(|err| anyhow!("Queue {capability}: {err}"))?;
+        let partials = producer.check(calendar_id, &action).map_err(refuse)?;
         let row = producer
             .enqueue(calendar_id, &action, None)
-            .map_err(|err| anyhow!("Queue {capability}: {err}"))?;
+            .map_err(refuse)?;
 
         for partial in &partials {
             warn!("{partial}");
@@ -652,7 +677,7 @@ impl PimdirBackend {
         Ok(PimdirQueued {
             row,
             seq,
-            source: performer,
+            source: invitation.source,
         })
     }
 
@@ -662,6 +687,45 @@ impl PimdirBackend {
             Some(hash) => Ok(self.client.blobs.get(hash)?),
             None => Ok(None),
         }
+    }
+}
+
+/// How the refusal of a reply or a cancel naming one occurrence starts
+/// when its performer cannot act on one alone, a prefix callers may match
+/// on.
+pub const OCCURRENCE_UNSUPPORTED: &str = "Occurrence not supported";
+
+/// Fails unless `contents` holds the occurrence `recurrence_id` names,
+/// spelled exactly as an expanded listing reports its `recurrenceId`.
+///
+/// The spelling is the payload's (pimdir STORAGE Annex B.2): the
+/// series' `DTSTART` form, which a performer matches verbatim, so a
+/// value naming the right instant in another form is refused too.
+fn check_occurrence(
+    calendar_id: &str,
+    stored: &PimdirItem,
+    contents: &[u8],
+    recurrence_id: Option<&str>,
+) -> Result<()> {
+    let Some(recurrence_id) = recurrence_id else {
+        return Ok(());
+    };
+
+    let item = CalendarItem {
+        id: stored.seq.to_string(),
+        calendar_id: calendar_id.to_owned(),
+        etag: None,
+        contents: contents.to_vec(),
+    };
+
+    match Event::occurrence(&item, recurrence_id) {
+        Some(event) if event.recurrence_id.as_deref() == Some(recurrence_id) => Ok(()),
+        Some(event) => bail!(
+            "Event `{}` spells that occurrence `{}`, not `{recurrence_id}`",
+            stored.seq,
+            event.recurrence_id.unwrap_or_default(),
+        ),
+        None => bail!("Event `{}` has no occurrence `{recurrence_id}`", stored.seq),
     }
 }
 
@@ -691,11 +755,15 @@ fn check_version(
         return Ok(());
     }
 
-    bail!(
-        "{PRECONDITION_FAILED}: item `{item_id}` in calendar `{calendar_id}` is at version \
-         `{}`, not `{expected}`; read it again",
-        current.unwrap_or("none (body not fetched)"),
+    Err(CodedError::new(
+        ErrorCode::PreconditionFailed,
+        format!(
+            "{PRECONDITION_FAILED}: item `{item_id}` in calendar `{calendar_id}` is at \
+             version `{}`, not `{expected}`; read it again",
+            current.unwrap_or("none (body not fetched)"),
+        ),
     )
+    .into())
 }
 
 /// Whether a stored item is of `kind`.
@@ -1020,7 +1088,14 @@ mod tests {
         let (_dir, mut backend, ids) = store(&[INVITATION]);
 
         let queued_row = backend
-            .reply("cal", &ids[0], "ACCEPTED", Some("See you there"), None)
+            .reply(
+                "cal",
+                &ids[0],
+                "ACCEPTED",
+                None,
+                Some("See you there"),
+                None,
+            )
             .unwrap();
 
         let rows = queued(&backend);
@@ -1044,7 +1119,7 @@ mod tests {
         let (_dir, mut backend, ids) = store(&[INVITATION]);
 
         backend
-            .reply("cal", &ids[0], "DECLINED", None, Some("caldav"))
+            .reply("cal", &ids[0], "DECLINED", None, None, Some("caldav"))
             .unwrap();
 
         let rows = queued(&backend);
@@ -1064,7 +1139,7 @@ mod tests {
         let (_dir, mut backend, ids) = store(&[INVITATION]);
 
         backend
-            .cancel("cal", &ids[0], Some("Moved to next week"), None)
+            .cancel("cal", &ids[0], None, Some("Moved to next week"), None)
             .unwrap();
 
         let rows = queued(&backend);
@@ -1084,10 +1159,10 @@ mod tests {
     fn an_event_with_nobody_to_answer_or_notify_queues_nothing() {
         let (_dir, mut backend, ids) = store(&[ALONE]);
 
-        let reply = backend.reply("cal", &ids[0], "ACCEPTED", None, None);
+        let reply = backend.reply("cal", &ids[0], "ACCEPTED", None, None, None);
         assert!(reply.unwrap_err().to_string().contains("ORGANIZER"));
 
-        let cancel = backend.cancel("cal", &ids[0], None, None);
+        let cancel = backend.cancel("cal", &ids[0], None, None, None);
         assert!(cancel.unwrap_err().to_string().contains("event delete"));
 
         assert!(queued(&backend).is_empty());
@@ -1097,8 +1172,16 @@ mod tests {
     fn an_unknown_event_or_calendar_queues_nothing() {
         let (_dir, mut backend, _) = store(&[INVITATION]);
 
-        assert!(backend.reply("cal", "999", "ACCEPTED", None, None).is_err());
-        assert!(backend.reply("nope", "1", "ACCEPTED", None, None).is_err());
+        assert!(
+            backend
+                .reply("cal", "999", "ACCEPTED", None, None, None)
+                .is_err()
+        );
+        assert!(
+            backend
+                .reply("nope", "1", "ACCEPTED", None, None, None)
+                .is_err()
+        );
         assert!(queued(&backend).is_empty());
     }
 
@@ -1128,6 +1211,24 @@ mod tests {
 
     /// A write naming a version the item no longer has stages nothing,
     /// and says so with the stable prefix.
+    /// The refusals a caller acts on carry their stable code.
+    #[test]
+    fn a_stale_if_match_and_an_unsupported_occurrence_carry_their_code() {
+        use crate::error::{ErrorCode, code_of};
+
+        let (_dir, mut backend, ids) = store(&[ALONE]);
+        let err = backend
+            .delete_item("cal", &ids[0], Some("stale"))
+            .unwrap_err();
+        assert_eq!(code_of(&err), Some(ErrorCode::PreconditionFailed));
+
+        let (_dir, mut backend, ids) = store(&[WEEKLY]);
+        let err = backend
+            .cancel("cal", &ids[0], Some("20261012T090000Z"), None, None)
+            .unwrap_err();
+        assert_eq!(code_of(&err), Some(ErrorCode::OccurrenceUnsupported));
+    }
+
     #[test]
     fn a_stale_if_match_refuses_the_update_and_the_delete() {
         let (_dir, mut backend, ids) = store(&[ALONE]);
@@ -1183,7 +1284,7 @@ mod tests {
         drop(owner);
 
         let queued_row = backend
-            .reply("cal", &ids[0], "TENTATIVE", None, None)
+            .reply("cal", &ids[0], "TENTATIVE", None, None, None)
             .unwrap();
 
         assert_eq!(queued_row.source.as_deref(), Some("caldav"));
@@ -1212,7 +1313,136 @@ mod tests {
         owner.declare("caldav", &declaration).unwrap();
         drop(owner);
 
-        assert!(backend.cancel("cal", &ids[0], None, None).is_err());
+        assert!(backend.cancel("cal", &ids[0], None, None, None).is_err());
+        assert!(queued(&backend).is_empty());
+    }
+
+    /// A weekly invitation, organised by someone else, inviting the
+    /// account.
+    const WEEKLY: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n\
+        BEGIN:VEVENT\r\nUID:weekly-invite@example.org\r\nDTSTAMP:20261001T080000Z\r\n\
+        DTSTART:20261005T090000Z\r\nDTEND:20261005T100000Z\r\nRRULE:FREQ=WEEKLY\r\n\
+        SUMMARY:Weekly\r\nORGANIZER;CN=Alice:mailto:alice@example.org\r\n\
+        ATTENDEE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:bob@example.org\r\n\
+        END:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    /// Declares every calendar capability for `caldav`, but `lacking`.
+    fn declare(dir: &tempfile::TempDir, lacking: &[&str]) {
+        let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source("caldav");
+        let declaration: Vec<_> = io_pimdir::capability::CALENDAR
+            .iter()
+            .map(|name| io_pimdir::capability::PimdirCapability {
+                collection: None,
+                name: name.to_string(),
+                support: match lacking.contains(name) {
+                    true => io_pimdir::capability::PimdirSupport::None,
+                    false => io_pimdir::capability::PimdirSupport::Full,
+                },
+                detail: None,
+            })
+            .collect();
+        owner.declare("caldav", &declaration).unwrap();
+    }
+
+    #[test]
+    fn a_reply_and_a_cancel_name_one_occurrence() {
+        let (dir, mut backend, ids) = store(&[WEEKLY]);
+        declare(&dir, &[]);
+
+        let reply = backend
+            .reply(
+                "cal",
+                &ids[0],
+                "ACCEPTED",
+                Some("20261012T090000Z"),
+                None,
+                None,
+            )
+            .unwrap();
+        backend
+            .cancel("cal", &ids[0], Some("20261019T090000Z"), None, None)
+            .unwrap();
+
+        let rows = queued(&backend);
+        assert_eq!(
+            rows[0].1,
+            serde_json::json!({
+                "v": 1,
+                "seq": reply.seq,
+                "source": "caldav",
+                "partstat": "ACCEPTED",
+                "recurrence_id": "20261012T090000Z",
+            })
+        );
+        assert_eq!(rows[1].0, "calendar-cancel");
+        assert_eq!(rows[1].1["recurrence_id"], "20261019T090000Z");
+    }
+
+    #[test]
+    fn an_occurrence_the_series_lacks_or_misspells_queues_nothing() {
+        let (dir, mut backend, ids) = store(&[WEEKLY]);
+        declare(&dir, &[]);
+
+        let missing = backend.reply(
+            "cal",
+            &ids[0],
+            "ACCEPTED",
+            Some("20261013T090000Z"),
+            None,
+            None,
+        );
+        assert!(missing.unwrap_err().to_string().contains("no occurrence"));
+
+        let misspelled = backend.cancel("cal", &ids[0], Some("20261012"), None, None);
+        assert!(misspelled.is_err());
+
+        assert!(queued(&backend).is_empty());
+    }
+
+    #[test]
+    fn a_performer_unable_to_act_on_one_occurrence_is_named() {
+        let (dir, mut backend, ids) = store(&[WEEKLY]);
+        declare(
+            &dir,
+            &[
+                io_pimdir::capability::CALENDAR_REPLY_OCCURRENCE,
+                io_pimdir::capability::CALENDAR_CANCEL_OCCURRENCE,
+            ],
+        );
+
+        let err = backend
+            .reply(
+                "cal",
+                &ids[0],
+                "ACCEPTED",
+                Some("20261012T090000Z"),
+                None,
+                None,
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(err.starts_with(OCCURRENCE_UNSUPPORTED), "{err}");
+        assert!(err.contains("calendar.reply.occurrence"), "{err}");
+        assert!(err.contains("caldav"), "{err}");
+
+        // NOTE: the whole series stays answerable.
+        backend
+            .reply("cal", &ids[0], "ACCEPTED", None, None, None)
+            .unwrap();
+        assert_eq!(queued(&backend).len(), 1);
+    }
+
+    #[test]
+    fn an_undeclared_store_refuses_one_occurrence() {
+        let (_dir, mut backend, ids) = store(&[WEEKLY]);
+
+        let err = backend
+            .cancel("cal", &ids[0], Some("20261012T090000Z"), None, None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.starts_with(OCCURRENCE_UNSUPPORTED), "{err}");
         assert!(queued(&backend).is_empty());
     }
 

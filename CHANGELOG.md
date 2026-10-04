@@ -15,9 +15,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Added `pimdir reply` and `pimdir cancel`, queueing the `calendar-reply` and `calendar-cancel` intents the sync engine sends (pimdir STORAGE Annex B.2).
 - Added `etag` to the event JSON (`event list`, `event read`, `event find`) and to `item read`, the version a write can be gated on. On pimdir it is the store's hash of the item's body.
 - Added `--if-match` to `event delete`, `todo delete`, `journal delete` and `item delete` (CalDAV `If-Match`, msgraph `changeKey`, pimdir version; refused on vdir and gcal).
+- Added `pimdir reply --recurrence-id` and `pimdir cancel --recurrence-id`, limiting the intent to one occurrence (`recurrence_id`, pimdir draft-04); a performer unable to act on one occurrence is refused with `occurrence-unsupported`. Their JSON adds `recurrenceId`.
+- Added a stable `code` to the `--json` error output for failures a caller acts on: `body-pending`, `precondition-failed`, `occurrence-unsupported`.
 
 ### Changed
 
+- Changed io-pimdir to the git revision `3a9ffb8` (pimdir draft-04).
 - Changed the pimdir `update_item` and `delete_item` to honour `--if-match`: a write naming a version the item no longer has is refused before anything is queued, with an error starting `Precondition failed:`.
 - Changed the local date windows (vdir, msgraph, pimdir) to keep a recurring event whose occurrences fall in them, not only one starting there.
 - Changed the pimdir writes to be refused before they are queued when a source of the store does not support them, naming the capability, the source and why (pimdir draft-03, STORAGE §15.6). A write a source supports only in part logs a warning.

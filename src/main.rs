@@ -129,6 +129,7 @@ mod backend;
 mod caldav;
 mod cli;
 mod config;
+mod error;
 #[cfg(feature = "gcal")]
 mod gcal;
 mod json_schema;
@@ -153,7 +154,6 @@ use std::{
 use anyhow::Result;
 use clap::{CommandFactory, Parser};
 use pimalaya_cli::{
-    error::ErrorReport,
     log::Logger,
     printer::{Printer, StdoutPrinter},
 };
@@ -165,7 +165,7 @@ fn main() {
     let cli = CalendulaCli::parse();
     let mut printer = StdoutPrinter::new(&cli.json);
     let result = run(cli, &mut printer);
-    ErrorReport::eval(&mut printer, result);
+    error::eval(&mut printer, result);
 }
 
 fn run(cli: CalendulaCli, printer: &mut StdoutPrinter) -> Result<()> {
