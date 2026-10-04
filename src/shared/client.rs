@@ -440,7 +440,16 @@ impl CalendarClient {
     }
 
     /// Deletes `item_id` from `calendar_id`.
-    pub fn delete_item(&mut self, calendar_id: &str, item_id: &str) -> Result<()> {
+    ///
+    /// `if_match` gates the delete as it gates [`update_item`](Self::update_item);
+    /// a backend with no such guard refuses it rather than pretending the
+    /// check happened.
+    pub fn delete_item(
+        &mut self,
+        calendar_id: &str,
+        item_id: &str,
+        if_match: Option<&str>,
+    ) -> Result<()> {
         match self.open()? {
             #[cfg(not(any(
                 feature = "vdir",
@@ -451,15 +460,15 @@ impl CalendarClient {
             )))]
             BackendClient::Unused(never) => match *never {},
             #[cfg(feature = "vdir")]
-            BackendClient::Vdir(client) => client.delete_item(calendar_id, item_id),
+            BackendClient::Vdir(client) => client.delete_item(calendar_id, item_id, if_match),
             #[cfg(feature = "caldav")]
-            BackendClient::Caldav(client) => client.delete_item(calendar_id, item_id),
+            BackendClient::Caldav(client) => client.delete_item(calendar_id, item_id, if_match),
             #[cfg(feature = "pimdir")]
-            BackendClient::Pimdir(client) => client.delete_item(calendar_id, item_id),
+            BackendClient::Pimdir(client) => client.delete_item(calendar_id, item_id, if_match),
             #[cfg(feature = "gcal")]
-            BackendClient::Gcal(client) => client.delete_item(calendar_id, item_id),
+            BackendClient::Gcal(client) => client.delete_item(calendar_id, item_id, if_match),
             #[cfg(feature = "msgraph")]
-            BackendClient::Msgraph(client) => client.delete_item(calendar_id, item_id),
+            BackendClient::Msgraph(client) => client.delete_item(calendar_id, item_id, if_match),
         }
     }
 }

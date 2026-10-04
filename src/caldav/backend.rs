@@ -156,9 +156,14 @@ impl CaldavBackend {
         Ok(())
     }
 
-    /// DELETEs a resource unconditionally.
-    pub fn delete_item(&mut self, calendar_id: &str, item_id: &str) -> Result<()> {
-        self.client.delete_item(calendar_id, item_id, None)?;
+    /// DELETEs a resource, gated on `if_match` when given.
+    pub fn delete_item(
+        &mut self,
+        calendar_id: &str,
+        item_id: &str,
+        if_match: Option<&str>,
+    ) -> Result<()> {
+        self.client.delete_item(calendar_id, item_id, if_match)?;
         Ok(())
     }
 }

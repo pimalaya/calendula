@@ -317,8 +317,19 @@ impl GcalBackend {
         Ok(())
     }
 
-    /// Deletes an event unconditionally.
-    pub fn delete_item(&mut self, calendar_id: &str, item_id: &str) -> Result<()> {
+    /// Deletes an event.
+    ///
+    /// Google offers no precondition on a delete, so an `if_match` is
+    /// refused rather than dropped.
+    pub fn delete_item(
+        &mut self,
+        calendar_id: &str,
+        item_id: &str,
+        if_match: Option<&str>,
+    ) -> Result<()> {
+        if if_match.is_some() {
+            bail!("Google Calendar cannot gate a delete on an ETag");
+        }
         self.client.event_delete(calendar_id, item_id, None, None)?;
         Ok(())
     }

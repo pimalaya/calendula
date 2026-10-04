@@ -39,6 +39,9 @@ use crate::shared::item::{CalendarItem, CalendarTimeRange};
 pub struct Event {
     /// The id of the item the event was projected from.
     pub id: String,
+    /// The entity tag of that item: the version a write to it can be
+    /// gated on (`--if-match`), `null` when the backend has none.
+    pub etag: Option<String>,
     /// The event's `UID`, empty when it carries none.
     pub uid: String,
     /// The instance identity of an occurrence, as a `RECURRENCE-ID`
@@ -128,18 +131,21 @@ impl Event {
     /// so one malformed resource does not stop the rest of the calendar from
     /// rendering.
     pub fn project(item: &CalendarItem) -> Vec<Self> {
-        expand::project(item)
+        tagged(item, expand::project(item))
     }
 
     /// Projects the occurrences of `item`'s events overlapping `range`,
     /// recurring series expanded, in start order.
     pub fn occurrences(item: &CalendarItem, range: Option<&CalendarTimeRange>) -> Vec<Self> {
-        expand::occurrences(item, range)
+        tagged(item, expand::occurrences(item, range))
     }
 
     /// Projects the one occurrence of `item` that `recurrence_id` names.
     pub fn occurrence(item: &CalendarItem, recurrence_id: &str) -> Option<Self> {
-        expand::occurrence(item, recurrence_id)
+        expand::occurrence(item, recurrence_id).map(|event| Event {
+            etag: item.etag.clone(),
+            ..event
+        })
     }
 
     /// The label an agenda cell shows: the summary, then the description.
@@ -155,6 +161,17 @@ impl Event {
     pub fn start_at(&self) -> Option<NaiveDateTime> {
         parse_stamp(&self.start)
     }
+}
+
+/// Stamps every event projected from `item` with the item's entity tag.
+fn tagged(item: &CalendarItem, events: Vec<Event>) -> Vec<Event> {
+    events
+        .into_iter()
+        .map(|event| Event {
+            etag: item.etag.clone(),
+            ..event
+        })
+        .collect()
 }
 
 /// Parses an iCalendar DATE or DATE-TIME into a [`NaiveDateTime`].

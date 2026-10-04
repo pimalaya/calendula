@@ -122,9 +122,14 @@ A pimdir write SHALL append one action to the store's queue (pimdir SPEC 15.1) t
 
 The body SHALL reach the blob tree through the blob writer, durably, before the row that pins it is appended, and the action SHALL address the item by the public `seq` that is already the item's shared id.
 
-`update_item` SHALL ignore `--if-match`, because the engine reconciles the applied edit against the base body it recorded at sync time, which is stronger than an entity-tag precondition a local store cannot check.
+`update_item` and `delete_item` SHALL honour `if_match` against the item's version. The engine still reconciles an applied edit against the base body it recorded at sync time: the precondition is the caller's, the merge the store's.
 
 Because a queued create carries no public id until the owner applies it, `create_item` SHALL report the item's link id instead.
+
+### Requirement: A pimdir item's version is its body hash
+The pimdir backend SHALL report as an item's `etag` the store's hash of its body, the pending queue folded in, so a staged update moves it at once. An item whose body is not local SHALL report none.
+
+`update_item` and `delete_item` SHALL refuse, before anything is queued, a write whose `if_match` is not that version, surrounding double quotes ignored, with an error starting `Precondition failed:` and naming the version found and the one expected. An item with no local body matches no version.
 
 ### Requirement: pimdir queues scheduling intents
 `pimdir reply <EVENT-ID> accept|tentative|decline` SHALL append one `calendar-reply` action `{ "v": 1, "source"?, "seq", "partstat": "ACCEPTED"|"TENTATIVE"|"DECLINED", "comment"? }`, and `pimdir cancel <EVENT-ID>` one `calendar-cancel` action `{ "v": 1, "source"?, "seq", "comment"? }` (pimdir STORAGE Annex B.2), anchored on the item's calendar, through the producer and its §15.6 gate, and SHALL touch no item.

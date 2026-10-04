@@ -166,7 +166,19 @@ impl VdirBackend {
     }
 
     /// Removes an item file.
-    pub fn delete_item(&mut self, calendar_id: &str, item_id: &str) -> Result<()> {
+    ///
+    /// A vdir item has no entity tag, so an `if_match` is refused.
+    pub fn delete_item(
+        &mut self,
+        calendar_id: &str,
+        item_id: &str,
+        if_match: Option<&str>,
+    ) -> Result<()> {
+        if if_match.is_some() {
+            return Err(anyhow!(
+                "The vdir backend has no ETag, so it cannot honour If-Match"
+            ));
+        }
         self.client.delete_item(self.path(calendar_id), item_id)?;
         Ok(())
     }

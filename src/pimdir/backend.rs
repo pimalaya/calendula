@@ -233,7 +233,7 @@ impl PimdirBackend {
         Ok(CalendarItem {
             id: stored.seq.to_string(),
             calendar_id: calendar_id.to_owned(),
-            etag: None,
+            etag: Some(hash.0),
             contents,
         })
     }
@@ -262,19 +262,23 @@ impl PimdirBackend {
 
     /// Stages a body replacement as an `update` the next sync pushes.
     ///
-    /// The engine three-way merges it against the base body it recorded
-    /// at sync time, which is why `if_match` is ignored: that base is a
-    /// stronger guarantee than an entity tag a local store cannot check.
+    /// `if_match` gates the staging on the item's version, the store's
+    /// hash of its body with the pending queue folded in. The engine
+    /// still three-way merges the update against the base body it
+    /// recorded at sync time: the gate is the caller's, the merge the
+    /// store's.
     pub fn update_item(
         &mut self,
         calendar_id: &str,
         item_id: &str,
         contents: Vec<u8>,
-        _if_match: Option<&str>,
+        if_match: Option<&str>,
     ) -> Result<()> {
         self.known_collection(calendar_id)?;
 
-        let seq = self.item(calendar_id, item_id)?.seq;
+        let stored = self.item(calendar_id, item_id)?;
+        check_version(&stored, calendar_id, item_id, if_match)?;
+        let seq = stored.seq;
         let object = self.stage_body(&contents)?;
 
         let action = PimdirAction::Update {
@@ -285,10 +289,19 @@ impl PimdirBackend {
     }
 
     /// Stages a `remove` action: a tombstone, then a server-side delete.
-    pub fn delete_item(&mut self, calendar_id: &str, item_id: &str) -> Result<()> {
+    ///
+    /// `if_match` gates it as it gates [`update_item`](Self::update_item).
+    pub fn delete_item(
+        &mut self,
+        calendar_id: &str,
+        item_id: &str,
+        if_match: Option<&str>,
+    ) -> Result<()> {
         self.known_collection(calendar_id)?;
 
-        let seq = self.item(calendar_id, item_id)?.seq;
+        let stored = self.item(calendar_id, item_id)?;
+        check_version(&stored, calendar_id, item_id, if_match)?;
+        let seq = stored.seq;
         self.enqueue(calendar_id, &PimdirAction::Remove { seq }, None)
     }
 
@@ -437,7 +450,7 @@ impl PimdirBackend {
         Ok(CalendarItem {
             id: stored.seq.to_string(),
             calendar_id: calendar_id.to_owned(),
-            etag: None,
+            etag: stored.object.as_ref().map(|hash| hash.0.clone()),
             contents,
         })
     }
@@ -650,6 +663,39 @@ impl PimdirBackend {
             None => Ok(None),
         }
     }
+}
+
+/// How the refusal of a write whose `--if-match` names a version the
+/// item no longer has starts, a prefix callers may match on.
+pub const PRECONDITION_FAILED: &str = "Precondition failed";
+
+/// Fails unless `if_match` names the item's current version.
+///
+/// The version is the store's hash of the item's body, the pending
+/// queue folded in: the `etag` a read or a listing reports. An item
+/// whose body is not local has no version to match. Surrounding double
+/// quotes are dropped, so an HTTP-quoted tag matches as well.
+fn check_version(
+    stored: &PimdirItem,
+    calendar_id: &str,
+    item_id: &str,
+    if_match: Option<&str>,
+) -> Result<()> {
+    let Some(expected) = if_match else {
+        return Ok(());
+    };
+    let expected = expected.trim().trim_matches('"');
+    let current = stored.object.as_ref().map(|hash| hash.0.as_str());
+
+    if current == Some(expected) {
+        return Ok(());
+    }
+
+    bail!(
+        "{PRECONDITION_FAILED}: item `{item_id}` in calendar `{calendar_id}` is at version \
+         `{}`, not `{expected}`; read it again",
+        current.unwrap_or("none (body not fetched)"),
+    )
 }
 
 /// Whether a stored item is of `kind`.
@@ -1054,6 +1100,67 @@ mod tests {
         assert!(backend.reply("cal", "999", "ACCEPTED", None, None).is_err());
         assert!(backend.reply("nope", "1", "ACCEPTED", None, None).is_err());
         assert!(queued(&backend).is_empty());
+    }
+
+    /// A read and a listing report the one version, the body's hash,
+    /// and a staged update moves it at once.
+    #[test]
+    fn the_version_is_the_body_hash_and_follows_a_staged_update() {
+        let (_dir, mut backend, ids) = store(&[ALONE]);
+
+        let read = backend.get_item("cal", &ids[0]).unwrap();
+        let listed = backend
+            .list_items("cal", CalendarItemQuery::default())
+            .unwrap();
+        let etag = read.etag.clone().unwrap();
+        assert_eq!(listed[0].etag.as_deref(), Some(etag.as_str()));
+        assert_eq!(etag, backend.client.reader.hash(ALONE.as_bytes()).0);
+
+        let edited = ALONE.replace("SUMMARY:", "SUMMARY:Edited ");
+        backend
+            .update_item("cal", &ids[0], edited.clone().into_bytes(), Some(&etag))
+            .unwrap();
+
+        let moved = backend.get_item("cal", &ids[0]).unwrap().etag.unwrap();
+        assert_ne!(moved, etag);
+        assert_eq!(moved, backend.client.reader.hash(edited.as_bytes()).0);
+    }
+
+    /// A write naming a version the item no longer has stages nothing,
+    /// and says so with the stable prefix.
+    #[test]
+    fn a_stale_if_match_refuses_the_update_and_the_delete() {
+        let (_dir, mut backend, ids) = store(&[ALONE]);
+        let pending = |backend: &PimdirBackend| {
+            backend
+                .client
+                .producer()
+                .unwrap()
+                .pending_actions("cal")
+                .unwrap()
+                .len()
+        };
+
+        let update = backend.update_item("cal", &ids[0], ALONE.into(), Some("stale"));
+        let err = update.unwrap_err().to_string();
+        assert!(err.starts_with(PRECONDITION_FAILED), "{err}");
+        assert!(err.contains("`stale`"), "{err}");
+
+        let delete = backend.delete_item("cal", &ids[0], Some("stale"));
+        assert!(
+            delete
+                .unwrap_err()
+                .to_string()
+                .starts_with(PRECONDITION_FAILED)
+        );
+        assert_eq!(pending(&backend), 0);
+
+        let etag = backend.get_item("cal", &ids[0]).unwrap().etag.unwrap();
+        backend
+            .delete_item("cal", &ids[0], Some(&format!("\"{etag}\"")))
+            .unwrap();
+        assert_eq!(pending(&backend), 1);
+        assert!(backend.get_item("cal", &ids[0]).is_err());
     }
 
     #[test]

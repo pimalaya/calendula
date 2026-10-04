@@ -16,13 +16,15 @@ use crate::shared::{arg::CalendarIdArg, client::CalendarClient};
 ///
 /// The raw iCalendar bytes are printed verbatim on stdout.
 ///
-/// JSON output: `{"contents"}`, carrying the raw iCalendar.
+/// JSON output: `{"contents", "etag"}`, the raw iCalendar and the
+/// version a write can be gated on (`--if-match`), `null` when the
+/// backend has none.
 #[derive(Debug, Parser)]
 pub struct ItemReadCommand {
     #[command(flatten)]
     pub calendar: CalendarIdArg,
 
-    /// Stable item identifier (iCal `UID`).
+    /// Item to read, as `item list` reports it.
     #[arg(value_name = "ITEM-ID")]
     pub item_id: String,
 }
@@ -32,7 +34,10 @@ impl ItemReadCommand {
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         let item = client.get_item(&calendar_id, &self.item_id)?;
         let contents = String::from_utf8_lossy(&item.contents).into_owned();
-        printer.out(ItemReadOutput { contents })
+        printer.out(ItemReadOutput {
+            contents,
+            etag: item.etag,
+        })
     }
 }
 
@@ -42,6 +47,8 @@ impl ItemReadCommand {
 pub struct ItemReadOutput {
     /// The raw iCalendar bytes, lossily decoded as UTF-8.
     pub contents: String,
+    /// The entity tag of the version read, when the backend has one.
+    pub etag: Option<String>,
 }
 
 impl fmt::Display for ItemReadOutput {

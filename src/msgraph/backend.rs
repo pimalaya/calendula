@@ -270,7 +270,20 @@ impl MsgraphBackend {
     }
 
     /// Deletes an event, the whole series for a master.
-    pub fn delete_item(&mut self, _calendar_id: &str, item_id: &str) -> Result<()> {
+    ///
+    /// An `if_match` is checked against the event's `changeKey`, read
+    /// first, as an update checks it.
+    pub fn delete_item(
+        &mut self,
+        _calendar_id: &str,
+        item_id: &str,
+        if_match: Option<&str>,
+    ) -> Result<()> {
+        if let Some(expected) = if_match
+            && self.event(item_id)?.change_key.as_deref() != Some(expected)
+        {
+            bail!("Item `{item_id}` changed on Microsoft Graph since it was read");
+        }
         self.client.event_delete(item_id)?;
         Ok(())
     }
