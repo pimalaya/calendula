@@ -11,7 +11,6 @@ use pimalaya_cli::printer::Printer;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::shared::note::Noted;
 use crate::shared::{
     arg::{CalendarIdArg, IcalComposerArgs},
     client::CalendarClient,
@@ -56,10 +55,7 @@ impl EventCreateCommand {
 
         if !self.composer.interactive {
             let id = client.create_item(&calendar_id, seed)?;
-            return printer.out(Noted {
-                output: EventCreateOutput::Created(EventCreatedOutput { id }),
-                notes: client.take_notes(),
-            });
+            return printer.out(EventCreateOutput::Created(EventCreatedOutput { id }));
         }
 
         let composer = IcalComposer {
@@ -76,10 +72,7 @@ impl EventCreateCommand {
         let created = client.create_item(&calendar_id, draft.contents.clone());
         let id = draft.finish(created)?;
 
-        printer.out(Noted {
-            output: EventCreateOutput::Created(EventCreatedOutput { id }),
-            notes: client.take_notes(),
-        })
+        printer.out(EventCreateOutput::Created(EventCreatedOutput { id }))
     }
 }
 
@@ -111,9 +104,6 @@ impl fmt::Display for EventCreateOutput {
 #[serde(rename_all = "camelCase")]
 pub struct EventCreatedOutput {
     /// Backend-assigned identifier of the new event.
-    ///
-    /// On pimdir this is the link id the queued create was staged under,
-    /// the store having no id of its own until a sync applies it.
     pub id: String,
 }
 

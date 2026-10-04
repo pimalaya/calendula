@@ -15,6 +15,9 @@ The shared adapters SHALL cover, per backend: `list_calendars`, `create_calendar
 
 A backend that cannot model an operation SHALL refuse it with a message naming what to do instead, rather than emulating it.
 
+### Requirement: Shared outputs carry no backend details
+The output of a shared command SHALL NOT carry a field that only one backend fills. A backend detail worth showing SHALL be logged by that backend's adapter or shown by its own namespace.
+
 ### Requirement: A create reports the identifier it was given
 `create_calendar` and `create_item` SHALL return the identifier the backend actually assigned, and the command SHALL report that one.
 

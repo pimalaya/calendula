@@ -196,8 +196,8 @@ pub fn holds_kind(contents: &[u8], kind: IcalComponentKind) -> bool {
 ///
 /// This is what a create starts from when it is given no source, and it
 /// is an item rather than an empty file so that no composer is asked to
-/// invent a `UID`: the CalDAV resource name and the pimdir link id both
-/// derive from it, and an editor handed an empty file mints none.
+/// invent a `UID`: a backend may key the item on it, and an editor
+/// handed an empty file mints none.
 ///
 /// A VEVENT also carries a DTSTART of now, which [`missing_dtstart`]
 /// would otherwise refuse the moment the composer handed it back. The

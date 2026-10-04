@@ -95,11 +95,11 @@ pub fn schemas() -> BTreeMap<String, Value> {
     );
     insert!(
         "calendula-event-create",
-        crate::shared::note::Noted<crate::shared::event::create::EventCreateOutput>
+        crate::shared::event::create::EventCreateOutput
     );
     insert!(
         "calendula-event-update",
-        crate::shared::note::Noted<crate::shared::event::update::EventUpdateOutput>
+        crate::shared::event::update::EventUpdateOutput
     );
     insert!(
         "calendula-todo-build",
@@ -107,11 +107,11 @@ pub fn schemas() -> BTreeMap<String, Value> {
     );
     insert!(
         "calendula-todo-create",
-        crate::shared::note::Noted<crate::shared::todo::create::TodoCreateOutput>
+        crate::shared::todo::create::TodoCreateOutput
     );
     insert!(
         "calendula-todo-update",
-        crate::shared::note::Noted<crate::shared::todo::update::TodoUpdateOutput>
+        crate::shared::todo::update::TodoUpdateOutput
     );
     insert!(
         "calendula-journal-build",
@@ -119,11 +119,11 @@ pub fn schemas() -> BTreeMap<String, Value> {
     );
     insert!(
         "calendula-journal-create",
-        crate::shared::note::Noted<crate::shared::journal::create::JournalCreateOutput>
+        crate::shared::journal::create::JournalCreateOutput
     );
     insert!(
         "calendula-journal-update",
-        crate::shared::note::Noted<crate::shared::journal::update::JournalUpdateOutput>
+        crate::shared::journal::update::JournalUpdateOutput
     );
     insert!(
         "calendula-item-build",
@@ -131,11 +131,11 @@ pub fn schemas() -> BTreeMap<String, Value> {
     );
     insert!(
         "calendula-item-create",
-        crate::shared::note::Noted<crate::shared::item::create::ItemCreateOutput>
+        crate::shared::item::create::ItemCreateOutput
     );
     insert!(
         "calendula-item-update",
-        crate::shared::note::Noted<crate::shared::item::update::ItemUpdateOutput>
+        crate::shared::item::update::ItemUpdateOutput
     );
 
     #[cfg(all(
@@ -195,12 +195,12 @@ pub fn schemas() -> BTreeMap<String, Value> {
     #[cfg(feature = "pimdir")]
     insert!(
         "calendula-pimdir-reply",
-        crate::shared::note::Noted<crate::pimdir::intent::PimdirIntentOutput>
+        crate::pimdir::intent::PimdirIntentOutput
     );
     #[cfg(feature = "pimdir")]
     insert!(
         "calendula-pimdir-cancel",
-        crate::shared::note::Noted<crate::pimdir::intent::PimdirIntentOutput>
+        crate::pimdir::intent::PimdirIntentOutput
     );
 
     #[cfg(feature = "vdir")]

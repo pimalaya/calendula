@@ -129,8 +129,7 @@ impl fmt::Display for ItemListOutput {
 
 /// The size column: the item's octets, or a dash when it has no body.
 ///
-/// A backend may list an item without one, a pimdir cache that has not
-/// downloaded it yet being the usual case.
+/// A backend may list an item whose body it does not hold yet.
 fn size_of(item: &CalendarItem) -> String {
     if item.contents.is_empty() {
         return String::from("-");

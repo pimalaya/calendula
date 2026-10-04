@@ -16,10 +16,7 @@ use pimalaya_cli::printer::Printer;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::{
-    pimdir::backend::{PimdirBackend, PimdirQueued},
-    shared::note::Noted,
-};
+use crate::pimdir::backend::{PimdirBackend, PimdirQueued};
 
 /// The answer to an invitation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -90,16 +87,13 @@ impl PimdirReplyCommand {
             self.source.as_deref(),
         )?;
 
-        printer.out(Noted {
-            output: PimdirIntentOutput::new(
-                queued,
-                calendar_id,
-                self.event_id,
-                Some(partstat),
-                self.comment,
-            ),
-            notes: backend.take_notes(),
-        })
+        printer.out(PimdirIntentOutput::new(
+            queued,
+            calendar_id,
+            self.event_id,
+            Some(partstat),
+            self.comment,
+        ))
     }
 }
 
@@ -144,10 +138,13 @@ impl PimdirCancelCommand {
             self.source.as_deref(),
         )?;
 
-        printer.out(Noted {
-            output: PimdirIntentOutput::new(queued, calendar_id, self.event_id, None, self.comment),
-            notes: backend.take_notes(),
-        })
+        printer.out(PimdirIntentOutput::new(
+            queued,
+            calendar_id,
+            self.event_id,
+            None,
+            self.comment,
+        ))
     }
 }
 

@@ -23,7 +23,7 @@ use crate::shared::{
 /// the id the other `event` commands take.
 ///
 /// The calendar is scanned whole, so this costs a full listing on a
-/// remote backend and a local read on vdir and pimdir.
+/// remote backend and a full read on a local one.
 ///
 /// JSON output: `{"events": [...]}`, shaped as `event list` prints them.
 #[derive(Debug, Parser)]

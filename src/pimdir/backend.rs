@@ -76,9 +76,6 @@ const SCAN_BATCH: usize = 500;
 /// The shared-API glue over a pimdir store.
 pub struct PimdirBackend {
     client: PimdirClient,
-    /// What the writes so far came back with, a capability their source
-    /// supports in part (pimdir STORAGE §15.6).
-    notes: Vec<String>,
     /// The `calendar.default` of the account, when built from one.
     calendar_default: Option<String>,
 }
@@ -88,7 +85,6 @@ impl PimdirBackend {
     pub fn new(config: PimdirConfig) -> Result<Self> {
         Ok(Self {
             client: PimdirClient::new(config)?,
-            notes: Vec::new(),
             calendar_default: None,
         })
     }
@@ -491,7 +487,9 @@ impl PimdirBackend {
             .enqueue(calendar_id, action, object)
             .map_err(stage)?;
 
-        self.notes.extend(partials.iter().map(ToString::to_string));
+        for partial in &partials {
+            warn!("{partial}");
+        }
         Ok(())
     }
 
@@ -634,7 +632,9 @@ impl PimdirBackend {
             .enqueue(calendar_id, &action, None)
             .map_err(|err| anyhow!("Queue {capability}: {err}"))?;
 
-        self.notes.extend(partials.iter().map(ToString::to_string));
+        for partial in &partials {
+            warn!("{partial}");
+        }
 
         Ok(PimdirQueued {
             row,
@@ -649,11 +649,6 @@ impl PimdirBackend {
             Some(hash) => Ok(self.client.blobs.get(hash)?),
             None => Ok(None),
         }
-    }
-
-    /// Takes the notes the writes so far came back with.
-    pub fn take_notes(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.notes)
     }
 }
 

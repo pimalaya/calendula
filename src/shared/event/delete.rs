@@ -7,7 +7,6 @@ use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};
 
-use crate::shared::note::Noted;
 use crate::shared::{arg::CalendarIdArg, client::CalendarClient};
 
 /// Delete a single event.
@@ -30,9 +29,6 @@ impl EventDeleteCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         client.delete_item(&calendar_id, &self.event_id)?;
-        printer.out(Noted {
-            output: Message::new("Event successfully deleted"),
-            notes: client.take_notes(),
-        })
+        printer.out(Message::new("Event successfully deleted"))
     }
 }

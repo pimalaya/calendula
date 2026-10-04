@@ -11,7 +11,6 @@ use pimalaya_cli::printer::Printer;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::shared::note::Noted;
 use crate::shared::{
     arg::{CalendarIdArg, IcalComposerArgs},
     client::CalendarClient,
@@ -79,10 +78,9 @@ impl TodoUpdateCommand {
         if !self.composer.interactive {
             client.update_item(&calendar_id, &self.todo_id, seed, if_match.as_deref())?;
 
-            return printer.out(Noted {
-                output: TodoUpdateOutput::Applied(TodoUpdatedOutput { id: self.todo_id }),
-                notes: client.take_notes(),
-            });
+            return printer.out(TodoUpdateOutput::Applied(TodoUpdatedOutput {
+                id: self.todo_id,
+            }));
         }
 
         let composer = IcalComposer {
@@ -108,10 +106,9 @@ impl TodoUpdateCommand {
 
         draft.finish(updated)?;
 
-        printer.out(Noted {
-            output: TodoUpdateOutput::Applied(TodoUpdatedOutput { id: self.todo_id }),
-            notes: client.take_notes(),
-        })
+        printer.out(TodoUpdateOutput::Applied(TodoUpdatedOutput {
+            id: self.todo_id,
+        }))
     }
 }
 
