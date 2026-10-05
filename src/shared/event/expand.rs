@@ -52,10 +52,9 @@ const BOUND_SLACK: i64 = 2 * 86_400;
 /// How far a window open on its end reaches: a year.
 const OPEN_REACH: i64 = 366 * 86_400;
 
-/// The properties an online meeting's join link rides in, in order of
-/// preference: the RFC 7986 one, then the vendors' own.
+/// The vendors' own properties an online meeting's join link rides in, in
+/// order of preference, read when no `CONFERENCE` (RFC 7986) gives one.
 const MEETING_PROPS: &[&str] = &[
-    "CONFERENCE",
     "X-GOOGLE-CONFERENCE",
     "X-GOOGLE-HANGOUT-LINK",
     "X-MICROSOFT-SKYPETEAMSMEETINGURL",
@@ -632,9 +631,7 @@ impl<'a> Context<'a> {
                 .filter(|prop| matches!(prop.name, IcalPropName::Kind(IcalPropKind::Attendee)))
                 .filter_map(attendee)
                 .collect(),
-            online_meeting_url: MEETING_PROPS
-                .iter()
-                .find_map(|name| named_text(component, name)),
+            online_meeting_url: meeting_url(component),
             start_secs: times.start_secs,
             end_secs: times.end_secs,
         }
@@ -781,6 +778,49 @@ fn text(component: &IcalComponent<'_>, kind: IcalPropKind) -> Option<String> {
 }
 
 /// The text of the first property named `name`, a vendor one included.
+/// The join link of an online meeting.
+///
+/// A conference may offer several ways in, one `CONFERENCE` each (RFC 7986
+/// 5.11): the one whose `FEATURE` says `VIDEO` is the link, then a web
+/// one, so a dial-in `tel:` is never taken for it. The vendors' own
+/// properties come next, then any `CONFERENCE` left.
+fn meeting_url(component: &IcalComponent<'_>) -> Option<String> {
+    let conferences: Vec<(&IcalProp<'_>, String)> = component
+        .props
+        .iter()
+        .filter(|prop| matches!(prop.name, IcalPropName::Kind(IcalPropKind::Conference)))
+        .filter_map(|prop| {
+            let text = value_text(&prop.value)?;
+            (!text.is_empty()).then_some((prop, text))
+        })
+        .collect();
+
+    let video = conferences.iter().find(|(prop, _)| {
+        prop.params.iter().any(|param| match param {
+            IcalParam::Feature(features) => features
+                .iter()
+                .any(|feature| feature.eq_ignore_ascii_case("VIDEO")),
+            _ => false,
+        })
+    });
+    let web = || {
+        conferences.iter().find(|(_, text)| {
+            let text = text.to_ascii_lowercase();
+            text.starts_with("https://") || text.starts_with("http://")
+        })
+    };
+
+    video
+        .or_else(web)
+        .map(|(_, text)| text.clone())
+        .or_else(|| {
+            MEETING_PROPS
+                .iter()
+                .find_map(|name| named_text(component, name))
+        })
+        .or_else(|| conferences.first().map(|(_, text)| text.clone()))
+}
+
 fn named_text(component: &IcalComponent<'_>, name: &str) -> Option<String> {
     component
         .props
@@ -1291,6 +1331,44 @@ mod tests {
                 "onlineMeetingUrl": "https://meet.example.org/abc-defg-hij",
             })
         );
+    }
+
+    #[test]
+    fn the_meeting_link_is_the_video_conference_not_the_dial_in() {
+        let link = |lines: &[&str]| {
+            let mut props = vec!["UID:meet@example.org", "DTSTART:20261005T090000Z"];
+            props.extend_from_slice(lines);
+            Event::project(&item("", &vevent(&props)))[0]
+                .online_meeting_url
+                .clone()
+        };
+
+        assert_eq!(
+            link(&[
+                "CONFERENCE;VALUE=URI;FEATURE=PHONE;LABEL=+33 1 00 00 00 00:tel:+33-1-00-00-00-00",
+                "CONFERENCE;VALUE=URI;FEATURE=AUDIO,VIDEO;LABEL=meet:https://meet.example.org/a",
+            ]),
+            Some(String::from("https://meet.example.org/a"))
+        );
+        assert_eq!(
+            link(&[
+                "CONFERENCE;VALUE=URI:tel:+33-1-00-00-00-00",
+                "CONFERENCE;VALUE=URI:https://meet.example.org/b",
+            ]),
+            Some(String::from("https://meet.example.org/b"))
+        );
+        assert_eq!(
+            link(&[
+                "CONFERENCE;VALUE=URI;FEATURE=PHONE:tel:+33-1-00-00-00-00",
+                "X-MICROSOFT-SKYPETEAMSMEETINGURL:https://teams.example.org/l/c",
+            ]),
+            Some(String::from("https://teams.example.org/l/c"))
+        );
+        assert_eq!(
+            link(&["CONFERENCE;VALUE=URI;FEATURE=PHONE:tel:+33-1-00-00-00-00"]),
+            Some(String::from("tel:+33-1-00-00-00-00"))
+        );
+        assert_eq!(link(&[]), None);
     }
 
     #[test]
