@@ -202,6 +202,7 @@ fn calendar_from(calendar: CaldavCalendar) -> Calendar {
         id: calendar.id,
         description: calendar.description,
         color: calendar.color,
+        default: false,
     }
 }
 

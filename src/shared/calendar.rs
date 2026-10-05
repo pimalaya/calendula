@@ -34,6 +34,11 @@ pub struct Calendar {
     /// ASCII `#RRGGBB` color marker, when the backend exposes one.
     #[serde(default)]
     pub color: Option<String>,
+    /// Whether new events go here when no calendar is named, as the
+    /// server states it (the pimdir backend reads it from the store,
+    /// STORAGE §14); `false` where the backend does not say.
+    #[serde(default)]
+    pub default: bool,
 }
 
 /// A partial update applied to a [`Calendar`].

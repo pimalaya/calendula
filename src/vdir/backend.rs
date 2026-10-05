@@ -203,6 +203,7 @@ fn calendar_from(collection: VdirCollection) -> Calendar {
         id,
         description: collection.description,
         color: collection.color,
+        default: false,
     }
 }
 

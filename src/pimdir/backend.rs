@@ -139,6 +139,7 @@ impl PimdirBackend {
                 id: collection.id,
                 description: collection.description,
                 color: collection.color,
+                default: collection.role.as_deref() == Some("default"),
             })
             .collect();
 
@@ -886,6 +887,43 @@ mod tests {
     };
 
     use super::*;
+
+    /// The calendar the server names the default carries the mark, read
+    /// from the role the sync engine recorded (pimdir STORAGE §14).
+    #[test]
+    fn the_default_calendar_is_the_one_its_store_marks() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let store = io_pimdir::client::PimdirStore::open(dir.path())
+                .unwrap()
+                .for_account("work");
+            for id in ["caldav/default", "caldav/team"] {
+                store.ensure_collection(id, CALENDAR_KIND).unwrap();
+            }
+            store
+                .set_collection_role("caldav/default", Some("default"))
+                .unwrap();
+        }
+
+        let mut backend = PimdirBackend::new(crate::config::PimdirConfig {
+            root: dir.path().to_path_buf(),
+            account: None,
+        })
+        .unwrap();
+        let defaults: Vec<(String, bool)> = backend
+            .list_calendars()
+            .unwrap()
+            .into_iter()
+            .map(|calendar| (calendar.id, calendar.default))
+            .collect();
+        assert_eq!(
+            defaults,
+            [
+                ("caldav/default".into(), true),
+                ("caldav/team".into(), false)
+            ]
+        );
+    }
 
     #[test]
     fn the_collection_refusal_points_at_the_sync() {

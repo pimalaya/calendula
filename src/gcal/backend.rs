@@ -371,6 +371,7 @@ fn calendar_from(entry: GcalCalendarListEntry) -> Calendar {
         id,
         description: entry.description,
         color: entry.background_color,
+        default: false,
     }
 }
 

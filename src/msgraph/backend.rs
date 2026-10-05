@@ -357,6 +357,7 @@ fn calendar_from(calendar: MsgraphCalendar) -> Calendar {
         id: calendar.id,
         description: None,
         color: calendar.hex_color,
+        default: false,
     }
 }
 
