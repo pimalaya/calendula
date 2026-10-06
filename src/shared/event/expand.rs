@@ -388,7 +388,7 @@ impl<'a> Context<'a> {
             return Zone::Named(zone);
         }
 
-        match IcalTz::of_calendar(self.ical, tzid) {
+        match defined_zone(self.ical, tzid) {
             Some(zone) => Zone::Defined(zone),
             None => Zone::Named(self.local.clone()),
         }
@@ -399,7 +399,7 @@ impl<'a> Context<'a> {
     fn assumed(&self, stamp: &Stamp) -> bool {
         match &stamp.tzid {
             Some(tzid) if !stamp.utc && !stamp.date => {
-                named_zone(tzid).is_none() && IcalTz::of_calendar(self.ical, tzid).is_none()
+                named_zone(tzid).is_none() && defined_zone(self.ical, tzid).is_none()
             }
             _ => false,
         }
@@ -514,7 +514,7 @@ impl<'a> Context<'a> {
             _ => start
                 .tzid
                 .as_deref()
-                .and_then(|tzid| IcalTz::of_calendar(self.ical, tzid)),
+                .and_then(|tzid| defined_zone(self.ical, tzid)),
         };
         let walk: Box<dyn Iterator<Item = _>> = match &filter {
             Some(zone) => Box::new(set.expand_in_zone(zone)),
@@ -683,11 +683,21 @@ fn overriding<'a>(
     })
 }
 
+/// The zone a calendar defines under `tzid`, if its definition states an
+/// offset.
+///
+/// A `VTIMEZONE` with no `STANDARD` nor `DAYLIGHT` (RFC 5545 3.6.5 owes
+/// one) defines nothing: read as one, it would place every time in UTC.
+fn defined_zone(ical: &Ical<'_>, tzid: &str) -> Option<IcalTz> {
+    IcalTz::of_calendar(ical, tzid).filter(|zone| !zone.observances.is_empty())
+}
+
 /// The zone the time-zone database answers to `tzid`.
 ///
 /// Some writers prefix the IANA name with a path of their own
-/// (`/mozilla.org/20050126_1/Europe/Paris`), so the trailing segments
-/// are tried after the whole.
+/// (`/mozilla.org/20050126_1/Europe/Paris`), or a lone slash
+/// (`/Europe/Paris`), so the segments are tried after the whole, empty
+/// ones dropped, from the first on.
 fn named_zone(tzid: &str) -> Option<TimeZone> {
     if let Ok(zone) = TimeZone::get(tzid) {
         return Some(zone);
@@ -697,7 +707,7 @@ fn named_zone(tzid: &str) -> Option<TimeZone> {
         .split('/')
         .filter(|segment| !segment.is_empty())
         .collect();
-    (1..segments.len()).find_map(|skip| TimeZone::get(&segments[skip..].join("/")).ok())
+    (0..segments.len()).find_map(|skip| TimeZone::get(&segments[skip..].join("/")).ok())
 }
 
 /// The instant a civil time names in a zone, with the offset it shows.
@@ -1489,5 +1499,39 @@ mod tests {
             None
         );
         assert_eq!(method(b"not a calendar"), None);
+    }
+
+    #[test]
+    fn a_tzid_with_a_leading_slash_names_its_zone() {
+        let item = item(
+            "",
+            &vevent(&[
+                "UID:slash@example.org",
+                "DTSTART;TZID=/Europe/Paris:20261019T090000",
+                "DTEND;TZID=Europe/Paris:20261019T100000",
+            ]),
+        );
+
+        let event = &Event::project(&item)[0];
+
+        assert_eq!(
+            event.starts_at.as_deref(),
+            Some("2026-10-19T09:00:00+02:00")
+        );
+        assert_eq!(event.ends_at.as_deref(), Some("2026-10-19T10:00:00+02:00"));
+        assert!(!event.zone_assumed);
+    }
+
+    #[test]
+    fn a_vtimezone_without_observances_defines_nothing() {
+        let item = item(
+            "BEGIN:VTIMEZONE\r\nTZID:Romance Standard Time\r\nEND:VTIMEZONE\r\n",
+            &vevent(&[
+                "UID:empty@example.org",
+                "DTSTART;TZID=Romance Standard Time:20261019T090000",
+            ]),
+        );
+
+        assert!(Event::project(&item)[0].zone_assumed);
     }
 }

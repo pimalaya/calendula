@@ -33,6 +33,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed a `TZID` with a leading slash (`/Europe/Paris`) read in the local zone rather than its own.
+- Fixed a `VTIMEZONE` stating no observance read as UTC: it defines nothing, and the time is read in the local zone with `zoneAssumed`.
 - Fixed `event delete` taking only the backend id although its help named the iCalendar `UID`: it now takes either, the id first, and refuses a `UID` several events carry.
 - Fixed a msgraph listing failing on a `numbered` recurring series: Graph fills its `endDate` with `0001-01-01`, which bounded the instances request before its start. The window now follows the range type. ([#10](https://github.com/pimalaya/calendula/issues/10))
 - Fixed msgraph listings dropping the cancelled occurrences of a series: Graph returns them only on a read of the master by id, so each master is now read so before projection. ([#11](https://github.com/pimalaya/calendula/issues/11))

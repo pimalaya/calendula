@@ -112,7 +112,7 @@ An occurrence SHALL carry the item `id` and its `recurrenceId`, the instance ide
 Without a window a series SHALL list once, at its first start.
 
 ### Requirement: Times resolve to instants
-A time SHALL resolve through its `TZID` as the time-zone database names it (a writer's path prefix tolerated), else through the calendar's `VTIMEZONE` of that `TZID`, else in the local zone, as a floating time does; a `Z` time is UTC. A local time a transition skips SHALL read with the offset before the gap, one it repeats as its first occurrence (RFC 5545 3.3.5).
+A time SHALL resolve through its `TZID` as the time-zone database names it (a writer's path prefix or a leading slash tolerated), else through the calendar's `VTIMEZONE` of that `TZID` when it states at least one observance, else in the local zone, as a floating time does; a `Z` time is UTC. A local time a transition skips SHALL read with the offset before the gap, one it repeats as its first occurrence (RFC 5545 3.3.5).
 
 Expansion SHALL move a UTC `UNTIL` onto the wall clock of a zoned `DTSTART` before the civil walk, and SHALL drop the instances a calendar-defined zone skips.
 
