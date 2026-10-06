@@ -6,7 +6,9 @@
 //! They are a convenience over the common fields rather than the whole of
 //! iCalendar: the composer is the complete surface, which is why a
 //! recurrence (`RRULE`, `RDATE`, `EXDATE`, overrides), an alarm, a
-//! conference and a hand-written `VTIMEZONE` are deliberately not a flag.
+//! conference link (`CONFERENCE`) and a hand-written `VTIMEZONE` are
+//! deliberately not a flag. `--online-meeting` asks the sync engine for a
+//! meeting it creates itself, which is not writing one.
 
 use std::borrow::Cow;
 
@@ -47,7 +49,8 @@ const FOLD_OCTETS: usize = 75;
 /// from flags.
 ///
 /// Each flag names one property, and writing it replaces every instance
-/// of that property the event already carried.
+/// of that property the event already carried. An empty value given to
+/// a text or a person flag removes the property instead.
 #[derive(Debug, Parser)]
 pub struct EventFieldsArgs {
     /// Identity of the event (`UID`).
@@ -56,16 +59,16 @@ pub struct EventFieldsArgs {
     /// none.
     #[arg(long, value_name = "TEXT")]
     pub uid: Option<String>,
-    /// Title of the event (`SUMMARY`).
+    /// Title of the event (`SUMMARY`); empty removes it.
     #[arg(long, value_name = "TEXT")]
     pub summary: Option<String>,
-    /// Free-form description (`DESCRIPTION`).
+    /// Free-form description (`DESCRIPTION`); empty removes it.
     #[arg(long, value_name = "TEXT")]
     pub description: Option<String>,
-    /// Where the event takes place (`LOCATION`).
+    /// Where the event takes place (`LOCATION`); empty removes it.
     #[arg(long, value_name = "TEXT")]
     pub location: Option<String>,
-    /// Web page of the event (`URL`).
+    /// Web page of the event (`URL`); empty removes it.
     #[arg(long, value_name = "URL")]
     pub url: Option<String>,
     /// Start of the event (`DTSTART`).
@@ -107,23 +110,35 @@ pub struct EventFieldsArgs {
     /// Organizer of the event (`ORGANIZER`).
     ///
     /// An email address, written as a `mailto:` URI, optionally prefixed
-    /// by a name: `Jane Doe:jane@example.org`.
+    /// by a name: `Jane Doe:jane@example.org`. Empty removes it.
     #[arg(long, value_name = "[NAME:]ADDRESS")]
     pub organizer: Option<String>,
     /// Attendees (`ATTENDEE`), the flag repeating, each spelled as
     /// `--organizer` is.
     ///
     /// Each is invited plainly: `PARTSTAT=NEEDS-ACTION` and `RSVP=TRUE`,
-    /// no role, which the composer sets.
+    /// no role, which the composer sets. `--attendee ""` alone removes
+    /// every attendee.
     #[arg(long, value_name = "[NAME:]ADDRESS")]
     pub attendee: Vec<String>,
-    /// Categories (`CATEGORIES`), the flag repeating.
+    /// Categories (`CATEGORIES`), the flag repeating; `--categories ""`
+    /// alone removes them.
     #[arg(long, value_name = "TEXT")]
     pub categories: Vec<String>,
     /// Revision of the event (`SEQUENCE`), which an organizer bumps on a
     /// significant change.
     #[arg(long, value_name = "NUMBER")]
     pub sequence: Option<u32>,
+    /// Ask for an online meeting (`X-PIMDIR-ONLINE-MEETING:TRUE`, pimdir
+    /// STORAGE Annex B.1), which the sync engine creates with the
+    /// provider's own service (Google Meet, Microsoft Teams) and brings
+    /// back as a `CONFERENCE` link.
+    ///
+    /// Served by the pimdir backend alone, and only when a source of the
+    /// store declares `calendar.online-meeting`; every other backend
+    /// refuses it.
+    #[arg(long)]
+    pub online_meeting: bool,
 }
 
 /// The status an event can be set to.
@@ -222,6 +237,25 @@ impl EventFieldsArgs {
             && self.attendee.is_empty()
             && self.categories.is_empty()
             && self.sequence.is_none()
+            && !self.online_meeting
+    }
+
+    /// Refuses `--online-meeting` on a backend that cannot serve it,
+    /// `backend` naming the one serving the account.
+    ///
+    /// Only a pimdir store hands the ask to a sync engine able to create
+    /// the meeting; anywhere else the property would be written and never
+    /// acted upon. Whether the store's sources can is the pimdir
+    /// backend's own check, made before it queues the write.
+    pub fn check_backend(&self, backend: &str) -> Result<()> {
+        if self.online_meeting && backend != "pimdir" {
+            bail!(
+                "--online-meeting needs the pimdir backend, whose sync engine creates the \
+                 meeting; the {backend} backend serves this account"
+            );
+        }
+
+        Ok(())
     }
 
     /// Writes the flags onto the VEVENT of `ical`, returning its new
@@ -229,7 +263,8 @@ impl EventFieldsArgs {
     ///
     /// Every instance of a property a flag names is dropped and the flag's
     /// own is written in place of the first, so a flag sets that property
-    /// rather than adding to it. Every other line keeps the event's own
+    /// rather than adding to it; an empty value writes nothing in its
+    /// place, which removes it. Every other line keeps the event's own
     /// bytes, the properties no flag covers included.
     pub fn apply(&self, ical: &[u8]) -> Result<Vec<u8>> {
         self.write(ical, false)
@@ -274,27 +309,28 @@ impl EventFieldsArgs {
         let times = self.times(ical, keep_length)?;
 
         let written = self.props(&times)?;
-        let mut dropped: Vec<IcalPropKind> = written.iter().map(|(kind, _)| *kind).collect();
+        let mut dropped: Vec<IcalPropName<'static>> =
+            written.iter().map(|(name, _)| name.clone()).collect();
 
         // NOTE: an end and a length are one fact spelled twice (RFC 5545
         // 3.6.1 allows either, never both), so setting one clears the
         // other.
         if self.end.is_some() || times.moved_end.is_some() {
-            dropped.push(IcalPropKind::Duration);
+            dropped.push(IcalPropName::Kind(IcalPropKind::Duration));
         }
 
         if self.duration.is_some() {
-            dropped.push(IcalPropKind::DtEnd);
+            dropped.push(IcalPropName::Kind(IcalPropKind::DtEnd));
         }
 
-        let lines: Vec<(IcalPropKind, Vec<IcalItem<'static>>)> = written
+        let lines: Lines = written
             .into_iter()
-            .map(|(kind, props)| {
+            .map(|(name, props)| {
                 let items = props
                     .iter()
                     .map(|prop| folded(prop.encode(escaper)))
                     .collect::<Result<Vec<_>>>()?;
-                Ok((kind, items))
+                Ok((name, items))
             })
             .collect::<Result<_>>()?;
 
@@ -371,77 +407,83 @@ impl EventFieldsArgs {
         })
     }
 
-    /// The properties the flags name, grouped by kind, in a stable order.
-    fn props(&self, times: &Times) -> Result<Vec<(IcalPropKind, Vec<IcalProp<'static>>)>> {
+    /// The properties the flags name, grouped by name, in a stable order.
+    ///
+    /// A name holding no property is one an empty flag removes: it is
+    /// dropped and nothing is written in its place.
+    fn props(&self, times: &Times) -> Result<Vec<(IcalPropName<'static>, Vec<IcalProp<'static>>)>> {
         let mut props = Vec::new();
+        let mut push = |kind: IcalPropKind, values: Vec<IcalProp<'static>>| {
+            props.push((IcalPropName::Kind(kind), values));
+        };
 
         if let Some(uid) = &self.uid {
-            props.push((IcalPropKind::Uid, vec![text(IcalPropKind::Uid, uid)]));
+            push(IcalPropKind::Uid, vec![text(IcalPropKind::Uid, uid)]);
         }
 
-        if let Some(summary) = &self.summary {
-            props.push((
-                IcalPropKind::Summary,
-                vec![text(IcalPropKind::Summary, summary)],
-            ));
-        }
-
-        if let Some(description) = &self.description {
-            let prop = text(IcalPropKind::Description, description);
-            props.push((IcalPropKind::Description, vec![prop]));
-        }
-
-        if let Some(location) = &self.location {
-            let prop = text(IcalPropKind::Location, location);
-            props.push((IcalPropKind::Location, vec![prop]));
+        for (kind, value) in [
+            (IcalPropKind::Summary, &self.summary),
+            (IcalPropKind::Description, &self.description),
+            (IcalPropKind::Location, &self.location),
+        ] {
+            if let Some(value) = value {
+                push(kind, unless_empty(value, |value| text(kind, value)));
+            }
         }
 
         if let Some(url) = &self.url {
-            let value = IcalValue::Uri(IcalUri(Cow::Owned(url.clone())));
-            props.push((
-                IcalPropKind::Url,
-                vec![prop(IcalPropKind::Url, vec![], value)],
-            ));
+            let url = unless_empty(url, |url| {
+                let value = IcalValue::Uri(IcalUri(Cow::Owned(url.to_owned())));
+                prop(IcalPropKind::Url, vec![], value)
+            });
+            push(IcalPropKind::Url, url);
         }
 
         if let Some(start) = &times.start {
-            props.push((
+            push(
                 IcalPropKind::DtStart,
                 vec![start.prop(IcalPropKind::DtStart)],
-            ));
+            );
         }
 
         if let Some(end) = times.end.as_ref().or(times.moved_end.as_ref()) {
-            props.push((IcalPropKind::DtEnd, vec![end.prop(IcalPropKind::DtEnd)]));
+            push(IcalPropKind::DtEnd, vec![end.prop(IcalPropKind::DtEnd)]);
         }
 
         if let Some(duration) = &times.duration {
             let value = IcalValue::Duration(IcalDuration(Cow::Owned(duration.clone())));
             let prop = prop(IcalPropKind::Duration, vec![], value);
-            props.push((IcalPropKind::Duration, vec![prop]));
+            push(IcalPropKind::Duration, vec![prop]);
         }
 
         if let Some(status) = self.status {
             let prop = text(IcalPropKind::Status, status.as_status());
-            props.push((IcalPropKind::Status, vec![prop]));
+            push(IcalPropKind::Status, vec![prop]);
         }
 
         if let Some(transparency) = self.transparency {
             let prop = text(IcalPropKind::Transp, transparency.as_transp());
-            props.push((IcalPropKind::Transp, vec![prop]));
+            push(IcalPropKind::Transp, vec![prop]);
         }
 
         if let Some(organizer) = &self.organizer {
-            let (name, address) = person(organizer)?;
-            let params = name.map(IcalParam::Cn).into_iter().collect();
-            let prop = prop(IcalPropKind::Organizer, params, address);
-            props.push((IcalPropKind::Organizer, vec![prop]));
+            let mut organizers = Vec::new();
+
+            if !organizer.is_empty() {
+                let (name, address) = person(organizer)?;
+                let params = name.map(IcalParam::Cn).into_iter().collect();
+                organizers.push(prop(IcalPropKind::Organizer, params, address));
+            }
+
+            push(IcalPropKind::Organizer, organizers);
         }
 
         if !self.attendee.is_empty() {
             let mut attendees = Vec::new();
 
-            for attendee in &self.attendee {
+            // NOTE: an empty value names nobody, so `--attendee ""` alone
+            // leaves the event inviting no one.
+            for attendee in self.attendee.iter().filter(|value| !value.is_empty()) {
                 let (name, address) = person(attendee)?;
                 let mut params: Vec<IcalParam<'static>> =
                     name.map(IcalParam::Cn).into_iter().collect();
@@ -450,27 +492,122 @@ impl EventFieldsArgs {
                 attendees.push(prop(IcalPropKind::Attendee, params, address));
             }
 
-            props.push((IcalPropKind::Attendee, attendees));
+            push(IcalPropKind::Attendee, attendees);
         }
 
         if !self.categories.is_empty() {
-            let values = self
+            let values: Vec<Cow<'static, str>> = self
                 .categories
                 .iter()
-                .map(|value| Cow::Owned(value.clone()));
-            let value = IcalValue::TextList(IcalTextList(values.collect()));
-            let prop = prop(IcalPropKind::Categories, vec![], value);
-            props.push((IcalPropKind::Categories, vec![prop]));
+                .filter(|value| !value.is_empty())
+                .map(|value| Cow::Owned(value.clone()))
+                .collect();
+
+            let categories = match values.is_empty() {
+                true => Vec::new(),
+                false => {
+                    let value = IcalValue::TextList(IcalTextList(values));
+                    vec![prop(IcalPropKind::Categories, vec![], value)]
+                }
+            };
+
+            push(IcalPropKind::Categories, categories);
         }
 
         if let Some(sequence) = self.sequence {
             let value = IcalValue::Integer(IcalInteger(Cow::Owned(sequence.to_string())));
             let prop = prop(IcalPropKind::Sequence, vec![], value);
-            props.push((IcalPropKind::Sequence, vec![prop]));
+            push(IcalPropKind::Sequence, vec![prop]);
+        }
+
+        if self.online_meeting {
+            let name = IcalPropName::Unknown(Cow::Borrowed(ONLINE_MEETING));
+            let ask = IcalProp {
+                name: name.clone(),
+                params: Vec::new(),
+                value: IcalValue::Text(IcalText(Cow::Borrowed("TRUE"))),
+            };
+            props.push((name, vec![ask]));
         }
 
         Ok(props)
     }
+}
+
+/// The property asking the sync engine for an online meeting (pimdir
+/// STORAGE Annex B.1).
+pub const ONLINE_MEETING: &str = "X-PIMDIR-ONLINE-MEETING";
+
+/// Encoded lines, grouped by the property they spell.
+type Lines = Vec<(IcalPropName<'static>, Vec<IcalItem<'static>>)>;
+
+/// The one property a value stands for, none when it is empty: what an
+/// empty flag writes is its property's removal.
+fn unless_empty(
+    value: &str,
+    prop: impl FnOnce(&str) -> IcalProp<'static>,
+) -> Vec<IcalProp<'static>> {
+    match value.is_empty() {
+        true => Vec::new(),
+        false => vec![prop(value)],
+    }
+}
+
+/// Marks every VEVENT of `ical` as revised at `now`, returning its new
+/// bytes (RFC 5545 3.8.7.2, 3.8.7.3).
+///
+/// `DTSTAMP` is set to `now` in UTC, where it stood, or after the
+/// event's last property when it carried none; `LAST-MODIFIED` is set
+/// to the same instant only where the event carries one. Every other
+/// line keeps its bytes, and a source holding no VEVENT comes back as it
+/// was, as does one the parser cannot structure.
+pub fn revise(ical: &[u8], now: Timestamp) -> Result<Vec<u8>> {
+    let mut recovery = IcalCst::parse_recovering(ical);
+
+    if !recovery.is_clean() {
+        return Ok(ical.to_vec());
+    }
+
+    let stamp = IcalValue::DateTime(IcalDateTime(Cow::Owned(
+        now.strftime("%Y%m%dT%H%M%SZ").to_string(),
+    )));
+
+    for cst in &mut recovery.calendars {
+        let escaper = Escaper::for_version(cst.version());
+
+        for item in &mut cst.items {
+            if !is_vevent(item) {
+                continue;
+            }
+
+            let IcalItem::Component(vevent) = item else {
+                continue;
+            };
+
+            let mut kinds = vec![IcalPropKind::DtStamp];
+
+            if vevent
+                .items
+                .iter()
+                .any(|item| names(item, &IcalPropKind::LastModified))
+            {
+                kinds.push(IcalPropKind::LastModified);
+            }
+
+            let mut dropped = Vec::new();
+            let mut lines: Lines = Vec::new();
+
+            for kind in kinds {
+                let line = folded(prop(kind, Vec::new(), stamp.clone()).encode(escaper))?;
+                dropped.push(IcalPropName::Kind(kind));
+                lines.push((IcalPropName::Kind(kind), vec![line]));
+            }
+
+            replace(vevent, &dropped, lines);
+        }
+    }
+
+    Ok(recovery.to_bytes())
 }
 
 /// Sets the calendar's `METHOD` (RFC 5546), returning its new bytes.
@@ -486,8 +623,8 @@ pub fn set_method(ical: &[u8], method: EventMethodArg) -> Result<Vec<u8>> {
 
     replace(
         &mut cst,
-        &[IcalPropKind::Method],
-        vec![(IcalPropKind::Method, vec![line])],
+        &[IcalPropName::Kind(IcalPropKind::Method)],
+        vec![(IcalPropName::Kind(IcalPropKind::Method), vec![line])],
     );
 
     Ok(cst.to_bytes())
@@ -693,7 +830,7 @@ fn moved_end(ical: &[u8], start: &Moment) -> Result<Option<Moment>> {
         return Ok(None);
     };
 
-    let carries = |kind: IcalPropKind| vevent.items.iter().any(|item| names(item, kind));
+    let carries = |kind: IcalPropKind| vevent.items.iter().any(|item| names(item, &kind));
 
     if !carries(IcalPropKind::DtEnd) || carries(IcalPropKind::Duration) {
         return Ok(None);
@@ -802,21 +939,20 @@ fn strip_mailto(value: &str) -> &str {
 /// leaves the layout as it found it; a kind the component did not carry
 /// lands after its last property, ahead of any nested component, as RFC
 /// 5545 orders a component's body.
-fn replace(
-    component: &mut IcalCst<'_>,
-    dropped: &[IcalPropKind],
-    mut lines: Vec<(IcalPropKind, Vec<IcalItem<'static>>)>,
-) {
+fn replace(component: &mut IcalCst<'_>, dropped: &[IcalPropName<'static>], mut lines: Lines) {
     let items = std::mem::take(&mut component.items);
     let mut kept = Vec::with_capacity(items.len());
 
     for item in items {
-        let Some(kind) = dropped.iter().find(|kind| names(&item, **kind)) else {
+        let Some(name) = dropped.iter().find(|name| names(&item, name)) else {
             kept.push(item);
             continue;
         };
 
-        if let Some(index) = lines.iter().position(|(written, _)| written == kind) {
+        if let Some(index) = lines
+            .iter()
+            .position(|(written, _)| written.eq_ignore_ascii_case(name))
+        {
             kept.extend(lines.remove(index).1);
         }
     }
@@ -886,9 +1022,9 @@ fn is_vevent(item: &IcalItem<'_>) -> bool {
 }
 
 /// Whether an item is a line carrying the given property.
-fn names(item: &IcalItem<'_>, kind: IcalPropKind) -> bool {
+fn names(item: &IcalItem<'_>, name: &str) -> bool {
     match item {
-        IcalItem::Prop(line) => line.name.get().eq_ignore_ascii_case(&kind),
+        IcalItem::Prop(line) => line.name.get().eq_ignore_ascii_case(name),
         _ => false,
     }
 }
@@ -954,7 +1090,9 @@ fn prop(
 mod tests {
     use clap::Parser;
 
-    use super::{EventFieldsArgs, EventMethodArg, set_method};
+    use jiff::Timestamp;
+
+    use super::{EventFieldsArgs, EventMethodArg, revise, set_method};
 
     #[derive(Parser)]
     struct Wrap {
@@ -1446,5 +1584,217 @@ mod tests {
 
         assert_eq!(out.matches("METHOD").count(), 1, "{out}");
         assert!(out.contains("METHOD:DECLINECOUNTER\r\n"), "{out}");
+    }
+
+    /// An event carrying every property an empty flag removes.
+    const FULL: &str = concat!(
+        "BEGIN:VCALENDAR\r\n",
+        "VERSION:2.0\r\n",
+        "PRODID:-//x//y//EN\r\n",
+        "BEGIN:VEVENT\r\n",
+        "UID:1@example.org\r\n",
+        "DTSTAMP:20260101T000000Z\r\n",
+        "DTSTART:20261019T090000Z\r\n",
+        "DTEND:20261019T100000Z\r\n",
+        "SUMMARY:Stand-up\r\n",
+        "DESCRIPTION:Daily\r\n",
+        "LOCATION:Room 1\r\n",
+        "URL:https://example.org/standup\r\n",
+        "CATEGORIES:work,team\r\n",
+        "ORGANIZER;CN=Jane:mailto:jane@example.org\r\n",
+        "ATTENDEE;CN=Jane:mailto:jane@example.org\r\n",
+        "ATTENDEE;CN=John:mailto:john@example.org\r\n",
+        "X-ODD;FOO=bar:kept as is\r\n",
+        "END:VEVENT\r\n",
+        "END:VCALENDAR\r\n",
+    );
+
+    #[test]
+    fn an_empty_flag_removes_its_property_and_nothing_else() {
+        let cases: [(&str, &[&str]); 7] = [
+            ("--summary", &["SUMMARY:Stand-up\r\n"]),
+            ("--description", &["DESCRIPTION:Daily\r\n"]),
+            ("--location", &["LOCATION:Room 1\r\n"]),
+            ("--url", &["URL:https://example.org/standup\r\n"]),
+            ("--categories", &["CATEGORIES:work,team\r\n"]),
+            (
+                "--organizer",
+                &["ORGANIZER;CN=Jane:mailto:jane@example.org\r\n"],
+            ),
+            (
+                "--attendee",
+                &[
+                    "ATTENDEE;CN=Jane:mailto:jane@example.org\r\n",
+                    "ATTENDEE;CN=John:mailto:john@example.org\r\n",
+                ],
+            ),
+        ];
+
+        for (flag, lines) in cases {
+            let out = apply(FULL, &[flag, ""]);
+            let expected = lines
+                .iter()
+                .fold(FULL.to_owned(), |event, line| event.replace(line, ""));
+
+            assert_eq!(out, expected, "{flag}");
+        }
+    }
+
+    #[test]
+    fn an_empty_flag_on_an_absent_property_changes_nothing() {
+        for flag in [
+            "--description",
+            "--location",
+            "--url",
+            "--categories",
+            "--organizer",
+        ] {
+            assert_eq!(apply(EVENT, &[flag, ""]), EVENT, "{flag}");
+        }
+
+        let bare = EVENT
+            .replace("ATTENDEE;CN=Jane:mailto:jane@example.org\r\n", "")
+            .replace("ATTENDEE;CN=John:mailto:john@example.org\r\n", "");
+        assert_eq!(apply(&bare, &["--attendee", ""]), bare);
+    }
+
+    #[test]
+    fn several_empty_flags_remove_several_properties() {
+        let out = apply(FULL, &["--location", "", "--url", "", "--summary", "Retro"]);
+
+        assert!(!out.contains("LOCATION"), "{out}");
+        assert!(!out.contains("URL"), "{out}");
+        assert!(out.contains("SUMMARY:Retro\r\n"), "{out}");
+        assert!(out.contains("X-ODD;FOO=bar:kept as is\r\n"), "{out}");
+    }
+
+    #[test]
+    fn an_empty_value_among_others_is_skipped() {
+        let out = apply(
+            FULL,
+            &[
+                "--categories",
+                "",
+                "--categories",
+                "home",
+                "--attendee",
+                "",
+                "--attendee",
+                "bob@example.org",
+            ],
+        );
+
+        assert!(out.contains("CATEGORIES:home\r\n"), "{out}");
+        assert_eq!(out.matches("ATTENDEE").count(), 1, "{out}");
+        assert!(out.contains("mailto:bob@example.org"), "{out}");
+    }
+
+    #[test]
+    fn an_empty_time_status_or_number_is_still_refused() {
+        for flag in ["--start", "--end", "--duration"] {
+            let err = refusal(EVENT, &[flag, ""]);
+            assert!(err.contains("Cannot read"), "{flag}: {err}");
+        }
+
+        for flag in ["--status", "--transparency", "--sequence"] {
+            let parsed = Wrap::try_parse_from(["calendula", flag, ""]);
+            assert!(parsed.is_err(), "{flag}");
+        }
+    }
+
+    #[test]
+    fn an_online_meeting_is_asked_for_on_the_event() {
+        let out = apply(EVENT, &["--online-meeting"]);
+
+        assert_eq!(
+            out,
+            EVENT.replace(
+                "X-ODD;FOO=bar:kept as is\r\n",
+                "X-ODD;FOO=bar:kept as is\r\nX-PIMDIR-ONLINE-MEETING:TRUE\r\n",
+            )
+        );
+
+        // NOTE: an ask already there, whatever it said, is replaced in
+        // place rather than doubled.
+        let asked = EVENT.replace("SUMMARY", "x-pimdir-online-meeting:FALSE\r\nSUMMARY");
+        let out = apply(&asked, &["--online-meeting"]);
+
+        assert_eq!(out.matches("ONLINE-MEETING").count(), 1, "{out}");
+        assert_eq!(
+            out,
+            EVENT.replace("SUMMARY", "X-PIMDIR-ONLINE-MEETING:TRUE\r\nSUMMARY")
+        );
+    }
+
+    /// The instant the revision tests are written at: 2026-10-06 12:34:56
+    /// UTC.
+    fn at() -> Timestamp {
+        Timestamp::from_second(1_791_290_096).unwrap()
+    }
+
+    fn revised(ical: &str) -> String {
+        String::from_utf8(revise(ical.as_bytes(), at()).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_revision_stamps_the_event_and_nothing_else() {
+        assert_eq!(at().to_string(), "2026-10-06T12:34:56Z");
+
+        let out = revised(EVENT);
+
+        assert_eq!(
+            out,
+            EVENT.replace("DTSTAMP:20260101T000000Z", "DTSTAMP:20261006T123456Z")
+        );
+        assert!(!out.contains("LAST-MODIFIED"), "{out}");
+    }
+
+    #[test]
+    fn a_revision_moves_a_last_modified_the_event_carries() {
+        let event = EVENT.replace(
+            "SUMMARY:Stand-up\r\n",
+            "SUMMARY:Stand-up\r\nLAST-MODIFIED:20260102T000000Z\r\n",
+        );
+
+        let out = revised(&event);
+
+        assert_eq!(
+            out,
+            event
+                .replace("DTSTAMP:20260101T000000Z", "DTSTAMP:20261006T123456Z")
+                .replace(
+                    "LAST-MODIFIED:20260102T000000Z",
+                    "LAST-MODIFIED:20261006T123456Z"
+                )
+        );
+    }
+
+    #[test]
+    fn a_revision_stamps_every_vevent_and_one_lacking_a_dtstamp() {
+        let series = EVENT.replace(
+            "END:VCALENDAR",
+            "BEGIN:VEVENT\r\nUID:1@example.org\r\nRECURRENCE-ID:20261026T090000Z\r\n\
+             DTSTART:20261026T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR",
+        );
+
+        let out = revised(&series);
+
+        assert_eq!(
+            out.matches("DTSTAMP:20261006T123456Z\r\n").count(),
+            2,
+            "{out}"
+        );
+        assert!(
+            out.contains("DTSTART:20261026T100000Z\r\nDTSTAMP:20261006T123456Z\r\nEND:VEVENT"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_revision_leaves_what_holds_no_vevent_as_it_is() {
+        let todo = EVENT.replace("VEVENT", "VTODO");
+
+        assert_eq!(revised(&todo), todo);
+        assert_eq!(revised("not an ical"), "not an ical");
     }
 }

@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: event-flags-for-clients
-status: active
+status: landed
 created: 2026-10-06
 ---
 

@@ -220,13 +220,22 @@ The composer SHALL remain the complete authoring surface; the field flags cover 
 A build or a create made from flags alone, with no source and no `-i`, SHALL be checked as a composed item is and refused naming the violations; a source given on the command line SHALL NOT be.
 
 ### Requirement: The field flags are a convenience, not the surface
-The field flags SHALL cover the fields `event list` renders and the few every calendar carries, and SHALL NOT grow to match what a composer models. Recurrence (`RRULE`, `RDATE`, `EXDATE`, overrides), alarms, conferences and hand-written `VTIMEZONE`s are out. The documentation SHALL say the composer is the complete surface.
+The field flags SHALL cover the fields `event list` renders and the few every calendar carries, and SHALL NOT grow to match what a composer models. Recurrence (`RRULE`, `RDATE`, `EXDATE`, overrides), alarms, conference links (`CONFERENCE`) and hand-written `VTIMEZONE`s are out; `--online-meeting` asks a sync engine to create a meeting and writes no link. The documentation SHALL say the composer is the complete surface.
 
 ### Requirement: A field flag sets its property and touches nothing else
 Writing a field flag SHALL drop every instance of the property it names on the VEVENT and write the flag's own, a repeated flag writing one instance per value. Every other line SHALL keep its bytes. A time flag SHALL take a date, a local time, a `Z` time, or a time prefixed by an IANA zone (`Europe/Paris:2026-10-19T09:00`); `--time-zone` names the zone of the times that name none. A zone a flag names SHALL arrive with its `VTIMEZONE`, minted once from the time-zone database. On an update, `--start` given without `--end` or `--duration` SHALL move the end with it, keeping the event's length.
 
 ### Requirement: Flags apply to one event
 A source holding several VEVENTs SHALL be refused when a field flag is set, since a flag rewrites one event and the others would be dropped or left inconsistent. With no flag the source passes through as written.
+
+### Requirement: An empty text flag removes its property
+An empty value given to `--summary`, `--description`, `--location`, `--url`, `--categories`, `--organizer` or `--attendee` SHALL remove that property from the VEVENT rather than write it empty: every instance is dropped and nothing is written in its place. A repeated flag drops its empty values, so `--categories ""` or `--attendee ""` alone removes every `CATEGORIES` or `ATTENDEE`. Removing a property the event does not carry SHALL leave the event byte for byte. The time flags, `--duration`, `--status`, `--transparency` and `--sequence` SHALL keep refusing an empty value.
+
+### Requirement: An update revises DTSTAMP
+`event update` SHALL set `DTSTAMP` to the time of the write, in UTC (`YYYYMMDDTHHMMSSZ`), and `LAST-MODIFIED` to the same instant when the event carries one, whatever it writes: field flags, a source, or what `-i` hands back. Every VEVENT of the item is revised, one lacking a `DTSTAMP` getting one after its last property; every other line SHALL keep its bytes. The revision SHALL belong to the shared update pipeline, so every backend stores an event revised alike.
+
+### Requirement: An online meeting can be asked for
+`--online-meeting` SHALL write `X-PIMDIR-ONLINE-MEETING:TRUE` on the VEVENT (pimdir STORAGE Annex B.1), replacing any instance it carried. On pimdir the write SHALL be refused before it is queued when no source declares `calendar.online-meeting` (see the backends capability); on any other backend `event create` and `event update` SHALL refuse the flag by name, before reaching the backend. `event build` reaches no backend and SHALL simply write the property.
 
 ### Requirement: A minted item carries an identity, and its family names its kind
 An item minted from nothing SHALL be a VCALENDAR carrying a PRODID and one component of the family's own kind, carrying a UID minted as a fresh UUID and a DTSTAMP of now. An editor handed an empty file mints no identity, and the CalDAV resource name and the pimdir link id both derive from the UID.

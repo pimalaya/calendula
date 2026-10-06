@@ -28,9 +28,11 @@ use crate::shared::{
 /// account is resolved unless `-i` needs the configured composer.
 ///
 /// The flags cover the common fields; a recurrence, an alarm, a
-/// conference and a hand-written `VTIMEZONE` are left to the composer,
-/// the complete surface. An event built from flags alone is checked
-/// before it is printed; a source passes through as written.
+/// conference link and a hand-written `VTIMEZONE` are left to the
+/// composer, the complete surface. `--online-meeting` writes the ask for
+/// a meeting a pimdir sync engine creates, whatever backend later stores
+/// the event. An event built from flags alone is checked before it is
+/// printed; a source passes through as written.
 ///
 /// Given a source alone, this is also how a loose iCalendar (an
 /// invitation attached to a mail) is read the way a calendar's events
@@ -233,5 +235,35 @@ mod tests {
 
         // NOTE: no PRODID, no DTSTAMP, no DTSTART: a source is not checked.
         assert_eq!(out["contents"], source);
+    }
+
+    #[test]
+    fn a_build_asks_for_an_online_meeting_with_no_backend() {
+        let out = build(&[
+            "--summary",
+            "Review",
+            "--start",
+            "2026-10-19T09:00Z",
+            "--online-meeting",
+        ])
+        .unwrap();
+
+        let contents = out["contents"].as_str().unwrap();
+        assert!(
+            contents.contains("X-PIMDIR-ONLINE-MEETING:TRUE\r\n"),
+            "{contents}"
+        );
+    }
+
+    #[test]
+    fn an_empty_flag_builds_an_event_without_its_property() {
+        let source = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//x//y//EN\r\n\
+                      BEGIN:VEVENT\r\nUID:a\r\nDTSTAMP:20260101T000000Z\r\n\
+                      DTSTART:20261019T090000Z\r\nLOCATION:Room 1\r\nEND:VEVENT\r\n\
+                      END:VCALENDAR\r\n";
+        let out = build(&[source, "--location", ""]).unwrap();
+
+        assert_eq!(out["contents"], source.replace("LOCATION:Room 1\r\n", ""));
+        assert_eq!(out["events"][0]["location"], "");
     }
 }

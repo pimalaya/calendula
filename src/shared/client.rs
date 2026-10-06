@@ -199,6 +199,31 @@ impl CalendarClient {
         }
     }
 
+    /// The name of the backend serving the account, as `--backend`
+    /// spells it, known without opening it.
+    pub fn backend_name(&self) -> &'static str {
+        match &self.config {
+            #[cfg(not(any(
+                feature = "vdir",
+                feature = "caldav",
+                feature = "pimdir",
+                feature = "gcal",
+                feature = "msgraph"
+            )))]
+            BackendConfig::Unused(never) => match *never {},
+            #[cfg(feature = "vdir")]
+            BackendConfig::Vdir(_) => "vdir",
+            #[cfg(feature = "caldav")]
+            BackendConfig::Caldav(_) => "caldav",
+            #[cfg(feature = "pimdir")]
+            BackendConfig::Pimdir(_) => "pimdir",
+            #[cfg(feature = "gcal")]
+            BackendConfig::Gcal(_) => "gcal",
+            #[cfg(feature = "msgraph")]
+            BackendConfig::Msgraph(_) => "msgraph",
+        }
+    }
+
     /// The open backend, opening it when it is not.
     fn open(&mut self) -> Result<&mut BackendClient> {
         if self.inner.is_none() {

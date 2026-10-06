@@ -27,8 +27,9 @@ use anyhow::{Result, anyhow, bail};
 use ical::component::IcalComponentKind;
 use io_pimdir::{
     capability::{
-        CALENDAR_CANCEL, CALENDAR_CANCEL_OCCURRENCE, CALENDAR_REPLY, CALENDAR_REPLY_OCCURRENCE,
-        CALENDAR_SCHEDULING,
+        CALENDAR_CANCEL, CALENDAR_CANCEL_OCCURRENCE, CALENDAR_ONLINE_MEETING, CALENDAR_REPLY,
+        CALENDAR_REPLY_OCCURRENCE, CALENDAR_SCHEDULING, PimdirRefusal, PimdirSourceCapabilities,
+        PimdirSupport, required_by_content,
     },
     client::{
         PimdirError,
@@ -251,13 +252,16 @@ impl PimdirBackend {
         self.known_collection(calendar_id)?;
 
         let link_id = derive(&contents).link_id;
-        let object = self.stage_body(&contents)?;
+        let hash = self.client.reader.hash(&contents);
 
         let action = PimdirAction::Add {
             link_id: Some(link_id.clone()),
             flags: PimdirFlags::default(),
-            object: Some(object.hash.clone()),
+            object: Some(hash),
         };
+        self.check_online_meeting(calendar_id, &action, None, &contents)?;
+
+        let object = self.stage_body(&contents)?;
         self.enqueue(calendar_id, &action, Some(&object))?;
 
         Ok(link_id.0)
@@ -281,14 +285,73 @@ impl PimdirBackend {
 
         let stored = self.item(calendar_id, item_id)?;
         check_version(&stored, calendar_id, item_id, if_match)?;
-        let seq = stored.seq;
-        let object = self.stage_body(&contents)?;
 
         let action = PimdirAction::Update {
-            seq,
-            object: object.hash.clone(),
+            seq: stored.seq,
+            object: self.client.reader.hash(&contents),
         };
+        let current = self.body(&stored)?;
+        self.check_online_meeting(calendar_id, &action, current.as_deref(), &contents)?;
+
+        let object = self.stage_body(&contents)?;
         self.enqueue(calendar_id, &action, Some(&object))
+    }
+
+    /// Refuses a write asking for an online meeting no source of the
+    /// store can create (pimdir STORAGE Annex B.1, §15.6).
+    ///
+    /// The store's own gate refuses a declared source lacking
+    /// `calendar.online-meeting`, and lets a store whose sources declare
+    /// nothing through: its owner would write the ask and nobody would
+    /// act on it. So the ask passes only where a source declares the
+    /// capability, fully or in part; one the event already carried is
+    /// no new ask, and passes as the store's gate lets it.
+    fn check_online_meeting(
+        &self,
+        calendar_id: &str,
+        action: &PimdirAction,
+        current: Option<&[u8]>,
+        new: &[u8],
+    ) -> Result<()> {
+        let needed = required_by_content(CALENDAR_KIND, action, current, Some(new));
+
+        if !needed.iter().any(|name| name == CALENDAR_ONLINE_MEETING) {
+            return Ok(());
+        }
+
+        let sources = self
+            .client
+            .producer()?
+            .capabilities(calendar_id)
+            .map_err(|err| anyhow!("Read the capabilities of `{calendar_id}`: {err}"))?;
+
+        let support = |source: &PimdirSourceCapabilities| {
+            let declared = source.declared.as_ref()?;
+            declared
+                .get(CALENDAR_ONLINE_MEETING)
+                .map(|(support, _)| *support)
+        };
+
+        if sources.iter().any(|source| {
+            matches!(
+                support(source),
+                Some(PimdirSupport::Full | PimdirSupport::Partial)
+            )
+        }) {
+            return Ok(());
+        }
+
+        let lacking: Vec<&str> = sources
+            .iter()
+            .filter(|source| source.declared.is_some())
+            .map(|source| source.source.as_str())
+            .collect();
+
+        Err(staging_error(PimdirError::Unsupported(PimdirRefusal {
+            capability: CALENDAR_ONLINE_MEETING.to_owned(),
+            source: lacking.join(", "),
+            detail: None,
+        })))
     }
 
     /// Stages a `remove` action: a tombstone, then a server-side delete.
@@ -486,22 +549,11 @@ impl PimdirBackend {
         action: &PimdirAction,
         object: Option<&PimdirObject>,
     ) -> Result<()> {
-        let stage = |err: PimdirError| match err {
-            PimdirError::Unsupported(refusal) if refusal.capability == CALENDAR_SCHEDULING => {
-                anyhow!(
-                    "Stage the pimdir action: {refusal}; to write it without notifying \
-                         anyone, first mark its ORGANIZER and ATTENDEE with \
-                         SCHEDULE-AGENT=NONE"
-                )
-            }
-            err => anyhow!("Stage the pimdir action: {err}"),
-        };
-
         let mut producer = self.client.producer()?;
-        let partials = producer.check(calendar_id, action).map_err(stage)?;
+        let partials = producer.check(calendar_id, action).map_err(staging_error)?;
         producer
             .enqueue(calendar_id, action, object)
-            .map_err(stage)?;
+            .map_err(staging_error)?;
 
         for partial in &partials {
             warn!("{partial}");
@@ -688,6 +740,32 @@ impl PimdirBackend {
             Some(hash) => Ok(self.client.blobs.get(hash)?),
             None => Ok(None),
         }
+    }
+}
+
+/// What a write the store refuses to stage reads as, naming the way out
+/// where there is one.
+fn staging_error(err: PimdirError) -> anyhow::Error {
+    match err {
+        PimdirError::Unsupported(refusal) if refusal.capability == CALENDAR_SCHEDULING => {
+            anyhow!(
+                "Stage the pimdir action: {refusal}; to write it without notifying \
+                 anyone, first mark its ORGANIZER and ATTENDEE with \
+                 SCHEDULE-AGENT=NONE"
+            )
+        }
+        PimdirError::Unsupported(refusal) if refusal.capability == CALENDAR_ONLINE_MEETING => {
+            let who = match refusal.source.is_empty() {
+                true => "no source of this store declares it".to_owned(),
+                false => format!("source {} does not support it", refusal.source),
+            };
+            anyhow!(
+                "Stage the pimdir action: an online meeting (X-PIMDIR-ONLINE-MEETING) needs \
+                 {}, and {who}; drop --online-meeting to write the event without one",
+                refusal.capability,
+            )
+        }
+        err => anyhow!("Stage the pimdir action: {err}"),
     }
 }
 
@@ -1542,5 +1620,122 @@ mod tests {
             &series(Some("20250101T000000Z")),
             &range
         ));
+    }
+
+    /// An event asking for an online meeting (Annex B.1).
+    const MEETING: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n\
+        BEGIN:VEVENT\r\nUID:meet@example.org\r\nDTSTAMP:20261001T080000Z\r\n\
+        DTSTART:20261005T090000Z\r\nSUMMARY:Sync\r\nX-PIMDIR-ONLINE-MEETING:TRUE\r\n\
+        END:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    /// Declares every calendar capability for `caldav`, and
+    /// `calendar.online-meeting` at `support`.
+    fn declare_meeting(dir: &tempfile::TempDir, support: io_pimdir::capability::PimdirSupport) {
+        let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source("caldav");
+        let declaration: Vec<_> = io_pimdir::capability::CALENDAR
+            .iter()
+            .map(|name| io_pimdir::capability::PimdirCapability {
+                collection: None,
+                name: name.to_string(),
+                support: match *name == CALENDAR_ONLINE_MEETING {
+                    true => support,
+                    false => io_pimdir::capability::PimdirSupport::Full,
+                },
+                detail: None,
+            })
+            .collect();
+        owner.declare("caldav", &declaration).unwrap();
+    }
+
+    fn pending(backend: &PimdirBackend) -> usize {
+        backend
+            .client
+            .producer()
+            .unwrap()
+            .pending_actions("cal")
+            .unwrap()
+            .len()
+    }
+
+    #[test]
+    fn an_online_meeting_in_an_undeclared_store_queues_nothing() {
+        let (_dir, mut backend, ids) = store(&[ALONE]);
+
+        let err = backend
+            .create_item("cal", MEETING.into())
+            .unwrap_err()
+            .to_string();
+        assert!(err.starts_with("Stage the pimdir action"), "{err}");
+        assert!(err.contains("calendar.online-meeting"), "{err}");
+        assert!(err.contains("no source of this store declares it"), "{err}");
+
+        let asked = ALONE.replace("SUMMARY", "X-PIMDIR-ONLINE-MEETING:TRUE\r\nSUMMARY");
+        let err = backend.update_item("cal", &ids[0], asked.into(), None);
+        assert!(err.is_err());
+
+        assert_eq!(pending(&backend), 0);
+    }
+
+    #[test]
+    fn an_online_meeting_a_source_does_not_support_names_it() {
+        let (dir, mut backend, _) = store(&[ALONE]);
+        declare_meeting(&dir, io_pimdir::capability::PimdirSupport::None);
+
+        let err = backend
+            .create_item("cal", MEETING.into())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("source caldav does not support it"), "{err}");
+        assert_eq!(pending(&backend), 0);
+    }
+
+    #[test]
+    fn an_online_meeting_a_source_declares_fully_or_in_part_is_queued() {
+        use io_pimdir::capability::PimdirSupport;
+
+        for support in [PimdirSupport::Full, PimdirSupport::Partial] {
+            let (dir, mut backend, ids) = store(&[ALONE]);
+            declare_meeting(&dir, support);
+
+            backend.create_item("cal", MEETING.into()).unwrap();
+
+            let asked = ALONE.replace("SUMMARY", "X-PIMDIR-ONLINE-MEETING:TRUE\r\nSUMMARY");
+            backend
+                .update_item("cal", &ids[0], asked.into(), None)
+                .unwrap();
+
+            assert_eq!(pending(&backend), 2, "{support:?}");
+        }
+    }
+
+    #[test]
+    fn an_online_meeting_the_event_already_asked_for_is_no_new_ask() {
+        use io_pimdir::capability::PimdirSupport;
+
+        // NOTE: the ask lands while the source supports it, which it
+        // stops declaring afterwards.
+        let (dir, mut backend, ids) = store(&[ALONE]);
+        declare_meeting(&dir, PimdirSupport::Full);
+        let asked = ALONE.replace("SUMMARY", "X-PIMDIR-ONLINE-MEETING:TRUE\r\nSUMMARY");
+        backend
+            .update_item("cal", &ids[0], asked.clone().into(), None)
+            .unwrap();
+
+        let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source("caldav");
+        owner.drain().unwrap();
+        drop(owner);
+        declare_meeting(&dir, PimdirSupport::None);
+        assert_eq!(pending(&backend), 0);
+
+        let edited = asked.replace("SUMMARY:Focus", "SUMMARY:Deep focus");
+        backend
+            .update_item("cal", &ids[0], edited.into(), None)
+            .unwrap();
+
+        assert_eq!(pending(&backend), 1);
     }
 }

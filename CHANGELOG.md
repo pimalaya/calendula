@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Added `--online-meeting` to `event build`, `event create` and `event update`, writing `X-PIMDIR-ONLINE-MEETING:TRUE` (pimdir STORAGE Annex B.1) for the sync engine to create a Google Meet or Microsoft Teams meeting. The pimdir backend refuses it before queueing when no source of the store declares `calendar.online-meeting`; the other backends refuse the flag by name.
 - Added field flags to `event build`, `event create` and `event update`, stacked between the source and `-i`: `--uid`, `--summary`, `--description`, `--location`, `--url`, `--start`, `--end`, `--duration`, `--time-zone`, `--status`, `--transparency`, `--organizer`, `--attendee`, `--categories` and `--sequence`, plus `--method` on `event build`. A flag replaces every instance of its property and leaves every other line as it was; a time takes a date, a local time, a `Z` time or an IANA zone prefix (`Europe/Paris:2026-10-19T09:00`), and a zone named arrives with its `VTIMEZONE`. `event update --start` alone moves the end with it. An event built from flags alone is checked; a source holding several VEVENTs is refused when a flag is set.
 - Added the projection to `event build --json`: `{contents, method, events}`, the calendar's `METHOD` and its events as `event read` prints them, so a loose iCalendar (an invitation attached to a mail) is read with no account and no backend.
 - Added `sequence` and `zoneAssumed` to the event JSON: the `SEQUENCE` (0 when absent), and whether a `TZID` nothing defines was read in the local zone.
@@ -24,6 +25,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Changed an empty value given to `--summary`, `--description`, `--location`, `--url`, `--categories`, `--organizer` or `--attendee` to remove the property rather than write it empty (`--attendee ""` removes every attendee). The time flags, `--status`, `--transparency` and `--sequence` still refuse an empty value.
+- Changed `event update` to revise the event it writes: `DTSTAMP` is set to the time of the write in UTC, and `LAST-MODIFIED` to the same instant when the event carries one, whether the write came from field flags, a source or `-i`.
 - Changed the composer from the only authoring surface of an event to the complete one: the field flags cover the common fields, and a recurrence, an alarm, a conference or a hand-written `VTIMEZONE` stay the composer's. The "nothing to build", "nothing to create" and "nothing to update" errors of the `event` family name the field flags.
 - Changed `onlineMeetingUrl` to prefer, among the `CONFERENCE` properties of an event (one per way in, RFC 7986 5.11), the one whose `FEATURE` says `VIDEO`, then a web one, so a dial-in `tel:` is never taken for the link; the vendors' own properties come next.
 

@@ -29,9 +29,11 @@ use crate::shared::{
 /// now.
 ///
 /// The flags cover the common fields; a recurrence, an alarm, a
-/// conference and a hand-written `VTIMEZONE` are left to the composer,
-/// the complete surface. An event built from flags alone is checked
-/// before it is written; a source goes to the backend as written.
+/// conference link and a hand-written `VTIMEZONE` are left to the
+/// composer, the complete surface. `--online-meeting` asks a pimdir
+/// store's sync engine to create a meeting, and is refused elsewhere. An
+/// event built from flags alone is checked before it is written; a
+/// source goes to the backend as written.
 ///
 /// The bytes are stored as given, so they carry the UID the event is
 /// addressed by afterwards.
@@ -58,6 +60,8 @@ impl EventCreateCommand {
         if self.ical.is_none() && self.fields.is_empty() && !self.composer.interactive {
             bail!("Nothing to create; give an iCalendar, a field flag, or -i to compose one");
         }
+
+        self.fields.check_backend(client.backend_name())?;
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
 
@@ -132,5 +136,72 @@ pub struct EventCreatedOutput {
 impl fmt::Display for EventCreatedOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Event `{}` successfully created", self.id)
+    }
+}
+
+#[cfg(all(test, feature = "vdir"))]
+mod tests {
+    use core::fmt;
+
+    use anyhow::Result;
+    use clap::Parser;
+    use pimalaya_cli::printer::Printer;
+    use serde::Serialize;
+
+    use super::EventCreateCommand;
+    use crate::{
+        backend::Backend,
+        config::{AccountConfig, Config, VdirConfig},
+        shared::{client::CalendarClient, item::CalendarItemQuery},
+    };
+
+    /// A printer dropping what it is handed.
+    struct Quiet;
+
+    impl Printer for Quiet {
+        fn out<T: fmt::Display + Serialize>(&mut self, _data: T) -> Result<()> {
+            Ok(())
+        }
+
+        fn is_json(&self) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn an_online_meeting_is_refused_off_pimdir_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("cal")).unwrap();
+        let client = || {
+            let account = AccountConfig {
+                vdir: Some(VdirConfig {
+                    home_dir: dir.path().to_path_buf(),
+                }),
+                ..Default::default()
+            };
+            CalendarClient::new(Config::default(), account, Backend::Auto).unwrap()
+        };
+
+        let command = EventCreateCommand::try_parse_from([
+            "create",
+            "-k",
+            "cal",
+            "--summary",
+            "Sync",
+            "--online-meeting",
+        ])
+        .unwrap();
+        let err = command
+            .execute(&mut Quiet, client())
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("--online-meeting"), "{err}");
+        assert!(err.contains("vdir backend"), "{err}");
+
+        let items = client()
+            .list_items("cal", CalendarItemQuery::default())
+            .unwrap();
+        assert!(items.is_empty());
     }
 }
