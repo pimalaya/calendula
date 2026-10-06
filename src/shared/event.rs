@@ -69,9 +69,16 @@ pub struct Event {
     /// The zone the start is written in: its `TZID`, `UTC`, or the local
     /// zone a floating time is read in. `null` for a whole day.
     pub time_zone: Option<String>,
+    /// Whether `DTSTART` or `DTEND` names a `TZID` neither the time-zone
+    /// database nor the calendar defines, so it was read in the local
+    /// zone rather than its own.
+    pub zone_assumed: bool,
     /// Whether the event is a recurring series, one of its occurrences,
     /// or an override of one.
     pub recurring: bool,
+    /// The `SEQUENCE`, the revision an organizer bumps on a significant
+    /// change; 0 when absent.
+    pub sequence: u32,
     /// The `STATUS` uppercased: `CONFIRMED`, `TENTATIVE`, `CANCELLED`.
     pub status: Option<String>,
     /// The `TRANSP` uppercased: `OPAQUE` (busy) or `TRANSPARENT` (free).

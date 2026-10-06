@@ -86,6 +86,19 @@ pub fn project(item: &CalendarItem) -> Vec<Event> {
         .collect()
 }
 
+/// The calendar's `METHOD` uppercased (RFC 5546: `REQUEST`, `CANCEL`,
+/// `REPLY`...), `None` when it carries none or its bytes do not parse.
+pub fn method(contents: &[u8]) -> Option<String> {
+    let cst = IcalCst::parse(contents).ok()?;
+    let ical = cst.decode();
+    ical.props
+        .iter()
+        .find(|prop| matches!(prop.name, IcalPropName::Kind(IcalPropKind::Method)))
+        .and_then(|prop| value_text(&prop.value))
+        .map(|method| method.trim().to_uppercase())
+        .filter(|method| !method.is_empty())
+}
+
 /// The occurrences of an item's events overlapping `range`, recurring
 /// series expanded, in start order.
 pub fn occurrences(item: &CalendarItem, range: Option<&CalendarTimeRange>) -> Vec<Event> {
@@ -381,6 +394,17 @@ impl<'a> Context<'a> {
         }
     }
 
+    /// Whether a time names a `TZID` nothing defines, and so is read in
+    /// the local zone rather than its own.
+    fn assumed(&self, stamp: &Stamp) -> bool {
+        match &stamp.tzid {
+            Some(tzid) if !stamp.utc && !stamp.date => {
+                named_zone(tzid).is_none() && IcalTz::of_calendar(self.ical, tzid).is_none()
+            }
+            _ => false,
+        }
+    }
+
     /// The instant a civil time names in a stamp's zone, with the offset
     /// it is shown at.
     fn resolve(&self, stamp: &Stamp, civil: IcalRecurDateTime) -> Option<(i64, i32)> {
@@ -619,7 +643,18 @@ impl<'a> Context<'a> {
             starts_at: times.starts_at.clone(),
             ends_at: times.ends_at.clone(),
             time_zone: times.time_zone.clone(),
+            zone_assumed: [IcalPropKind::DtStart, IcalPropKind::DtEnd]
+                .into_iter()
+                .filter_map(|kind| stamp(component, kind))
+                .any(|stamp| self.assumed(&stamp)),
             recurring,
+            sequence: prop(component, IcalPropKind::Sequence)
+                .and_then(|prop| match &prop.value {
+                    IcalValue::Integer(integer) => integer.get(),
+                    value => value_text(value).and_then(|text| text.trim().parse().ok()),
+                })
+                .and_then(|sequence| u32::try_from(sequence).ok())
+                .unwrap_or(0),
             status: text(component, IcalPropKind::Status).map(|status| status.to_uppercase()),
             transparency: text(component, IcalPropKind::Transp).map(|transp| transp.to_uppercase()),
             busy_status: named_text(component, "X-MICROSOFT-CDO-BUSYSTATUS")
@@ -1297,7 +1332,9 @@ mod tests {
                 "startsAt": "2026-10-05T09:00:00+00:00",
                 "endsAt": "2026-10-05T09:45:00+00:00",
                 "timeZone": "UTC",
+                "zoneAssumed": false,
                 "recurring": false,
+                "sequence": 0,
                 "status": "CONFIRMED",
                 "transparency": "OPAQUE",
                 "busyStatus": "TENTATIVE",
@@ -1387,5 +1424,70 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert!(events[0].recurring);
         assert_eq!(events[0].recurrence_id, None);
+    }
+
+    #[test]
+    fn a_zone_nothing_defines_is_assumed_and_one_defined_is_not() {
+        let unknown = item(
+            "",
+            &vevent(&[
+                "UID:unknown@example.org",
+                "DTSTART;TZID=Nowhere Standard Time:20261019T090000",
+                "DTEND;TZID=Nowhere Standard Time:20261019T100000",
+            ]),
+        );
+        let known = item(
+            "",
+            &vevent(&[
+                "UID:known@example.org",
+                "DTSTART;TZID=/mozilla.org/20050126_1/Europe/Paris:20261019T090000",
+                "DTEND:20261019T080000Z",
+            ]),
+        );
+        let floating = item(
+            "",
+            &vevent(&["UID:floating@example.org", "DTSTART:20261019T090000"]),
+        );
+
+        assert!(Event::project(&unknown)[0].zone_assumed);
+        assert!(!Event::project(&known)[0].zone_assumed);
+        assert_eq!(
+            Event::project(&known)[0].starts_at.as_deref(),
+            Some("2026-10-19T09:00:00+02:00")
+        );
+        assert!(!Event::project(&floating)[0].zone_assumed);
+    }
+
+    #[test]
+    fn the_sequence_reads_as_a_number_and_defaults_to_zero() {
+        let revised = item(
+            "",
+            &vevent(&[
+                "UID:a@example.org",
+                "DTSTART:20261019T090000Z",
+                "SEQUENCE:3",
+            ]),
+        );
+        let first = item(
+            "",
+            &vevent(&["UID:b@example.org", "DTSTART:20261019T090000Z"]),
+        );
+
+        assert_eq!(Event::project(&revised)[0].sequence, 3);
+        assert_eq!(Event::project(&first)[0].sequence, 0);
+    }
+
+    #[test]
+    fn the_method_is_the_calendar_one_uppercased() {
+        let invitation = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\nMETHOD:request\r\n\
+            BEGIN:VEVENT\r\nUID:x@example.org\r\nDTSTAMP:20260101T000000Z\r\nDTSTART:20261019T090000Z\r\n\
+            END:VEVENT\r\nEND:VCALENDAR\r\n";
+
+        assert_eq!(method(invitation.as_bytes()).as_deref(), Some("REQUEST"));
+        assert_eq!(
+            method(&item("", &vevent(&["UID:y@example.org"])).contents),
+            None
+        );
+        assert_eq!(method(b"not a calendar"), None);
     }
 }

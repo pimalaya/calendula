@@ -91,7 +91,7 @@ pub fn schemas() -> BTreeMap<String, Value> {
 
     insert!(
         "calendula-event-build",
-        crate::shared::build::IcalBuildOutput
+        crate::shared::event::build::EventBuildOutput
     );
     insert!(
         "calendula-event-create",

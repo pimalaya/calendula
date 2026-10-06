@@ -27,6 +27,7 @@ use crate::{
     shared::{
         arg::IcalComposerArgs,
         composer::IcalComposer,
+        event::build::EventBuildOutput,
         ical::{IcalFamily, blank_item, read_source},
     },
 };
@@ -140,9 +141,11 @@ fn emit(
     item: &[u8],
 ) -> Result<()> {
     let Some(path) = output else {
-        return printer.out(IcalBuildOutput {
-            contents: String::from_utf8(item.to_vec())?,
-        });
+        let contents = String::from_utf8(item.to_vec())?;
+        if family == IcalFamily::Event {
+            return printer.out(EventBuildOutput::of(contents));
+        }
+        return printer.out(IcalBuildOutput { contents });
     };
 
     fs::write(path, item).with_context(|| format!("Cannot write iCalendar {path:?}"))?;
