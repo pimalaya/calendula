@@ -27,13 +27,13 @@ use crate::{
 #[derive(Debug, Subcommand)]
 pub enum EventCommand {
     Agenda(EventAgendaCommand),
-    Build(EventBuildCommand),
+    Build(Box<EventBuildCommand>),
     #[command(visible_alias = "ls")]
     List(EventListCommand),
     Read(EventReadCommand),
     Find(EventFindCommand),
-    Create(EventCreateCommand),
-    Update(EventUpdateCommand),
+    Create(Box<EventCreateCommand>),
+    Update(Box<EventUpdateCommand>),
     Delete(EventDeleteCommand),
 }
 

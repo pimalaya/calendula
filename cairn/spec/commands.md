@@ -188,6 +188,8 @@ What the composer wrote SHALL be checked against the RFC 5545 contract through i
 
 A VEVENT SHALL also be refused when it carries no DTSTART and the calendar specifies no METHOD (RFC 5545 3.6.1). That requirement is a condition on the enclosing calendar rather than a property list, so ical-rs's per-component contract cannot state it; calendula SHALL state it, because it is the one thing a person writing an event by hand leaves out and because a server does worse than refuse it: SabreDAV denormalizes DTSTART into its index on write and answers HTTP 500.
 
+The check SHALL NOT refuse what RFC 5545 allows and ical-rs's contract omits: a `DATE` value and a `TZID` on `DTSTART`, `DTEND`, `DUE`, `RECURRENCE-ID`, `EXDATE` and `RDATE`, and the `CN`, `DIR`, `SENT-BY` and scheduling parameters on `ORGANIZER`. A whole-day, zoned or organized event is not invalid.
+
 An item that does not pass SHALL have its violations printed and SHALL offer to re-open the editor, defaulting to yes. This is not a menu: the only question is whether to fix it, and declining is an error rather than an abandon.
 
 An iCalendar given on the command line SHALL NOT be checked, going to the backend as it was written: that is the promise the projections already make, calendula never rewriting bytes it was handed.
@@ -207,10 +209,24 @@ The composer SHALL be opt-in through `-i`, never opt-out, which is what keeps ev
 
 A `create` given no source SHALL mint the item it starts from rather than open an empty file, so no composer is asked to invent an identity. An `update` given no source SHALL start from the item the backend holds, and SHALL send the entity tag it read as `If-Match` unless `--if-match` names another: an edit that takes a minute must not silently overwrite a write that landed during it.
 
-A command given neither a source nor `-i` has nothing to write and SHALL say so.
+A command given neither a source nor `-i` has nothing to write and SHALL say so; the `event` family also takes the field flags, which count as something to write.
 
 ### Requirement: The composer is the authoring surface
-calendula SHALL NOT grow per-property flags for the component families. A recurrence rule, a time zone reference and an attendee list are where a flag stops being ergonomic, and the documentation SHALL say the composer is the complete surface, so the absence reads as the boundary it is.
+The composer SHALL remain the complete authoring surface; the field flags cover the common fields only. A recurrence rule and an alarm are where a flag stops being ergonomic, and the documentation SHALL say so, so their absence reads as the boundary it is.
+
+### Requirement: A source, the field flags and the composer stack
+`event build`, `event create` and `event update` SHALL take an iCalendar source, the field flags and `-i/--interactive` together, applied in that order: the source (or the minted seed, or for an update the item the backend holds) is the event to start from, each flag sets the property it names on its VEVENT, and `-i` opens the result in the composer. A command given no source, no field flag and no `-i` has nothing to write and SHALL say so.
+
+A build or a create made from flags alone, with no source and no `-i`, SHALL be checked as a composed item is and refused naming the violations; a source given on the command line SHALL NOT be.
+
+### Requirement: The field flags are a convenience, not the surface
+The field flags SHALL cover the fields `event list` renders and the few every calendar carries, and SHALL NOT grow to match what a composer models. Recurrence (`RRULE`, `RDATE`, `EXDATE`, overrides), alarms, conferences and hand-written `VTIMEZONE`s are out. The documentation SHALL say the composer is the complete surface.
+
+### Requirement: A field flag sets its property and touches nothing else
+Writing a field flag SHALL drop every instance of the property it names on the VEVENT and write the flag's own, a repeated flag writing one instance per value. Every other line SHALL keep its bytes. A time flag SHALL take a date, a local time, a `Z` time, or a time prefixed by an IANA zone (`Europe/Paris:2026-10-19T09:00`); `--time-zone` names the zone of the times that name none. A zone a flag names SHALL arrive with its `VTIMEZONE`, minted once from the time-zone database. On an update, `--start` given without `--end` or `--duration` SHALL move the end with it, keeping the event's length.
+
+### Requirement: Flags apply to one event
+A source holding several VEVENTs SHALL be refused when a field flag is set, since a flag rewrites one event and the others would be dropped or left inconsistent. With no flag the source passes through as written.
 
 ### Requirement: A minted item carries an identity, and its family names its kind
 An item minted from nothing SHALL be a VCALENDAR carrying a PRODID and one component of the family's own kind, carrying a UID minted as a fresh UUID and a DTSTAMP of now. An editor handed an empty file mints no identity, and the CalDAV resource name and the pimdir link id both derive from the UID.

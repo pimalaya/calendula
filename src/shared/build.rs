@@ -1,8 +1,8 @@
 //! # Item build
 //!
 //! The pipeline the `build` verb of every component family runs: an
-//! iCalendar source refined in the composer and printed, rather than
-//! written to a backend.
+//! iCalendar source, set by the family's field flags, refined in the
+//! composer and printed, rather than written to a backend.
 
 use core::fmt;
 
@@ -28,9 +28,33 @@ use crate::{
         arg::IcalComposerArgs,
         composer::IcalComposer,
         event::build::EventBuildOutput,
-        ical::{IcalFamily, blank_item, read_source},
+        ical::{IcalFamily, blank_item, ensure_valid, read_source},
     },
 };
+
+/// What a family sets on the item between its source and the composer.
+///
+/// Only `event` has field flags; the other families pass [`NoFields`].
+pub trait IcalFields {
+    /// Whether nothing is set, the source then passing through.
+    fn is_empty(&self) -> bool;
+
+    /// Writes the fields onto `item`, returning its new bytes.
+    fn apply(&self, item: &[u8]) -> Result<Vec<u8>>;
+}
+
+/// The fields of a family taking no flag.
+pub struct NoFields;
+
+impl IcalFields for NoFields {
+    fn is_empty(&self) -> bool {
+        true
+    }
+
+    fn apply(&self, item: &[u8]) -> Result<Vec<u8>> {
+        Ok(item.to_vec())
+    }
+}
 
 /// What a `build` takes, whichever family it belongs to.
 #[derive(Debug, Parser)]
@@ -62,22 +86,49 @@ impl IcalBuildArgs {
         account_name: Option<&str>,
         family: IcalFamily,
     ) -> Result<()> {
+        self.execute_with(printer, config_paths, account_name, family, &NoFields)
+    }
+
+    /// Builds the item as [`execute`](Self::execute) does, `fields` set on
+    /// it between the source and the composer.
+    pub fn execute_with(
+        self,
+        printer: &mut impl Printer,
+        config_paths: &[PathBuf],
+        account_name: Option<&str>,
+        family: IcalFamily,
+        fields: &impl IcalFields,
+    ) -> Result<()> {
         let Self {
             composer,
             output,
             ical,
         } = self;
 
-        if ical.is_none() && !composer.interactive {
+        if ical.is_none() && fields.is_empty() && !composer.interactive {
+            if family == IcalFamily::Event {
+                bail!("Nothing to build; give an iCalendar, a field flag, or -i to compose one");
+            }
+
             bail!("Nothing to build; give an iCalendar, or -i to compose one");
         }
 
-        let seed = match &ical {
+        let base = match &ical {
             Some(source) => read_source(source)?,
             None => blank_item(family)?,
         };
 
+        let seed = fields.apply(&base)?;
+
         if !composer.interactive {
+            // NOTE: what a create checks, a build checks too. A built item
+            // reaches `create` as a source, which goes to the backend as
+            // it was written, so a laxer check here would be a way around
+            // that one.
+            if ical.is_none() {
+                ensure_valid(&seed)?;
+            }
+
             return emit(printer, output.as_deref(), family, &seed);
         }
 

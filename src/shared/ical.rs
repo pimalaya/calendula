@@ -19,9 +19,11 @@ use chrono::Utc;
 use ical::{
     component::{IcalComponent, IcalComponentKind, IcalComponentName},
     ical::Ical,
+    param::IcalParamKind,
     prop::{IcalProp, IcalPropKind, IcalPropName},
     tree::cst::IcalCst,
-    value::{IcalValue, datetime::IcalDateTime, text::IcalText},
+    validator::IcalValidateError,
+    value::{IcalValue, IcalValueKind, datetime::IcalDateTime, text::IcalText},
     version::IcalVersion,
 };
 
@@ -127,11 +129,76 @@ pub fn check(item: &[u8]) -> Vec<String> {
 
     let mut violations = match ical.validate() {
         Ok(_) => Vec::new(),
-        Err(errors) => errors.iter().map(|err| format!("{err}")).collect(),
+        Err(errors) => errors
+            .iter()
+            .filter(|err| !is_spurious(err))
+            .map(|err| format!("{err}"))
+            .collect(),
     };
 
     violations.extend(conditional);
     violations
+}
+
+/// Whether a validator finding is one RFC 5545 itself contradicts.
+///
+/// ical-rs 0.5.3 states too narrow a contract for a few properties: a
+/// `DTSTART`, a `DTEND`, a `DUE`, a `RECURRENCE-ID`, an `EXDATE` and an
+/// `RDATE` take a `DATE` and a `TZID` (RFC 5545 3.8.2, 3.8.4.4, 3.8.5),
+/// and an `ORGANIZER` its `CN`, `DIR` and `SENT-BY` (3.8.4.3) and the RFC
+/// 6638 and 7986 parameters an `ATTENDEE` is already allowed. Refusing
+/// those would refuse every whole-day, zoned or organized event, so they
+/// are dropped here until the contract is widened upstream.
+fn is_spurious(error: &IcalValidateError) -> bool {
+    let timed = |prop: &IcalPropKind| {
+        matches!(
+            prop,
+            IcalPropKind::DtStart
+                | IcalPropKind::DtEnd
+                | IcalPropKind::Due
+                | IcalPropKind::RecurrenceId
+                | IcalPropKind::ExDate
+                | IcalPropKind::RDate
+        )
+    };
+
+    match error {
+        IcalValidateError::ValueKind { prop, kind } => timed(prop) && *kind == IcalValueKind::Date,
+        IcalValidateError::ParamNotAllowed { prop, param } if timed(prop) => {
+            *param == IcalParamKind::TzId
+        }
+        IcalValidateError::ParamNotAllowed {
+            prop: IcalPropKind::Organizer,
+            param,
+        } => matches!(
+            param,
+            IcalParamKind::Cn
+                | IcalParamKind::Dir
+                | IcalParamKind::SentBy
+                | IcalParamKind::Email
+                | IcalParamKind::ScheduleAgent
+                | IcalParamKind::ScheduleForceSend
+                | IcalParamKind::ScheduleStatus
+        ),
+        _ => false,
+    }
+}
+
+/// Refuses an item that does not pass [`check`], naming every violation.
+///
+/// What a build or a create made from flags alone is held to: the item
+/// is calendula's own then, and has to be one a server takes.
+pub fn ensure_valid(item: &[u8]) -> Result<()> {
+    let violations = check(item);
+
+    if !violations.is_empty() {
+        bail!(
+            "The item these flags describe is not a valid iCalendar:\n\n  {}\n",
+            violations.join("\n  ")
+        );
+    }
+
+    Ok(())
 }
 
 /// Every VEVENT that owes a DTSTART and carries none.
@@ -384,5 +451,19 @@ mod tests {
                      DTSTAMP:20260101T000000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
 
         assert!(!check(item).is_empty());
+    }
+
+    #[test]
+    fn a_whole_day_a_zone_and_a_named_organizer_pass_the_check() {
+        // NOTE: ical-rs 0.5.3 refuses all three, which RFC 5545 allows
+        // (3.8.2.2, 3.8.2.4, 3.8.4.3); the check drops those findings.
+        let item = b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//x//y//EN\r\n\
+                     BEGIN:VEVENT\r\nUID:a\r\nDTSTAMP:20260101T000000Z\r\n\
+                     DTSTART;VALUE=DATE:20261019\r\n\
+                     DTEND;TZID=Europe/Paris:20261019T100000\r\n\
+                     ORGANIZER;CN=Jane:mailto:jane@example.org\r\n\
+                     END:VEVENT\r\nEND:VCALENDAR\r\n";
+
+        assert!(check(item).is_empty(), "{:?}", check(item));
     }
 }

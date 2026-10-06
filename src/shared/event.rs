@@ -17,6 +17,7 @@ pub mod cli;
 pub mod create;
 pub mod delete;
 pub mod expand;
+pub mod fields;
 pub mod find;
 pub mod list;
 pub mod read;

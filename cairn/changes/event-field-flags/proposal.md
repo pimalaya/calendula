@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: event-field-flags
-status: active
+status: landed
 created: 2026-10-06
 ---
 

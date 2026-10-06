@@ -1,7 +1,8 @@
 //! # Event update
 //!
 //! The `event update` command, replacing one VEVENT of the selected
-//! calendar.
+//! calendar, from an iCalendar source, from field flags, from the
+//! composer, or from any combination of the three.
 
 use core::fmt;
 
@@ -15,18 +16,26 @@ use crate::shared::{
     arg::{CalendarIdArg, IcalComposerArgs},
     client::CalendarClient,
     composer::IcalComposer,
+    event::fields::EventFieldsArgs,
     ical::read_source,
 };
 
 /// Overwrite an existing event from an iCalendar source.
 ///
-/// The source and `-i` stack: the source replaces the event's bytes,
-/// and `-i` opens the result in the composer. The whole component is
-/// replaced, so the source has to carry every property the event keeps:
-/// what it omits is dropped.
+/// The source, the field flags and `-i` stack: the source replaces the
+/// event's bytes, the flags set the properties they name on it, and `-i`
+/// opens the result in the composer. The whole component is replaced, so
+/// a source has to carry every property the event keeps: what it omits
+/// is dropped.
 ///
 /// With no source the event is read from the backend first, and the
-/// version it answered guards the write.
+/// version it answered guards the write; `--summary "New title"` alone
+/// then changes the title and nothing else. A `--start` given without
+/// `--end` or `--duration` moves the event, which keeps its length.
+///
+/// The flags cover the common fields; a recurrence, an alarm, a
+/// conference and a hand-written `VTIMEZONE` are left to the composer,
+/// the complete surface.
 ///
 /// JSON output: `{"id"}`, the event the backend updated.
 #[derive(Debug, Parser)]
@@ -44,6 +53,9 @@ pub struct EventUpdateCommand {
     /// The composer the event is refined in before it is written.
     #[command(flatten)]
     pub composer: IcalComposerArgs,
+    /// The properties the command sets on the event.
+    #[command(flatten)]
+    pub fields: EventFieldsArgs,
     /// Event to update, as `event list` reports it.
     #[arg(value_name = "EVENT-ID")]
     pub event_id: String,
@@ -56,8 +68,8 @@ pub struct EventUpdateCommand {
 
 impl EventUpdateCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
-        if self.ical.is_none() && !self.composer.interactive {
-            bail!("Nothing to update; give an iCalendar, or -i to edit the event");
+        if self.ical.is_none() && self.fields.is_empty() && !self.composer.interactive {
+            bail!("Nothing to update; give an iCalendar, a field flag, or -i to edit the event");
         }
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
@@ -65,7 +77,7 @@ impl EventUpdateCommand {
         // NOTE: reading the stored bytes also gives the version they are
         // being changed from, so an edit that took a minute cannot
         // silently overwrite a write that landed during it.
-        let (seed, etag) = match &self.ical {
+        let (base, etag) = match &self.ical {
             Some(source) => (read_source(source)?, None),
             None => {
                 let item = client.get_item(&calendar_id, &self.event_id)?;
@@ -74,6 +86,7 @@ impl EventUpdateCommand {
         };
 
         let if_match = self.if_match.or(etag);
+        let seed = self.fields.apply_keeping_length(&base)?;
 
         if !self.composer.interactive {
             client.update_item(&calendar_id, &self.event_id, seed, if_match.as_deref())?;
