@@ -30,7 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Changed the composer from the only authoring surface of an event to the complete one: the field flags cover the common fields, and a recurrence, an alarm, a conference or a hand-written `VTIMEZONE` stay the composer's. The "nothing to build", "nothing to create" and "nothing to update" errors of the `event` family name the field flags.
 - Changed `onlineMeetingUrl` to prefer, among the `CONFERENCE` properties of an event (one per way in, RFC 7986 5.11), the one whose `FEATURE` says `VIDEO`, then a web one, so a dial-in `tel:` is never taken for the link; the vendors' own properties come next.
 
-- Changed io-pimdir to the git revision `8c83c04` (pimdir draft-04), the one neverest and himalaya pin: a reply or cancellation the sync engine performed now leaves a receipt.
+- Changed io-pimdir to the git revision `35a1c3f` (pimdir draft-04), the one neverest and himalaya pin: a reply or cancellation the sync engine performed now leaves a receipt, and a store reconciled by the current neverest (no `probes` table) opens.
 - Changed the pimdir `update_item` and `delete_item` to honour `--if-match`: a write naming a version the item no longer has is refused before anything is queued, with an error starting `Precondition failed:`.
 - Changed the local date windows (vdir, msgraph, pimdir) to keep a recurring event whose occurrences fall in them, not only one starting there.
 - Changed the pimdir writes to be refused before they are queued when a source of the store does not support them, naming the capability, the source and why (pimdir draft-03, STORAGE §15.6). A write a source supports only in part logs a warning.
