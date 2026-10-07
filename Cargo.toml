@@ -49,7 +49,7 @@ io-gcal = { version = "0.1.3", default-features = false, features = ["client"], 
 io-msgraph = { version = "0.4.5", default-features = false, optional = true }
 io-http = { version = "0.5", default-features = false, optional = true }
 io-pim-discovery = { version = "0.8", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "stream"] }
-io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "f9b13f8836e1161af80b1b1457032ea49b747461", default-features = false, features = ["client"], optional = true }
+io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "ff28408a7834cc43cdd6e7229510174a783356fd", default-features = false, features = ["client"], optional = true }
 io-vdir = { version = "0.2", default-features = false, features = ["client", "serde"], optional = true }
 io-webdav = { version = "0.5", default-features = false, features = ["client"], optional = true }
 jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-bundle-always"] }
