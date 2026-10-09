@@ -13,6 +13,8 @@
 //! as the `timeMin` and `timeMax` parameters of `events.list` rather than
 //! applied locally, and the listing walks `nextPageToken` only as far as the
 //! requested window reaches.
+//!
+//! [`CalendarTimeRange`]: crate::shared::item::CalendarTimeRange
 
 use anyhow::{Context, Result, bail};
 use ical::component::IcalComponentKind;

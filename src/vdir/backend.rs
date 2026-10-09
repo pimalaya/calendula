@@ -7,6 +7,8 @@
 //! display name, description and color, and each `.ics` file is an
 //! item. vdir has no server, hence no entity tag: `if_match` is ignored
 //! and a [`CalendarTimeRange`] filters after parsing, never pushed down.
+//!
+//! [`CalendarTimeRange`]: crate::shared::item::CalendarTimeRange
 
 use anyhow::{Context, Result, anyhow};
 use ical::component::IcalComponentKind;

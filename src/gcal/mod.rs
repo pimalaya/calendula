@@ -4,12 +4,15 @@
 //!
 //! The three other backends speak iCalendar natively; this one does not.
 //! Google stores a JSON event and exposes no per-event iCalendar
-//! representation, so [`project`] synthesizes the document of record on read
-//! and re-projects it on write, per cardamum's projection policy.
+//! representation, so io-gcal's projection ([`GcalEvent::to_ical`])
+//! synthesizes the document of record on read and re-projects it on write,
+//! per cardamum's projection policy.
 //!
 //! The [`cli`] family covers what the shared surface cannot: sharing rules,
 //! availability, recurrence expansion, server-side parsing, the colour
 //! palettes and the account settings.
+//!
+//! [`GcalEvent::to_ical`]: io_gcal::v3::rest::events::GcalEvent::to_ical
 
 pub mod acl;
 pub mod backend;

@@ -5,7 +5,9 @@
 //!
 //! Expansion is ical-rs's [`IcalRecurSet`]: `DTSTART` plus every `RRULE`
 //! and `RDATE`, minus every `EXDATE`, with the `RECURRENCE-ID` overrides
-//! of the same `UID` applied. It is civil, so the zone step comes after:
+//! of the same `UID` applied, a `UNTIL`, an `EXDATE`, an `RDATE` or a
+//! `RECURRENCE-ID` written on another clock told on the `DTSTART`'s first
+//! (RFC 5545 3.3.10). It is civil, so the zone step comes after:
 //! a `TZID` the time-zone database knows resolves through it, one the
 //! calendar defines through its `VTIMEZONE`, a `Z` time is UTC, and a
 //! floating time, or a zone nobody defines, is read in the local zone
@@ -25,9 +27,13 @@ use ical::{
     ical::Ical,
     param::IcalParam,
     prop::{IcalProp, IcalPropKind, IcalPropName},
-    recur::{IcalRecurDateTime, set::IcalRecurSet},
+    recur::{
+        IcalRecurDateTime,
+        set::{IcalRecurOverride, IcalRecurSet},
+    },
     tree::cst::IcalCst,
     tz::{IcalTz, IcalTzOffset},
+    tzdb,
     value::IcalValue,
 };
 use jiff::{
@@ -486,11 +492,12 @@ impl<'a> Context<'a> {
 
         let series = group.master.and_then(|master| {
             let start = stamp(master, IcalPropKind::DtStart)?;
-            let set = IcalRecurSet::of_component(master);
-            (!set.rules.is_empty() || !set.dates.is_empty()).then_some((master, start, set))
+            let zones = self.zones(group, start.civil.seconds());
+            let set = IcalRecurSet::of_component_in(master, &zones);
+            (!set.rules.is_empty() || !set.dates.is_empty()).then_some((master, start, set, zones))
         });
 
-        let Some((master, start, mut set)) = series else {
+        let Some((master, start, mut set, zones)) = series else {
             // NOTE: a lone event, plus whatever overrides travel without
             // their series, an invitation to one instance being the
             // common case.
@@ -503,10 +510,8 @@ impl<'a> Context<'a> {
         };
 
         for component in &group.overrides {
-            set.with_override(component);
+            set.with_override_in(component, &zones);
         }
-
-        self.localize_until(master, &start, &mut set);
 
         let span = Span::of(self, master, &start);
         let filter = match self.zone(&start) {
@@ -529,10 +534,9 @@ impl<'a> Context<'a> {
             seen.insert(occurrence.id);
 
             let recurrence_id = wire(occurrence.id, start.date, start.utc);
-            let event = match occurrence
-                .over
-                .and_then(|index| overriding(&group.overrides, set.overrides[index].id))
-            {
+            let event = match occurrence.over.and_then(|index| {
+                overriding(&group.overrides, set.overrides[index].id, &set, &zones)
+            }) {
                 Some(component) => {
                     let mut event = self.lone(item_id, component);
                     event.recurrence_id = Some(recurrence_id);
@@ -552,7 +556,7 @@ impl<'a> Context<'a> {
         // into the window from an identity past the bound was never
         // reached; it is still an occurrence of the series.
         for component in &group.overrides {
-            let Some(id) = prop(component, IcalPropKind::RecurrenceId).and_then(civil_of) else {
+            let Some(id) = override_id(component, &set, &zones) else {
                 continue;
             };
             if seen.contains(&id) || set.exdates.binary_search(&id).is_ok() {
@@ -567,41 +571,46 @@ impl<'a> Context<'a> {
         out
     }
 
-    /// Moves each rule's UTC `UNTIL` onto the wall clock of a zoned
-    /// `DTSTART`.
+    /// The zones a group's times are told through, one per `TZID` it
+    /// names, each resolved as [`zone`](Self::zone) reads it, so the set
+    /// brings a time written on another clock onto its series' (RFC 5545
+    /// 3.3.10).
     ///
-    /// RFC 5545 3.3.10 writes the bound in UTC whenever the start is
-    /// zoned, while expansion compares civil times: unconverted, the last
-    /// instance is lost or gained by the zone's offset.
-    fn localize_until(&self, master: &IcalComponent<'_>, start: &Stamp, set: &mut IcalRecurSet) {
-        if start.utc || start.date {
-            return;
-        }
+    /// A zone the database resolves is described around `anchor`, the
+    /// series' start. One the calendar alone defines is its `VTIMEZONE`.
+    /// One nobody defines is the local zone, under the same `TZID`.
+    fn zones(&self, group: &Group<'_>, anchor: i64) -> Vec<IcalTz> {
+        let mut zones: Vec<IcalTz> = Vec::new();
 
-        let zone = self.zone(start);
-        let rules = master
-            .props
+        let tzids = group
+            .master
             .iter()
-            .filter(|prop| matches!(prop.name, IcalPropName::Kind(IcalPropKind::RRule)))
-            .filter_map(|prop| match &prop.value {
-                IcalValue::Recur(recur) => ical::recur::IcalRecurRule::parse(&recur.0)
-                    .ok()
-                    .map(|_| recur.0.to_string()),
+            .chain(&group.overrides)
+            .flat_map(|component| &component.props)
+            .flat_map(|prop| &prop.params)
+            .filter_map(|param| match param {
+                IcalParam::TzId(tzid) => Some(tzid.as_ref()),
                 _ => None,
             });
 
-        // NOTE: the set keeps the readable rules in source order, which
-        // is the order they are read here.
-        for (rule, raw) in set.rules.iter_mut().zip(rules) {
-            let utc = raw.split(';').any(|part| {
-                part.split_once('=').is_some_and(|(name, value)| {
-                    name.eq_ignore_ascii_case("UNTIL") && value.ends_with(['Z', 'z'])
-                })
-            });
-            if let (true, Some(until)) = (utc, rule.until) {
-                rule.until = Some(local(&zone, until.seconds()));
+        for tzid in tzids {
+            if zones.iter().any(|zone| zone.id == tzid) {
+                continue;
+            }
+
+            let zone = match (named_zone(tzid), defined_zone(self.ical, tzid)) {
+                (Some(zone), _) => database_zone(&zone, anchor),
+                (None, Some(zone)) => Some(zone),
+                (None, None) => database_zone(&self.local, anchor),
+            };
+
+            if let Some(mut zone) = zone {
+                zone.id = tzid.to_owned();
+                zones.push(zone);
             }
         }
+
+        zones
     }
 
     /// One component read on its own times.
@@ -677,10 +686,28 @@ impl<'a> Context<'a> {
 fn overriding<'a>(
     overrides: &[&'a IcalComponent<'a>],
     id: IcalRecurDateTime,
+    set: &IcalRecurSet,
+    zones: &[IcalTz],
 ) -> Option<&'a IcalComponent<'a>> {
-    overrides.iter().copied().find(|component| {
-        prop(component, IcalPropKind::RecurrenceId).and_then(civil_of) == Some(id)
-    })
+    overrides
+        .iter()
+        .copied()
+        .find(|component| override_id(component, set, zones) == Some(id))
+}
+
+/// The instance an override's `RECURRENCE-ID` names, told on the series'
+/// clock.
+///
+/// A component with no `DTSTART` is no override to the set, and its
+/// identity is read as written.
+fn override_id(
+    component: &IcalComponent<'_>,
+    set: &IcalRecurSet,
+    zones: &[IcalTz],
+) -> Option<IcalRecurDateTime> {
+    IcalRecurOverride::of_component(component, &set.zone, zones)
+        .map(|over| over.id)
+        .or_else(|| prop(component, IcalPropKind::RecurrenceId).and_then(civil_of))
 }
 
 /// The zone a calendar defines under `tzid`, if its definition states an
@@ -742,25 +769,17 @@ fn resolve(zone: &Zone, civil: IcalRecurDateTime) -> Option<(i64, i32)> {
     }
 }
 
-/// The wall-clock time an instant shows in a zone.
-fn local(zone: &Zone, at: i64) -> IcalRecurDateTime {
-    let offset = match zone {
-        Zone::Utc => 0,
-        Zone::Named(zone) => Timestamp::from_second(at)
-            .map(|at| zone.to_offset(at).seconds())
-            .unwrap_or(0),
-        Zone::Defined(_) => {
-            // NOTE: a VTIMEZONE answers civil times only, so the offset is
-            // read at the instant's UTC time, then once more at the local
-            // time that gives, which settles it but within an hour of a
-            // transition.
-            let first = resolve(zone, IcalRecurDateTime::from_seconds(at)).map_or(0, |(_, o)| o);
-            let civil = IcalRecurDateTime::from_seconds(at + i64::from(first));
-            resolve(zone, civil).map_or(first, |(_, offset)| offset)
-        }
-    };
+/// A zone of the time-zone database as the `VTIMEZONE` describing it
+/// around `anchor`, `None` for one with no IANA name.
+fn database_zone(zone: &TimeZone, anchor: i64) -> Option<IcalTz> {
+    let mut calendar = IcalCst::empty("VCALENDAR");
+    calendar.push_component(tzdb::vtimezone(zone.iana_name()?, anchor)?);
 
-    IcalRecurDateTime::from_seconds(at + i64::from(offset))
+    calendar
+        .decode()
+        .components
+        .iter()
+        .find_map(IcalTz::of_component)
 }
 
 /// An instant at an offset, as RFC 3339 spells it.
@@ -1177,6 +1196,67 @@ mod tests {
         assert!(Event::occurrence(&item, "20261009T090000Z").is_none());
     }
 
+    /// A daily series at 14:00 in Paris, three instances, then `extra`.
+    fn paris_daily(extra: &[&str]) -> String {
+        let mut events = vevent(&[
+            "UID:paris@example.org",
+            "DTSTART;TZID=Europe/Paris:20260601T140000",
+            "DTEND;TZID=Europe/Paris:20260601T150000",
+            "RRULE:FREQ=DAILY;COUNT=3",
+            "SUMMARY:Sync",
+        ]);
+        if !extra.is_empty() {
+            events.push_str(&vevent(extra));
+        }
+        events
+    }
+
+    #[test]
+    fn a_utc_exdate_drops_its_instance_of_a_zoned_series() {
+        let events = paris_daily(&[]).replace(
+            "SUMMARY:Sync\r\n",
+            "SUMMARY:Sync\r\nEXDATE:20260602T120000Z\r\n",
+        );
+        let item = item("", &events);
+
+        let events = Event::occurrences(&item, Some(&days("2026-06-01", "2026-06-30")));
+
+        assert_eq!(
+            starts(&events),
+            ["2026-06-01T14:00:00+02:00", "2026-06-03T14:00:00+02:00"]
+        );
+    }
+
+    #[test]
+    fn a_utc_recurrence_id_overrides_its_instance_of_a_zoned_series() {
+        let item = item(
+            "",
+            &paris_daily(&[
+                "UID:paris@example.org",
+                "RECURRENCE-ID:20260602T120000Z",
+                "DTSTART;TZID=Europe/Paris:20260602T160000",
+                "DTEND;TZID=Europe/Paris:20260602T170000",
+                "SUMMARY:Sync (moved)",
+            ]),
+        );
+
+        let events = Event::occurrences(&item, Some(&days("2026-06-01", "2026-06-30")));
+
+        assert_eq!(
+            starts(&events),
+            [
+                "2026-06-01T14:00:00+02:00",
+                "2026-06-02T16:00:00+02:00",
+                "2026-06-03T14:00:00+02:00",
+            ]
+        );
+        assert_eq!(events[1].summary, "Sync (moved)");
+        assert_eq!(events[1].recurrence_id.as_deref(), Some("20260602T140000"));
+
+        let read = Event::occurrence(&item, "20260602T140000").unwrap();
+        assert_eq!(read.summary, "Sync (moved)");
+    }
+
     #[test]
     fn an_override_moved_into_the_window_from_past_it_is_listed() {
         let events = [
@@ -1250,6 +1330,38 @@ mod tests {
             Some("2026-10-26T10:00:00+01:00")
         );
     }
+
+    #[test]
+    fn a_utc_until_bounds_a_series_in_a_zone_only_the_calendar_defines() {
+        let item = item(
+            ROMANCE,
+            &vevent(&[
+                "UID:outlook@example.org",
+                "DTSTART;TZID=Romance Standard Time:20261019T090000",
+                "DTEND;TZID=Romance Standard Time:20261019T100000",
+                "RRULE:FREQ=WEEKLY;UNTIL=20261026T080000Z",
+            ]),
+        );
+
+        let events = Event::occurrences(&item, Some(&days("2026-10-01", "2026-11-30")));
+
+        // NOTE: 08:00 UTC is 09:00 on Oct 26, past the change to +01:00,
+        // so the bound keeps that instance.
+        assert_eq!(
+            starts(&events),
+            ["2026-10-19T09:00:00+02:00", "2026-10-26T09:00:00+01:00"]
+        );
+    }
+
+    /// A zone the time-zone database does not know, as Outlook names it.
+    const ROMANCE: &str = "BEGIN:VTIMEZONE\r\nTZID:Romance Standard Time\r\n\
+            BEGIN:STANDARD\r\nDTSTART:16011028T030000\r\n\
+            RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10\r\n\
+            TZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nEND:STANDARD\r\n\
+            BEGIN:DAYLIGHT\r\nDTSTART:16010325T020000\r\n\
+            RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3\r\n\
+            TZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nEND:DAYLIGHT\r\n\
+            END:VTIMEZONE\r\n";
 
     #[test]
     fn a_zone_only_the_calendar_defines_resolves_through_its_vtimezone() {

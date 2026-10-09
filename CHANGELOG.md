@@ -30,7 +30,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Changed the composer from the only authoring surface of an event to the complete one: the field flags cover the common fields, and a recurrence, an alarm, a conference or a hand-written `VTIMEZONE` stay the composer's. The "nothing to build", "nothing to create" and "nothing to update" errors of the `event` family name the field flags.
 - Changed `onlineMeetingUrl` to prefer, among the `CONFERENCE` properties of an event (one per way in, RFC 7986 5.11), the one whose `FEATURE` says `VIDEO`, then a web one, so a dial-in `tel:` is never taken for the link; the vendors' own properties come next.
 
-- Changed io-pimdir to the git revision `be03184` (pimdir draft-04), the one neverest and himalaya pin: a reply or cancellation the sync engine performed now leaves a receipt, a store reconciled by the current neverest (no `probes` table) opens, an empty mail date is stored as no date, a band round keeps undated mail, and opening a store creates the `items_by_sort_global` index a page across collections walks.
+- Changed io-pimdir to 0.7 (pimdir draft-04), from crates.io rather than a git revision: a reply or cancellation the sync engine performed now leaves a receipt, a store reconciled by the current neverest (no `probes` table) opens, an empty mail date is stored as no date, a band round keeps undated mail, and opening a store creates the `items_by_sort_global` index a page across collections walks.
+- Changed ical-rs to 0.6, io-gcal to 0.2 and io-msgraph to 0.5. The composed-item check now also refuses a duration outside RFC 5545 3.3.6 (a `TRIGGER:P1H`, say) and a `LANGUAGE` or `ALTREP` on a property the RFC gives none, and `--duration` refuses a second straight after an hour (`PT1H5S`; write `PT1H0M5S`). The gcal and msgraph backends mint an online meeting's join link as a `CONFERENCE` (RFC 7986) rather than their vendor property.
 - Changed the pimdir `update_item` and `delete_item` to honour `--if-match`: a write naming a version the item no longer has is refused before anything is queued, with an error starting `Precondition failed:`.
 - Changed the local date windows (vdir, msgraph, pimdir) to keep a recurring event whose occurrences fall in them, not only one starting there.
 - Changed the pimdir writes to be refused before they are queued when a source of the store does not support them, naming the capability, the source and why (pimdir draft-03, STORAGE §15.6). A write a source supports only in part logs a warning.
@@ -38,9 +39,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
-- Fixed the composed-item check refusing a whole-day, a zoned or an organized event: ical-rs 0.5.3 refuses a `DATE` value and a `TZID` on `DTSTART`, `DTEND`, `DUE`, `RECURRENCE-ID`, `EXDATE` and `RDATE`, and a `CN` on `ORGANIZER`, all of which RFC 5545 allows.
+- Fixed the composed-item check refusing a whole-day, a zoned or an organized event: a `DATE` value and a `TZID` on `DTSTART`, `DTEND`, `DUE`, `RECURRENCE-ID`, `EXDATE` and `RDATE`, and a `CN` on `ORGANIZER`, all of which RFC 5545 allows.
 - Fixed a `TZID` with a leading slash (`/Europe/Paris`) read in the local zone rather than its own.
 - Fixed a `VTIMEZONE` stating no observance read as UTC: it defines nothing, and the time is read in the local zone with `zoneAssumed`.
+- Fixed an `EXDATE` or a `RECURRENCE-ID` written in UTC (or another zone) on a zoned recurring series naming no instance: the excluded occurrence still listed, and the override listed beside the occurrence it replaced. Each is now told on the series' clock first, as a UTC `UNTIL` already was.
 - Fixed `event delete` taking only the backend id although its help named the iCalendar `UID`: it now takes either, the id first, and refuses a `UID` several events carry.
 - Fixed a msgraph listing failing on a `numbered` recurring series: Graph fills its `endDate` with `0001-01-01`, which bounded the instances request before its start. The window now follows the range type. ([#10](https://github.com/pimalaya/calendula/issues/10))
 - Fixed msgraph listings dropping the cancelled occurrences of a series: Graph returns them only on a read of the master by id, so each master is now read so before projection. ([#11](https://github.com/pimalaya/calendula/issues/11))

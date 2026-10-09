@@ -8,6 +8,8 @@
 //! id a listing showed addresses the same resource on every verb. The
 //! server owns the query, so a [`CalendarTimeRange`] is pushed down as
 //! an RFC 4791 `time-range` filter rather than applied locally.
+//!
+//! [`CalendarTimeRange`]: crate::shared::item::CalendarTimeRange
 
 use anyhow::{Context, Result, anyhow};
 use ical::{component::vevent::VEVENT, prop::uid::UID, tree::cst::IcalCst};

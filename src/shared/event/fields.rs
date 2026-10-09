@@ -15,15 +15,18 @@ use std::borrow::Cow;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, ValueEnum};
 use ical::{
-    component::{vevent::VEVENT, vtimezone::VTIMEZONE},
+    component::{
+        IcalComponent, IcalComponentKind, IcalComponentName, vevent::VEVENT, vtimezone::VTIMEZONE,
+    },
+    ical::Ical,
     param::IcalParam,
     prop::{IcalProp, IcalPropKind, IcalPropName},
     tree::{
         codec::mode::Escaper,
         cst::{IcalCst, IcalItem},
-        line::IcalLine,
     },
     tzdb,
+    validator::IcalValidateError,
     value::{
         IcalValue,
         cal_address::IcalCalAddress,
@@ -33,6 +36,7 @@ use ical::{
         text::{IcalText, IcalTextList},
         uri::IcalUri,
     },
+    version::IcalVersion,
 };
 use jiff::{
     Timestamp, ToSpan,
@@ -41,9 +45,6 @@ use jiff::{
 };
 
 use crate::shared::{event::Event, item::CalendarItem};
-
-/// How long a content line may run before it is folded (RFC 5545 3.1).
-const FOLD_OCTETS: usize = 75;
 
 /// The VEVENT fields `event build`, `event create` and `event update` set
 /// from flags.
@@ -328,11 +329,11 @@ impl EventFieldsArgs {
             .map(|(name, props)| {
                 let items = props
                     .iter()
-                    .map(|prop| folded(prop.encode(escaper)))
-                    .collect::<Result<Vec<_>>>()?;
-                Ok((name, items))
+                    .map(|prop| IcalItem::Prop(prop.encode(escaper)))
+                    .collect();
+                (name, items)
             })
-            .collect::<Result<_>>()?;
+            .collect();
 
         let vevent = cst.component_mut::<VEVENT>().context("Find VEVENT error")?;
 
@@ -598,7 +599,7 @@ pub fn revise(ical: &[u8], now: Timestamp) -> Result<Vec<u8>> {
             let mut lines: Lines = Vec::new();
 
             for kind in kinds {
-                let line = folded(prop(kind, Vec::new(), stamp.clone()).encode(escaper))?;
+                let line = IcalItem::Prop(prop(kind, Vec::new(), stamp.clone()).encode(escaper));
                 dropped.push(IcalPropName::Kind(kind));
                 lines.push((IcalPropName::Kind(kind), vec![line]));
             }
@@ -619,7 +620,7 @@ pub fn set_method(ical: &[u8], method: EventMethodArg) -> Result<Vec<u8>> {
     let mut cst = IcalCst::parse(ical).context("Parse iCalendar error")?;
     let escaper = Escaper::for_version(cst.version());
     let value = IcalValue::Text(IcalText(Cow::Borrowed(method.as_method())));
-    let line = folded(prop(IcalPropKind::Method, vec![], value).encode(escaper))?;
+    let line = IcalItem::Prop(prop(IcalPropKind::Method, vec![], value).encode(escaper));
 
     replace(
         &mut cst,
@@ -851,52 +852,43 @@ fn moved_end(ical: &[u8], start: &Moment) -> Result<Option<Moment>> {
     Ok(Some(start.plus(length.max(0))?))
 }
 
-/// Validates an RFC 5545 duration (3.3.6), uppercased.
+/// Reads an RFC 5545 duration (3.3.6), uppercased.
 ///
-/// Strict where ical-rs's reading is liberal: what a flag writes has to
-/// be the grammar, not something a reader happens to tolerate. A negative
-/// length is no length for an event.
+/// Held to the grammar by ical-rs's validator, strict where reading a
+/// length is liberal: what a flag writes has to be the grammar, not
+/// something a reader happens to tolerate. A negative length is no length
+/// for an event.
 fn duration(value: &str) -> Result<String> {
     let duration = value.trim().to_ascii_uppercase();
-    let span = duration.strip_prefix('+').unwrap_or(&duration);
+    let span = duration.strip_prefix('+').unwrap_or(&duration).to_owned();
 
-    let valid = match span.strip_prefix('P') {
-        Some(rest) => match rest.split_once('T') {
-            Some((date, time)) => units(date, "D") && !time.is_empty() && units(time, "HMS"),
-            None => (units(rest, "D") || units(rest, "W")) && !rest.is_empty(),
-        },
-        None => false,
+    let length = IcalValue::Duration(IcalDuration(Cow::Owned(span.clone())));
+    let vevent = IcalComponent {
+        name: IcalComponentName::Kind(IcalComponentKind::VEvent),
+        props: vec![prop(IcalPropKind::Duration, Vec::new(), length)],
+        components: Vec::new(),
     };
 
-    if !valid {
+    let ical = Ical {
+        version: IcalVersion::V2_0,
+        props: Vec::new(),
+        components: vec![vevent],
+    };
+
+    let conforms = match ical.validate() {
+        Ok(_) => true,
+        Err(errors) => !errors
+            .iter()
+            .any(|err| matches!(err, IcalValidateError::Duration { .. })),
+    };
+
+    if !conforms || span.starts_with('-') {
         bail!(
             "Cannot read duration `{value}`; give an RFC 5545 duration such as PT1H30M, P1D or P2W"
         );
     }
 
-    Ok(span.to_owned())
-}
-
-/// Whether `value` is numbers each followed by one of `units`, in that
-/// order, none twice; empty is allowed.
-fn units(value: &str, units: &str) -> bool {
-    let mut allowed = units.chars();
-    let mut digits = false;
-
-    for character in value.chars() {
-        if character.is_ascii_digit() {
-            digits = true;
-            continue;
-        }
-
-        if !digits || !allowed.any(|unit| unit == character) {
-            return false;
-        }
-
-        digits = false;
-    }
-
-    !digits
+    Ok(span)
 }
 
 /// Splits `[NAME:]ADDRESS` into the `CN` and the `mailto:` URI.
@@ -1027,39 +1019,6 @@ fn names(item: &IcalItem<'_>, name: &str) -> bool {
         IcalItem::Prop(line) => line.name.get().eq_ignore_ascii_case(name),
         _ => false,
     }
-}
-
-/// An encoded line folded at 75 octets (RFC 5545 3.1).
-///
-/// ical-rs writes an encoded property out on one line, and a description
-/// easily runs past what RFC 5545 asks a line to stay within. The fold is
-/// read back through the parser, which records it on the line's wire
-/// shape, so it serializes folded.
-fn folded(line: IcalLine<'static>) -> Result<IcalItem<'static>> {
-    let logical = line.to_string();
-    let logical = logical.trim_end_matches(['\r', '\n']);
-
-    let mut out = String::with_capacity(logical.len() + logical.len() / FOLD_OCTETS * 3);
-    let mut width = 0;
-
-    for character in logical.chars() {
-        // NOTE: a fold never splits a character: the octet budget is
-        // checked before a whole one is written.
-        if width + character.len_utf8() > FOLD_OCTETS {
-            out.push_str("\r\n ");
-            width = 1;
-        }
-
-        out.push(character);
-        width += character.len_utf8();
-    }
-
-    let mut scratch = IcalCst::empty("VEVENT");
-    scratch
-        .push_raw(&out)
-        .with_context(|| format!("Encode iCalendar line `{logical}` error"))?;
-
-    scratch.items.pop().context("Encode iCalendar line error")
 }
 
 /// A text property, its line breaks normalized to the `\n` RFC 5545
@@ -1309,6 +1268,19 @@ mod tests {
     }
 
     #[test]
+    fn a_long_line_is_folded_between_characters() {
+        let long = "é".repeat(60);
+        let out = apply(EVENT, &["--summary", &long]);
+
+        assert!(out.lines().all(|line| line.len() <= 75), "{out}");
+        assert!(
+            out.replace("\r\n ", "")
+                .contains(&format!("SUMMARY:{long}\r\n")),
+            "{out}"
+        );
+    }
+
+    #[test]
     fn a_time_takes_a_date_a_local_time_and_a_utc_one() {
         let out = apply(EVENT, &["--start", "2026-10-19", "--end", "2026-10-20"]);
         assert!(out.contains("DTSTART;VALUE=DATE:20261019\r\n"), "{out}");
@@ -1463,13 +1435,22 @@ mod tests {
 
     #[test]
     fn a_duration_outside_the_grammar_is_refused() {
-        for duration in ["1h", "P1H", "PT", "P1DT", "-PT1H", "P1W2D"] {
+        for duration in [
+            "1h", "P1H", "PT", "P1DT", "-PT1H", "P1W2D", "PT1H5S", "PT1.5S", "P",
+        ] {
             let err = refusal(EVENT, &[&format!("--duration={duration}")]);
             assert!(err.contains("RFC 5545 duration"), "{duration}: {err}");
         }
 
-        for duration in ["P1D", "P2W", "PT15M", "P1DT2H", "PT1H0M5S"] {
-            apply(EVENT, &["--duration", duration]);
+        for (duration, written) in [
+            ("P1D", "P1D"),
+            ("P2W", "P2W"),
+            ("PT15M", "PT15M"),
+            ("p1dt2h", "P1DT2H"),
+            ("+PT1H0M5S", "PT1H0M5S"),
+        ] {
+            let out = apply(EVENT, &["--duration", duration]);
+            assert!(out.contains(&format!("DURATION:{written}\r\n")), "{out}");
         }
     }
 

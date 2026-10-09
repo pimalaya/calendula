@@ -822,9 +822,9 @@ dependencies = [
 
 [[package]]
 name = "ical-rs"
-version = "0.5.3"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e8b293ee52f1d10fe06d1224664d113a51f30285fc36154bfd3d8c1077c7622"
+checksum = "7bf4899f3dd5544302e03f0768f90e97a9ad6ec75689c2dd71680ec8d9f0ae24"
 dependencies = [
  "jiff",
  "memchr",
@@ -960,9 +960,9 @@ dependencies = [
 
 [[package]]
 name = "io-gcal"
-version = "0.1.3"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3912bb286b937d9055d8139c20ca72f658ff2fa7c4ab365b2df7357cd700fc01"
+checksum = "17a7b0824811316d554c22abce3a7b85f03d6e224cbf11e44792894c1d0aa28b"
 dependencies = [
  "anyhow",
  "ical-rs",
@@ -995,9 +995,9 @@ dependencies = [
 
 [[package]]
 name = "io-msgraph"
-version = "0.4.5"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4c226bb0fd65e74376ea3d15075c4a7748d84ed98594980a993ee1b4fa463ff"
+checksum = "65320c336ee6a7dbcbae717a2fbe8915d62e87da13c241861daed4a16f0d5734"
 dependencies = [
  "anyhow",
  "base64",
@@ -1036,8 +1036,9 @@ dependencies = [
 
 [[package]]
 name = "io-pimdir"
-version = "0.6.0"
-source = "git+https://github.com/pimalaya/io-pimdir?rev=be03184246e1ad7e45bd657de5076d99a1b34922#be03184246e1ad7e45bd657de5076d99a1b34922"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2f9a6703ec6e7993d395ed325bf0698e7ab17b61b0b5ad84095704349a71e90"
 dependencies = [
  "blake3",
  "fs4",
