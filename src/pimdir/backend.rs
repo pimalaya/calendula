@@ -906,7 +906,7 @@ fn start_of(stored: &PimdirItem) -> Option<&PimdirTime> {
         PimdirSummary::Event(event) => event.dtstart.as_ref(),
         PimdirSummary::Task(task) => task.dtstart.as_ref().or(task.due.as_ref()),
         PimdirSummary::Journal(journal) => journal.dtstart.as_ref(),
-        PimdirSummary::Mail(_) | PimdirSummary::Contact(_) => None,
+        PimdirSummary::Mail(_) | PimdirSummary::Contact(_) | PimdirSummary::File(_) => None,
     }
 }
 

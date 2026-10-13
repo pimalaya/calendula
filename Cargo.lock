@@ -822,9 +822,8 @@ dependencies = [
 
 [[package]]
 name = "ical-rs"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bf4899f3dd5544302e03f0768f90e97a9ad6ec75689c2dd71680ec8d9f0ae24"
+version = "0.6.1"
+source = "git+https://github.com/pimalaya/ical?rev=caa14225152a7aff6d8c86cef1f95e800dd77d20#caa14225152a7aff6d8c86cef1f95e800dd77d20"
 dependencies = [
  "jiff",
  "memchr",
@@ -979,8 +978,7 @@ dependencies = [
 [[package]]
 name = "io-http"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fe2064378f85c13e3f3aca141308fa541c4478ff5cf5ebadd7dcbcce1a44281"
+source = "git+https://github.com/pimalaya/io-http?rev=e1815307771c1ec65a86b77256d46c33241d3038#e1815307771c1ec65a86b77256d46c33241d3038"
 dependencies = [
  "anyhow",
  "base64",
@@ -995,9 +993,8 @@ dependencies = [
 
 [[package]]
 name = "io-msgraph"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65320c336ee6a7dbcbae717a2fbe8915d62e87da13c241861daed4a16f0d5734"
+version = "0.6.0"
+source = "git+https://github.com/pimalaya/io-msgraph?rev=2ae26370aefa671c16316dbad98107634436bce6#2ae26370aefa671c16316dbad98107634436bce6"
 dependencies = [
  "anyhow",
  "base64",
@@ -1036,9 +1033,8 @@ dependencies = [
 
 [[package]]
 name = "io-pimdir"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2f9a6703ec6e7993d395ed325bf0698e7ab17b61b0b5ad84095704349a71e90"
+version = "0.8.0"
+source = "git+https://github.com/pimalaya/io-pimdir?rev=189db408bdbeee33c1c535709c5f40f3464c7ecb#189db408bdbeee33c1c535709c5f40f3464c7ecb"
 dependencies = [
  "blake3",
  "fs4",
@@ -1075,8 +1071,7 @@ dependencies = [
 [[package]]
 name = "io-webdav"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0910be6c0a525345eed08d5a7e411e5ad67c83e57e1aa141c720419ce5682fa9"
+source = "git+https://github.com/pimalaya/io-webdav?rev=62fad898d1ecb3ebb25c37826a79eb72fcd54d7f#62fad898d1ecb3ebb25c37826a79eb72fcd54d7f"
 dependencies = [
  "anyhow",
  "io-http",

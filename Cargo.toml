@@ -46,10 +46,10 @@ getrandom = "0.4"
 humansize = "2"
 ical-rs = { version = "0.6", default-features = false, features = ["parser", "tzdb"] }
 io-gcal = { version = "0.2", default-features = false, features = ["client"], optional = true }
-io-msgraph = { version = "0.5", default-features = false, optional = true }
+io-msgraph = { version = "0.6", default-features = false, optional = true }
 io-http = { version = "0.5", default-features = false, optional = true }
 io-pim-discovery = { version = "0.8", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "stream"] }
-io-pimdir = { version = "0.7", default-features = false, features = ["client"], optional = true }
+io-pimdir = { version = "0.8", default-features = false, features = ["client"], optional = true }
 io-vdir = { version = "0.2", default-features = false, features = ["client", "serde"], optional = true }
 io-webdav = { version = "0.5", default-features = false, features = ["client"], optional = true }
 jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-bundle-always"] }
@@ -63,3 +63,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 shellexpand = "3.1"
 url = { version = "2.5", features = ["serde"] }
+
+[patch.crates-io]
+# NOTE: unreleased revisions, the set the Pimalaya Android client builds, to
+# be replaced by released versions.
+ical-rs = { git = "https://github.com/pimalaya/ical", rev = "caa14225152a7aff6d8c86cef1f95e800dd77d20" }
+io-http = { git = "https://github.com/pimalaya/io-http", rev = "e1815307771c1ec65a86b77256d46c33241d3038" }
+io-msgraph = { git = "https://github.com/pimalaya/io-msgraph", rev = "2ae26370aefa671c16316dbad98107634436bce6" }
+io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "189db408bdbeee33c1c535709c5f40f3464c7ecb" }
+io-webdav = { git = "https://github.com/pimalaya/io-webdav", rev = "62fad898d1ecb3ebb25c37826a79eb72fcd54d7f" }
