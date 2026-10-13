@@ -126,6 +126,9 @@ An event's JSON SHALL carry `id`, `etag` (the entity tag of its item, `null` whe
 ### Requirement: An event is found by its UID
 `event find <UID>` SHALL list, unexpanded, every VEVENT of the calendar carrying that `UID`, with the id the other `event` commands take.
 
+### Requirement: A UID hint narrows a find
+The listing query MAY carry a `UID`, which `event find` sets. A backend MAY leave out an item it can tell carries another `UID` without reading it, and SHALL ignore the hint on a listing naming a page size, which leaving items out would shift. The caller SHALL still compare the `UID` of every event it gets.
+
 ### Requirement: An event is deleted by its id or its UID
 `event delete <EVENT-ID>` SHALL take the id `event list` reports or the event's iCalendar `UID`. It SHALL try the id first, by a read, then list the calendar's events and look for an item of that id, then for the items carrying that `UID`. One item SHALL be deleted whole; several carrying the `UID` SHALL be refused, naming their ids; none SHALL be a clear miss.
 

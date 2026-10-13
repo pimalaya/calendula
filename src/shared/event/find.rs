@@ -23,7 +23,9 @@ use crate::shared::{
 /// the id the other `event` commands take.
 ///
 /// The calendar is scanned whole, so this costs a full listing on a
-/// remote backend and a full read on a local one.
+/// remote backend and a full read on a local one. On pimdir, whose stored
+/// summary names each resource's `UID`, only the bodies that may carry
+/// this one are read.
 ///
 /// JSON output: `{"events": [...]}`, shaped as `event list` prints them.
 #[derive(Debug, Parser)]
@@ -48,6 +50,7 @@ impl EventFindCommand {
             &calendar_id,
             CalendarItemQuery {
                 kind: IcalFamily::Event.kind(),
+                uid: Some(&self.uid),
                 ..Default::default()
             },
         )?;

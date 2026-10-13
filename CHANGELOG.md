@@ -25,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Changed the pimdir listings to stream the store rather than load it: `event list`, `event find`, `todo list`, `journal list`, `item list` and `pimdir status` hold one batch of rows and the page they print instead of every body of the calendar, a page stops reading once full, and a body is not read where the stored summary already rules the item out, by its kind or, for `event find`, by its `UID`. The output is unchanged.
 - Changed an empty value given to `--summary`, `--description`, `--location`, `--url`, `--categories`, `--organizer` or `--attendee` to remove the property rather than write it empty (`--attendee ""` removes every attendee). The time flags, `--status`, `--transparency` and `--sequence` still refuse an empty value.
 - Changed `event update` to revise the event it writes: `DTSTAMP` is set to the time of the write in UTC, and `LAST-MODIFIED` to the same instant when the event carries one, whether the write came from field flags, a source or `-i`.
 - Changed the composer from the only authoring surface of an event to the complete one: the field flags cover the common fields, and a recurrence, an alarm, a conference or a hand-written `VTIMEZONE` stay the composer's. The "nothing to build", "nothing to create" and "nothing to update" errors of the `event` family name the field flags.

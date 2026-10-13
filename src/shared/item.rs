@@ -84,6 +84,12 @@ pub struct CalendarItemQuery<'a> {
     /// Component kind to keep, `None` keeping every kind, which is what
     /// the raw `item` family asks for.
     pub kind: Option<IcalComponentKind>,
+    /// A `UID` the caller filters the projected events by, a hint only:
+    /// a backend MAY leave out an item it can tell carries another one
+    /// without reading it, and the caller still compares every event it
+    /// gets. Leaving items out would shift a page, so a backend honours
+    /// it only on a listing naming no page size.
+    pub uid: Option<&'a str>,
 }
 
 /// An inclusive day window narrowing a listing.

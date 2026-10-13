@@ -97,6 +97,7 @@ impl EventListCommand {
                 page_size,
                 range: range.as_ref(),
                 kind: IcalFamily::Event.kind(),
+                ..Default::default()
             },
         )?;
         let events = match &range {

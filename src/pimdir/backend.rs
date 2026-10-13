@@ -21,7 +21,7 @@
 //! Ids are the store's public `seq`, stable across every collection an
 //! item is filed in, never the internal link id.
 
-use std::{io::Write, path::PathBuf};
+use std::{io::Write, ops::ControlFlow, path::PathBuf};
 
 use anyhow::{Result, anyhow, bail};
 use ical::component::IcalComponentKind;
@@ -59,7 +59,6 @@ use crate::{
     },
     shared::{
         calendar::{Calendar, CalendarDiff},
-        client::paginate,
         event::Event,
         ical::holds_kind,
         item::{CalendarItem, CalendarItemQuery, CalendarTimeRange},
@@ -70,7 +69,12 @@ use crate::{
 const CALENDAR_KIND: &str = "text/calendar";
 
 /// How many items to pull per keyset page when scanning a collection.
+#[cfg(not(test))]
 const SCAN_BATCH: usize = 500;
+
+/// A batch small enough for a test store to span several.
+#[cfg(test)]
+const SCAN_BATCH: usize = 7;
 
 /// The shared-API glue over a pimdir store.
 pub struct PimdirBackend {
@@ -180,6 +184,12 @@ impl PimdirBackend {
     /// An unhydrated item lists with empty contents, and a range still
     /// filters it off the stored summary: a cache hiding its own
     /// undownloaded items from a window would answer another question.
+    ///
+    /// The collection streams through in keyset batches, one body held
+    /// at a time: what the listing keeps is the page, and the scan stops
+    /// once the page is full. A body is read only to answer the filters
+    /// or to be returned, never for an item the stored summary already
+    /// rules out (see [`ruled_out`]).
     pub fn list_items(
         &mut self,
         calendar_id: &str,
@@ -187,27 +197,52 @@ impl PimdirBackend {
     ) -> Result<Vec<CalendarItem>> {
         self.known_collection(calendar_id)?;
 
-        let mut items = Vec::new();
+        let mut page = Window::new(query.page, query.page_size);
+        if page.is_closed() {
+            return Ok(Vec::new());
+        }
 
-        for stored in self.scan_items(calendar_id)? {
+        // NOTE: a hint leaving items out would shift a page.
+        let uid = query.uid.filter(|_| query.page_size.is_none());
+        let filtered = query.kind.is_some() || query.range.is_some();
+        let restaged = match query.kind.is_some() || uid.is_some() {
+            true => self.restaged()?,
+            false => Vec::new(),
+        };
+
+        self.scan(calendar_id, |stored| {
+            if ruled_out(&stored, query.kind, uid, &restaged) {
+                return Ok(ControlFlow::Continue(()));
+            }
+
+            // NOTE: with no filter to answer, an item before the page
+            // needs no body to be counted.
+            if !filtered && page.skips() {
+                return Ok(ControlFlow::Continue(()));
+            }
+
             let item = self.item_from(calendar_id, &stored)?;
 
             if let Some(kind) = query.kind
                 && !is_kind(&item, &stored, kind)
             {
-                continue;
+                return Ok(ControlFlow::Continue(()));
             }
 
             if let Some(range) = query.range
                 && !in_range(&item, &stored, range)
             {
-                continue;
+                return Ok(ControlFlow::Continue(()));
             }
 
-            items.push(item);
-        }
+            if filtered && page.skips() {
+                return Ok(ControlFlow::Continue(()));
+            }
 
-        Ok(paginate(items, query.page, query.page_size))
+            Ok(page.keep(item))
+        })?;
+
+        Ok(page.into_items())
     }
 
     /// Reads one item's bytes from its content-addressed blob.
@@ -378,8 +413,12 @@ impl PimdirBackend {
         let mut calendars = Vec::new();
 
         for collection in self.calendar_collections()? {
-            let items = self.scan_items(&collection.id)?;
-            let hydrated = items.iter().filter(|item| item.object.is_some()).count();
+            let (mut total, mut hydrated) = (0, 0);
+            self.scan(&collection.id, |item| {
+                total += 1;
+                hydrated += usize::from(item.object.is_some());
+                Ok(ControlFlow::Continue(()))
+            })?;
             let queued = self.client.reader.count_pending_creates(&collection.id)?;
 
             calendars.push(PimdirCalendarStatus {
@@ -389,7 +428,7 @@ impl PimdirBackend {
                     collection.name
                 },
                 id: collection.id,
-                total: items.len(),
+                total,
                 hydrated,
                 queued,
             });
@@ -447,34 +486,59 @@ impl PimdirBackend {
         )
     }
 
-    /// Pulls every live item of a collection by keyset paging, each
-    /// with its summary joined.
+    /// Walks every live item of a collection by keyset paging, each
+    /// with its summary joined, until `visit` breaks.
     ///
     /// In the order the store maintains for calendars, start ascending.
-    fn scan_items(&self, calendar_id: &str) -> Result<Vec<PimdirItem>> {
-        let mut all = Vec::new();
+    /// One batch of rows is held at a time, never the collection.
+    fn scan(
+        &self,
+        calendar_id: &str,
+        mut visit: impl FnMut(PimdirItem) -> Result<ControlFlow<()>>,
+    ) -> Result<()> {
         let mut cursor: Option<(String, i64)> = None;
 
         loop {
-            let page = self.client.reader.list_summaries(
+            let batch = self.client.reader.list_summaries(
                 calendar_id,
                 cursor.as_ref().map(|(key, seq)| (key.as_str(), *seq)),
                 SCAN_BATCH,
             )?;
-            let count = page.len();
+            let count = batch.len();
 
-            if let Some(last) = page.last() {
+            if let Some(last) = batch.last() {
                 cursor = Some((last.sort_key.clone(), last.seq));
             }
 
-            all.extend(page);
+            for item in batch {
+                if visit(item)?.is_break() {
+                    return Ok(());
+                }
+            }
 
             if count < SCAN_BATCH {
-                break;
+                return Ok(());
             }
         }
+    }
 
-        Ok(all)
+    /// The public ids of the items a pending `update` repoints, store
+    /// wide.
+    ///
+    /// The reader folds the new body in, while the summary beside the
+    /// row is still the one the owner derived from the old body, so it
+    /// cannot rule such an item out.
+    fn restaged(&self) -> Result<Vec<i64>> {
+        Ok(self
+            .client
+            .reader
+            .list_pending_actions()?
+            .into_iter()
+            .filter_map(|pending| match pending.action {
+                PimdirAction::Update { seq, .. } => Some(seq),
+                _ => None,
+            })
+            .collect())
     }
 
     /// The stored item behind a public item id, or a clear miss.
@@ -845,6 +909,110 @@ fn check_version(
     .into())
 }
 
+/// Whether the stored summary proves a local item matches neither `kind`
+/// nor `uid`, so a listing need not read its body.
+///
+/// Only a negative answer is drawn, and only from what the format makes
+/// true of every resource: one component type, filed in that type's
+/// table (pimdir STORAGE Annex A.3), and one `UID` shared by every
+/// component (RFC 4791 4.1). A date never rules an item out: an
+/// override moves an occurrence anywhere and the summary describes the
+/// master alone, so the window is answered from the body.
+///
+/// An item with no local body is answered from its summary anyway,
+/// without a read, and one a pending `update` repoints (`restaged`)
+/// carries a summary of its old body, so neither is ruled out here.
+fn ruled_out(
+    stored: &PimdirItem,
+    kind: Option<IcalComponentKind>,
+    uid: Option<&str>,
+    restaged: &[i64],
+) -> bool {
+    if stored.object.is_none() || restaged.contains(&stored.seq) {
+        return false;
+    }
+
+    let (table, stated) = match &stored.summary {
+        Some(PimdirSummary::Event(event)) => (IcalComponentKind::VEvent, event.uid.as_deref()),
+        Some(PimdirSummary::Task(task)) => (IcalComponentKind::VTodo, task.uid.as_deref()),
+        Some(PimdirSummary::Journal(journal)) => {
+            (IcalComponentKind::VJournal, journal.uid.as_deref())
+        }
+        _ => return false,
+    };
+
+    if kind.is_some_and(|kind| kind != table) {
+        return true;
+    }
+
+    // NOTE: the summary keeps the `UID` verbatim where a projection
+    // decodes it, so a value holding an escape or padding is left to
+    // the body rather than compared.
+    match (uid, stated) {
+        (Some(uid), Some(stated)) => !stated.contains('\\') && stated.trim() != uid.trim(),
+        _ => false,
+    }
+}
+
+/// The page a streamed listing keeps: 1-indexed, a `None` size keeping
+/// every match, as the shared `paginate` cuts a whole list.
+struct Window<T> {
+    /// Matches still to pass over before the page starts.
+    skip: usize,
+    /// The page size, `None` for no cap.
+    take: Option<usize>,
+    items: Vec<T>,
+}
+
+impl<T> Window<T> {
+    fn new(page: Option<u32>, page_size: Option<u32>) -> Self {
+        let (skip, take) = match page_size {
+            None => (0, None),
+            Some(size) => {
+                let page = page.unwrap_or(1).max(1);
+                let skip = ((page - 1) as usize).saturating_mul(size as usize);
+                (skip, Some(size as usize))
+            }
+        };
+
+        Self {
+            skip,
+            take,
+            items: Vec::new(),
+        }
+    }
+
+    /// Whether the page holds nothing whatever the collection holds.
+    fn is_closed(&self) -> bool {
+        self.take == Some(0)
+    }
+
+    /// Passes over one match when the page has not started yet.
+    fn skips(&mut self) -> bool {
+        match self.skip {
+            0 => false,
+            _ => {
+                self.skip -= 1;
+                true
+            }
+        }
+    }
+
+    /// Keeps one match, breaking once the page is full.
+    fn keep(&mut self, item: T) -> ControlFlow<()> {
+        self.items.push(item);
+
+        match self.take {
+            Some(take) if self.items.len() >= take => ControlFlow::Break(()),
+            _ => ControlFlow::Continue(()),
+        }
+    }
+
+    fn into_items(self) -> Vec<T> {
+        self.items
+    }
+}
+
 /// Whether a stored item is of `kind`.
 ///
 /// A body the sync has not downloaded still answers: the summary table
@@ -959,6 +1127,7 @@ fn unsupported(verb: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::shared::ical::IcalFamily;
     use io_pimdir::{
         placement::{PimdirLevel, PimdirLinkId},
         summary::calendar::{PimdirEventSummary, PimdirJournalSummary, PimdirTaskSummary},
@@ -1737,5 +1906,495 @@ mod tests {
             .unwrap();
 
         assert_eq!(pending(&backend), 1);
+    }
+
+    /// A whole iCalendar resource around `components`.
+    fn resource(components: &str) -> String {
+        format!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n{components}END:VCALENDAR\r\n"
+        )
+    }
+
+    /// One component of `kind` carrying `lines`.
+    fn component(kind: &str, lines: &str) -> String {
+        format!("BEGIN:{kind}\r\nDTSTAMP:20260101T000000Z\r\n{lines}END:{kind}\r\n")
+    }
+
+    /// A calendar mixing every shape a window, a kind or a UID has to
+    /// answer: singles, all-day and long events, open and closed series,
+    /// an override moved into a window from an identity past it, a
+    /// resource holding overrides and no master, an escaped `UID`, to-dos, journals and a resource no
+    /// summary table takes.
+    fn mixed_calendar() -> Vec<String> {
+        let mut bodies = Vec::new();
+
+        for (index, day) in [3, 9, 14, 21, 28].into_iter().enumerate() {
+            for month in [8, 9, 10, 11, 12] {
+                bodies.push(resource(&component(
+                    "VEVENT",
+                    &format!(
+                        "UID:single-{month}-{index}@example.org\r\nSUMMARY:Single {month} {index}\r\n\
+                         DTSTART:2026{month:02}{day:02}T090000Z\r\nDTEND:2026{month:02}{day:02}T100000Z\r\n"
+                    ),
+                )));
+            }
+        }
+
+        bodies.push(resource(&component(
+            "VEVENT",
+            "UID:all-day@example.org\r\nSUMMARY:All day\r\n\
+             DTSTART;VALUE=DATE:20261013\r\nDTEND;VALUE=DATE:20261014\r\n",
+        )));
+        bodies.push(resource(&component(
+            "VEVENT",
+            "UID:long@example.org\r\nSUMMARY:Long\r\n\
+             DTSTART:20260920T090000Z\r\nDTEND:20261020T090000Z\r\n",
+        )));
+        bodies.push(resource(&component(
+            "VEVENT",
+            "UID:weekly@example.org\r\nSUMMARY:Weekly\r\n\
+             DTSTART:20200106T090000Z\r\nDTEND:20200106T100000Z\r\nRRULE:FREQ=WEEKLY\r\n",
+        )));
+        bodies.push(resource(&component(
+            "VEVENT",
+            "UID:ended@example.org\r\nSUMMARY:Ended\r\n\
+             DTSTART:20250106T090000Z\r\nRRULE:FREQ=WEEKLY;UNTIL=20250301T000000Z\r\n",
+        )));
+        bodies.push(resource(&format!(
+            "{}{}",
+            component(
+                "VEVENT",
+                "UID:moved@example.org\r\nSUMMARY:Moved\r\n\
+                 DTSTART:20250106T090000Z\r\nRRULE:FREQ=WEEKLY;COUNT=3\r\n",
+            ),
+            component(
+                "VEVENT",
+                "UID:moved@example.org\r\nSUMMARY:Moved out\r\n\
+                 RECURRENCE-ID:20250120T090000Z\r\nDTSTART:20261014T090000Z\r\n",
+            ),
+        )));
+        bodies.push(resource(&format!(
+            "{}{}",
+            component(
+                "VEVENT",
+                "UID:orphans@example.org\r\nSUMMARY:First instance\r\n\
+                 RECURRENCE-ID:20250106T090000Z\r\nDTSTART:20250106T090000Z\r\n",
+            ),
+            component(
+                "VEVENT",
+                "UID:orphans@example.org\r\nSUMMARY:Later instance\r\n\
+                 RECURRENCE-ID:20261012T090000Z\r\nDTSTART:20261012T090000Z\r\n",
+            ),
+        )));
+        bodies.push(resource(&component(
+            "VEVENT",
+            "UID:esc\\,aped@example.org\r\nSUMMARY:Escaped\r\nDTSTART:20261016T090000Z\r\n",
+        )));
+        for day in [2, 12, 22] {
+            bodies.push(resource(&component(
+                "VTODO",
+                &format!("UID:todo-{day}@example.org\r\nSUMMARY:Todo {day}\r\nDUE;VALUE=DATE:202610{day:02}\r\n"),
+            )));
+            bodies.push(resource(&component(
+                "VJOURNAL",
+                &format!("UID:journal-{day}@example.org\r\nSUMMARY:Journal {day}\r\nDTSTART:202610{day:02}T080000Z\r\n"),
+            )));
+        }
+        bodies.push(resource(&component(
+            "VTODO",
+            "UID:undated-todo@example.org\r\nSUMMARY:Someday\r\n",
+        )));
+        bodies.push(resource(&component(
+            "VFREEBUSY",
+            "UID:busy@example.org\r\nDTSTART:20261012T000000Z\r\nDTEND:20261013T000000Z\r\n",
+        )));
+
+        bodies
+    }
+
+    /// The listing as it was before it streamed: every summary, then
+    /// every body, then the filters, then the page cut in memory.
+    fn eager(
+        backend: &PimdirBackend,
+        calendar_id: &str,
+        query: CalendarItemQuery<'_>,
+    ) -> Result<Vec<CalendarItem>> {
+        let mut all = Vec::new();
+        backend.scan(calendar_id, |stored| {
+            all.push(stored);
+            Ok(ControlFlow::Continue(()))
+        })?;
+
+        let mut items = Vec::new();
+        for stored in &all {
+            let item = backend.item_from(calendar_id, stored)?;
+            if query.kind.is_some_and(|kind| !is_kind(&item, stored, kind)) {
+                continue;
+            }
+            if query
+                .range
+                .is_some_and(|range| !in_range(&item, stored, range))
+            {
+                continue;
+            }
+            items.push(item);
+        }
+
+        Ok(crate::shared::client::paginate(
+            items,
+            query.page,
+            query.page_size,
+        ))
+    }
+
+    /// What `event find` prints for `uid` out of `items`.
+    fn found(items: &[CalendarItem], uid: &str) -> Vec<Event> {
+        items
+            .iter()
+            .flat_map(Event::project)
+            .filter(|event| event.uid == uid)
+            .collect()
+    }
+
+    /// The windows a listing is asked for: none, a month, a week, and
+    /// open on either side.
+    fn ranges() -> Vec<Option<CalendarTimeRange>> {
+        let range = |start: Option<&str>, end: Option<&str>| {
+            Some(CalendarTimeRange {
+                start: start.map(Into::into),
+                end: end.map(Into::into),
+            })
+        };
+
+        vec![
+            None,
+            range(Some("20260801T000000Z"), Some("20260901T000000Z")),
+            range(Some("20261012T000000Z"), Some("20261019T000000Z")),
+            range(None, Some("20260910T000000Z")),
+            range(Some("20261201T000000Z"), None),
+        ]
+    }
+
+    /// Every listing a command asks for comes out as it did when the
+    /// whole collection was read first: same items, same order, same
+    /// bodies and versions, page by page, across batch boundaries.
+    fn assert_streams_as_it_listed(backend: &mut PimdirBackend) {
+        let kinds = [
+            None,
+            Some(IcalComponentKind::VEvent),
+            Some(IcalComponentKind::VTodo),
+            Some(IcalComponentKind::VJournal),
+        ];
+        let pages = [
+            (None, None),
+            (None, Some(3)),
+            (Some(2), Some(3)),
+            (Some(4), Some(5)),
+            (Some(7), Some(7)),
+            (Some(100), Some(5)),
+            (Some(1), Some(0)),
+            (Some(3), None),
+        ];
+        let mut listed = 0;
+
+        for kind in kinds {
+            for range in ranges() {
+                for (page, page_size) in pages {
+                    let query = CalendarItemQuery {
+                        page,
+                        page_size,
+                        range: range.as_ref(),
+                        kind,
+                        uid: None,
+                    };
+                    let streamed = backend.list_items("cal", query).unwrap();
+                    let expected = eager(backend, "cal", query).unwrap();
+                    assert_eq!(streamed, expected, "{query:?}");
+                    listed += streamed.len();
+                }
+            }
+        }
+
+        // NOTE: the matrix lists something, or it proves nothing.
+        assert!(listed > 300, "{listed}");
+
+        for uid in [
+            "moved@example.org",
+            "orphans@example.org",
+            "weekly@example.org",
+            "esc,aped@example.org",
+            "esc\\,aped@example.org",
+            "todo-12@example.org",
+            "renamed@example.org",
+            "missing@example.org",
+        ] {
+            let query = CalendarItemQuery {
+                kind: IcalFamily::Event.kind(),
+                uid: Some(uid),
+                ..Default::default()
+            };
+            let streamed = backend.list_items("cal", query).unwrap();
+            let expected = eager(backend, "cal", query).unwrap();
+            assert_eq!(found(&streamed, uid), found(&expected, uid), "{uid}");
+
+            // NOTE: a page ignores the hint rather than shift.
+            let paged = CalendarItemQuery {
+                page_size: Some(4),
+                page: Some(2),
+                ..query
+            };
+            assert_eq!(
+                backend.list_items("cal", paged).unwrap(),
+                eager(backend, "cal", paged).unwrap(),
+                "{uid}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_streamed_listing_lists_what_the_whole_read_listed() {
+        let bodies = mixed_calendar();
+        let bodies: Vec<&str> = bodies.iter().map(String::as_str).collect();
+        let (_dir, mut backend, ids) = store(&bodies);
+        assert_eq!(ids.len(), bodies.len());
+        assert!(ids.len() > 4 * SCAN_BATCH);
+
+        assert_streams_as_it_listed(&mut backend);
+
+        // NOTE: the overrides are there to be found.
+        let moved = backend
+            .list_items(
+                "cal",
+                CalendarItemQuery {
+                    kind: IcalFamily::Event.kind(),
+                    uid: Some("moved@example.org"),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(found(&moved, "moved@example.org").len(), 2);
+        let week = ranges().remove(2).unwrap();
+        let window = CalendarItemQuery {
+            range: Some(&week),
+            kind: IcalFamily::Event.kind(),
+            ..Default::default()
+        };
+        let summaries: Vec<String> = backend
+            .list_items("cal", window)
+            .unwrap()
+            .iter()
+            .flat_map(|item| Event::occurrences(item, Some(&week)))
+            .map(|event| event.summary)
+            .collect();
+        for expected in ["Moved out", "Later instance", "Weekly", "Long", "All day"] {
+            assert!(
+                summaries.iter().any(|summary| summary == expected),
+                "{expected}: {summaries:?}"
+            );
+        }
+    }
+
+    /// A pending update repoints the body while the summary still
+    /// describes the old one, so the summary rules nothing out for it:
+    /// an event turned to-do lists as a to-do, and a new `UID` is found.
+    #[test]
+    fn a_staged_update_is_read_from_its_new_body() {
+        let bodies = mixed_calendar();
+        let bodies: Vec<&str> = bodies.iter().map(String::as_str).collect();
+        let (_dir, mut backend, _) = store(&bodies);
+        let mut id_of = |uid: &str| {
+            let items = backend
+                .list_items("cal", CalendarItemQuery::default())
+                .unwrap();
+            let item = items
+                .into_iter()
+                .find(|item| found(std::slice::from_ref(item), uid).len() == 1);
+            item.unwrap().id
+        };
+        let ids = [
+            id_of("single-8-0@example.org"),
+            id_of("single-9-0@example.org"),
+        ];
+
+        let retyped = resource(&component(
+            "VTODO",
+            "UID:single-8-0@example.org\r\nSUMMARY:Now a todo\r\nDUE;VALUE=DATE:20261013\r\n",
+        ));
+        backend
+            .update_item("cal", &ids[0], retyped.into_bytes(), None)
+            .unwrap();
+        let renamed = resource(&component(
+            "VEVENT",
+            "UID:renamed@example.org\r\nSUMMARY:Renamed\r\nDTSTART:20261013T090000Z\r\n",
+        ));
+        backend
+            .update_item("cal", &ids[1], renamed.into_bytes(), None)
+            .unwrap();
+
+        assert_streams_as_it_listed(&mut backend);
+
+        let todos = backend
+            .list_items(
+                "cal",
+                CalendarItemQuery {
+                    kind: IcalFamily::Todo.kind(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(todos.iter().any(|item| item.id == ids[0]));
+        let renamed = backend
+            .list_items(
+                "cal",
+                CalendarItemQuery {
+                    kind: IcalFamily::Event.kind(),
+                    uid: Some("renamed@example.org"),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(found(&renamed, "renamed@example.org")[0].id, ids[1]);
+    }
+
+    /// Makes the bodies of `ids` unreadable: each blob turns into a
+    /// directory, so any read of it fails the listing.
+    fn poison(backend: &PimdirBackend, ids: &[&String]) {
+        for id in ids {
+            let stored = backend.item("cal", id).unwrap();
+            let path = backend.client.blobs.path(stored.object.as_ref().unwrap());
+            std::fs::remove_file(&path).unwrap();
+            std::fs::create_dir(&path).unwrap();
+        }
+    }
+
+    /// A listing reads the bodies it returns and those its filters need,
+    /// and no other: not those past a full page, not those before a page
+    /// no filter narrows, not those the summary rules out by kind or by
+    /// `UID`.
+    #[test]
+    fn a_listing_reads_no_body_it_does_not_need() {
+        let bodies = mixed_calendar();
+        let bodies: Vec<&str> = bodies.iter().map(String::as_str).collect();
+        let (_dir, mut backend, _) = store(&bodies);
+        let all = || CalendarItemQuery::default();
+        let order: Vec<String> = backend
+            .list_items("cal", all())
+            .unwrap()
+            .into_iter()
+            .map(|item| item.id)
+            .collect();
+        let kind_of = |id: &String| {
+            let item = backend.get_item("cal", id).unwrap();
+            [
+                IcalComponentKind::VEvent,
+                IcalComponentKind::VTodo,
+                IcalComponentKind::VJournal,
+            ]
+            .into_iter()
+            .find(|kind| holds_kind(&item.contents, *kind))
+        };
+        let kinds: Vec<_> = order.iter().map(kind_of).collect();
+        let uid_of = |id: &String| {
+            let item = backend.get_item("cal", id).unwrap();
+            Event::project(&item).first().map(|event| event.uid.clone())
+        };
+        let uids: Vec<_> = order.iter().map(uid_of).collect();
+
+        // Past a full page, and before a page nothing filters.
+        let page = |page, page_size| CalendarItemQuery {
+            page: Some(page),
+            page_size: Some(page_size),
+            ..all()
+        };
+        let first: Vec<String> = backend
+            .list_items("cal", page(1, 3))
+            .unwrap()
+            .into_iter()
+            .map(|item| item.id)
+            .collect();
+        let events = CalendarItemQuery {
+            kind: IcalFamily::Event.kind(),
+            ..page(1, 3)
+        };
+        let first_events = backend.list_items("cal", events).unwrap();
+        poison(
+            &backend,
+            &order
+                .iter()
+                .skip(3)
+                .filter(|id| !first_events.iter().any(|item| &item.id == *id))
+                .take(10)
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            backend
+                .list_items("cal", page(1, 3))
+                .unwrap()
+                .into_iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
+            first
+        );
+        assert_eq!(backend.list_items("cal", events).unwrap(), first_events);
+        assert!(eager(&backend, "cal", page(1, 3)).is_err());
+
+        // NOTE: each case poisons a store of its own, built alike.
+        let fresh = || {
+            let (dir, backend, ids) = store(&bodies);
+            assert_eq!(ids, order);
+            (dir, backend)
+        };
+
+        let (_dir, mut backend) = fresh();
+        poison(&backend, &order.iter().take(4).collect::<Vec<_>>());
+        assert_eq!(
+            backend
+                .list_items("cal", page(2, 4))
+                .unwrap()
+                .into_iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
+            order[4..8]
+        );
+        assert!(eager(&backend, "cal", page(2, 4)).is_err());
+
+        // Every event, under a to-do or a journal listing.
+        let (_dir, mut backend) = fresh();
+        let events: Vec<&String> = order
+            .iter()
+            .zip(&kinds)
+            .filter(|(_, kind)| **kind == Some(IcalComponentKind::VEvent))
+            .map(|(id, _)| id)
+            .collect();
+        poison(&backend, &events);
+        for (family, count) in [(IcalFamily::Todo, 4), (IcalFamily::Journal, 3)] {
+            let query = CalendarItemQuery {
+                kind: family.kind(),
+                ..all()
+            };
+            assert_eq!(backend.list_items("cal", query).unwrap().len(), count);
+            assert!(eager(&backend, "cal", query).is_err());
+        }
+
+        // Every event carrying another UID, under a find. The escaped one
+        // is read whatever its spelling, as the hint leaves it alone.
+        let (_dir, mut backend) = fresh();
+        let others: Vec<&String> = order
+            .iter()
+            .zip(&uids)
+            .filter(|(_, uid)| uid.as_deref().is_some_and(|uid| uid != "moved@example.org"))
+            .filter(|(_, uid)| !uid.as_deref().is_some_and(|uid| uid.contains("aped")))
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(others.len(), 30);
+        poison(&backend, &others);
+        let find = CalendarItemQuery {
+            kind: IcalFamily::Event.kind(),
+            uid: Some("moved@example.org"),
+            ..all()
+        };
+        let moved = backend.list_items("cal", find).unwrap();
+        assert_eq!(found(&moved, "moved@example.org").len(), 2);
+        assert!(eager(&backend, "cal", find).is_err());
     }
 }
