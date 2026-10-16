@@ -15,15 +15,18 @@ use std::{
 };
 
 use anyhow::{Result, bail};
-use chrono::{Datelike, Local, NaiveDateTime};
+use chrono::{Datelike, Local, Months, NaiveDate, NaiveDateTime};
 use clap::Parser;
 use pimalaya_cli::printer::Printer;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Serialize, Serializer, ser::SerializeMap};
 
 use crate::shared::{
-    arg::CalendarIdArg, client::CalendarClient, event::Event, ical::IcalFamily,
-    item::CalendarItemQuery,
+    arg::CalendarIdArg,
+    client::CalendarClient,
+    event::Event,
+    ical::IcalFamily,
+    item::{CalendarItemQuery, CalendarTimeRange},
 };
 
 const DAYS_IN_WEEK: usize = 7;
@@ -130,16 +133,6 @@ impl EventAgendaCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
         let now = Local::now();
 
-        let calendar_id = client.account.calendar_id(self.calendar.id)?;
-        let items = client.list_items(
-            &calendar_id,
-            CalendarItemQuery {
-                kind: IcalFamily::Event.kind(),
-                ..Default::default()
-            },
-        )?;
-        let all_events: Vec<Event> = items.iter().flat_map(Event::project).collect();
-
         let mut ctl = CalControl {
             reform_year: DEFAULT_REFORM_YEAR,
             num_months: 0,
@@ -160,7 +153,7 @@ impl EventAgendaCommand {
                 year: 0,
                 start_month: 0,
             },
-            all_events,
+            all_events: Vec::new(),
             events: BTreeMap::new(),
         };
 
@@ -273,6 +266,27 @@ impl EventAgendaCommand {
         }
 
         headers_init(&mut ctl);
+
+        // NOTE: the events are fetched once the grid is settled, over the
+        // days it draws, so a recurring series lists each occurrence those
+        // days hold instead of once at its first start.
+        let calendar_id = client.account.calendar_id(self.calendar.id)?;
+        let range = match drawn_days(&ctl) {
+            Some((first, last)) => CalendarTimeRange::from_days(Some(first), Some(last))?,
+            None => None,
+        };
+        let items = client.list_items(
+            &calendar_id,
+            CalendarItemQuery {
+                range: range.as_ref(),
+                kind: IcalFamily::Event.kind(),
+                ..Default::default()
+            },
+        )?;
+        ctl.all_events = items
+            .iter()
+            .flat_map(|item| Event::occurrences(item, range.as_ref()))
+            .collect();
 
         let mut grid = String::new();
 
@@ -870,7 +884,9 @@ fn collect_events(ctl: &mut CalControl, y: i32, m: u32, d: u32) -> bool {
     has_event
 }
 
-fn monthly(grid: &mut String, ctl: &mut CalControl) -> fmt::Result {
+/// The first month the grid draws, as `(year, month)`: the requested
+/// one, moved back by half the month count when the months span it.
+fn first_month(ctl: &CalControl) -> (i32, usize) {
     let mut month = if ctl.req.start_month > 0 {
         ctl.req.start_month
     } else {
@@ -892,6 +908,23 @@ fn monthly(grid: &mut String, ctl: &mut CalControl) -> fmt::Result {
             month = new_month as usize;
         }
     }
+
+    (year, month)
+}
+
+/// The first and last days the grid draws, both inclusive, or `None`
+/// for a grid chrono cannot place.
+fn drawn_days(ctl: &CalControl) -> Option<(NaiveDate, NaiveDate)> {
+    let (year, month) = first_month(ctl);
+    let first = NaiveDate::from_ymd_opt(year, month as u32, 1)?;
+    let last = first
+        .checked_add_months(Months::new(ctl.num_months as u32))?
+        .pred_opt()?;
+    Some((first, last))
+}
+
+fn monthly(grid: &mut String, ctl: &mut CalControl) -> fmt::Result {
+    let (mut year, mut month) = first_month(ctl);
 
     let rows = (ctl.num_months - 1) / ctl.months_in_row;
 
@@ -1062,6 +1095,61 @@ mod tests {
         }
 
         EventAgendaOutput::new(String::new(), events)
+    }
+
+    fn grid(year: i32, month: usize, num_months: usize, span_months: bool) -> CalControl {
+        CalControl {
+            reform_year: DEFAULT_REFORM_YEAR,
+            num_months,
+            span_months,
+            months_in_row: 0,
+            weekstart: 0,
+            weektype: 0,
+            day_width: DAY_LEN,
+            week_width: 0,
+            gutter_width: 2,
+            julian: false,
+            header_year: false,
+            header_hint: false,
+            vertical: false,
+            req: CalRequest {
+                day: 0,
+                month,
+                year,
+                start_month: 0,
+            },
+            all_events: Vec::new(),
+            events: BTreeMap::new(),
+        }
+    }
+
+    fn day(year: i32, month: u32, day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(year, month, day).unwrap()
+    }
+
+    #[test]
+    fn one_month_draws_its_own_days() {
+        assert_eq!(
+            drawn_days(&grid(2026, 2, 1, false)),
+            Some((day(2026, 2, 1), day(2026, 2, 28)))
+        );
+    }
+
+    /// `-3` centres on the month, so January reaches back into December.
+    #[test]
+    fn three_spanning_months_reach_across_the_year() {
+        assert_eq!(
+            drawn_days(&grid(2027, 1, 3, true)),
+            Some((day(2026, 12, 1), day(2027, 2, 28)))
+        );
+    }
+
+    #[test]
+    fn a_year_draws_january_to_december() {
+        let mut ctl = grid(2026, 10, 12, false);
+        ctl.req.start_month = 1;
+
+        assert_eq!(drawn_days(&ctl), Some((day(2026, 1, 1), day(2026, 12, 31))));
     }
 
     #[test]
