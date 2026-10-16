@@ -56,12 +56,13 @@ pub struct EventCreateCommand {
 }
 
 impl EventCreateCommand {
-    pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+    pub fn execute(mut self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
         if self.ical.is_none() && self.fields.is_empty() && !self.composer.interactive {
             bail!("Nothing to create; give an iCalendar, a field flag, or -i to compose one");
         }
 
         self.fields.check_backend(client.backend_name())?;
+        self.fields.anchor_floating(client.backend_name());
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
 

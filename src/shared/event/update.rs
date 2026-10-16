@@ -85,7 +85,7 @@ impl EventUpdateCommand {
     /// so every backend stores an event revised alike; a projected one
     /// maps `DTSTAMP` and `LAST-MODIFIED` as its projection says.
     pub fn execute_at(
-        self,
+        mut self,
         printer: &mut impl Printer,
         mut client: CalendarClient,
         now: impl Fn() -> Timestamp,
@@ -95,6 +95,7 @@ impl EventUpdateCommand {
         }
 
         self.fields.check_backend(client.backend_name())?;
+        self.fields.anchor_floating(client.backend_name());
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
 
