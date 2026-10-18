@@ -960,8 +960,7 @@ dependencies = [
 [[package]]
 name = "io-gcal"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17a7b0824811316d554c22abce3a7b85f03d6e224cbf11e44792894c1d0aa28b"
+source = "git+https://github.com/pimalaya/io-gcal?rev=90537616dd6d7659c6bfe81df9b4a1428e143f06#90537616dd6d7659c6bfe81df9b4a1428e143f06"
 dependencies = [
  "anyhow",
  "ical-rs",

@@ -64,7 +64,7 @@ An all-day boundary SHALL project as a `VALUE=DATE` property and back; a timed o
 
 A floating DTSTART (no `Z` suffix and no TZID) has no Google form, since the API needs either a UTC offset or a named zone, so it SHALL be refused by name rather than resolved to a guessed zone.
 
-A VEVENT expressing its length as a DURATION rather than a DTEND SHALL likewise be refused by name, since Google requires an end.
+A VEVENT expressing its length as a DURATION rather than a DTEND SHALL be given the end that DURATION names, since Google requires an end and has no field for a length: the DTSTART shifted by it on its wall clock, in its zone and its shape (a date by whole days only), the DURATION dropped so the event reads back with a DTEND. A negative DURATION, an unreadable one, or one with hours after a `VALUE=DATE` start SHALL still be refused by name.
 
 A recurring event whose boundaries are UTC SHALL be given the `UTC` time zone explicitly, since Google expands a recurrence in the zone of its start and a UTC offset names none.
 
