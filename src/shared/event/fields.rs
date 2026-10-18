@@ -99,7 +99,8 @@ pub struct EventFieldsArgs {
     /// `Europe/Paris`.
     ///
     /// Without it such a time is floating: the same wall-clock time
-    /// wherever it is read.
+    /// wherever it is read. Google and Outlook cannot store one, so on
+    /// those accounts it is read in the local zone instead.
     #[arg(long, value_name = "ZONE")]
     pub time_zone: Option<String>,
     /// Status of the event (`STATUS`).
@@ -257,6 +258,34 @@ impl EventFieldsArgs {
         }
 
         Ok(())
+    }
+
+    /// Anchors the times naming no zone in the local one, on a backend
+    /// that cannot store a floating time, `backend` naming the one
+    /// serving the account.
+    ///
+    /// Google and Outlook need a zone on every timed boundary. The local
+    /// zone (`TZ`, then the system's) is the one calendula reads a
+    /// floating time in, `event list` included, so the event lands at the
+    /// wall-clock time it was given. It is what `--time-zone` does, and
+    /// `--time-zone` keeps the last word. A local zone without an IANA
+    /// name anchors nothing, and the backend refuses the floating time
+    /// by name, as before.
+    pub fn anchor_floating(&mut self, backend: &str) {
+        let local = TimeZone::try_system()
+            .ok()
+            .and_then(|tz| tz.iana_name().map(ToOwned::to_owned));
+
+        self.anchor_floating_in(backend, local);
+    }
+
+    fn anchor_floating_in(&mut self, backend: &str, local: Option<String>) {
+        let stores_floating = !matches!(backend, "gcal" | "msgraph");
+        let names_a_time = self.start.is_some() || self.end.is_some();
+
+        if !stores_floating && names_a_time && self.time_zone.is_none() {
+            self.time_zone = local;
+        }
     }
 
     /// Writes the flags onto the VEVENT of `ical`, returning its new
@@ -1301,6 +1330,76 @@ mod tests {
         let err = refusal(EVENT, &["--start", "19/10/2026"]);
 
         assert!(err.contains("YYYY-MM-DD"), "{err}");
+    }
+
+    fn anchored(backend: &str, local: Option<&str>, args: &[&str]) -> String {
+        let mut fields = fields(args);
+        fields.anchor_floating_in(backend, local.map(ToOwned::to_owned));
+        String::from_utf8(fields.apply(EVENT.as_bytes()).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_backend_without_floating_times_anchors_them_in_the_local_zone() {
+        let times = ["--start", "2026-10-19T09:00", "--end", "2026-10-19T10:00"];
+
+        for backend in ["gcal", "msgraph"] {
+            let out = anchored(backend, Some("Europe/Madrid"), &times);
+
+            assert!(
+                out.contains("DTSTART;TZID=Europe/Madrid:20261019T090000\r\n"),
+                "{backend}: {out}"
+            );
+            assert!(
+                out.contains("DTEND;TZID=Europe/Madrid:20261019T100000\r\n"),
+                "{backend}: {out}"
+            );
+            assert!(out.contains("TZID:Europe/Madrid\r\n"), "{backend}: {out}");
+        }
+
+        for backend in ["vdir", "caldav", "pimdir", "jmap"] {
+            let out = anchored(backend, Some("Europe/Madrid"), &times);
+
+            assert!(
+                out.contains("DTSTART:20261019T090000\r\n"),
+                "{backend}: {out}"
+            );
+            assert!(!out.contains("VTIMEZONE"), "{backend}: {out}");
+        }
+    }
+
+    #[test]
+    fn only_a_floating_time_is_anchored_and_the_zone_flag_wins() {
+        let out = anchored(
+            "gcal",
+            Some("Europe/Madrid"),
+            &["--time-zone", "Europe/Paris", "--start", "2026-10-19T09:00"],
+        );
+        assert!(
+            out.contains("DTSTART;TZID=Europe/Paris:20261019T090000\r\n"),
+            "{out}"
+        );
+
+        let out = anchored(
+            "gcal",
+            Some("Europe/Madrid"),
+            &["--start", "2026-10-19", "--end", "2026-10-20"],
+        );
+        assert!(out.contains("DTSTART;VALUE=DATE:20261019\r\n"), "{out}");
+
+        let out = anchored(
+            "gcal",
+            Some("Europe/Madrid"),
+            &["--start", "2026-10-19T09:00Z"],
+        );
+        assert!(out.contains("DTSTART:20261019T090000Z\r\n"), "{out}");
+
+        // NOTE: no time flag, so no zone to name, which --time-zone alone
+        // would refuse.
+        let out = anchored("gcal", Some("Europe/Madrid"), &["--duration", "PT1H"]);
+        assert!(out.contains("DURATION:PT1H\r\n"), "{out}");
+
+        let out = anchored("gcal", None, &["--start", "2026-10-19T09:00"]);
+        assert!(out.contains("DTSTART:20261019T090000\r\n"), "{out}");
     }
 
     #[test]
