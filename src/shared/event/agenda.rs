@@ -7,6 +7,10 @@
 //! calendar for the dates before the reform year `--reform` sets. That
 //! is why the day arithmetic here is hand-rolled: chrono only knows the
 //! proleptic Gregorian calendar.
+//!
+//! Month and weekday names follow the time locale, as they do in cal:
+//! `LC_ALL`, then `LC_TIME`, then `LANG`, falling back to the English
+//! names of the POSIX locale.
 
 use std::{
     borrow::Cow,
@@ -15,7 +19,7 @@ use std::{
 };
 
 use anyhow::{Result, bail};
-use chrono::{Datelike, Local, Months, NaiveDate, NaiveDateTime};
+use chrono::{Datelike, Local, Locale, Months, NaiveDate, NaiveDateTime};
 use clap::Parser;
 use pimalaya_cli::printer::Printer;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
@@ -57,8 +61,8 @@ pub struct EventAgendaCommand {
     /// Date the calendar is drawn at. Defaults to today.
     ///
     /// Accepts `YEAR`, `MONTH YEAR` or `DAY MONTH YEAR`, the month
-    /// being a number or an English name. A lone year shows the whole
-    /// year.
+    /// being a number or a name, in English or in the language of the
+    /// time locale. A lone year shows the whole year.
     #[arg(name = "DATE")]
     date_args: Vec<String>,
 
@@ -153,6 +157,7 @@ impl EventAgendaCommand {
                 year: 0,
                 start_month: 0,
             },
+            names: Names::new(time_locale()),
             all_events: Vec::new(),
             events: BTreeMap::new(),
         };
@@ -208,7 +213,7 @@ impl EventAgendaCommand {
         match self.date_args.len() {
             3 => {
                 ctl.req.day = self.date_args[0].parse().unwrap_or(1);
-                ctl.req.month = parse_month(&self.date_args[1]);
+                ctl.req.month = parse_month(&self.date_args[1], &ctl.names);
                 ctl.req.year = self.date_args[2].parse().unwrap_or(now.year());
                 let dm = DAYS_IN_MONTH[leap_year(&ctl, ctl.req.year)][ctl.req.month];
                 if ctl.req.day > dm as i32 {
@@ -217,7 +222,7 @@ impl EventAgendaCommand {
                 ctl.req.day = day_in_year(&ctl, ctl.req.day, ctl.req.month, ctl.req.year);
             }
             2 => {
-                ctl.req.month = parse_month(&self.date_args[0]);
+                ctl.req.month = parse_month(&self.date_args[0], &ctl.names);
                 ctl.req.year = self.date_args[1].parse().unwrap_or(now.year());
             }
             1 => {
@@ -296,7 +301,7 @@ impl EventAgendaCommand {
             monthly(&mut grid, &mut ctl)?;
         }
 
-        printer.out(EventAgendaOutput::new(grid, ctl.events))
+        printer.out(EventAgendaOutput::new(grid, ctl.events).with_locale(ctl.names.locale))
     }
 }
 
@@ -317,6 +322,7 @@ struct CalControl {
     header_hint: bool,
     vertical: bool,
     req: CalRequest,
+    names: Names,
     all_events: Vec<Event>,
     events: BTreeMap<NaiveDateTime, Vec<AgendaEvent>>,
 }
@@ -344,33 +350,81 @@ const DAYS_IN_MONTH: [[usize; 13]; 2] = [
     [0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31],
 ];
 
-const FULL_MONTH: [&str; 12] = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-];
+/// The locale month and weekday names are drawn in.
+///
+/// Reads `LC_ALL`, then `LC_TIME`, then `LANG`, the first one set and
+/// not empty winning, as setlocale(3) does. Its codeset and modifier
+/// (`es_ES.UTF-8@euro`) are dropped; `C`, `POSIX` or a locale chrono
+/// does not know fall back to the POSIX one, whose names are English.
+fn time_locale() -> Locale {
+    let var = ["LC_ALL", "LC_TIME", "LANG"]
+        .iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .find(|value| !value.is_empty());
 
-const WEEKDAYS: [&str; 7] = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+    var.map_or(Locale::POSIX, |value| parse_locale(&value))
+}
 
-fn parse_month(s: &str) -> usize {
+fn parse_locale(value: &str) -> Locale {
+    let name = value.split(['.', '@']).next().unwrap_or_default();
+    Locale::try_from(name).unwrap_or(Locale::POSIX)
+}
+
+/// The month and weekday names of one locale, as the grid prints them.
+#[derive(Clone)]
+struct Names {
+    locale: Locale,
+    /// Full month names, January first.
+    months: [String; 12],
+    /// Weekday names cut to two characters, as cal does, Sunday first.
+    weekdays: [String; 7],
+}
+
+impl Names {
+    fn new(locale: Locale) -> Self {
+        // Any year works: only the names are read. 2023-01-01 is a
+        // Sunday, so the weekdays come out Sunday first.
+        let months = std::array::from_fn(|i| {
+            let date = NaiveDate::from_ymd_opt(2023, i as u32 + 1, 1).unwrap();
+            date.format_localized("%B", locale).to_string()
+        });
+        let weekdays = std::array::from_fn(|i| {
+            let date = NaiveDate::from_ymd_opt(2023, 1, i as u32 + 1).unwrap();
+            let abbr = date.format_localized("%a", locale).to_string();
+            abbr.chars().take(2).collect()
+        });
+
+        Self {
+            locale,
+            months,
+            weekdays,
+        }
+    }
+
+    fn month(&self, month: usize) -> &str {
+        &self.months[month - 1]
+    }
+}
+
+/// The width a name takes on screen: its characters, not its bytes, so
+/// `sá` or `août` stay aligned.
+fn text_width(s: &str) -> usize {
+    s.chars().count()
+}
+
+fn parse_month(s: &str, names: &Names) -> usize {
     if let Ok(m) = s.parse::<usize>()
         && (1..=12).contains(&m)
     {
         return m;
     }
     let lower = s.to_lowercase();
-    for (i, name) in FULL_MONTH.iter().enumerate() {
-        if name.to_lowercase().starts_with(&lower) {
-            return i + 1;
+    let english = Names::new(Locale::POSIX);
+    for list in [&names.months, &english.months] {
+        for (i, name) in list.iter().enumerate() {
+            if name.to_lowercase().starts_with(&lower) {
+                return i + 1;
+            }
         }
     }
     1
@@ -388,8 +442,8 @@ fn leap_year(ctl: &CalControl, year: i32) -> usize {
 
 fn headers_init(ctl: &mut CalControl) {
     let year_str = format!("{}", ctl.req.year);
-    for month_name in &FULL_MONTH {
-        if ctl.week_width < month_name.len() + year_str.len() + 1 {
+    for month_name in &ctl.names.months {
+        if ctl.week_width < text_width(month_name) + year_str.len() + 1 {
             ctl.header_hint = true;
             break;
         }
@@ -544,7 +598,7 @@ fn cal_fill_month(month: &mut CalMonth, ctl: &CalControl) {
 }
 
 fn center(grid: &mut String, s: &str, width: usize, sep: usize) -> fmt::Result {
-    let len = s.len();
+    let len = text_width(s);
     let pad = if width > len { (width - len) / 2 } else { 0 };
     write!(grid, "{}", " ".repeat(pad))?;
     write!(grid, "{s}")?;
@@ -558,9 +612,9 @@ fn center(grid: &mut String, s: &str, width: usize, sep: usize) -> fmt::Result {
 fn cal_output_header(grid: &mut String, months: &[CalMonth], ctl: &CalControl) -> fmt::Result {
     for (i, m) in months.iter().enumerate() {
         let out = if ctl.header_hint || ctl.header_year {
-            FULL_MONTH[m.month - 1].to_string()
+            ctl.names.month(m.month).to_string()
         } else {
-            format!("{} {}", FULL_MONTH[m.month - 1], m.year)
+            format!("{} {}", ctl.names.month(m.month), m.year)
         };
         center(
             grid,
@@ -605,7 +659,7 @@ fn cal_output_header(grid: &mut String, months: &[CalMonth], ctl: &CalControl) -
             if d > 0 {
                 write!(grid, " ")?;
             }
-            write!(grid, "{:>2}", WEEKDAYS[wd])?;
+            write!(grid, "{:>2}", ctl.names.weekdays[wd])?;
         }
 
         if i < months.len() - 1 {
@@ -718,9 +772,9 @@ fn cal_vert_output_header(grid: &mut String, months: &[CalMonth], ctl: &CalContr
 
     for (i, m) in months.iter().enumerate() {
         let out = if ctl.header_hint || ctl.header_year {
-            FULL_MONTH[m.month - 1].to_string()
+            ctl.names.month(m.month).to_string()
         } else {
-            format!("{} {}", FULL_MONTH[m.month - 1], m.year)
+            format!("{} {}", ctl.names.month(m.month), m.year)
         };
         write!(grid, "{:<width$}", out, width = month_width)?;
         if i < months.len() - 1 {
@@ -752,7 +806,12 @@ fn cal_vert_output_months(
 
     for i in 0..DAYS_IN_WEEK {
         let wd = (i + ctl.weekstart) % DAYS_IN_WEEK;
-        write!(grid, "{:<width$}", WEEKDAYS[wd], width = ctl.day_width - 1)?;
+        write!(
+            grid,
+            "{:<width$}",
+            ctl.names.weekdays[wd],
+            width = ctl.day_width - 1
+        )?;
 
         for (mi, m) in months.iter().enumerate() {
             let mut reqday = 0;
@@ -1001,6 +1060,9 @@ struct AgendaEvent {
 pub struct EventAgendaOutput {
     grid: String,
     events: BTreeMap<NaiveDateTime, Vec<AgendaEvent>>,
+    /// The locale the event times are stamped in; the JSON payload
+    /// ignores it.
+    locale: Locale,
 }
 
 impl EventAgendaOutput {
@@ -1015,7 +1077,17 @@ impl EventAgendaOutput {
             at_instant.sort_by(|a, b| a.label.cmp(&b.label).then_with(|| a.id.cmp(&b.id)));
         }
 
-        Self { grid, events }
+        Self {
+            grid,
+            events,
+            locale: Locale::POSIX,
+        }
+    }
+
+    /// Stamps the event times with the month names of `locale`.
+    fn with_locale(mut self, locale: Locale) -> Self {
+        self.locale = locale;
+        self
     }
 }
 
@@ -1024,8 +1096,10 @@ impl fmt::Display for EventAgendaOutput {
         write!(f, "{}", self.grid)?;
 
         for (date, events) in &self.events {
-            let stamp = date.format("%b %d, %R").to_string();
-            let padding = " ".repeat(stamp.len() + 2);
+            // NaiveDateTime has no format_localized: the names live in the date.
+            let day = date.date().format_localized("%b %d", self.locale);
+            let stamp = format!("{day}, {}", date.format("%R"));
+            let padding = " ".repeat(text_width(&stamp) + 2);
 
             for (nth, event) in events.iter().enumerate() {
                 match nth {
@@ -1118,6 +1192,7 @@ mod tests {
                 year,
                 start_month: 0,
             },
+            names: Names::new(Locale::POSIX),
             all_events: Vec::new(),
             events: BTreeMap::new(),
         }
@@ -1209,6 +1284,68 @@ mod tests {
         assert_eq!(
             to_string(&agenda).unwrap(),
             r#"{"2026-08-14T09:00:00":["Stand-up"]}"#
+        );
+    }
+
+    #[test]
+    fn the_locale_drops_its_codeset_and_modifier() {
+        assert_eq!(parse_locale("es_ES.UTF-8"), Locale::es_ES);
+        assert_eq!(parse_locale("de_DE.UTF-8@euro"), Locale::de_DE);
+        assert_eq!(parse_locale("fr_FR"), Locale::fr_FR);
+    }
+
+    #[test]
+    fn an_unknown_locale_falls_back_to_posix() {
+        assert_eq!(parse_locale("C"), Locale::POSIX);
+        assert_eq!(parse_locale("C.UTF-8"), Locale::POSIX);
+        assert_eq!(parse_locale("xx_YY"), Locale::POSIX);
+    }
+
+    #[test]
+    fn posix_names_are_the_english_ones() {
+        let names = Names::new(Locale::POSIX);
+
+        assert_eq!(names.month(10), "October");
+        assert_eq!(names.weekdays.join(" "), "Su Mo Tu We Th Fr Sa");
+    }
+
+    #[test]
+    fn spanish_names_match_cal() {
+        let names = Names::new(Locale::es_ES);
+
+        assert_eq!(names.month(10), "octubre");
+        assert_eq!(names.weekdays.join(" "), "do lu ma mi ju vi sá");
+    }
+
+    #[test]
+    fn a_month_is_read_in_english_or_in_the_locale() {
+        let names = Names::new(Locale::es_ES);
+
+        assert_eq!(parse_month("octubre", &names), 10);
+        assert_eq!(parse_month("October", &names), 10);
+        assert_eq!(parse_month("ago", &names), 8);
+        assert_eq!(parse_month("10", &names), 10);
+    }
+
+    #[test]
+    fn a_header_with_accents_stays_centred() {
+        let mut grid = String::new();
+        center(&mut grid, "sá", 4, 0).unwrap();
+
+        assert_eq!(grid, " sá ");
+    }
+
+    #[test]
+    fn event_times_are_stamped_in_the_locale() {
+        let agenda = agenda(vec![
+            (instant(9), "1", "Stand-up"),
+            (instant(9), "2", "Café"),
+        ])
+        .with_locale(Locale::es_ES);
+
+        assert_eq!(
+            agenda.to_string(),
+            "ago 14, 09:00: Café\n               Stand-up\n"
         );
     }
 }
