@@ -81,6 +81,21 @@ A series placed once at its first start leaves a yearly event out of every year 
 - WHEN `calendula event agenda 2027` draws that year
 - THEN the day it falls on in 2027 is marked and the event lists under the grid at that day
 
+### Requirement: An agenda names months and weekdays in the time locale
+The agenda SHALL draw month and weekday names, and stamp the events under its grid, in the locale `LC_ALL`, then `LC_TIME`, then `LANG` resolves to, as cal does. A locale that is unset, `C`, `POSIX` or unknown SHALL fall back to the English names of the POSIX locale. A month argument SHALL be read in English or in the language of that locale.
+
+The grid is a port of cal, so the two drawing the same month in different languages on one system would disagree.
+
+#### Scenario: A Spanish system
+- GIVEN `LANG=es_ES.UTF-8` and no `LC_ALL` or `LC_TIME`
+- WHEN `calendula event agenda -m` draws October 2026
+- THEN the header reads `octubre 2026`, the weekdays `lu ma mi ju vi sá do`, and an event on the 19th is stamped `oct 19`
+
+#### Scenario: The POSIX locale
+- GIVEN `LANG=C`
+- WHEN `calendula event agenda -m` draws October 2026
+- THEN the header reads `October 2026` and the weekdays `Mo Tu We Th Fr Sa Su`
+
 ### Requirement: A page of a family holds that family
 A listing SHALL narrow by component kind before it paginates. Filtering after paginating makes a page mean "the components of this kind among the first N items of any kind", which on a calendar dominated by another kind is empty however many matches the calendar holds.
 
