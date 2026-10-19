@@ -96,6 +96,11 @@ The grid is a port of cal, so the two drawing the same month in different langua
 - WHEN `calendula event agenda -m` draws October 2026
 - THEN the header reads `October 2026` and the weekdays `Mo Tu We Th Fr Sa Su`
 
+#### Scenario: A double-width language
+- GIVEN `LANG=ja_JP.UTF-8`
+- WHEN `calendula event agenda -m` draws October 2027
+- THEN the header reads `10月 2027` and the weekdays `日 月 火 水 木 金 土`, both lines 20 columns wide like the days under them
+
 ### Requirement: A page of a family holds that family
 A listing SHALL narrow by component kind before it paginates. Filtering after paginating makes a page mean "the components of this kind among the first N items of any kind", which on a calendar dominated by another kind is empty however many matches the calendar holds.
 

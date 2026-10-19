@@ -24,6 +24,7 @@ use clap::Parser;
 use pimalaya_cli::printer::Printer;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Serialize, Serializer, ser::SerializeMap};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::shared::{
     arg::CalendarIdArg,
@@ -376,7 +377,7 @@ struct Names {
     locale: Locale,
     /// Full month names, January first.
     months: [String; 12],
-    /// Weekday names cut to two characters, as cal does, Sunday first.
+    /// Weekday names cut to two columns, as cal does, Sunday first.
     weekdays: [String; 7],
 }
 
@@ -391,7 +392,7 @@ impl Names {
         let weekdays = std::array::from_fn(|i| {
             let date = NaiveDate::from_ymd_opt(2023, 1, i as u32 + 1).unwrap();
             let abbr = date.format_localized("%a", locale).to_string();
-            abbr.chars().take(2).collect()
+            cut_to_width(&abbr, 2)
         });
 
         Self {
@@ -406,10 +407,34 @@ impl Names {
     }
 }
 
-/// The width a name takes on screen: its characters, not its bytes, so
-/// `sá` or `août` stay aligned.
+/// The width a name takes on screen, in terminal columns as cal measures
+/// it with wcwidth(3): not its bytes, so `sá` or `août` stay aligned, and
+/// not its characters, so the double-width `日` or `10月` do too.
 fn text_width(s: &str) -> usize {
-    s.chars().count()
+    UnicodeWidthStr::width(s)
+}
+
+/// The longest start of `s` that fits in `width` columns.
+fn cut_to_width(s: &str, width: usize) -> String {
+    let mut used = 0;
+    s.chars()
+        .take_while(|c| {
+            used += UnicodeWidthChar::width(*c).unwrap_or(0);
+            used <= width
+        })
+        .collect()
+}
+
+/// Writes `s` right-aligned in `width` columns.
+fn pad_left(grid: &mut String, s: &str, width: usize) -> fmt::Result {
+    let pad = width.saturating_sub(text_width(s));
+    write!(grid, "{}{s}", " ".repeat(pad))
+}
+
+/// Writes `s` left-aligned in `width` columns.
+fn pad_right(grid: &mut String, s: &str, width: usize) -> fmt::Result {
+    let pad = width.saturating_sub(text_width(s));
+    write!(grid, "{s}{}", " ".repeat(pad))
 }
 
 fn parse_month(s: &str, names: &Names) -> usize {
@@ -659,7 +684,7 @@ fn cal_output_header(grid: &mut String, months: &[CalMonth], ctl: &CalControl) -
             if d > 0 {
                 write!(grid, " ")?;
             }
-            write!(grid, "{:>2}", ctl.names.weekdays[wd])?;
+            pad_left(grid, &ctl.names.weekdays[wd], 2)?;
         }
 
         if i < months.len() - 1 {
@@ -776,7 +801,7 @@ fn cal_vert_output_header(grid: &mut String, months: &[CalMonth], ctl: &CalContr
         } else {
             format!("{} {}", ctl.names.month(m.month), m.year)
         };
-        write!(grid, "{:<width$}", out, width = month_width)?;
+        pad_right(grid, &out, month_width)?;
         if i < months.len() - 1 {
             write!(grid, "{}", " ".repeat(ctl.gutter_width))?;
         }
@@ -806,12 +831,7 @@ fn cal_vert_output_months(
 
     for i in 0..DAYS_IN_WEEK {
         let wd = (i + ctl.weekstart) % DAYS_IN_WEEK;
-        write!(
-            grid,
-            "{:<width$}",
-            ctl.names.weekdays[wd],
-            width = ctl.day_width - 1
-        )?;
+        pad_right(grid, &ctl.names.weekdays[wd], ctl.day_width - 1)?;
 
         for (mi, m) in months.iter().enumerate() {
             let mut reqday = 0;
@@ -1315,6 +1335,39 @@ mod tests {
 
         assert_eq!(names.month(10), "octubre");
         assert_eq!(names.weekdays.join(" "), "do lu ma mi ju vi sá");
+    }
+
+    #[test]
+    fn japanese_names_match_cal() {
+        let names = Names::new(Locale::ja_JP);
+
+        assert_eq!(names.month(10), "10月");
+        assert_eq!(names.weekdays.join(" "), "日 月 火 水 木 金 土");
+    }
+
+    /// `日` and `10月` are double-width: measured by characters, the
+    /// header and the weekday row would come out wider than the days.
+    #[test]
+    fn a_japanese_month_keeps_its_columns() {
+        let mut ctl = grid(2027, 10, 1, false);
+        ctl.names = Names::new(Locale::ja_JP);
+        ctl.months_in_row = 1;
+        ctl.week_width = ctl.day_width * DAYS_IN_WEEK - 1;
+        let mut out = String::new();
+        monthly(&mut out, &mut ctl).unwrap();
+        let lines: Vec<&str> = out.lines().collect();
+
+        assert_eq!(lines[0], "     10月 2027      ");
+        assert_eq!(lines[1], "日 月 火 水 木 金 土");
+        assert_eq!(text_width(lines[0]), 20);
+        assert_eq!(text_width(lines[1]), 20);
+    }
+
+    #[test]
+    fn a_weekday_is_cut_to_two_columns() {
+        assert_eq!(cut_to_width("sáb", 2), "sá");
+        assert_eq!(cut_to_width("日曜日", 2), "日");
+        assert_eq!(cut_to_width("日曜日", 3), "日");
     }
 
     #[test]

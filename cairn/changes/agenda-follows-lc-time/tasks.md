@@ -9,8 +9,8 @@ change: agenda-follows-lc-time
 - [x] Replace `FULL_MONTH` and `WEEKDAYS` with `Names`, built from chrono's locale tables, and carry it in `CalControl`.
 - [x] Stamp the events in the locale (`EventAgendaOutput::with_locale`).
 - [x] Read a month argument in English or in the locale.
-- [x] Centre and pad by characters, not bytes.
-- [x] Tests: locale parsing and fallback, POSIX and Spanish names, month parsing, centring an accented name, a Spanish stamp.
+- [x] Centre and pad by terminal columns (`unicode-width`), not bytes or characters; cut the weekdays to two columns.
+- [x] Tests: locale parsing and fallback, POSIX, Spanish and Japanese names, month parsing, centring an accented name, a Japanese month keeping its columns, cutting a weekday to two columns, a Spanish stamp.
 - [x] Checked against a Google calendar with `es_ES.UTF-8`: one month, `-3`, `-y` and a month by name; and with `LANG=C`, unchanged.
 - [x] `cargo test`, `cargo clippy --all-targets --all-features`, `cargo fmt --check`.
 - [x] CHANGELOG: one `### Changed` entry.

@@ -14,9 +14,9 @@ created: 2026-10-18
 ## What
 
 - The locale is picked as setlocale(3) does for `LC_TIME`: `LC_ALL`, then `LC_TIME`, then `LANG`, the first one set and not empty winning; its codeset and modifier are dropped (`es_ES.UTF-8@euro` reads as `es_ES`).
-- The names come from chrono's locale tables (the `unstable-locales` feature, which pulls `pure-rust-locales`): `%B` for the months, `%a` cut to two characters for the weekdays, as cal does (`mié` draws `mi`).
+- The names come from chrono's locale tables (the `unstable-locales` feature, which pulls `pure-rust-locales`): `%B` for the months, `%a` cut to two columns for the weekdays, as cal does (`mié` draws `mi`, and the double-width `日` stays whole).
 - `C`, `POSIX`, no variable set or a locale chrono does not know fall back to POSIX, whose names are the English ones the agenda draws today: such a system sees no change.
 - The event stamps under the grid use the same locale (`oct 19, 20:50`); their pattern is unchanged.
 - A month argument is read in English or in the language of the locale (`event agenda enero 2027`).
-- Headers are centred by characters rather than bytes, so a name with an accent (`sá`, `août`) stays aligned.
+- Headers and weekdays are centred and padded by terminal columns (`unicode-width`, as cal measures with wcwidth), not by bytes or characters, so a name with an accent (`sá`, `août`) or a double-width one (`日`, `10月`) stays aligned.
 - The `--json` payload is unchanged.

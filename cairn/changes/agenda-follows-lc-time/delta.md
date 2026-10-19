@@ -21,3 +21,8 @@ The grid is a port of cal, so the two drawing the same month in different langua
 - GIVEN `LANG=C`
 - WHEN `calendula event agenda -m` draws October 2026
 - THEN the header reads `October 2026` and the weekdays `Mo Tu We Th Fr Sa Su`
+
+#### Scenario: A double-width language
+- GIVEN `LANG=ja_JP.UTF-8`
+- WHEN `calendula event agenda -m` draws October 2027
+- THEN the header reads `10月 2027` and the weekdays `日 月 火 水 木 金 土`, both lines 20 columns wide like the days under them

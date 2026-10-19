@@ -205,6 +205,7 @@ dependencies = [
  "shellexpand",
  "tempfile",
  "toml",
+ "unicode-width",
  "url",
 ]
 
