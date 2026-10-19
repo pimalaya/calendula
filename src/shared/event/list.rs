@@ -221,9 +221,15 @@ fn table_times(event: &Event, zone: &TimeZone) -> (String, String) {
             .starts_at
             .clone()
             .unwrap_or_else(|| event.start.clone());
+        let first = start.parse::<Date>().ok();
         let end = match event.ends_at.as_deref().map(str::parse::<Date>) {
-            // NOTE: the JSON end is exclusive, the table's the last day.
-            Some(Ok(end)) => end.yesterday().unwrap_or(end).to_string(),
+            // NOTE: the JSON end is exclusive, the table's the last day,
+            // never before the first: a zero-length whole day (DTEND equal
+            // to DTSTART) ends on its start.
+            Some(Ok(end)) => {
+                let last = end.yesterday().unwrap_or(end);
+                first.map_or(last, |first| last.max(first)).to_string()
+            }
             _ => event.end.clone(),
         };
         return (start, end);
@@ -288,6 +294,18 @@ mod tests {
         let mut event = event(true, "20260519", "20260520");
         event.starts_at = Some("2026-05-19".into());
         event.ends_at = Some("2026-05-20".into());
+
+        assert_eq!(
+            table_times(&event, &TimeZone::UTC),
+            ("2026-05-19".into(), "2026-05-19".into())
+        );
+    }
+
+    #[test]
+    fn a_zero_length_whole_day_ends_on_its_start() {
+        let mut event = event(true, "20260519", "20260519");
+        event.starts_at = Some("2026-05-19".into());
+        event.ends_at = Some("2026-05-19".into());
 
         assert_eq!(
             table_times(&event, &TimeZone::UTC),
