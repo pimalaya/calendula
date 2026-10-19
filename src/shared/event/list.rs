@@ -8,9 +8,10 @@ use std::fmt;
 use anyhow::Result;
 use chrono::NaiveDate;
 use clap::Parser;
+use jiff::{Timestamp, civil::Date, tz::TimeZone};
 use pimalaya_cli::{
     printer::Printer,
-    table::{Cell, Color, ContentArrangement, Row, Table, TableStyle},
+    table::{Cell, Color, ColumnConstraint, ContentArrangement, Row, Table, TableStyle},
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -38,12 +39,17 @@ use crate::shared::{
 /// it lists on its own, at its own times, with the `recurrenceId` that
 /// addresses it beside the item `id`, overrides applied and excluded
 /// dates dropped, in start order. The bounds are UTC midnights, and one
-/// open on its end reaches a year past its start. Without a window a
-/// series lists once, at its first start.
+/// open on its end reaches a year past its start.
+///
+/// Without a window the listing is the raw one: items in the order the
+/// backend returns them, a series once at its first start. For what is
+/// coming, give `--from` (or draw `event agenda`).
 ///
 /// Times resolve through their `TZID`, the calendar's `VTIMEZONE` or
 /// the time-zone database; a floating time is read in the local zone
-/// (`TZ`, then the system's).
+/// (`TZ`, then the system's). The table shows them in that local zone
+/// (`2026-10-30 09:00`), a whole-day event by its days, the end being
+/// the last one (`2026-05-19`).
 ///
 /// JSON output: `{"events": [{"id", "uid", "recurrenceId", "summary",
 /// "description", "location", "start", "end", "allDay", "startsAt",
@@ -164,6 +170,7 @@ impl EventListOutput {
 
 impl fmt::Display for EventListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let zone = TimeZone::try_system().unwrap_or(TimeZone::UTC);
         let mut table = Table::new();
 
         table
@@ -180,10 +187,20 @@ impl fmt::Display for EventListOutput {
                 row.max_height(1);
                 row.add_cell(Cell::new(&event.id).fg(self.colors.id));
                 row.add_cell(Cell::new(&event.summary).fg(self.colors.summary));
-                row.add_cell(Cell::new(&event.start).fg(self.colors.start));
-                row.add_cell(Cell::new(&event.end).fg(self.colors.end));
+                let (start, end) = table_times(event, &zone);
+                row.add_cell(Cell::new(start).fg(self.colors.start));
+                row.add_cell(Cell::new(end).fg(self.colors.end));
                 row
             }));
+
+        // NOTE: a time cut short (`2026-10-1…`) no longer says when, so
+        // squeezing the table into the terminal truncates the id and the
+        // summary but not these two.
+        for index in [2, 3] {
+            if let Some(column) = table.column_mut(index) {
+                column.set_constraint(ColumnConstraint::ContentWidth);
+            }
+        }
 
         if let Some(width) = self.max_width {
             table.set_width(width);
@@ -191,5 +208,100 @@ impl fmt::Display for EventListOutput {
 
         writeln!(f)?;
         writeln!(f, "{table}")
+    }
+}
+
+/// The start and end an event's row shows, for a person to read: a
+/// timed event at its instants in `zone`, a whole-day one by its days,
+/// the end inclusive. An event whose times did not resolve shows them
+/// as iCalendar spells them.
+fn table_times(event: &Event, zone: &TimeZone) -> (String, String) {
+    if event.all_day {
+        let start = event
+            .starts_at
+            .clone()
+            .unwrap_or_else(|| event.start.clone());
+        let end = match event.ends_at.as_deref().map(str::parse::<Date>) {
+            // NOTE: the JSON end is exclusive, the table's the last day.
+            Some(Ok(end)) => end.yesterday().unwrap_or(end).to_string(),
+            _ => event.end.clone(),
+        };
+        return (start, end);
+    }
+
+    let local = |secs: Option<i64>, raw: &str| {
+        secs.and_then(|secs| Timestamp::from_second(secs).ok())
+            .map(|at| {
+                at.to_zoned(zone.clone())
+                    .strftime("%Y-%m-%d %H:%M")
+                    .to_string()
+            })
+            .unwrap_or_else(|| raw.to_string())
+    };
+
+    (
+        local(event.start_secs, &event.start),
+        local(event.end_secs, &event.end),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn event(all_day: bool, start: &str, end: &str) -> Event {
+        Event {
+            all_day,
+            start: start.into(),
+            end: end.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_timed_event_shows_in_the_local_zone() {
+        let mut event = event(false, "20261030T080000Z", "20261030T093000Z");
+        event.start_secs = Some(1_793_347_200);
+        event.end_secs = Some(1_793_352_600);
+        let zone = TimeZone::get("Europe/Madrid").unwrap();
+
+        assert_eq!(
+            table_times(&event, &zone),
+            ("2026-10-30 09:00".into(), "2026-10-30 10:30".into())
+        );
+    }
+
+    #[test]
+    fn a_whole_day_event_ends_on_its_last_day() {
+        let mut event = event(true, "20260519", "20260521");
+        event.starts_at = Some("2026-05-19".into());
+        event.ends_at = Some("2026-05-21".into());
+
+        assert_eq!(
+            table_times(&event, &TimeZone::UTC),
+            ("2026-05-19".into(), "2026-05-20".into())
+        );
+    }
+
+    #[test]
+    fn a_one_day_event_starts_and_ends_on_it() {
+        let mut event = event(true, "20260519", "20260520");
+        event.starts_at = Some("2026-05-19".into());
+        event.ends_at = Some("2026-05-20".into());
+
+        assert_eq!(
+            table_times(&event, &TimeZone::UTC),
+            ("2026-05-19".into(), "2026-05-19".into())
+        );
+    }
+
+    #[test]
+    fn unresolved_times_show_as_written() {
+        let event = event(false, "20261030T090000", "20261030T100000");
+
+        assert_eq!(
+            table_times(&event, &TimeZone::UTC),
+            ("20261030T090000".into(), "20261030T100000".into())
+        );
     }
 }
