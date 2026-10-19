@@ -53,6 +53,8 @@ Each SHALL cover `list`, `read`, `create`, `update` and `delete` and read the sa
 ### Requirement: Columns follow the kind
 A component listing SHALL render the properties its kind is read by: an event its summary and its start and end, a todo its summary, due date, status, priority and completion percentage, a journal its summary and its date.
 
+The event table SHALL show the start and end for a person to read, `startsAt` and `endsAt` in the local zone (`TZ`, then the system's), the one a floating time is read in: `2026-10-30 09:00` for a timed event, the days for a whole-day one with the end as its last day (`2026-05-19`). A time that did not resolve SHALL show as iCalendar spells it. Squeezed into the terminal or `--max-width`, the table SHALL truncate the id and the summary but keep the start and end whole. The `--json` payload SHALL stay as it is, `start` and `end` iCalendar-spelled and a whole day's `endsAt` exclusive.
+
 A property the component omits SHALL render empty rather than absent, so the columns line up down the table. A todo whose STATUS is `COMPLETED` SHALL read as fully done even where PERCENT-COMPLETE is absent, since RFC 5545 3.8.1.8 makes the one imply the other.
 
 ### Requirement: Only events draw an agenda
@@ -141,7 +143,7 @@ A `UNTIL`, an `EXDATE`, an `RDATE` or a `RECURRENCE-ID` written on another clock
 
 An occurrence SHALL carry the item `id` and its `recurrenceId`, the instance identity spelled as the series' `DTSTART` (a date, a local time, or a `Z` time), which `event read -r` takes back. Occurrences SHALL list in start order. A timed occurrence overlaps when it starts before the window's end and ends after its start (a zero-length one when it starts inside); a whole-day one compares by date. A window open on its end SHALL reach a year past its start.
 
-Without a window a series SHALL list once, at its first start.
+Without a window the listing SHALL be the raw one, in the order the backend returns the items, a series once at its first start; it SHALL NOT be sorted by start, since only the first page the backend returns would be, which reads like an agenda without being one. The help SHALL point to `--from` (or `event agenda`) for what is coming.
 
 ### Requirement: Times resolve to instants
 A time SHALL resolve through its `TZID` as the time-zone database names it (a writer's path prefix or a leading slash tolerated), else through the calendar's `VTIMEZONE` of that `TZID` when it states at least one observance, else in the local zone, as a floating time does; a `Z` time is UTC. A local time a transition skips SHALL read with the offset before the gap, one it repeats as its first occurrence (RFC 5545 3.3.5).

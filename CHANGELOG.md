@@ -25,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Changed the `event list` table to show the start and end in the local zone (`2026-10-30 09:00`) rather than as iCalendar spells them, a whole-day event by its days with the end as its last one, and kept whole when the table is squeezed; the `--json` output is unchanged. `event list --help` now points to `--from` or `event agenda` for what is coming, the listing without a window being the raw one.
 - Changed `event create` and `event update` on a Google or an Outlook account to read a `--start` or `--end` naming no zone in the local zone (`TZ`, then the system's), as `--time-zone` would, instead of writing a floating time the backend refused. `--time-zone` still wins; the other backends keep the time floating.
 - Changed a Google account to accept an event giving its end as a `DURATION` (`event create --duration`, an invitation) instead of refusing it: the end is computed from the `DTSTART`, in its zone, and the event is stored with a `DTEND` (io-gcal at `9053761`). A negative `DURATION`, or one with hours after a date start, is still refused.
 - Changed `event agenda` to name months and weekdays in the time locale, as cal does: `LC_ALL`, then `LC_TIME`, then `LANG`, with the English names of the POSIX locale when none is set or chrono does not know it. The event times under the grid are stamped in it too, and a month argument is read in English or in that language.
