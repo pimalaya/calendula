@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: gcal-create-invites
-status: active
+status: landed
 created: 2026-10-19
 ---
 
@@ -15,12 +15,12 @@ Import was chosen so the `UID` survives. `events.insert` keeps it too: inserting
 
 ## What
 
-`create_item` uses `events.insert` with `sendUpdates=all` when the event names at least one `ATTENDEE` and no `ORGANIZER`: an event the account is creating and inviting people to, which Google then organizes as the account. The `iCalUID` is sent in the body, so the `UID` survives as it does through import.
+`create_item` uses `events.insert` with `sendUpdates=all` when the event names at least one `ATTENDEE` and either no `ORGANIZER`, which Google then makes the account, or one whose address is the calendar id: an event the account is creating and inviting people to. The `iCalUID` is sent in the body, so the `UID` survives as it does through import.
 
-Every other event keeps going through `events.import` as today (with a `UID`) or `events.insert` without `sendUpdates` (without one). An event that names an `ORGANIZER` is a copy of someone's invitation, or a migration, and inserting it would make the account its organizer and mail its guests on their behalf.
+Every other event keeps going through `events.import` as today (with a `UID`) or `events.insert` without `sendUpdates` (without one). An event naming any other `ORGANIZER` is a copy of someone's invitation, or a migration, and inserting it would make the account its organizer and mail its guests on their behalf.
 
 Out of scope, each to its own issue: a flag to choose whether guests are mailed on create, update and delete, and adding or removing one attendee without resetting the others' `PARTSTAT`.
 
-## Open question
+## Settled question
 
-An event whose `ORGANIZER` is the account itself (built by hand, or exported and created again) still goes through import and mails nobody. Comparing the organizer with the calendar's owner would cover it, but `primary` is not an address; it is left out unless you prefer to read the owner from the calendar list entry.
+An event whose `ORGANIZER` is the account itself (built by hand, or exported and created again) is our own meeting and takes the insert path too. It is told by comparing the organizer's address with the calendar id, case-insensitively, which is the address for a primary calendar; an organizer that does not match stays on import, as today (#20).
