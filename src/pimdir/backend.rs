@@ -45,14 +45,14 @@ use io_pimdir::{
     },
 };
 use log::warn;
-use pimalaya_cli::printer::Printer;
+use pimalaya_cli::{error::CodedError, printer::Printer};
 use pimalaya_config::toml::TomlConfig;
 
 use crate::{
     account::context::Account,
     cli::load_config,
     config::PimdirConfig,
-    error::{CodedError, ErrorCode},
+    error::ErrorCode,
     pimdir::{
         client::PimdirClient,
         status::{PimdirCalendarStatus, PimdirStatusOutput},
@@ -1499,7 +1499,9 @@ mod tests {
     /// The refusals a caller acts on carry their stable code.
     #[test]
     fn a_stale_if_match_and_an_unsupported_occurrence_carry_their_code() {
-        use crate::error::{ErrorCode, code_of};
+        use pimalaya_cli::error::code_of;
+
+        use crate::error::ErrorCode;
 
         let (_dir, mut backend, ids) = store(&[ALONE]);
         let err = backend

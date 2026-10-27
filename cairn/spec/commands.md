@@ -183,6 +183,9 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 - WHEN `calendula --json event delete --if-match <old etag>` names it
 - THEN the command exits 1, queues nothing and prints `{"code":"precondition-failed","error":"Precondition failed: …","sources":[],"backtrace":null}`
 
+### Requirement: The JSON contract is described and versioned
+`json-schema` SHALL describe the failure object under the key `calendula-error`, its `code` typed by the code vocabulary. Every generated schema SHALL carry an `$id` naming the contract version: the major version of calendula, or `0.<minor>` before 1.0. Every registered payload SHALL be a JSON object, checked by a test. Piped `--json` output SHALL print one value per line.
+
 ### Requirement: Calendar selection
 A shared command operating inside a calendar SHALL take it through the flattened `-k/--calendar` flag, resolved by the account: the flag wins, otherwise `calendar.default`, otherwise the command bails.
 
@@ -204,7 +207,7 @@ Each command's doc comment SHALL be its help text: the first paragraph is what `
 ### Requirement: Every data command returns a named output type
 A command answering with data SHALL hand the printer a `*Output` type deriving `Display`, `Serialize` and `JsonSchema`, named after its command path. `Message` carries a confirmation and never data.
 
-A `create`, an `update` and a `build` answer data too: an abandoned edit is an outcome they have to report, so each SHALL return an untagged enum whose write arm serializes exactly as it would on its own, and whose abandoned arm carries nothing. A `build` writing to `-o` answers a `Message`, having handed the data to a file.
+A `create`, an `update` and a `build` answer data too: an abandoned edit is an outcome they have to report, so each SHALL return an untagged enum whose write arm serializes exactly as it would on its own, and whose abandoned arm carries nothing, as an empty object. A `build` writing to `-o` answers a `Message`, having handed the data to a file.
 
 Every key of such a payload SHALL be camelCase, the spelling of the wire formats calendula sits over and the one a jq path addresses without quoting. The configuration schema stays kebab-case, being a TOML document a person writes rather than machine surface.
 

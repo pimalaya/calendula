@@ -94,7 +94,7 @@ impl TodoUpdateCommand {
         client.disconnect();
 
         let Some(draft) = composer.edit(printer, &seed)? else {
-            return printer.out(TodoUpdateOutput::Abandoned);
+            return printer.out(TodoUpdateOutput::Abandoned {});
         };
 
         let updated = client.update_item(
@@ -122,15 +122,16 @@ impl TodoUpdateCommand {
 pub enum TodoUpdateOutput {
     /// The todo the backend updated.
     Applied(TodoUpdatedOutput),
-    /// Nothing, the edit having been abandoned.
-    Abandoned,
+    /// Nothing, the edit having been abandoned: an empty object rather
+    /// than null, so every payload of the command is a JSON object.
+    Abandoned {},
 }
 
 impl fmt::Display for TodoUpdateOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Applied(out) => out.fmt(f),
-            Self::Abandoned => writeln!(f, "Todo not updated"),
+            Self::Abandoned {} => writeln!(f, "Todo not updated"),
         }
     }
 }

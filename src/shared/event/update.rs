@@ -133,7 +133,7 @@ impl EventUpdateCommand {
         client.disconnect();
 
         let Some(draft) = composer.edit(printer, &seed)? else {
-            return printer.out(EventUpdateOutput::Abandoned);
+            return printer.out(EventUpdateOutput::Abandoned {});
         };
 
         // NOTE: stamped once the edit is over, the instant it is written,
@@ -160,15 +160,16 @@ impl EventUpdateCommand {
 pub enum EventUpdateOutput {
     /// The event the backend updated.
     Applied(EventUpdatedOutput),
-    /// Nothing, the edit having been abandoned.
-    Abandoned,
+    /// Nothing, the edit having been abandoned: an empty object rather
+    /// than null, so every payload of the command is a JSON object.
+    Abandoned {},
 }
 
 impl fmt::Display for EventUpdateOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Applied(out) => out.fmt(f),
-            Self::Abandoned => writeln!(f, "Event not updated"),
+            Self::Abandoned {} => writeln!(f, "Event not updated"),
         }
     }
 }

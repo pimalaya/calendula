@@ -66,7 +66,7 @@ impl JournalCreateCommand {
         // on the first call that needs it, so the editor runs with no
         // connection held and the create below opens one.
         let Some(draft) = composer.edit(printer, &seed)? else {
-            return printer.out(JournalCreateOutput::Abandoned);
+            return printer.out(JournalCreateOutput::Abandoned {});
         };
 
         let created = client.create_item(&calendar_id, draft.contents.clone());
@@ -86,15 +86,16 @@ impl JournalCreateCommand {
 pub enum JournalCreateOutput {
     /// The journal entry the backend created.
     Created(JournalCreatedOutput),
-    /// Nothing, the edit having been abandoned.
-    Abandoned,
+    /// Nothing, the edit having been abandoned: an empty object rather
+    /// than null, so every payload of the command is a JSON object.
+    Abandoned {},
 }
 
 impl fmt::Display for JournalCreateOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Created(out) => out.fmt(f),
-            Self::Abandoned => writeln!(f, "Journal not created"),
+            Self::Abandoned {} => writeln!(f, "Journal not created"),
         }
     }
 }

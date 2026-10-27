@@ -66,7 +66,7 @@ impl ItemCreateCommand {
         // on the first call that needs it, so the editor runs with no
         // connection held and the create below opens one.
         let Some(draft) = composer.edit(printer, &seed)? else {
-            return printer.out(ItemCreateOutput::Abandoned);
+            return printer.out(ItemCreateOutput::Abandoned {});
         };
 
         let created = client.create_item(&calendar_id, draft.contents.clone());
@@ -86,15 +86,16 @@ impl ItemCreateCommand {
 pub enum ItemCreateOutput {
     /// The item the backend created.
     Created(ItemCreatedOutput),
-    /// Nothing, the edit having been abandoned.
-    Abandoned,
+    /// Nothing, the edit having been abandoned: an empty object rather
+    /// than null, so every payload of the command is a JSON object.
+    Abandoned {},
 }
 
 impl fmt::Display for ItemCreateOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Created(out) => out.fmt(f),
-            Self::Abandoned => writeln!(f, "Item not created"),
+            Self::Abandoned {} => writeln!(f, "Item not created"),
         }
     }
 }

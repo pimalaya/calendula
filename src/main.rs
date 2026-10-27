@@ -154,18 +154,19 @@ use std::{
 use anyhow::Result;
 use clap::{CommandFactory, Parser};
 use pimalaya_cli::{
+    error::ErrorReport,
     log::Logger,
     printer::{Printer, StdoutPrinter},
 };
 use pimalaya_config::toml::TomlConfig;
 
-use crate::{cli::CalendulaCli, config::Config};
+use crate::{cli::CalendulaCli, config::Config, error::ErrorCode};
 
 fn main() {
     let cli = CalendulaCli::parse();
     let mut printer = StdoutPrinter::new(&cli.json);
     let result = run(cli, &mut printer);
-    error::eval(&mut printer, result);
+    ErrorReport::<ErrorCode>::eval_coded(&mut printer, result);
 }
 
 fn run(cli: CalendulaCli, printer: &mut StdoutPrinter) -> Result<()> {

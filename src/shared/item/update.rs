@@ -94,7 +94,7 @@ impl ItemUpdateCommand {
         client.disconnect();
 
         let Some(draft) = composer.edit(printer, &seed)? else {
-            return printer.out(ItemUpdateOutput::Abandoned);
+            return printer.out(ItemUpdateOutput::Abandoned {});
         };
 
         let updated = client.update_item(
@@ -122,15 +122,16 @@ impl ItemUpdateCommand {
 pub enum ItemUpdateOutput {
     /// The item the backend updated.
     Applied(ItemUpdatedOutput),
-    /// Nothing, the edit having been abandoned.
-    Abandoned,
+    /// Nothing, the edit having been abandoned: an empty object rather
+    /// than null, so every payload of the command is a JSON object.
+    Abandoned {},
 }
 
 impl fmt::Display for ItemUpdateOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Applied(out) => out.fmt(f),
-            Self::Abandoned => writeln!(f, "Item not updated"),
+            Self::Abandoned {} => writeln!(f, "Item not updated"),
         }
     }
 }
