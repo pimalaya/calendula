@@ -25,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Bumped rustls-webpki to 0.103.16 and webpki-root-certs to 1.0.11, fixing RUSTSEC-2026-0382 and RUSTSEC-2026-0383.
 - Changed piped `--json` output to print one value per line, each schema of `json-schema` to carry an `$id` naming the contract version (`v0.2`), and added `calendula-error`, the schema of the JSON failure object (pimalaya-cli `55b6693`). The abandoned arm of the `create` and `update` outputs, which `--json` never prints, is now `{}` rather than `null`, so each of their schemas is an object.
 - Changed the `event list` table to show the start and end in the local zone (`2026-10-30 09:00`) rather than as iCalendar spells them, a whole-day event by its days with the end as its last one, and kept whole when the table is squeezed; the `--json` output is unchanged. `event list --help` now points to `--from` or `event agenda` for what is coming, the listing without a window being the raw one.
 - Changed `event create` and `event update` on a Google or an Outlook account to read a `--start` or `--end` naming no zone in the local zone (`TZ`, then the system's), as `--time-zone` would, instead of writing a floating time the backend refused. `--time-zone` still wins; the other backends keep the time floating.
