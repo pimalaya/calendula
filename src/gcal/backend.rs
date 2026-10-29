@@ -24,8 +24,9 @@ use io_gcal::v3::{
         calendar_list::{GcalCalendarListEntry, list::GcalCalendarListListParams},
         calendars::GcalCalendar,
         events::{
-            GcalEvent, import::GcalEventImportParams, insert::GcalEventInsertParams,
-            list::GcalEventsListParams, update::GcalEventUpdateParams,
+            GcalEvent, GcalSendUpdates, import::GcalEventImportParams,
+            insert::GcalEventInsertParams, list::GcalEventsListParams,
+            update::GcalEventUpdateParams,
         },
     },
 };
@@ -271,21 +272,29 @@ impl GcalBackend {
 
     /// Creates an event from an iCalendar document.
     ///
-    /// A document carrying a UID is imported, so the UID survives as the
-    /// event's `iCalUID` and the resource keeps the identity it already
-    /// had; one carrying none is inserted, and Google mints both ids itself.
+    /// An event the account organizes and invites people to is inserted
+    /// with `sendUpdates=all`, its UID sent as the `iCalUID` so it survives,
+    /// for Google to mail the attendees. Any other document carrying a UID
+    /// is imported, so the UID survives as the event's `iCalUID` and the
+    /// resource keeps the identity it already had; one carrying none is
+    /// inserted, and Google mints both ids itself.
     pub fn create_item(&mut self, calendar_id: &str, contents: Vec<u8>) -> Result<String> {
         let event = GcalEvent::from_ical(&contents)?;
 
-        let created = match event.ical_uid.as_deref().filter(|uid| !uid.is_empty()) {
-            Some(_) => {
-                let params = GcalEventImportParams::default();
-                self.client.event_import(calendar_id, &event, &params)?
-            }
-            None => {
-                let params = GcalEventInsertParams::default();
-                self.client.event_insert(calendar_id, &event, &params)?
-            }
+        let has_uid = event.ical_uid.as_deref().is_some_and(|uid| !uid.is_empty());
+
+        let created = if invites(&event, calendar_id) {
+            let params = GcalEventInsertParams {
+                send_updates: Some(GcalSendUpdates::All),
+                ..Default::default()
+            };
+            self.client.event_insert(calendar_id, &event, &params)?
+        } else if has_uid {
+            let params = GcalEventImportParams::default();
+            self.client.event_import(calendar_id, &event, &params)?
+        } else {
+            let params = GcalEventInsertParams::default();
+            self.client.event_insert(calendar_id, &event, &params)?
         };
 
         Ok(created.response.id.unwrap_or_default())
@@ -348,6 +357,27 @@ impl GcalBackend {
             .calendar_list_entry_patch(id, &entry, Some(true))?;
 
         Ok(())
+    }
+}
+
+/// Whether creating `event` in `calendar_id` invites its attendees: it
+/// names at least one, and either no organizer, which Google then makes
+/// the account, or the calendar itself, the address of a primary calendar.
+///
+/// An event organized by anyone else is a copy of their invitation, or a
+/// migration, and inserting it would make the account mail its guests on
+/// the organizer's behalf.
+fn invites(event: &GcalEvent, calendar_id: &str) -> bool {
+    if event.attendees.is_empty() {
+        return false;
+    }
+
+    match &event.organizer {
+        None => true,
+        Some(organizer) => organizer
+            .email
+            .as_deref()
+            .is_some_and(|email| email.eq_ignore_ascii_case(calendar_id)),
     }
 }
 
@@ -427,7 +457,7 @@ fn item_from(calendar_id: &str, event: &GcalEvent, exceptions: &[&GcalEvent]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use io_gcal::v3::rest::events::GcalEventDateTime;
+    use io_gcal::v3::rest::events::{GcalEventAttendee, GcalEventDateTime, GcalEventPerson};
 
     use crate::shared::event::Event;
 
@@ -489,5 +519,41 @@ mod tests {
         // NOTE: a page of zero clamps to the first page, as the shared
         // pagination clamps it.
         assert_eq!(window(Some(0), Some(25)), Some(25));
+    }
+
+    #[test]
+    fn only_an_event_the_account_organizes_invites_its_attendees() {
+        let event = |organizer: Option<&str>, attendees: &[&str]| GcalEvent {
+            organizer: organizer.map(|email| GcalEventPerson {
+                email: Some(email.to_owned()),
+                ..Default::default()
+            }),
+            attendees: attendees
+                .iter()
+                .map(|email| GcalEventAttendee {
+                    email: Some((*email).to_owned()),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let calendar = "me@example.org";
+
+        assert!(invites(&event(None, &["ann@example.org"]), calendar));
+        assert!(invites(
+            &event(Some("me@example.org"), &["ann@example.org"]),
+            calendar
+        ));
+        assert!(invites(
+            &event(Some("Me@Example.org"), &["ann@example.org"]),
+            calendar
+        ));
+
+        assert!(!invites(&event(None, &[]), calendar));
+        assert!(!invites(&event(Some("me@example.org"), &[]), calendar));
+        assert!(!invites(
+            &event(Some("bob@example.org"), &["ann@example.org"]),
+            calendar
+        ));
     }
 }
