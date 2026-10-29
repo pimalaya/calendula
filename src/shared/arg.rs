@@ -2,7 +2,8 @@
 //!
 //! Clap arguments reused across the shared API commands.
 
-use clap::Parser;
+use anyhow::{Result, bail};
+use clap::{Parser, ValueEnum};
 
 /// The calendar a shared-API command operates on.
 ///
@@ -32,4 +33,47 @@ pub struct IcalComposerArgs {
     /// edits in place.
     #[arg(long, value_name = "COMMAND", requires = "interactive")]
     pub composer: Option<String>,
+}
+
+/// Who a gcal write mails, for an `event create`, `update` or `delete`.
+#[derive(Debug, Parser)]
+pub struct SendUpdatesArg {
+    /// Who Google mails about the write (`sendUpdates`): every guest,
+    /// the guests outside Google Calendar, or nobody.
+    ///
+    /// Omitted, the write mails whom it mailed before: an update or a
+    /// delete leaves it to Google, and a create invites the attendees of
+    /// an event the account organizes. An event organized by someone else
+    /// is imported, which mails nobody, so `all` and `external-only` are
+    /// refused on it.
+    ///
+    /// Served by the gcal backend alone; every other backend refuses it.
+    #[arg(long, value_name = "WHO")]
+    pub send_updates: Option<SendUpdates>,
+}
+
+impl SendUpdatesArg {
+    /// Refuses `--send-updates` off gcal, `backend` naming the one serving
+    /// the account, before anything reaches it.
+    pub fn check_backend(&self, backend: &str) -> Result<()> {
+        if self.send_updates.is_some() && backend != "gcal" {
+            bail!(
+                "--send-updates needs the gcal backend; the {backend} backend serves this account"
+            );
+        }
+
+        Ok(())
+    }
+}
+
+/// Who Google mails about a write.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum SendUpdates {
+    /// Every guest.
+    All,
+    /// The guests outside Google Calendar, who keep getting iCalendar
+    /// invitations.
+    ExternalOnly,
+    /// Nobody.
+    None,
 }

@@ -34,6 +34,7 @@ use crate::{
     cli::resolve_account,
     config::{AccountConfig, Config},
     shared::{
+        arg::SendUpdates,
         calendar::{Calendar, CalendarDiff},
         item::{CalendarItem, CalendarItemQuery},
     },
@@ -398,7 +399,19 @@ impl CalendarClient {
     }
 
     /// Stores raw iCalendar bytes as a new item, returning the id assigned.
-    pub fn create_item(&mut self, calendar_id: &str, contents: Vec<u8>) -> Result<String> {
+    ///
+    /// `send_updates` says whom a gcal write mails; the command refuses it
+    /// before reaching any other backend, which ignores it.
+    pub fn create_item(
+        &mut self,
+        calendar_id: &str,
+        contents: Vec<u8>,
+        send_updates: Option<SendUpdates>,
+    ) -> Result<String> {
+        // NOTE: read by gcal alone, the commands refusing it elsewhere.
+        #[cfg(not(feature = "gcal"))]
+        let _ = send_updates;
+
         match self.open()? {
             #[cfg(not(any(
                 feature = "vdir",
@@ -415,7 +428,7 @@ impl CalendarClient {
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.create_item(calendar_id, contents),
             #[cfg(feature = "gcal")]
-            BackendClient::Gcal(client) => client.create_item(calendar_id, contents),
+            BackendClient::Gcal(client) => client.create_item(calendar_id, contents, send_updates),
             #[cfg(feature = "msgraph")]
             BackendClient::Msgraph(client) => client.create_item(calendar_id, contents),
         }
@@ -425,13 +438,20 @@ impl CalendarClient {
     ///
     /// `if_match` is the entity tag to gate the write on, `None` overwriting
     /// unconditionally. A backend with no guard concept ignores it.
+    /// `send_updates` is read by gcal alone, as on
+    /// [`create_item`](Self::create_item).
     pub fn update_item(
         &mut self,
         calendar_id: &str,
         item_id: &str,
         contents: Vec<u8>,
         if_match: Option<&str>,
+        send_updates: Option<SendUpdates>,
     ) -> Result<()> {
+        // NOTE: read by gcal alone, the commands refusing it elsewhere.
+        #[cfg(not(feature = "gcal"))]
+        let _ = send_updates;
+
         match self.open()? {
             #[cfg(not(any(
                 feature = "vdir",
@@ -455,7 +475,7 @@ impl CalendarClient {
             }
             #[cfg(feature = "gcal")]
             BackendClient::Gcal(client) => {
-                client.update_item(calendar_id, item_id, contents, if_match)
+                client.update_item(calendar_id, item_id, contents, if_match, send_updates)
             }
             #[cfg(feature = "msgraph")]
             BackendClient::Msgraph(client) => {
@@ -468,13 +488,19 @@ impl CalendarClient {
     ///
     /// `if_match` gates the delete as it gates [`update_item`](Self::update_item);
     /// a backend with no such guard refuses it rather than pretending the
-    /// check happened.
+    /// check happened. `send_updates` is read by gcal alone, as on
+    /// [`create_item`](Self::create_item).
     pub fn delete_item(
         &mut self,
         calendar_id: &str,
         item_id: &str,
         if_match: Option<&str>,
+        send_updates: Option<SendUpdates>,
     ) -> Result<()> {
+        // NOTE: read by gcal alone, the commands refusing it elsewhere.
+        #[cfg(not(feature = "gcal"))]
+        let _ = send_updates;
+
         match self.open()? {
             #[cfg(not(any(
                 feature = "vdir",
@@ -491,7 +517,9 @@ impl CalendarClient {
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.delete_item(calendar_id, item_id, if_match),
             #[cfg(feature = "gcal")]
-            BackendClient::Gcal(client) => client.delete_item(calendar_id, item_id, if_match),
+            BackendClient::Gcal(client) => {
+                client.delete_item(calendar_id, item_id, if_match, send_updates)
+            }
             #[cfg(feature = "msgraph")]
             BackendClient::Msgraph(client) => client.delete_item(calendar_id, item_id, if_match),
         }

@@ -37,6 +37,7 @@ use crate::{
     config::GcalConfig,
     gcal::{client::connect, render::rfc3339},
     shared::{
+        arg::SendUpdates,
         calendar::{Calendar, CalendarDiff},
         client::paginate,
         item::{CalendarItem, CalendarItemQuery},
@@ -278,23 +279,30 @@ impl GcalBackend {
     /// is imported, so the UID survives as the event's `iCalUID` and the
     /// resource keeps the identity it already had; one carrying none is
     /// inserted, and Google mints both ids itself.
-    pub fn create_item(&mut self, calendar_id: &str, contents: Vec<u8>) -> Result<String> {
+    ///
+    /// A `send_updates` given replaces the `all` of an inserted event. An
+    /// import mails nobody and takes no `sendUpdates`, so asking it to
+    /// mail the attendees is refused, naming the organizer.
+    pub fn create_item(
+        &mut self,
+        calendar_id: &str,
+        contents: Vec<u8>,
+        send_updates: Option<SendUpdates>,
+    ) -> Result<String> {
         let event = GcalEvent::from_ical(&contents)?;
 
-        let has_uid = event.ical_uid.as_deref().is_some_and(|uid| !uid.is_empty());
-
-        let created = if invites(&event, calendar_id) {
-            let params = GcalEventInsertParams {
-                send_updates: Some(GcalSendUpdates::All),
-                ..Default::default()
-            };
-            self.client.event_insert(calendar_id, &event, &params)?
-        } else if has_uid {
-            let params = GcalEventImportParams::default();
-            self.client.event_import(calendar_id, &event, &params)?
-        } else {
-            let params = GcalEventInsertParams::default();
-            self.client.event_insert(calendar_id, &event, &params)?
+        let created = match create_path(&event, calendar_id, send_updates)? {
+            CreatePath::Insert(send_updates) => {
+                let params = GcalEventInsertParams {
+                    send_updates,
+                    ..Default::default()
+                };
+                self.client.event_insert(calendar_id, &event, &params)?
+            }
+            CreatePath::Import => {
+                let params = GcalEventImportParams::default();
+                self.client.event_import(calendar_id, &event, &params)?
+            }
         };
 
         Ok(created.response.id.unwrap_or_default())
@@ -312,6 +320,7 @@ impl GcalBackend {
         item_id: &str,
         contents: Vec<u8>,
         if_match: Option<&str>,
+        send_updates: Option<SendUpdates>,
     ) -> Result<()> {
         let projected = GcalEvent::from_ical(&contents)?;
         let current = self
@@ -320,7 +329,10 @@ impl GcalBackend {
             .response;
 
         let event = projected.merge(&current);
-        let params = GcalEventUpdateParams::default();
+        let params = GcalEventUpdateParams {
+            send_updates: send_updates.map(gcal_send_updates),
+            ..Default::default()
+        };
 
         self.client
             .event_update(calendar_id, item_id, &event, &params, if_match)?;
@@ -328,7 +340,8 @@ impl GcalBackend {
         Ok(())
     }
 
-    /// Deletes an event.
+    /// Deletes an event, mailing whom `send_updates` names, Google
+    /// deciding when it names nobody.
     ///
     /// Google offers no precondition on a delete, so an `if_match` is
     /// refused rather than dropped.
@@ -337,11 +350,14 @@ impl GcalBackend {
         calendar_id: &str,
         item_id: &str,
         if_match: Option<&str>,
+        send_updates: Option<SendUpdates>,
     ) -> Result<()> {
         if if_match.is_some() {
             bail!("Google Calendar cannot gate a delete on an ETag");
         }
-        self.client.event_delete(calendar_id, item_id, None, None)?;
+        let send_updates = send_updates.map(gcal_send_updates);
+        self.client
+            .event_delete(calendar_id, item_id, send_updates, None)?;
         Ok(())
     }
 
@@ -357,6 +373,69 @@ impl GcalBackend {
             .calendar_list_entry_patch(id, &entry, Some(true))?;
 
         Ok(())
+    }
+}
+
+/// How a create reaches Google.
+#[derive(Debug, Eq, PartialEq)]
+enum CreatePath {
+    /// `events.insert`, with this `sendUpdates`.
+    Insert(Option<GcalSendUpdates>),
+    /// `events.import`, which mails nobody.
+    Import,
+}
+
+/// How `event` is created in `calendar_id`, `send_updates` being what
+/// the command was given.
+///
+/// An event the account invites people to is inserted mailing them, or
+/// mailing whom `send_updates` names; one carrying a UID otherwise is
+/// imported, and one carrying none is inserted. An import mails nobody,
+/// so `all` or `external-only` asked of one with attendees is refused,
+/// naming its organizer, rather than ignored.
+fn create_path(
+    event: &GcalEvent,
+    calendar_id: &str,
+    send_updates: Option<SendUpdates>,
+) -> Result<CreatePath> {
+    let has_uid = event.ical_uid.as_deref().is_some_and(|uid| !uid.is_empty());
+
+    if invites(event, calendar_id) {
+        let send_updates = send_updates.map_or(GcalSendUpdates::All, gcal_send_updates);
+        return Ok(CreatePath::Insert(Some(send_updates)));
+    }
+
+    if !has_uid {
+        return Ok(CreatePath::Insert(send_updates.map(gcal_send_updates)));
+    }
+
+    let mails = matches!(
+        send_updates,
+        Some(SendUpdates::All | SendUpdates::ExternalOnly)
+    );
+
+    if mails && !event.attendees.is_empty() {
+        let organizer = event
+            .organizer
+            .as_ref()
+            .and_then(|organizer| organizer.email.as_deref())
+            .unwrap_or_default();
+
+        bail!(
+            "Cannot mail the attendees of an event organized by {organizer}: Google imports it \
+             and mails nobody; give --send-updates none or leave it out"
+        );
+    }
+
+    Ok(CreatePath::Import)
+}
+
+/// The io-gcal spelling of whom a write mails.
+fn gcal_send_updates(send_updates: SendUpdates) -> GcalSendUpdates {
+    match send_updates {
+        SendUpdates::All => GcalSendUpdates::All,
+        SendUpdates::ExternalOnly => GcalSendUpdates::ExternalOnly,
+        SendUpdates::None => GcalSendUpdates::None,
     }
 }
 
@@ -519,6 +598,82 @@ mod tests {
         // NOTE: a page of zero clamps to the first page, as the shared
         // pagination clamps it.
         assert_eq!(window(Some(0), Some(25)), Some(25));
+    }
+
+    /// An event organized by `organizer`, inviting `attendees`, carrying
+    /// a UID.
+    fn invitation(organizer: Option<&str>, attendees: &[&str]) -> GcalEvent {
+        GcalEvent {
+            ical_uid: Some(String::from("1@example.org")),
+            organizer: organizer.map(|email| GcalEventPerson {
+                email: Some(email.to_owned()),
+                ..Default::default()
+            }),
+            attendees: attendees
+                .iter()
+                .map(|email| GcalEventAttendee {
+                    email: Some((*email).to_owned()),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn send_updates_replaces_the_all_of_an_invitation() {
+        let event = invitation(None, &["ann@example.org"]);
+        let path = |send_updates| create_path(&event, "me@example.org", send_updates).unwrap();
+
+        assert_eq!(path(None), CreatePath::Insert(Some(GcalSendUpdates::All)));
+        assert_eq!(
+            path(Some(SendUpdates::All)),
+            CreatePath::Insert(Some(GcalSendUpdates::All))
+        );
+        assert_eq!(
+            path(Some(SendUpdates::ExternalOnly)),
+            CreatePath::Insert(Some(GcalSendUpdates::ExternalOnly))
+        );
+        assert_eq!(
+            path(Some(SendUpdates::None)),
+            CreatePath::Insert(Some(GcalSendUpdates::None))
+        );
+    }
+
+    #[test]
+    fn an_imported_invitation_mails_nobody_and_refuses_to_mail() {
+        let event = invitation(Some("bob@example.org"), &["ann@example.org"]);
+        let path = |send_updates| create_path(&event, "me@example.org", send_updates);
+
+        assert_eq!(path(None).unwrap(), CreatePath::Import);
+        assert_eq!(path(Some(SendUpdates::None)).unwrap(), CreatePath::Import);
+
+        for send_updates in [SendUpdates::All, SendUpdates::ExternalOnly] {
+            let err = path(Some(send_updates)).unwrap_err().to_string();
+            assert!(err.contains("organized by bob@example.org"), "{err}");
+        }
+    }
+
+    #[test]
+    fn an_event_inviting_nobody_takes_any_send_updates() {
+        let event = invitation(Some("bob@example.org"), &[]);
+
+        for send_updates in [None, Some(SendUpdates::All), Some(SendUpdates::None)] {
+            let path = create_path(&event, "me@example.org", send_updates).unwrap();
+            assert_eq!(path, CreatePath::Import);
+        }
+
+        // NOTE: without a UID the event is inserted, and the choice
+        // travels as given, or not at all.
+        let bare = GcalEvent::default();
+        assert_eq!(
+            create_path(&bare, "me@example.org", None).unwrap(),
+            CreatePath::Insert(None)
+        );
+        assert_eq!(
+            create_path(&bare, "me@example.org", Some(SendUpdates::None)).unwrap(),
+            CreatePath::Insert(Some(GcalSendUpdates::None))
+        );
     }
 
     #[test]

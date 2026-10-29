@@ -8,7 +8,7 @@ use clap::Parser;
 use pimalaya_cli::printer::{Message, Printer};
 
 use crate::shared::{
-    arg::CalendarIdArg,
+    arg::{CalendarIdArg, SendUpdatesArg},
     client::CalendarClient,
     event::Event,
     ical::IcalFamily,
@@ -43,13 +43,25 @@ pub struct EventDeleteCommand {
     /// (RFC 9110 `If-Match`), which is how a concurrent write is caught.
     #[arg(long, value_name = "ETAG")]
     pub if_match: Option<String>,
+
+    /// Whom a gcal delete mails.
+    #[command(flatten)]
+    pub send_updates: SendUpdatesArg,
 }
 
 impl EventDeleteCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+        self.send_updates.check_backend(client.backend_name())?;
+
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         let item_id = resolve(&mut client, &calendar_id, &self.event_id)?;
-        client.delete_item(&calendar_id, &item_id, self.if_match.as_deref())?;
+        let send_updates = self.send_updates.send_updates;
+        client.delete_item(
+            &calendar_id,
+            &item_id,
+            self.if_match.as_deref(),
+            send_updates,
+        )?;
         printer.out(Message::new("Event successfully deleted"))
     }
 }

@@ -14,7 +14,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::shared::{
-    arg::{CalendarIdArg, IcalComposerArgs},
+    arg::{CalendarIdArg, IcalComposerArgs, SendUpdatesArg},
     client::CalendarClient,
     composer::IcalComposer,
     event::fields::{EventFieldsArgs, revise},
@@ -64,6 +64,9 @@ pub struct EventUpdateCommand {
     /// The properties the command sets on the event.
     #[command(flatten)]
     pub fields: EventFieldsArgs,
+    /// Whom a gcal update mails.
+    #[command(flatten)]
+    pub send_updates: SendUpdatesArg,
     /// Event to update, as `event list` reports it.
     #[arg(value_name = "EVENT-ID")]
     pub event_id: String,
@@ -96,6 +99,7 @@ impl EventUpdateCommand {
         }
 
         self.fields.check_backend(client.backend_name())?;
+        self.send_updates.check_backend(client.backend_name())?;
         self.fields.anchor_floating(client.backend_name());
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
@@ -112,11 +116,18 @@ impl EventUpdateCommand {
         };
 
         let if_match = self.if_match.or(etag);
+        let send_updates = self.send_updates.send_updates;
         let seed = self.fields.apply_keeping_length(&base)?;
 
         if !self.composer.interactive {
             let contents = revise(&seed, now())?;
-            client.update_item(&calendar_id, &self.event_id, contents, if_match.as_deref())?;
+            client.update_item(
+                &calendar_id,
+                &self.event_id,
+                contents,
+                if_match.as_deref(),
+                send_updates,
+            )?;
 
             return printer.out(EventUpdateOutput::Applied(EventUpdatedOutput {
                 id: self.event_id,
@@ -140,7 +151,13 @@ impl EventUpdateCommand {
         // NOTE: stamped once the edit is over, the instant it is written,
         // whatever the editor left in DTSTAMP.
         let updated = revise(&draft.contents, now()).and_then(|contents| {
-            client.update_item(&calendar_id, &self.event_id, contents, if_match.as_deref())
+            client.update_item(
+                &calendar_id,
+                &self.event_id,
+                contents,
+                if_match.as_deref(),
+                send_updates,
+            )
         });
 
         draft.finish(updated)?;
@@ -254,7 +271,7 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             std::fs::create_dir(dir.path().join("cal")).unwrap();
             let id = client(&dir)
-                .create_item("cal", body.as_bytes().to_vec())
+                .create_item("cal", body.as_bytes().to_vec(), None)
                 .unwrap();
             (dir, id)
         }
@@ -321,6 +338,62 @@ mod tests {
             assert!(err.contains("vdir backend"), "{err}");
             assert_eq!(stored(&dir, &id), EVENT);
         }
+
+        #[test]
+        fn send_updates_is_refused_off_gcal_by_name_on_every_write() {
+            use crate::shared::event::{create::EventCreateCommand, delete::EventDeleteCommand};
+
+            let (dir, id) = home(EVENT);
+            let refused = |err: anyhow::Error| {
+                let err = err.to_string();
+                assert!(err.contains("--send-updates"), "{err}");
+                assert!(err.contains("vdir backend"), "{err}");
+            };
+
+            refused(
+                update(
+                    client(&dir),
+                    &[
+                        "-k",
+                        "cal",
+                        "--summary",
+                        "Retro",
+                        "--send-updates",
+                        "none",
+                        &id,
+                    ],
+                )
+                .unwrap_err(),
+            );
+
+            let delete = EventDeleteCommand::try_parse_from([
+                "delete",
+                "-k",
+                "cal",
+                "--send-updates",
+                "none",
+                &id,
+            ])
+            .unwrap();
+            refused(delete.execute(&mut Quiet, client(&dir)).unwrap_err());
+
+            assert_eq!(stored(&dir, &id), EVENT);
+
+            let create = EventCreateCommand::try_parse_from([
+                "create",
+                "-k",
+                "cal",
+                "--summary",
+                "Retro",
+                "--send-updates",
+                "all",
+            ])
+            .unwrap();
+            refused(create.execute(&mut Quiet, client(&dir)).unwrap_err());
+
+            let listed = client(&dir).list_items("cal", Default::default()).unwrap();
+            assert_eq!(listed.len(), 1);
+        }
     }
 
     #[cfg(feature = "pimdir")]
@@ -339,7 +412,7 @@ mod tests {
             drop(store);
 
             client(&dir)
-                .create_item("cal", EVENT.as_bytes().to_vec())
+                .create_item("cal", EVENT.as_bytes().to_vec(), None)
                 .unwrap();
 
             let mut owner = io_pimdir::client::PimdirStore::open(dir.path())

@@ -76,7 +76,7 @@ impl TodoUpdateCommand {
         let if_match = self.if_match.or(etag);
 
         if !self.composer.interactive {
-            client.update_item(&calendar_id, &self.todo_id, seed, if_match.as_deref())?;
+            client.update_item(&calendar_id, &self.todo_id, seed, if_match.as_deref(), None)?;
 
             return printer.out(TodoUpdateOutput::Applied(TodoUpdatedOutput {
                 id: self.todo_id,
@@ -102,6 +102,7 @@ impl TodoUpdateCommand {
             &self.todo_id,
             draft.contents.clone(),
             if_match.as_deref(),
+            None,
         );
 
         draft.finish(updated)?;

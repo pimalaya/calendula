@@ -76,7 +76,13 @@ impl JournalUpdateCommand {
         let if_match = self.if_match.or(etag);
 
         if !self.composer.interactive {
-            client.update_item(&calendar_id, &self.journal_id, seed, if_match.as_deref())?;
+            client.update_item(
+                &calendar_id,
+                &self.journal_id,
+                seed,
+                if_match.as_deref(),
+                None,
+            )?;
 
             return printer.out(JournalUpdateOutput::Applied(JournalUpdatedOutput {
                 id: self.journal_id,
@@ -102,6 +108,7 @@ impl JournalUpdateCommand {
             &self.journal_id,
             draft.contents.clone(),
             if_match.as_deref(),
+            None,
         );
 
         draft.finish(updated)?;

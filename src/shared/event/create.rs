@@ -13,7 +13,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::shared::{
-    arg::{CalendarIdArg, IcalComposerArgs},
+    arg::{CalendarIdArg, IcalComposerArgs, SendUpdatesArg},
     client::CalendarClient,
     composer::IcalComposer,
     event::fields::EventFieldsArgs,
@@ -50,6 +50,9 @@ pub struct EventCreateCommand {
     /// The properties the command sets on the event.
     #[command(flatten)]
     pub fields: EventFieldsArgs,
+    /// Whom a gcal create mails.
+    #[command(flatten)]
+    pub send_updates: SendUpdatesArg,
     /// iCalendar to store: a path to a file, raw iCalendar contents, or
     /// `-` for stdin. Omit to mint one.
     #[arg(value_name = "ICAL")]
@@ -63,6 +66,7 @@ impl EventCreateCommand {
         }
 
         self.fields.check_backend(client.backend_name())?;
+        self.send_updates.check_backend(client.backend_name())?;
         self.fields.anchor_floating(client.backend_name());
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
@@ -82,7 +86,7 @@ impl EventCreateCommand {
                 ensure_valid(&seed)?;
             }
 
-            let id = client.create_item(&calendar_id, seed)?;
+            let id = client.create_item(&calendar_id, seed, self.send_updates.send_updates)?;
             return printer.out(EventCreateOutput::Created(EventCreatedOutput { id }));
         }
 
@@ -97,7 +101,11 @@ impl EventCreateCommand {
             return printer.out(EventCreateOutput::Abandoned {});
         };
 
-        let created = client.create_item(&calendar_id, draft.contents.clone());
+        let created = client.create_item(
+            &calendar_id,
+            draft.contents.clone(),
+            self.send_updates.send_updates,
+        );
         let id = draft.finish(created)?;
 
         printer.out(EventCreateOutput::Created(EventCreatedOutput { id }))

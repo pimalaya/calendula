@@ -35,7 +35,7 @@ pub struct TodoDeleteCommand {
 impl TodoDeleteCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
-        client.delete_item(&calendar_id, &self.todo_id, self.if_match.as_deref())?;
+        client.delete_item(&calendar_id, &self.todo_id, self.if_match.as_deref(), None)?;
         printer.out(Message::new("Todo successfully deleted"))
     }
 }
