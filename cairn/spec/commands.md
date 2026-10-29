@@ -289,6 +289,26 @@ An empty value given to `--summary`, `--description`, `--location`, `--url`, `--
 ### Requirement: An online meeting can be asked for
 `--online-meeting` SHALL write `X-PIMDIR-ONLINE-MEETING:TRUE` on the VEVENT (pimdir STORAGE Annex B.1), replacing any instance it carried. On pimdir the write SHALL be refused before it is queued when no source declares `calendar.online-meeting` (see the backends capability); on any other backend `event create` and `event update` SHALL refuse the flag by name, before reaching the backend. `event build` reaches no backend and SHALL simply write the property.
 
+### Requirement: A gcal write chooses who is mailed
+`event create`, `event update` and `event delete` SHALL take `--send-updates all|external-only|none`, which the gcal backend SHALL pass as the API's `sendUpdates` on the request it makes. Absent, update and delete SHALL omit `sendUpdates` and create SHALL choose as the Google Calendar backend requirement says, so nothing changes for a caller that does not give it.
+
+On `event create` the flag SHALL override that choice wherever the event is inserted. An event that is imported instead mails nobody: `none` SHALL pass, and `all` or `external-only` SHALL be refused, naming the event's `ORGANIZER`. On any other backend the three commands SHALL refuse the flag by name, before reaching the backend. `event build` SHALL NOT take it.
+
+#### Scenario: A quiet fix
+- GIVEN a gcal event with an attendee
+- WHEN `calendula event update --summary "Typo fixed" --send-updates none ID` runs
+- THEN the event is updated with `sendUpdates=none`, and Google mails nobody
+
+#### Scenario: An invitation stored for later
+- GIVEN a gcal account
+- WHEN `calendula event create --attendee ann@example.org --send-updates none …` runs
+- THEN the event is inserted with `sendUpdates=none` and its `iCalUID`, and Ann is not mailed
+
+#### Scenario: Another backend
+- GIVEN a CalDAV account
+- WHEN `calendula event delete --send-updates none ID` runs
+- THEN the command is refused naming `--send-updates`, and nothing is deleted
+
 ### Requirement: A minted item carries an identity, and its family names its kind
 An item minted from nothing SHALL be a VCALENDAR carrying a PRODID and one component of the family's own kind, carrying a UID minted as a fresh UUID and a DTSTAMP of now. An editor handed an empty file mints no identity, and the CalDAV resource name and the pimdir link id both derive from the UID.
 
