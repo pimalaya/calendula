@@ -293,6 +293,7 @@ impl PimdirBackend {
             link_id: Some(link_id.clone()),
             flags: PimdirFlags::default(),
             object: Some(hash),
+            supersedes: None,
         };
         self.check_online_meeting(calendar_id, &action, None, &contents)?;
 
