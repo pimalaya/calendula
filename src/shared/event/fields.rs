@@ -122,8 +122,27 @@ pub struct EventFieldsArgs {
     /// Each is invited plainly: `PARTSTAT=NEEDS-ACTION` and `RSVP=TRUE`,
     /// no role, which the composer sets. `--attendee ""` alone removes
     /// every attendee.
+    ///
+    /// It replaces the whole list; `--add-attendee` and
+    /// `--remove-attendee` touch one attendee and keep the others'
+    /// answers.
     #[arg(long, value_name = "[NAME:]ADDRESS")]
     pub attendee: Vec<String>,
+    /// One attendee to add (`ATTENDEE`), the flag repeating, spelled as
+    /// `--attendee` is and invited as plainly.
+    ///
+    /// Written after the event's last attendee, every other line kept
+    /// as it was. An address the event already carries is refused,
+    /// whatever name comes with it.
+    #[arg(long, value_name = "[NAME:]ADDRESS", conflicts_with = "attendee")]
+    pub add_attendee: Vec<String>,
+    /// One attendee to remove (`ATTENDEE`), the flag repeating, by
+    /// address, with or without `mailto:`, in any case.
+    ///
+    /// Every other line is kept as it was. An address the event does not
+    /// carry is refused.
+    #[arg(long, value_name = "ADDRESS", conflicts_with = "attendee")]
+    pub remove_attendee: Vec<String>,
     /// Categories (`CATEGORIES`), the flag repeating; `--categories ""`
     /// alone removes them.
     #[arg(long, value_name = "TEXT")]
@@ -257,6 +276,8 @@ impl EventFieldsArgs {
             && self.transparency.is_none()
             && self.organizer.is_none()
             && self.attendee.is_empty()
+            && self.add_attendee.is_empty()
+            && self.remove_attendee.is_empty()
             && self.categories.is_empty()
             && self.sequence.is_none()
             && self.alarm.is_none()
@@ -424,8 +445,10 @@ impl EventFieldsArgs {
             .collect();
 
         let vevent = cst.component_mut::<VEVENT>().context("Find VEVENT error")?;
+        let invites = self.attendee_edit(vevent, escaper)?;
 
         replace(vevent, &dropped, lines);
+        edit_attendees(vevent, invites);
 
         if lead.is_some() || self.no_alarm {
             let alarm = lead.map(|lead| display_alarm(vevent, &lead, escaper));
@@ -435,6 +458,68 @@ impl EventFieldsArgs {
         define_zones(&mut cst, &times.zones);
 
         Ok(cst.to_bytes())
+    }
+
+    /// The attendee lines `--add-attendee` writes and the addresses
+    /// `--remove-attendee` drops, checked against the event's own
+    /// `ATTENDEE`s.
+    ///
+    /// Every refusal comes before anything is written, so a call that
+    /// changes nothing never looks like it succeeded.
+    fn attendee_edit(&self, vevent: &IcalCst<'_>, escaper: Escaper) -> Result<AttendeeEdit> {
+        let mut edit = AttendeeEdit::default();
+
+        if self.add_attendee.is_empty() && self.remove_attendee.is_empty() {
+            return Ok(edit);
+        }
+
+        let carried: Vec<String> = vevent
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                IcalItem::Prop(line) if names(item, &IcalPropKind::Attendee) => {
+                    Some(address_key(&line.raw_value_str()))
+                }
+                _ => None,
+            })
+            .collect();
+
+        for value in &self.remove_attendee {
+            let (_, address) = person(value)?;
+            let key = address_key(&address_of(&address));
+
+            if !carried.contains(&key) {
+                bail!("Cannot remove attendee {key}: the event does not carry it");
+            }
+
+            if !edit.removed.contains(&key) {
+                edit.removed.push(key);
+            }
+        }
+
+        let mut added = Vec::new();
+
+        for value in &self.add_attendee {
+            let (name, address) = person(value)?;
+            let key = address_key(&address_of(&address));
+
+            if edit.removed.contains(&key) {
+                bail!(
+                    "Cannot both add and remove attendee {key}: adding it back would reset its \
+                     answer; give --attendee to rewrite the whole list"
+                );
+            }
+
+            if carried.contains(&key) || added.contains(&key) {
+                bail!("Cannot add attendee {key}: the event already carries it");
+            }
+
+            added.push(key);
+            edit.added
+                .push(IcalItem::Prop(invite(name, address).encode(escaper)));
+        }
+
+        Ok(edit)
     }
 
     /// The times the flags name, resolved against the zone flag, and the
@@ -580,11 +665,7 @@ impl EventFieldsArgs {
             // leaves the event inviting no one.
             for attendee in self.attendee.iter().filter(|value| !value.is_empty()) {
                 let (name, address) = person(attendee)?;
-                let mut params: Vec<IcalParam<'static>> =
-                    name.map(IcalParam::Cn).into_iter().collect();
-                params.push(IcalParam::PartStat(Cow::Borrowed("NEEDS-ACTION")));
-                params.push(IcalParam::Rsvp(Cow::Borrowed("TRUE")));
-                attendees.push(prop(IcalPropKind::Attendee, params, address));
+                attendees.push(invite(name, address));
             }
 
             push(IcalPropKind::Attendee, attendees);
@@ -1059,6 +1140,70 @@ fn replace_alarms(component: &mut IcalCst<'_>, alarm: Option<IcalCst<'static>>) 
     }
 }
 
+/// What `--add-attendee` and `--remove-attendee` change on an event.
+#[derive(Debug, Default)]
+struct AttendeeEdit {
+    /// The lines written after the last `ATTENDEE`.
+    added: Vec<IcalItem<'static>>,
+    /// The addresses whose `ATTENDEE` is dropped, as [`address_key`]
+    /// spells them.
+    removed: Vec<String>,
+}
+
+/// Drops the `ATTENDEE`s an edit removes and writes the ones it adds
+/// after the last one left, or where a property the component lacked
+/// lands when none is.
+fn edit_attendees(component: &mut IcalCst<'_>, edit: AttendeeEdit) {
+    component.items.retain(|item| match item {
+        IcalItem::Prop(line) if names(item, &IcalPropKind::Attendee) => {
+            !edit.removed.contains(&address_key(&line.raw_value_str()))
+        }
+        _ => true,
+    });
+
+    if edit.added.is_empty() {
+        return;
+    }
+
+    match component
+        .items
+        .iter()
+        .rposition(|item| names(item, &IcalPropKind::Attendee))
+    {
+        Some(last) => {
+            component.items.splice(last + 1..last + 1, edit.added);
+        }
+        None => replace(
+            component,
+            &[],
+            vec![(IcalPropName::Kind(IcalPropKind::Attendee), edit.added)],
+        ),
+    }
+}
+
+/// An attendee invited plainly: `PARTSTAT=NEEDS-ACTION` and `RSVP=TRUE`,
+/// with a `CN` when a name is given.
+fn invite(name: Option<Cow<'static, str>>, address: IcalValue<'static>) -> IcalProp<'static> {
+    let mut params: Vec<IcalParam<'static>> = name.map(IcalParam::Cn).into_iter().collect();
+    params.push(IcalParam::PartStat(Cow::Borrowed("NEEDS-ACTION")));
+    params.push(IcalParam::Rsvp(Cow::Borrowed("TRUE")));
+    prop(IcalPropKind::Attendee, params, address)
+}
+
+/// The URI a [`person`] value holds.
+fn address_of(value: &IcalValue<'_>) -> String {
+    match value {
+        IcalValue::CalAddress(address) => address.0.to_string(),
+        _ => String::new(),
+    }
+}
+
+/// An attendee's address as two are compared: its `mailto:` dropped, in
+/// any case, and lowercased.
+fn address_key(value: &str) -> String {
+    strip_mailto(value.trim()).to_lowercase()
+}
+
 /// Splits `[NAME:]ADDRESS` into the `CN` and the `mailto:` URI.
 fn person(value: &str) -> Result<(Option<Cow<'static, str>>, IcalValue<'static>)> {
     let bare = strip_mailto(value.trim());
@@ -1435,6 +1580,220 @@ mod tests {
         let err = refusal(EVENT, &["--attendee", "Jane"]);
 
         assert!(err.contains("email address"), "{err}");
+    }
+
+    /// An event whose attendees answered: Ann accepted, Bob declined.
+    const ANSWERED: &str = concat!(
+        "BEGIN:VCALENDAR\r\n",
+        "VERSION:2.0\r\n",
+        "PRODID:-//x//y//EN\r\n",
+        "BEGIN:VEVENT\r\n",
+        "UID:1@example.org\r\n",
+        "DTSTAMP:20260101T000000Z\r\n",
+        "DTSTART:20261019T090000Z\r\n",
+        "SUMMARY:Stand-up\r\n",
+        "ATTENDEE;CN=Ann;PARTSTAT=ACCEPTED;ROLE=CHAIR:mailto:Ann@Example.org\r\n",
+        "ATTENDEE;CN=Bob;PARTSTAT=DECLINED:MAILTO:bob@example.org\r\n",
+        "X-ODD;FOO=bar:kept as is\r\n",
+        "BEGIN:VALARM\r\n",
+        "ACTION:DISPLAY\r\n",
+        "TRIGGER:-PT10M\r\n",
+        "END:VALARM\r\n",
+        "END:VEVENT\r\n",
+        "END:VCALENDAR\r\n",
+    );
+
+    const CAROL: &str = "ATTENDEE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:carol@example.org\r\n";
+
+    #[test]
+    fn an_added_attendee_lands_after_the_last_one() {
+        let out = apply(ANSWERED, &["--add-attendee", "carol@example.org"]);
+        let bob = "ATTENDEE;CN=Bob;PARTSTAT=DECLINED:MAILTO:bob@example.org\r\n";
+
+        assert_eq!(out, ANSWERED.replace(bob, &format!("{bob}{CAROL}")));
+    }
+
+    #[test]
+    fn several_added_attendees_keep_their_order_and_names() {
+        let out = apply(
+            ANSWERED,
+            &[
+                "--add-attendee",
+                "Carol Ruiz:carol@example.org",
+                "--add-attendee",
+                "mailto:dan@example.org",
+            ],
+        );
+
+        let carol = out
+            .find("ATTENDEE;CN=Carol Ruiz;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:carol@")
+            .unwrap();
+        let dan = out
+            .find("ATTENDEE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:dan@example.org\r\n")
+            .unwrap();
+        let bob = out.find("bob@example.org").unwrap();
+        assert!(bob < carol && carol < dan, "{out}");
+    }
+
+    #[test]
+    fn an_attendee_added_to_an_event_without_any_lands_ahead_of_its_alarm() {
+        let bare = ANSWERED
+            .replace(
+                "ATTENDEE;CN=Ann;PARTSTAT=ACCEPTED;ROLE=CHAIR:mailto:Ann@Example.org\r\n",
+                "",
+            )
+            .replace(
+                "ATTENDEE;CN=Bob;PARTSTAT=DECLINED:MAILTO:bob@example.org\r\n",
+                "",
+            );
+
+        let out = apply(&bare, &["--add-attendee", "carol@example.org"]);
+
+        assert_eq!(
+            out,
+            bare.replace("BEGIN:VALARM", &format!("{CAROL}BEGIN:VALARM"))
+        );
+    }
+
+    #[test]
+    fn a_removed_attendee_leaves_the_others_byte_for_byte() {
+        let out = apply(ANSWERED, &["--remove-attendee", "BOB@example.org"]);
+
+        assert_eq!(
+            out,
+            ANSWERED.replace(
+                "ATTENDEE;CN=Bob;PARTSTAT=DECLINED:MAILTO:bob@example.org\r\n",
+                ""
+            )
+        );
+
+        let out = apply(ANSWERED, &["--remove-attendee", "MailTo:ann@example.ORG"]);
+
+        assert!(!out.contains("Ann@Example.org"), "{out}");
+        assert!(out.contains("PARTSTAT=DECLINED"), "{out}");
+    }
+
+    #[test]
+    fn adding_and_removing_go_together() {
+        let out = update(
+            ANSWERED,
+            &[
+                "--remove-attendee",
+                "ann@example.org",
+                "--add-attendee",
+                "carol@example.org",
+                "--summary",
+                "Retro",
+            ],
+        );
+
+        assert!(!out.contains("Ann@Example.org"), "{out}");
+        assert!(
+            out.contains(&format!(
+                "ATTENDEE;CN=Bob;PARTSTAT=DECLINED:MAILTO:bob@example.org\r\n{CAROL}"
+            )),
+            "{out}"
+        );
+        assert!(out.contains("SUMMARY:Retro\r\n"), "{out}");
+    }
+
+    #[test]
+    fn an_attendee_already_there_is_refused_whatever_its_name() {
+        let err = refusal(ANSWERED, &["--add-attendee", "Ann B:ann@example.org"]);
+
+        assert!(err.contains("ann@example.org"), "{err}");
+        assert!(err.contains("already carries"), "{err}");
+
+        let err = refusal(
+            ANSWERED,
+            &[
+                "--add-attendee",
+                "carol@example.org",
+                "--add-attendee",
+                "Carol@example.org",
+            ],
+        );
+
+        assert!(err.contains("carol@example.org"), "{err}");
+    }
+
+    #[test]
+    fn an_attendee_the_event_lacks_cannot_be_removed() {
+        let err = refusal(
+            ANSWERED,
+            &[
+                "--remove-attendee",
+                "ann@example.org",
+                "--remove-attendee",
+                "carol@example.org",
+            ],
+        );
+
+        assert!(err.contains("carol@example.org"), "{err}");
+        assert!(err.contains("does not carry"), "{err}");
+    }
+
+    #[test]
+    fn one_address_on_both_flags_is_refused() {
+        let err = refusal(
+            ANSWERED,
+            &[
+                "--remove-attendee",
+                "ann@example.org",
+                "--add-attendee",
+                "Ann:ANN@example.org",
+            ],
+        );
+
+        assert!(err.contains("ann@example.org"), "{err}");
+        assert!(err.contains("both add and remove"), "{err}");
+    }
+
+    #[test]
+    fn the_attendee_list_cannot_be_both_replaced_and_edited() {
+        for flag in ["--add-attendee", "--remove-attendee"] {
+            let err = Wrap::try_parse_from([
+                "calendula",
+                "--attendee",
+                "carol@example.org",
+                flag,
+                "ann@example.org",
+            ])
+            .err()
+            .unwrap()
+            .to_string();
+
+            assert!(err.contains("--attendee"), "{flag}: {err}");
+            assert!(err.contains(flag), "{flag}: {err}");
+        }
+    }
+
+    #[test]
+    fn an_attendee_edit_on_several_events_is_refused() {
+        let two = ANSWERED.replace(
+            "END:VEVENT\r\n",
+            "END:VEVENT\r\nBEGIN:VEVENT\r\nUID:2@example.org\r\nEND:VEVENT\r\n",
+        );
+
+        for flag in ["--add-attendee", "--remove-attendee"] {
+            let err = refusal(&two, &[flag, "bob@example.org"]);
+            assert!(err.contains("several VEVENTs"), "{flag}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_long_added_attendee_is_folded() {
+        let name = "Carolina ".repeat(8);
+        let out = apply(
+            ANSWERED,
+            &[
+                "--add-attendee",
+                &format!("{}:carol@example.org", name.trim()),
+            ],
+        );
+
+        assert!(out.contains("CN=Carolina"), "{out}");
+        assert!(out.lines().all(|line| line.len() <= 75), "{out}");
     }
 
     #[test]

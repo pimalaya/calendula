@@ -267,4 +267,30 @@ mod tests {
         assert_eq!(out["contents"], source.replace("LOCATION:Room 1\r\n", ""));
         assert_eq!(out["events"][0]["location"], "");
     }
+
+    #[test]
+    fn a_build_adds_and_removes_one_attendee_of_its_source() {
+        let source = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//x//y//EN\r\n\
+                      BEGIN:VEVENT\r\nUID:a\r\nDTSTAMP:20260101T000000Z\r\n\
+                      DTSTART:20261019T090000Z\r\n\
+                      ATTENDEE;PARTSTAT=ACCEPTED:mailto:ann@example.org\r\n\
+                      ATTENDEE;PARTSTAT=DECLINED:mailto:bob@example.org\r\n\
+                      END:VEVENT\r\nEND:VCALENDAR\r\n";
+        let out = build(&[
+            source,
+            "--remove-attendee",
+            "bob@example.org",
+            "--add-attendee",
+            "Carol:carol@example.org",
+        ])
+        .unwrap();
+
+        let attendees = out["events"][0]["attendees"].as_array().unwrap();
+        assert_eq!(attendees.len(), 2, "{out}");
+        assert_eq!(attendees[0]["email"], "ann@example.org");
+        assert_eq!(attendees[0]["partstat"], "ACCEPTED");
+        assert_eq!(attendees[1]["email"], "carol@example.org");
+        assert_eq!(attendees[1]["name"], "Carol");
+        assert_eq!(attendees[1]["partstat"], "NEEDS-ACTION");
+    }
 }
