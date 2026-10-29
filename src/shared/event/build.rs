@@ -27,9 +27,10 @@ use crate::shared::{
 /// backend, which is how an event is judged before it is sent. No
 /// account is resolved unless `-i` needs the configured composer.
 ///
-/// The flags cover the common fields; a recurrence, an alarm, a
-/// conference link and a hand-written `VTIMEZONE` are left to the
-/// composer, the complete surface. `--online-meeting` writes the ask for
+/// The flags cover the common fields and one display alarm before the
+/// start (`--alarm`); a recurrence, any other alarm, a conference link
+/// and a hand-written `VTIMEZONE` are left to the composer, the complete
+/// surface. `--online-meeting` writes the ask for
 /// a meeting a pimdir sync engine creates, whatever backend later stores
 /// the event. An event built from flags alone is checked before it is
 /// printed; a source passes through as written.

@@ -39,9 +39,10 @@ use crate::shared::{
 /// is set to the time of the write, in UTC, and `LAST-MODIFIED` to the
 /// same instant when the event carries one.
 ///
-/// The flags cover the common fields; a recurrence, an alarm, a
-/// conference link and a hand-written `VTIMEZONE` are left to the
-/// composer, the complete surface. `--online-meeting` asks a pimdir
+/// The flags cover the common fields and one display alarm before the
+/// start (`--alarm`); a recurrence, any other alarm, a conference link
+/// and a hand-written `VTIMEZONE` are left to the composer, the complete
+/// surface. `--online-meeting` asks a pimdir
 /// store's sync engine to create a meeting, and is refused elsewhere.
 ///
 /// JSON output: `{"id"}`, the event the backend updated.

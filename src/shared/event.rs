@@ -94,6 +94,8 @@ pub struct Event {
     /// The join link of an online meeting: a `CONFERENCE`, or the
     /// vendors' own properties.
     pub online_meeting_url: Option<String>,
+    /// Every `VALARM`, in document order.
+    pub alarms: Vec<EventAlarm>,
     /// The start in Unix seconds, for windowing and ordering.
     #[serde(skip)]
     pub(crate) start_secs: Option<i64>,
@@ -110,6 +112,17 @@ pub struct EventPerson {
     pub email: String,
     /// The `CN`, when it carries one.
     pub name: Option<String>,
+}
+
+/// A `VALARM`.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EventAlarm {
+    /// The `ACTION` uppercased: `DISPLAY`, `AUDIO`, `EMAIL`.
+    pub action: Option<String>,
+    /// The `TRIGGER` value as written: a duration from the start, such
+    /// as `-PT15M`, or a UTC time.
+    pub trigger: Option<String>,
 }
 
 /// An `ATTENDEE`.

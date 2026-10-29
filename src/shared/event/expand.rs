@@ -43,7 +43,7 @@ use jiff::{
 };
 
 use crate::shared::{
-    event::{Event, EventAttendee, EventPerson},
+    event::{Event, EventAlarm, EventAttendee, EventPerson},
     item::{CalendarItem, CalendarTimeRange},
 };
 
@@ -676,6 +676,7 @@ impl<'a> Context<'a> {
                 .filter_map(attendee)
                 .collect(),
             online_meeting_url: meeting_url(component),
+            alarms: component.components.iter().filter_map(alarm).collect(),
             start_secs: times.start_secs,
             end_secs: times.end_secs,
         }
@@ -998,6 +999,24 @@ fn attendee(prop: &IcalProp<'_>) -> Option<EventAttendee> {
             _ => None,
         })
         .unwrap_or_else(|| "INDIVIDUAL".into()),
+    })
+}
+
+/// A `VALARM`, `None` for any other component.
+fn alarm(component: &IcalComponent<'_>) -> Option<EventAlarm> {
+    if component.name != IcalComponentName::Kind(IcalComponentKind::VAlarm) {
+        return None;
+    }
+
+    let trigger = prop(component, IcalPropKind::Trigger).and_then(|prop| match &prop.value {
+        IcalValue::Duration(duration) => Some(duration.0.to_string()),
+        IcalValue::DateTime(date) => Some(date.0.to_string()),
+        value => value_text(value),
+    });
+
+    Some(EventAlarm {
+        action: text(component, IcalPropKind::Action).map(|action| action.to_uppercase()),
+        trigger,
     })
 }
 
@@ -1488,7 +1507,45 @@ mod tests {
                     },
                 ],
                 "onlineMeetingUrl": "https://meet.example.org/abc-defg-hij",
+                "alarms": [],
             })
+        );
+    }
+
+    #[test]
+    fn the_alarms_project_in_document_order_their_triggers_as_written() {
+        let item = item(
+            "",
+            &vevent(&[
+                "UID:alarms@example.org",
+                "DTSTART:20261005T090000Z",
+                "SUMMARY:Planning",
+                "BEGIN:VALARM",
+                "ACTION:display",
+                "TRIGGER:-PT15M",
+                "DESCRIPTION:Planning",
+                "END:VALARM",
+                "BEGIN:VALARM",
+                "ACTION:EMAIL",
+                "TRIGGER;RELATED=END:P1D",
+                "END:VALARM",
+                "BEGIN:VALARM",
+                "ACTION:AUDIO",
+                "TRIGGER;VALUE=DATE-TIME:20261004T080000Z",
+                "END:VALARM",
+            ]),
+        );
+
+        let events = Event::project(&item);
+        let value = serde_json::to_value(&events[0].alarms).unwrap();
+
+        assert_eq!(
+            value,
+            json!([
+                { "action": "DISPLAY", "trigger": "-PT15M" },
+                { "action": "EMAIL", "trigger": "P1D" },
+                { "action": "AUDIO", "trigger": "20261004T080000Z" },
+            ])
         );
     }
 

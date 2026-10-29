@@ -28,9 +28,10 @@ use crate::shared::{
 /// fresh, carrying nothing but a `UID`, a `DTSTAMP` and a `DTSTART` of
 /// now.
 ///
-/// The flags cover the common fields; a recurrence, an alarm, a
-/// conference link and a hand-written `VTIMEZONE` are left to the
-/// composer, the complete surface. `--online-meeting` asks a pimdir
+/// The flags cover the common fields and one display alarm before the
+/// start (`--alarm`); a recurrence, any other alarm, a conference link
+/// and a hand-written `VTIMEZONE` are left to the composer, the complete
+/// surface. `--online-meeting` asks a pimdir
 /// store's sync engine to create a meeting, and is refused elsewhere. An
 /// event built from flags alone is checked before it is written; a
 /// source goes to the backend as written.

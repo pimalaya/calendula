@@ -5,10 +5,11 @@
 //!
 //! They are a convenience over the common fields rather than the whole of
 //! iCalendar: the composer is the complete surface, which is why a
-//! recurrence (`RRULE`, `RDATE`, `EXDATE`, overrides), an alarm, a
-//! conference link (`CONFERENCE`) and a hand-written `VTIMEZONE` are
-//! deliberately not a flag. `--online-meeting` asks the sync engine for a
-//! meeting it creates itself, which is not writing one.
+//! recurrence (`RRULE`, `RDATE`, `EXDATE`, overrides), any alarm but one
+//! display alarm before the start, a conference link (`CONFERENCE`) and a
+//! hand-written `VTIMEZONE` are deliberately not a flag. `--online-meeting`
+//! asks the sync engine for a meeting it creates itself, which is not
+//! writing one.
 
 use std::borrow::Cow;
 
@@ -20,7 +21,7 @@ use ical::{
     },
     ical::Ical,
     param::IcalParam,
-    prop::{IcalProp, IcalPropKind, IcalPropName},
+    prop::{IcalProp, IcalPropKind, IcalPropName, summary::SUMMARY},
     tree::{
         codec::mode::Escaper,
         cst::{IcalCst, IcalItem},
@@ -131,6 +132,25 @@ pub struct EventFieldsArgs {
     /// significant change.
     #[arg(long, value_name = "NUMBER")]
     pub sequence: Option<u32>,
+    /// One display alarm, this long before the start (`VALARM`).
+    ///
+    /// An RFC 5545 duration (`PT15M`, `P1D`) or a short form: `15m`,
+    /// `1h`, `2d`. Replaces every alarm the event carried with one
+    /// `ACTION:DISPLAY` alarm described by the event's summary. Several
+    /// alarms, one after the end, an absolute one or an email one are
+    /// left to the composer.
+    ///
+    /// Google holds a lead in whole minutes up to four weeks, Outlook one
+    /// in whole minutes spelled in hours and minutes (`48h`, not `2d`);
+    /// those accounts refuse any other lead rather than round it.
+    #[arg(long, value_name = "LEAD", conflicts_with = "no_alarm")]
+    pub alarm: Option<String>,
+    /// Remove every alarm of the event (`VALARM`).
+    ///
+    /// A Google event left with none takes the calendar's default
+    /// reminders.
+    #[arg(long)]
+    pub no_alarm: bool,
     /// Ask for an online meeting (`X-PIMDIR-ONLINE-MEETING:TRUE`, pimdir
     /// STORAGE Annex B.1), which the sync engine creates with the
     /// provider's own service (Google Meet, Microsoft Teams) and brings
@@ -239,6 +259,8 @@ impl EventFieldsArgs {
             && self.attendee.is_empty()
             && self.categories.is_empty()
             && self.sequence.is_none()
+            && self.alarm.is_none()
+            && !self.no_alarm
             && !self.online_meeting
     }
 
@@ -249,6 +271,11 @@ impl EventFieldsArgs {
     /// the meeting; anywhere else the property would be written and never
     /// acted upon. Whether the store's sources can is the pimdir
     /// backend's own check, made before it queues the write.
+    ///
+    /// An `--alarm` lead the backend cannot hold is refused too, never
+    /// rounded: Google keeps whole minutes up to four weeks, and the
+    /// Outlook projection reads a lead in whole minutes, spelled without
+    /// days or weeks, as its one reminder.
     pub fn check_backend(&self, backend: &str) -> Result<()> {
         if self.online_meeting && backend != "pimdir" {
             bail!(
@@ -257,7 +284,38 @@ impl EventFieldsArgs {
             );
         }
 
-        Ok(())
+        let Some(value) = &self.alarm else {
+            return Ok(());
+        };
+
+        let lead = lead(value)?;
+        let seconds = IcalDuration::from(lead.as_str()).seconds().unwrap_or(0);
+
+        match backend {
+            "gcal" | "msgraph" if seconds % 60 != 0 => bail!(
+                "Cannot set alarm `{value}`: the {backend} backend holds a lead in whole \
+                 minutes"
+            ),
+            "gcal" if seconds > MAX_GCAL_LEAD_MINUTES * 60 => bail!(
+                "Cannot set alarm `{value}`: the gcal backend holds a lead of four weeks \
+                 ({MAX_GCAL_LEAD_MINUTES} minutes) at most"
+            ),
+            // NOTE: the msgraph projection reads a lead through a span
+            // whose days and weeks need a calendar to count in minutes,
+            // so it stashes such an alarm rather than set the reminder.
+            "msgraph" if lead.contains(['D', 'W']) => {
+                let spelled = match seconds % 3600 {
+                    0 => format!("{}h", seconds / 3600),
+                    _ => format!("{}m", seconds / 60),
+                };
+
+                bail!(
+                    "Cannot set alarm `{value}`: the msgraph backend reads a lead in hours \
+                     and minutes only; give {spelled} instead"
+                )
+            }
+            _ => Ok(()),
+        }
     }
 
     /// Anchors the times naming no zone in the local one, on a backend
@@ -337,6 +395,7 @@ impl EventFieldsArgs {
 
         let escaper = Escaper::for_version(cst.version());
         let times = self.times(ical, keep_length)?;
+        let lead = self.alarm.as_deref().map(lead).transpose()?;
 
         let written = self.props(&times)?;
         let mut dropped: Vec<IcalPropName<'static>> =
@@ -367,6 +426,12 @@ impl EventFieldsArgs {
         let vevent = cst.component_mut::<VEVENT>().context("Find VEVENT error")?;
 
         replace(vevent, &dropped, lines);
+
+        if lead.is_some() || self.no_alarm {
+            let alarm = lead.map(|lead| display_alarm(vevent, &lead, escaper));
+            replace_alarms(vevent, alarm);
+        }
+
         define_zones(&mut cst, &times.zones);
 
         Ok(cst.to_bytes())
@@ -563,6 +628,9 @@ impl EventFieldsArgs {
         Ok(props)
     }
 }
+
+/// The longest lead the gcal backend holds: four weeks, in minutes.
+const MAX_GCAL_LEAD_MINUTES: i64 = 40320;
 
 /// The property asking the sync engine for an online meeting (pimdir
 /// STORAGE Annex B.1).
@@ -888,6 +956,45 @@ fn moved_end(ical: &[u8], start: &Moment) -> Result<Option<Moment>> {
 /// something a reader happens to tolerate. A negative length is no length
 /// for an event.
 fn duration(value: &str) -> Result<String> {
+    let Some(span) = span(value) else {
+        bail!(
+            "Cannot read duration `{value}`; give an RFC 5545 duration such as PT1H30M, P1D or P2W"
+        );
+    };
+
+    Ok(span)
+}
+
+/// Reads an alarm lead: an RFC 5545 duration as [`duration`] reads one,
+/// or a whole number of minutes, hours or days (`15m`, `1h`, `2d`),
+/// spelled as the duration it stands for.
+fn lead(value: &str) -> Result<String> {
+    let trimmed = value.trim();
+
+    let digits = trimmed.bytes().take_while(u8::is_ascii_digit).count();
+    let (amount, unit) = trimmed.split_at(digits);
+
+    let short = match unit {
+        _ if amount.is_empty() => None,
+        "m" => Some(format!("PT{amount}M")),
+        "h" => Some(format!("PT{amount}H")),
+        "d" => Some(format!("P{amount}D")),
+        _ => None,
+    };
+
+    let Some(lead) = short.or_else(|| span(value)) else {
+        bail!(
+            "Cannot read alarm lead `{value}`; give an RFC 5545 duration such as PT15M or P1D, \
+             or a short form such as 15m, 1h or 2d"
+        );
+    };
+
+    Ok(lead)
+}
+
+/// The RFC 5545 duration `value` spells, uppercased and its leading `+`
+/// dropped, `None` when it breaks ical-rs's validator or is negative.
+fn span(value: &str) -> Option<String> {
     let duration = value.trim().to_ascii_uppercase();
     let span = duration.strip_prefix('+').unwrap_or(&duration).to_owned();
 
@@ -911,13 +1018,45 @@ fn duration(value: &str) -> Result<String> {
             .any(|err| matches!(err, IcalValidateError::Duration { .. })),
     };
 
-    if !conforms || span.starts_with('-') {
-        bail!(
-            "Cannot read duration `{value}`; give an RFC 5545 duration such as PT1H30M, P1D or P2W"
-        );
+    (conforms && !span.starts_with('-')).then_some(span)
+}
+
+/// A display alarm `lead` before the start, described by the event's
+/// summary, `Reminder` when it has none (RFC 5545 3.6.6).
+fn display_alarm(vevent: &IcalCst<'_>, lead: &str, escaper: Escaper) -> IcalCst<'static> {
+    let summary = vevent
+        .prop::<SUMMARY>()
+        .map(|summary| summary.0.into_owned())
+        .filter(|summary| !summary.is_empty())
+        .unwrap_or_else(|| String::from("Reminder"));
+
+    let trigger = IcalValue::Duration(IcalDuration(Cow::Owned(format!("-{lead}"))));
+
+    let mut alarm = IcalCst::empty("VALARM");
+
+    for prop in [
+        text(IcalPropKind::Action, "DISPLAY"),
+        prop(IcalPropKind::Trigger, Vec::new(), trigger),
+        text(IcalPropKind::Description, &summary),
+    ] {
+        alarm.push_line(prop.encode(escaper));
     }
 
-    Ok(span)
+    alarm
+}
+
+/// Drops every VALARM of a component and writes `alarm` in place of the
+/// first, or after the component's last item when it carried none.
+fn replace_alarms(component: &mut IcalCst<'_>, alarm: Option<IcalCst<'static>>) {
+    let at = component.items.iter().position(is_alarm);
+    component.items.retain(|item| !is_alarm(item));
+
+    if let Some(alarm) = alarm {
+        let at = at.unwrap_or(component.items.len());
+        component
+            .items
+            .insert(at, IcalItem::Component(Box::new(alarm)));
+    }
 }
 
 /// Splits `[NAME:]ADDRESS` into the `CN` and the `mailto:` URI.
@@ -1042,6 +1181,17 @@ fn is_vevent(item: &IcalItem<'_>) -> bool {
     }
 }
 
+/// Whether an item is a VALARM.
+fn is_alarm(item: &IcalItem<'_>) -> bool {
+    match item {
+        IcalItem::Component(child) => child
+            .begin
+            .as_ref()
+            .is_some_and(|begin| begin.raw_value_str().eq_ignore_ascii_case("VALARM")),
+        _ => false,
+    }
+}
+
 /// Whether an item is a line carrying the given property.
 fn names(item: &IcalItem<'_>, name: &str) -> bool {
     match item {
@@ -1081,6 +1231,7 @@ mod tests {
     use jiff::Timestamp;
 
     use super::{EventFieldsArgs, EventMethodArg, revise, set_method};
+    use crate::shared::ical::{IcalFamily, blank_item, ensure_valid};
 
     #[derive(Parser)]
     struct Wrap {
@@ -1804,6 +1955,183 @@ mod tests {
             out,
             EVENT.replace("SUMMARY", "X-PIMDIR-ONLINE-MEETING:TRUE\r\nSUMMARY")
         );
+    }
+
+    #[test]
+    fn an_alarm_replaces_the_one_the_event_carried_in_place() {
+        let out = apply(EVENT, &["--alarm", "15m"]);
+
+        assert_eq!(
+            out,
+            EVENT.replace(
+                "TRIGGER:-PT10M\r\n",
+                "TRIGGER:-PT15M\r\nDESCRIPTION:Stand-up\r\n"
+            )
+        );
+    }
+
+    #[test]
+    fn an_alarm_replaces_every_alarm_where_the_first_stood() {
+        let two = EVENT.replace(
+            "END:VALARM\r\n",
+            concat!(
+                "END:VALARM\r\n",
+                "BEGIN:VALARM\r\n",
+                "ACTION:EMAIL\r\n",
+                "TRIGGER:-P1D\r\n",
+                "END:VALARM\r\n",
+            ),
+        );
+        let out = update(&two, &["--alarm", "PT1H"]);
+
+        assert_eq!(out.matches("BEGIN:VALARM").count(), 1, "{out}");
+        assert_eq!(
+            out,
+            EVENT.replace(
+                "TRIGGER:-PT10M\r\n",
+                "TRIGGER:-PT1H\r\nDESCRIPTION:Stand-up\r\n"
+            )
+        );
+    }
+
+    #[test]
+    fn an_alarm_lands_after_the_last_item_of_an_event_without_one() {
+        let bare = EVENT.replace(
+            "BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT10M\r\nEND:VALARM\r\n",
+            "",
+        );
+        let out = apply(&bare, &["--summary", "Retro", "--alarm", "2d"]);
+
+        assert!(
+            out.contains(concat!(
+                "X-ODD;FOO=bar:kept as is\r\n",
+                "BEGIN:VALARM\r\n",
+                "ACTION:DISPLAY\r\n",
+                "TRIGGER:-P2D\r\n",
+                "DESCRIPTION:Retro\r\n",
+                "END:VALARM\r\n",
+                "END:VEVENT\r\n",
+            )),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn an_alarm_on_an_event_without_a_summary_is_a_reminder() {
+        let out = apply(EVENT, &["--summary", "", "--alarm", "1h"]);
+
+        assert!(!out.contains("SUMMARY"), "{out}");
+        assert!(
+            out.contains("TRIGGER:-PT1H\r\nDESCRIPTION:Reminder\r\n"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_lead_takes_a_duration_or_a_short_form() {
+        for (lead, trigger) in [
+            ("15m", "-PT15M"),
+            ("1h", "-PT1H"),
+            ("2d", "-P2D"),
+            ("0m", "-PT0M"),
+            ("PT1H30M", "-PT1H30M"),
+            ("p1w", "-P1W"),
+            (" +P1DT2H ", "-P1DT2H"),
+        ] {
+            let out = apply(EVENT, &["--alarm", lead]);
+            assert!(
+                out.contains(&format!("TRIGGER:{trigger}\r\n")),
+                "{lead}: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_lead_outside_both_shapes_is_refused() {
+        for lead in [
+            "", "-PT15M", "15", "m", "15M", "1.5h", "15min", "PT", "P1H", "-15m",
+        ] {
+            // NOTE: a value opening on a hyphen is only read as one when
+            // joined to its flag.
+            let err = refusal(EVENT, &[&format!("--alarm={lead}")]);
+            assert!(err.contains("Cannot read alarm lead"), "{lead}: {err}");
+            assert!(err.contains("15m"), "{lead}: {err}");
+        }
+    }
+
+    #[test]
+    fn no_alarm_removes_every_alarm_and_nothing_else() {
+        let bare = EVENT.replace(
+            "BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT10M\r\nEND:VALARM\r\n",
+            "",
+        );
+
+        assert_eq!(apply(EVENT, &["--no-alarm"]), bare);
+        assert_eq!(apply(&bare, &["--no-alarm"]), bare);
+    }
+
+    #[test]
+    fn an_alarm_and_no_alarm_cannot_both_be_given() {
+        let both = Wrap::try_parse_from(["calendula", "--alarm", "15m", "--no-alarm"]);
+        assert!(both.is_err());
+    }
+
+    #[test]
+    fn an_event_minted_with_an_alarm_passes_the_check() {
+        let seed = blank_item(IcalFamily::Event).unwrap();
+        let out = fields(&["--alarm", "15m"]).apply(&seed).unwrap();
+
+        ensure_valid(&out).unwrap();
+    }
+
+    fn backend_refusal(backend: &str, lead: &str) -> Option<String> {
+        fields(&["--alarm", lead])
+            .check_backend(backend)
+            .err()
+            .map(|err| err.to_string())
+    }
+
+    #[test]
+    fn a_lead_gcal_cannot_hold_is_refused() {
+        for lead in ["30d", "P5W", "P28DT1M"] {
+            let err = backend_refusal("gcal", lead).unwrap();
+            assert!(err.contains("four weeks"), "{lead}: {err}");
+        }
+
+        let err = backend_refusal("gcal", "PT90S").unwrap();
+        assert!(err.contains("whole minutes"), "{err}");
+
+        for lead in ["15m", "P1D", "P28D", "P4W", "PT120S"] {
+            assert_eq!(backend_refusal("gcal", lead), None, "{lead}");
+        }
+    }
+
+    #[test]
+    fn a_lead_msgraph_cannot_hold_is_refused() {
+        let err = backend_refusal("msgraph", "2d").unwrap();
+        assert!(err.contains("give 48h"), "{err}");
+
+        let err = backend_refusal("msgraph", "P1DT30M").unwrap();
+        assert!(err.contains("give 1470m"), "{err}");
+
+        let err = backend_refusal("msgraph", "PT90S").unwrap();
+        assert!(err.contains("whole minutes"), "{err}");
+
+        for lead in ["15m", "48h", "PT1H30M"] {
+            assert_eq!(backend_refusal("msgraph", lead), None, "{lead}");
+        }
+    }
+
+    #[test]
+    fn a_native_backend_holds_any_lead() {
+        for backend in ["caldav", "vdir", "pimdir"] {
+            for lead in ["PT90S", "P5W", "2d"] {
+                assert_eq!(backend_refusal(backend, lead), None, "{backend} {lead}");
+            }
+        }
+
+        let err = backend_refusal("caldav", "soon").unwrap();
+        assert!(err.contains("Cannot read alarm lead"), "{err}");
     }
 
     /// The instant the revision tests are written at: 2026-10-06 12:34:56
