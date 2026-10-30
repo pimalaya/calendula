@@ -165,7 +165,7 @@ The listing query MAY carry a `UID`, which `event find` sets. A backend MAY leav
 `event delete <EVENT-ID>` SHALL take the id `event list` reports or the event's iCalendar `UID`. It SHALL try the id first, by a read, then list the calendar's events and look for an item of that id, then for the items carrying that `UID`. One item SHALL be deleted whole; several carrying the `UID` SHALL be refused, naming their ids; none SHALL be a clear miss.
 
 ### Requirement: A delete can be gated on a version
-`event delete`, `todo delete`, `journal delete` and `item delete` SHALL take `--if-match <ETAG>`. CalDAV SHALL send it as `If-Match`, msgraph SHALL compare it with the event's `changeKey`, and pimdir SHALL check it as an update does. A backend that cannot gate a delete (vdir, gcal) SHALL refuse the flag rather than drop it.
+`event delete`, `todo delete`, `journal delete` and `item delete` SHALL take `--if-match <ETAG>`. CalDAV and gcal SHALL send it as `If-Match`, msgraph SHALL compare it with the event's `changeKey`, and pimdir SHALL check it as an update does. A backend that cannot gate a delete (vdir) SHALL refuse the flag rather than drop it.
 
 `item read` SHALL add the `etag` of the version read to its JSON, `null` when the backend has none.
 
