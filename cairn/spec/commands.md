@@ -165,7 +165,7 @@ The listing query MAY carry a `UID`, which `event find` sets. A backend MAY leav
 `event delete <EVENT-ID>` SHALL take the id `event list` reports or the event's iCalendar `UID`. It SHALL try the id first, by a read, then list the calendar's events and look for an item of that id, then for the items carrying that `UID`. One item SHALL be deleted whole; several carrying the `UID` SHALL be refused, naming their ids; none SHALL be a clear miss.
 
 ### Requirement: A delete can be gated on a version
-`event delete`, `todo delete`, `journal delete` and `item delete` SHALL take `--if-match <ETAG>`. CalDAV SHALL send it as `If-Match`, msgraph SHALL compare it with the event's `changeKey`, and pimdir SHALL check it as an update does. A backend that cannot gate a delete (vdir, gcal) SHALL refuse the flag rather than drop it.
+`event delete`, `todo delete`, `journal delete` and `item delete` SHALL take `--if-match <ETAG>`. CalDAV and gcal SHALL send it as `If-Match`, msgraph SHALL compare it with the event's `changeKey`, and pimdir SHALL check it as an update does. A backend that cannot gate a delete (vdir) SHALL refuse the flag rather than drop it.
 
 `item read` SHALL add the `etag` of the version read to its JSON, `null` when the backend has none.
 
@@ -263,9 +263,24 @@ A build or a create made from flags alone, with no source and no `-i`, SHALL be 
 The field flags SHALL cover the fields `event list` renders and the few every calendar carries, and SHALL NOT grow to match what a composer models. Recurrence (`RRULE`, `RDATE`, `EXDATE`, overrides), alarms, conference links (`CONFERENCE`) and hand-written `VTIMEZONE`s are out; `--online-meeting` asks a sync engine to create a meeting and writes no link. The documentation SHALL say the composer is the complete surface.
 
 ### Requirement: A field flag sets its property and touches nothing else
-Writing a field flag SHALL drop every instance of the property it names on the VEVENT and write the flag's own, a repeated flag writing one instance per value. Every other line SHALL keep its bytes. A time flag SHALL take a date, a local time, a `Z` time, or a time prefixed by an IANA zone (`Europe/Paris:2026-10-19T09:00`); `--time-zone` names the zone of the times that name none. A zone a flag names SHALL arrive with its `VTIMEZONE`, minted once from the time-zone database. On an update, `--start` given without `--end` or `--duration` SHALL move the end with it, keeping the event's length.
+Writing a field flag SHALL drop every instance of the property it names on the VEVENT and write the flag's own, a repeated flag writing one instance per value. `--add-attendee` and `--remove-attendee` are the exception: each SHALL touch the one `ATTENDEE` it names (see [A field flag adds or removes one attendee](#requirement-a-field-flag-adds-or-removes-one-attendee)). Every other line SHALL keep its bytes. A time flag SHALL take a date, a local time, a `Z` time, or a time prefixed by an IANA zone (`Europe/Paris:2026-10-19T09:00`); `--time-zone` names the zone of the times that name none. A zone a flag names SHALL arrive with its `VTIMEZONE`, minted once from the time-zone database. On an update, `--start` given without `--end` or `--duration` SHALL move the end with it, keeping the event's length.
 
 A line a flag writes longer than 75 octets SHALL be folded (RFC 5545 3.1), never inside a character. `--duration` SHALL take an RFC 5545 3.3.6 duration in any case, a leading `+` dropped, checked by ical-rs's validator; a negative one SHALL be refused.
+
+### Requirement: A field flag adds or removes one attendee
+`event build`, `event create` and `event update` SHALL take `--add-attendee [NAME:]ADDRESS` and `--remove-attendee ADDRESS`, each repeatable and spelled as `--attendee` is. `--add-attendee` SHALL write one `ATTENDEE` with `PARTSTAT=NEEDS-ACTION` and `RSVP=TRUE`, and a `CN` when a name is given, after the event's last `ATTENDEE`, or where `--attendee` writes when the event has none. On `event build` and `event create` the two flags work on the source or the minted seed, as every field flag does. `--remove-attendee` SHALL drop the `ATTENDEE` carrying that address. Addresses SHALL be compared case-insensitively on the `mailto:` value.
+
+An address added that the event already carries, an address removed that it does not, an address given to both flags, and either flag given with `--attendee` SHALL each be refused naming the address or the flags, before anything is written.
+
+#### Scenario: A guest joins
+- GIVEN an event whose attendees are Ann, who accepted, and Bob, who declined
+- WHEN `calendula event update --add-attendee carol@example.org ID` runs
+- THEN Carol is written after Bob with `PARTSTAT=NEEDS-ACTION` and `RSVP=TRUE`, and Ann's and Bob's lines keep their bytes
+
+#### Scenario: A guest already there
+- GIVEN an event carrying `ATTENDEE:mailto:Ann@Example.org`
+- WHEN `calendula event update --add-attendee "Ann B:ann@example.org" ID` runs
+- THEN the update is refused naming `ann@example.org`, and the event is untouched
 
 ### Requirement: A backend without floating times anchors the time flags locally
 On a backend that cannot store a floating time (gcal, msgraph), `event create` and `event update` SHALL read a `--start` or `--end` naming no zone in the local zone (`TZ`, then the system's), as `--time-zone` naming that zone would, `TZID` and `VTIMEZONE` included. `--time-zone` SHALL win when given; a date, a `Z` time and a zone-prefixed time SHALL be left as they are. The other backends SHALL keep such a time floating. A local zone with no IANA name SHALL anchor nothing.

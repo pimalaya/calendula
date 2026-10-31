@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Added `--add-attendee [NAME:]ADDRESS` and `--remove-attendee ADDRESS` to `event build`, `event create` and `event update`, each repeatable: one attendee is added after the last one, invited plainly, or removed, and every other line keeps its bytes, the other attendees' answers included. Addresses compare case-insensitively, `mailto:` or not. An address already there, one the event lacks, one given to both flags, and either flag given with `--attendee` are refused before anything is written. ([#22](https://github.com/pimalaya/calendula/issues/22))
 - Added `--send-updates all|external-only|none` to `event create`, `event update` and `event delete` on gcal accounts, sent as the API's `sendUpdates` so a write chooses whom Google mails: `none` fixes a typo or deletes an old event without mailing the guests. Left out, nothing changes. On `event create` it replaces the `all` an invitation the account organizes is inserted with; an event organized by someone else is imported, which mails nobody, so `all` and `external-only` are refused on it, naming the organizer. Every other backend refuses the flag by name. ([#21](https://github.com/pimalaya/calendula/issues/21))
 - Added `--alarm <LEAD>` and `--no-alarm` to `event build`, `event create` and `event update`. `--alarm` replaces every VALARM of the event with one display alarm the lead before the start (an RFC 5545 duration such as `PT15M`, or `15m`, `1h`, `2d`), described by the event's summary; `--no-alarm` removes every VALARM. A lead the account cannot hold is refused before the write, never rounded: on gcal one that is not whole minutes or exceeds four weeks, on msgraph one that is not whole minutes or names days or weeks.
 - Added `alarms` to the event JSON (`event list`, `event read`, `event find`, `event build`): every VALARM with its `action` and its `trigger` as written.
@@ -22,7 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Added `event read --recurrence-id`, projecting one occurrence, and `event find <UID>`.
 - Added `pimdir reply` and `pimdir cancel`, queueing the `calendar-reply` and `calendar-cancel` intents the sync engine sends (pimdir STORAGE Annex B.2).
 - Added `etag` to the event JSON (`event list`, `event read`, `event find`) and to `item read`, the version a write can be gated on. On pimdir it is the store's hash of the item's body.
-- Added `--if-match` to `event delete`, `todo delete`, `journal delete` and `item delete` (CalDAV `If-Match`, msgraph `changeKey`, pimdir version; refused on vdir and gcal).
+- Added `--if-match` to `event delete`, `todo delete`, `journal delete` and `item delete` (CalDAV and gcal `If-Match`, msgraph `changeKey`, pimdir version; refused on vdir).
 - Added `pimdir reply --recurrence-id` and `pimdir cancel --recurrence-id`, limiting the intent to one occurrence (`recurrence_id`, pimdir draft-04); a performer unable to act on one occurrence is refused with `occurrence-unsupported`. Their JSON adds `recurrenceId`.
 - Added a stable `code` to the `--json` error output for failures a caller acts on: `body-pending`, `precondition-failed`, `occurrence-unsupported`.
 

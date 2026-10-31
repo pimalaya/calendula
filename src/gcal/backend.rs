@@ -340,11 +340,8 @@ impl GcalBackend {
         Ok(())
     }
 
-    /// Deletes an event, mailing whom `send_updates` names, Google
-    /// deciding when it names nobody.
-    ///
-    /// Google offers no precondition on a delete, so an `if_match` is
-    /// refused rather than dropped.
+    /// Deletes an event, optionally gated on an `if_match` etag, mailing
+    /// whom `send_updates` names, Google deciding when it names nobody.
     pub fn delete_item(
         &mut self,
         calendar_id: &str,
@@ -352,12 +349,9 @@ impl GcalBackend {
         if_match: Option<&str>,
         send_updates: Option<SendUpdates>,
     ) -> Result<()> {
-        if if_match.is_some() {
-            bail!("Google Calendar cannot gate a delete on an ETag");
-        }
         let send_updates = send_updates.map(gcal_send_updates);
         self.client
-            .event_delete(calendar_id, item_id, send_updates, None)?;
+            .event_delete(calendar_id, item_id, send_updates, if_match)?;
         Ok(())
     }
 
