@@ -54,7 +54,7 @@ impl TodoCreateCommand {
         };
 
         if !self.composer.interactive {
-            let id = client.create_item(&calendar_id, seed)?;
+            let id = client.create_item(&calendar_id, seed, None)?;
             return printer.out(TodoCreateOutput::Created(TodoCreatedOutput { id }));
         }
 
@@ -69,7 +69,7 @@ impl TodoCreateCommand {
             return printer.out(TodoCreateOutput::Abandoned {});
         };
 
-        let created = client.create_item(&calendar_id, draft.contents.clone());
+        let created = client.create_item(&calendar_id, draft.contents.clone(), None);
         let id = draft.finish(created)?;
 
         printer.out(TodoCreateOutput::Created(TodoCreatedOutput { id }))

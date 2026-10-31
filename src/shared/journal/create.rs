@@ -54,7 +54,7 @@ impl JournalCreateCommand {
         };
 
         if !self.composer.interactive {
-            let id = client.create_item(&calendar_id, seed)?;
+            let id = client.create_item(&calendar_id, seed, None)?;
             return printer.out(JournalCreateOutput::Created(JournalCreatedOutput { id }));
         }
 
@@ -69,7 +69,7 @@ impl JournalCreateCommand {
             return printer.out(JournalCreateOutput::Abandoned {});
         };
 
-        let created = client.create_item(&calendar_id, draft.contents.clone());
+        let created = client.create_item(&calendar_id, draft.contents.clone(), None);
         let id = draft.finish(created)?;
 
         printer.out(JournalCreateOutput::Created(JournalCreatedOutput { id }))

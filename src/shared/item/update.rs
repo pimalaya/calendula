@@ -76,7 +76,7 @@ impl ItemUpdateCommand {
         let if_match = self.if_match.or(etag);
 
         if !self.composer.interactive {
-            client.update_item(&calendar_id, &self.item_id, seed, if_match.as_deref())?;
+            client.update_item(&calendar_id, &self.item_id, seed, if_match.as_deref(), None)?;
 
             return printer.out(ItemUpdateOutput::Applied(ItemUpdatedOutput {
                 id: self.item_id,
@@ -102,6 +102,7 @@ impl ItemUpdateCommand {
             &self.item_id,
             draft.contents.clone(),
             if_match.as_deref(),
+            None,
         );
 
         draft.finish(updated)?;
