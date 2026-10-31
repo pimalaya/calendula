@@ -22,7 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Added `event read --recurrence-id`, projecting one occurrence, and `event find <UID>`.
 - Added `pimdir reply` and `pimdir cancel`, queueing the `calendar-reply` and `calendar-cancel` intents the sync engine sends (pimdir STORAGE Annex B.2).
 - Added `etag` to the event JSON (`event list`, `event read`, `event find`) and to `item read`, the version a write can be gated on. On pimdir it is the store's hash of the item's body.
-- Added `--if-match` to `event delete`, `todo delete`, `journal delete` and `item delete` (CalDAV `If-Match`, msgraph `changeKey`, pimdir version; refused on vdir and gcal).
+- Added `--if-match` to `event delete`, `todo delete`, `journal delete` and `item delete` (CalDAV and gcal `If-Match`, msgraph `changeKey`, pimdir version; refused on vdir).
 - Added `pimdir reply --recurrence-id` and `pimdir cancel --recurrence-id`, limiting the intent to one occurrence (`recurrence_id`, pimdir draft-04); a performer unable to act on one occurrence is refused with `occurrence-unsupported`. Their JSON adds `recurrenceId`.
 - Added a stable `code` to the `--json` error output for failures a caller acts on: `body-pending`, `precondition-failed`, `occurrence-unsupported`.
 
