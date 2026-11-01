@@ -500,5 +500,39 @@ mod tests {
                     )
             );
         }
+        /// `--send-updates` is gcal's: pimdir refuses it by name on every
+        /// write, before anything is queued.
+        #[test]
+        fn send_updates_is_refused_by_name_and_queues_nothing() {
+            use crate::shared::event::{create::EventCreateCommand, delete::EventDeleteCommand};
+
+            let (dir, id) = store();
+            let refused = |err: anyhow::Error| {
+                let err = err.to_string();
+                assert!(err.contains("--send-updates"), "{err}");
+                assert!(err.contains("pimdir backend"), "{err}");
+            };
+
+            let args = ["-k", "cal", "--summary", "Retro", "--send-updates", "none"];
+            refused(update(client(&dir), &[&args[..], &[id.as_str()]].concat()).unwrap_err());
+
+            let delete = EventDeleteCommand::try_parse_from([
+                "delete",
+                "-k",
+                "cal",
+                "--send-updates",
+                "none",
+                &id,
+            ])
+            .unwrap();
+            refused(delete.execute(&mut Quiet, client(&dir)).unwrap_err());
+
+            let create =
+                EventCreateCommand::try_parse_from([&["create"][..], &args[..]].concat()).unwrap();
+            refused(create.execute(&mut Quiet, client(&dir)).unwrap_err());
+
+            let producer = io_pimdir::client::producer::PimdirProducer::open(dir.path(), "t");
+            assert!(producer.unwrap().pending_actions("cal").unwrap().is_empty());
+        }
     }
 }

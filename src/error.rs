@@ -34,16 +34,14 @@ pub enum ErrorCode {
     ItemDuplicate,
     /// The pimdir store has no schema yet: its sync engine creates it.
     StoreUncreated,
-    /// The pimdir store's schema is newer than this calendula's: the
-    /// caller upgrades calendula.
-    StoreNewer,
+    /// The pimdir store is of another format version than this
+    /// calendula's, never migrated: an earlier sync engine's store is
+    /// reinstalled by that engine, a newer one's needs a newer calendula.
+    StoreVersion,
     /// The pimdir database is not a pimdir store, another program having
     /// written it: the caller points calendula at the store its sync
     /// engine fills.
     StoreForeign,
-    /// The pimdir store was written by an earlier draft: its sync engine,
-    /// run or upgraded, brings it to the current schema.
-    StoreStale,
     /// The pimdir store's two version stamps disagree.
     StoreCorrupt,
     /// The pimdir store names its bodies by a hash this calendula does not
@@ -51,4 +49,13 @@ pub enum ErrorCode {
     StoreHashAlgo,
     /// Another process holds the pimdir store: the caller retries.
     StoreBusy,
+    /// A path of the pimdir store is a link or another user can reach it:
+    /// the caller restricts it, a store being its user's alone.
+    StoreExposed,
+    /// A flag set holds a flag the pimdir store cannot: refused before
+    /// anything is queued.
+    FlagInvalid,
+    /// A queue action's payload is one its schema refuses: refused before
+    /// anything is queued.
+    ActionMalformed,
 }

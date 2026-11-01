@@ -1,5 +1,29 @@
 # Migration guide
 
+## 0.2.x -> unreleased
+
+### pimdir store
+
+The pimdir backend follows pimdir storage-draft-08, and a store is never migrated: one any earlier neverest wrote is refused with the code `store-version`. Reinstall it, in this order, so no queued write is lost:
+
+1. Run `neverest sync` with the neverest that wrote the store until nothing is queued: the writes calendula queued live in that store alone.
+2. Upgrade to a neverest following storage-draft-08.
+3. Run `neverest sync --reset --force -a <account>`, which moves the store aside into a sibling `<dir>.reset-<instant>` directory, deleting nothing, and syncs a new one.
+
+The store keeps its path, so `pimdir.root` does not change.
+
+### Error codes
+
+The `--json` error codes `store-newer` and `store-stale` are gone: a store of another format version, earlier or newer, is `store-version`. `store-exposed` (a store path another user can reach, or a link), `flag-invalid` and `action-malformed` are new.
+
+### pimdir reply and cancel
+
+Every `calendar-reply` and `calendar-cancel` now names the source performing it, so the `source` of their JSON output is never `null`. In a calendar whose sources declare no capability, it is `--source`, else the one source syncing the calendar; a calendar several sources sync needs `--source`.
+
+### To-dos
+
+A calendar refuses a to-do where its sync engine states `calendar.component.vtodo` `none` (pimdir STORAGE §15.6), no longer `x-vtodo`; a sync engine stating nothing refuses none.
+
 ## 0.1.x -> 0.2.0
 
 calendula 0.2.0 drops `pimalaya-toolbox` and the inline CalDAV implementation in favour of the Pimalaya stack, and owns its cross-protocol layer rather than borrowing one: `pimalaya-cli` for the clap scaffolding, prompts, spinners and tables, `pimalaya-config` for the TOML loading and secrets, `pimalaya-stream` for the transport, `io-webdav` for CalDAV over WebDAV, `io-vdir` for the filesystem backend, `io-pimdir` for the local store, `io-pim-discovery` for server discovery, and `ical-rs` for iCalendar.

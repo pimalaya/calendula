@@ -21,8 +21,9 @@
 use std::{fmt, path::PathBuf};
 
 use anyhow::{Result, anyhow};
-use io_pimdir::client::{
-    PimdirError, blobs::PimdirBlobs, producer::PimdirProducer, reader::PimdirReader,
+use io_pimdir::{
+    client::{PimdirError, blobs::PimdirBlobs, producer::PimdirProducer, reader::PimdirReader},
+    sql::FORMAT_VERSION,
 };
 use pimalaya_cli::error::CodedError;
 
@@ -140,30 +141,77 @@ fn resolve_account(reader: &PimdirReader, configured: Option<String>) -> Result<
 /// the code of [`ErrorCode`] that io-pimdir's own stable one maps to.
 ///
 /// Only the failures a caller acts on get one: a store its sync engine
-/// has to create or bring off an earlier draft, one newer than calendula,
-/// a database another program wrote, one whose two version stamps
-/// disagree, one naming its bodies by a hash calendula does not know, one
-/// another process holds. An older store is read as it stands, so it fails
-/// nothing. The message is io-pimdir's, which never advises deleting the
-/// store.
+/// has to create, one of another format version, a database another
+/// program wrote, one whose two version stamps disagree, one naming its
+/// bodies by a hash calendula does not know, one another process holds,
+/// one another user can reach, and an action or a flag the store refuses
+/// before anything is queued. The message is io-pimdir's, but for a store
+/// of another format version: a store is never migrated (pimdir STORAGE
+/// §6), so one an earlier sync engine wrote is reinstalled by the engine
+/// that owns it, which moves it aside, and one a newer engine wrote needs
+/// a newer calendula. No message advises deleting the store.
 pub(crate) fn store_error(err: PimdirError, context: impl fmt::Display) -> anyhow::Error {
     let code = match err.code() {
         "store-uncreated" => ErrorCode::StoreUncreated,
-        "store-newer" => ErrorCode::StoreNewer,
+        "store-version" => ErrorCode::StoreVersion,
         "store-foreign" => ErrorCode::StoreForeign,
-        "store-stale" => ErrorCode::StoreStale,
         "store-corrupt" => ErrorCode::StoreCorrupt,
         "store-hash-algo" => ErrorCode::StoreHashAlgo,
         "store-busy" => ErrorCode::StoreBusy,
+        "store-exposed" => ErrorCode::StoreExposed,
+        "flag-invalid" => ErrorCode::FlagInvalid,
+        "action-malformed" => ErrorCode::ActionMalformed,
         _ => return anyhow!("{context}: {err}"),
     };
 
-    CodedError::new(code, format!("{context}: {err}")).into()
+    let message = match &err {
+        PimdirError::Version { found } => version_message(found.as_deref(), context),
+        err => format!("{context}: {err}"),
+    };
+
+    CodedError::new(code, message).into()
+}
+
+/// What a store of another format version than calendula's reads as,
+/// `found` being the version it names, `None` for one naming none.
+///
+/// A store naming none, as every draft before storage-draft-08 wrote, or
+/// an earlier draft, is an earlier sync engine's: its queued writes live
+/// in it alone, so it is synced by that engine until nothing is queued
+/// before the current one reinstalls it. Any other is a newer one's.
+fn version_message(found: Option<&str>, context: impl fmt::Display) -> String {
+    let draft = |version: &str| {
+        version
+            .strip_prefix("storage-draft-")
+            .and_then(|number| number.parse::<u32>().ok())
+    };
+    let earlier = match found {
+        None => true,
+        Some(found) => matches!(
+            (draft(found), draft(FORMAT_VERSION)),
+            (Some(found), Some(ours)) if found < ours
+        ),
+    };
+    let found = found.unwrap_or("of no format version");
+
+    match earlier {
+        true => format!(
+            "{context}: the pimdir store is {found}, written by an earlier sync engine, and \
+             calendula reads {FORMAT_VERSION} alone; a store is never migrated, so sync it \
+             with the neverest that wrote it until nothing is queued, then reinstall it \
+             with `neverest sync --reset --force -a <account>`, which moves it aside, \
+             deleting nothing, and syncs a new one"
+        ),
+        false => format!(
+            "{context}: the pimdir store is {found}, written by a newer sync engine than \
+             calendula's {FORMAT_VERSION}; upgrade calendula"
+        ),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use io_pimdir::client::PimdirError;
+    use io_pimdir::{client::PimdirError, codec::PimdirActionError};
     use pimalaya_cli::error::code_of;
 
     use crate::{error::ErrorCode, pimdir::client::store_error};
@@ -175,18 +223,22 @@ mod tests {
     fn a_store_failure_carries_the_code_io_pimdir_names() {
         let failures = [
             PimdirError::Uncreated,
-            PimdirError::Version { found: 99 },
+            PimdirError::Version {
+                found: Some("storage-draft-07".into()),
+            },
+            PimdirError::Version { found: None },
             PimdirError::Foreign,
-            PimdirError::Stale { missing: "items" },
             PimdirError::VersionMismatch {
                 user_version: 1,
                 store_meta: 2,
             },
             PimdirError::HashAlgo {
                 found: "md5".into(),
-                declared: None,
             },
             PimdirError::Busy,
+            PimdirError::Exposed("/tmp/store".into()),
+            PimdirError::Flag("two words".into()),
+            PimdirError::Action(PimdirActionError::MissingField("source")),
         ];
 
         for err in failures {
@@ -195,6 +247,41 @@ mod tests {
             let err = store_error(err, "Open pimdir store");
             let code: ErrorCode = code_of(&err).unwrap_or_else(|| panic!("no code for {shown}"));
             assert_eq!(serde_json::to_value(code).unwrap(), name, "{shown}");
+        }
+    }
+
+    /// A store an earlier sync engine wrote is reinstalled by it, in the
+    /// order that keeps its queued writes, and one a newer engine wrote
+    /// needs a newer calendula; neither says to delete the store.
+    #[test]
+    fn a_store_of_another_version_names_the_reinstall_or_the_upgrade() {
+        let refused = |found: Option<&str>| {
+            store_error(
+                PimdirError::Version {
+                    found: found.map(Into::into),
+                },
+                "Open pimdir store",
+            )
+            .to_string()
+        };
+
+        for earlier in [refused(None), refused(Some("storage-draft-07"))] {
+            assert!(earlier.contains("earlier sync engine"), "{earlier}");
+            assert!(earlier.contains("until nothing is queued"), "{earlier}");
+            assert!(
+                earlier.contains("neverest sync --reset --force"),
+                "{earlier}"
+            );
+            assert!(earlier.contains("deleting nothing"), "{earlier}");
+        }
+
+        for newer in [
+            refused(Some("storage-draft-09")),
+            refused(Some("storage-v1.0.0")),
+        ] {
+            assert!(newer.contains("upgrade calendula"), "{newer}");
+            assert!(!newer.contains("move"), "{newer}");
+            assert!(!newer.contains("delet"), "{newer}");
         }
     }
 }

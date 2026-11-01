@@ -72,8 +72,6 @@ ical-rs = { git = "https://github.com/pimalaya/ical", rev = "99b92736a6a076c7293
 io-gcal = { git = "https://github.com/pimalaya/io-gcal", rev = "90537616dd6d7659c6bfe81df9b4a1428e143f06" }
 io-http = { git = "https://github.com/pimalaya/io-http", rev = "e1815307771c1ec65a86b77256d46c33241d3038" }
 io-msgraph = { git = "https://github.com/pimalaya/io-msgraph", rev = "2ae26370aefa671c16316dbad98107634436bce6" }
-# NOTE: temporary local checkout, until the io-pimdir changes of 2026-10-30
-# are pushed; it then returns to a git revision.
-io-pimdir = { path = "../io-pimdir" }
+io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "bff573783364a9bba3104c5e11c01fb944d67e62" }
 io-webdav = { git = "https://github.com/pimalaya/io-webdav", rev = "b2b9a00462f7d371de3fb419e53288f0a13cee39" }
 pimalaya-cli = { git = "https://github.com/pimalaya/cli", rev = "55b66933950f02541892407667e5e0b254245871" }

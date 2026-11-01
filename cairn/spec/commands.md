@@ -179,12 +179,14 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 | `occurrence-unsupported` | `pimdir reply` or `pimdir cancel` names an occurrence its performer cannot act on alone |
 | `item-duplicate` | a pimdir create names a `UID` its calendar holds or has queued |
 | `store-uncreated` | the pimdir store has no schema yet: its sync engine creates it |
-| `store-newer` | the pimdir store's schema is newer than calendula's: upgrade calendula |
+| `store-version` | the pimdir store is of another format version than calendula's: an earlier sync engine's is reinstalled, a newer one's needs calendula upgraded |
 | `store-foreign` | the pimdir database is not a pimdir store: another program wrote it |
-| `store-stale` | the pimdir store was written by an earlier draft: run or upgrade its sync engine |
-| `store-corrupt` | the pimdir store's two version stamps disagree |
+| `store-corrupt` | the pimdir store's two version stamps disagree, or its schema is not the canonical one |
 | `store-hash-algo` | the pimdir store names its bodies by a hash this calendula does not know: upgrade calendula |
 | `store-busy` | another process holds the pimdir store; retry |
+| `store-exposed` | a path of the pimdir store is a link or another user can reach it: restrict it |
+| `flag-invalid` | a pimdir write carries a flag the store cannot hold |
+| `action-malformed` | a pimdir queue action's payload is one its schema refuses |
 
 #### Scenario: A stale version
 - GIVEN a pimdir event whose body changed since it was read

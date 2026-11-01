@@ -180,9 +180,8 @@ pub struct PimdirIntentOutput {
     pub partstat: Option<String>,
     /// The comment sent with it.
     pub comment: Option<String>,
-    /// The source named to perform it, `null` in a store whose sources
-    /// declare nothing, where the sync engine picks.
-    pub source: Option<String>,
+    /// The source named to perform it.
+    pub source: String,
 }
 
 impl PimdirIntentOutput {

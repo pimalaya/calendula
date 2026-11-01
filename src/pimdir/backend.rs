@@ -28,9 +28,9 @@ use anyhow::{Result, anyhow, bail};
 use ical::component::IcalComponentKind;
 use io_pimdir::{
     capability::{
-        CALENDAR_CANCEL, CALENDAR_CANCEL_OCCURRENCE, CALENDAR_ONLINE_MEETING, CALENDAR_REPLY,
-        CALENDAR_REPLY_OCCURRENCE, CALENDAR_SCHEDULING, PimdirPartial, PimdirRefusal,
-        PimdirSourceCapabilities, PimdirSupport, X_VTODO,
+        CALENDAR_CANCEL, CALENDAR_CANCEL_OCCURRENCE, CALENDAR_COMPONENT_VTODO,
+        CALENDAR_ONLINE_MEETING, CALENDAR_REPLY, CALENDAR_REPLY_OCCURRENCE, CALENDAR_SCHEDULING,
+        PimdirPartial, PimdirRefusal, PimdirSourceCapabilities, PimdirSupport,
     },
     client::{
         PimdirDuplicate, PimdirError,
@@ -665,17 +665,15 @@ impl PimdirBackend {
             check_occurrence(calendar_id, &stored, &contents, recurrence_id)?;
         }
 
-        self.intent(
-            calendar_id,
+        self.intent(calendar_id, CALENDAR_REPLY, source, |source| {
             PimdirInvitation {
-                source: None,
+                source,
                 item: PimdirIntentItem::Seq(stored.seq),
                 partstat: Some(partstat),
                 comment: comment.map(ToOwned::to_owned),
                 recurrence_id: recurrence_id.map(ToOwned::to_owned),
-            },
-            source,
-        )
+            }
+        })
     }
 
     /// Queues the cancellation of an event the account organises, the
@@ -708,51 +706,59 @@ impl PimdirBackend {
             check_occurrence(calendar_id, &stored, &contents, recurrence_id)?;
         }
 
-        self.intent(
-            calendar_id,
+        self.intent(calendar_id, CALENDAR_CANCEL, source, |source| {
             PimdirInvitation {
-                source: None,
+                source,
                 item: PimdirIntentItem::Seq(stored.seq),
                 partstat: None,
                 comment: comment.map(ToOwned::to_owned),
                 recurrence_id: recurrence_id.map(ToOwned::to_owned),
-            },
-            source,
-        )
+            }
+        })
     }
 
     /// Appends an invitation intent, anchored on its collection (pimdir
     /// STORAGE §15.6), naming its performer.
     ///
-    /// A store whose sources declare nothing predates capabilities, and
-    /// its owner picks the performer as it always did, so the payload
-    /// names none there unless the user did.
+    /// `invitation` builds the payload around the performer, which every
+    /// intent names (Annex B.2): `source` when the user chose one, else
+    /// the candidate the store resolves. A store whose sources declare
+    /// nothing predates capabilities and resolves none, so the performer
+    /// there is `source`, else the one source syncing the calendar.
     fn intent(
         &mut self,
         calendar_id: &str,
-        mut invitation: PimdirInvitation,
+        capability: &str,
         source: Option<&str>,
+        invitation: impl FnOnce(String) -> PimdirInvitation,
     ) -> Result<PimdirQueued> {
-        let capability = match invitation.partstat {
-            Some(_) => CALENDAR_REPLY,
-            None => CALENDAR_CANCEL,
-        };
-        let PimdirIntentItem::Seq(seq) = invitation.item else {
-            bail!("An invitation intent of calendula names a stored item");
-        };
-
         let mut producer = self.client.producer()?;
 
-        let declared = producer
+        let syncing = producer
             .capabilities(calendar_id)
-            .map_err(|err| anyhow!("Read the capabilities of `{calendar_id}`: {err}"))?
-            .iter()
-            .any(|source| source.declared.is_some());
+            .map_err(|err| anyhow!("Read the capabilities of `{calendar_id}`: {err}"))?;
+        let declared = syncing.iter().any(|source| source.declared.is_some());
 
-        invitation.source = match (declared, source) {
-            (false, source) => source.map(ToOwned::to_owned),
+        let performer = match (declared, source) {
+            (false, Some(chosen)) => chosen.to_owned(),
+            (false, None) => match syncing.as_slice() {
+                [only] => only.source.clone(),
+                [] => bail!(
+                    "No source syncs calendar `{calendar_id}` to perform {capability}: \
+                     name one with --source"
+                ),
+                several => bail!(
+                    "Several sources sync calendar `{calendar_id}` ({}): choose the one \
+                     to perform {capability} with --source",
+                    several
+                        .iter()
+                        .map(|source| source.source.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+            },
             (true, chosen) => match producer.performer(calendar_id, capability, chosen) {
-                Ok(source) => Some(source),
+                Ok(source) => source,
                 Err(PimdirError::Ambiguous { candidates, .. }) => bail!(
                     "Several sources can perform {capability} for this account ({}): \
                      choose one with --source",
@@ -762,18 +768,23 @@ impl PimdirBackend {
             },
         };
 
+        let invitation = invitation(performer);
+        let PimdirIntentItem::Seq(seq) = invitation.item else {
+            bail!("An invitation intent of calendula names a stored item");
+        };
+
         let action = invitation
             .to_action()
-            .map_err(|err| anyhow!("Queue {capability}: {err}"))?;
+            .map_err(|err| store_error(err.into(), format!("Queue {capability}")))?;
 
         let refuse = |err: PimdirError| match err {
             PimdirError::Unsupported(refusal)
                 if refusal.capability == CALENDAR_REPLY_OCCURRENCE
                     || refusal.capability == CALENDAR_CANCEL_OCCURRENCE =>
             {
-                let who = match refusal.source.is_empty() {
-                    true => "no source of this store declares it".to_owned(),
-                    false => format!("source {} does not support it", refusal.source),
+                let who = match declared {
+                    false => "no source of this store declares it".to_owned(),
+                    true => format!("source {} does not support it", refusal.source),
                 };
                 anyhow::Error::from(CodedError::new(
                     ErrorCode::OccurrenceUnsupported,
@@ -784,7 +795,7 @@ impl PimdirBackend {
                     ),
                 ))
             }
-            err => anyhow!("Queue {capability}: {err}"),
+            err => store_error(err, format!("Queue {capability}")),
         };
 
         let partials = producer.check(calendar_id, &action).map_err(refuse)?;
@@ -868,7 +879,7 @@ fn staging_error(err: PimdirError) -> anyhow::Error {
                 refusal.capability,
             )
         }
-        PimdirError::Unsupported(refusal) if refusal.capability == X_VTODO => {
+        PimdirError::Unsupported(refusal) if refusal.capability == CALENDAR_COMPONENT_VTODO => {
             let why = match &refusal.detail {
                 Some(detail) => format!(" ({detail})"),
                 None => String::new(),
@@ -1153,9 +1164,8 @@ pub struct PimdirQueued {
     pub row: i64,
     /// The public id of the item the intent addresses.
     pub seq: i64,
-    /// The source named to perform it, `None` in a store whose sources
-    /// declare nothing.
-    pub source: Option<String>,
+    /// The source named to perform it.
+    pub source: String,
 }
 
 /// Whether a VEVENT of `contents` carries the property `name`.
@@ -1548,13 +1558,14 @@ mod tests {
             rows[0].1,
             serde_json::json!({
                 "v": 1,
+                "source": "caldav",
                 "seq": queued_row.seq,
                 "partstat": "ACCEPTED",
                 "comment": "See you there",
             })
         );
         assert_eq!(queued_row.seq.to_string(), ids[0]);
-        assert_eq!(queued_row.source, None);
+        assert_eq!(queued_row.source, "caldav");
     }
 
     #[test]
@@ -1592,6 +1603,7 @@ mod tests {
             rows[0].1,
             serde_json::json!({
                 "v": 1,
+                "source": "caldav",
                 "seq": ids[0].parse::<i64>().unwrap(),
                 "comment": "Moved to next week",
             })
@@ -1625,6 +1637,94 @@ mod tests {
                 .reply("nope", "1", "ACCEPTED", None, None, None)
                 .is_err()
         );
+        assert!(queued(&backend).is_empty());
+    }
+
+    /// Every intent names its performer (pimdir STORAGE Annex B.2): in a
+    /// store whose sources declare nothing, a calendar several sources
+    /// sync has no performer until the user names one, and nothing is
+    /// queued meanwhile.
+    #[test]
+    fn an_undeclared_calendar_several_sources_sync_needs_a_source() {
+        use io_pimdir::{
+            change::PimdirWriteOp,
+            collection::{PimdirCheckpoint, PimdirCollectionId},
+        };
+
+        let (dir, mut backend, ids) = store(&[INVITATION]);
+        let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source("google");
+        owner
+            .write(vec![PimdirWriteOp::SetCheckpoint {
+                collection: PimdirCollectionId("cal".into()),
+                checkpoint: PimdirCheckpoint(b"1".to_vec()),
+            }])
+            .unwrap();
+        drop(owner);
+
+        let reply = backend.reply("cal", &ids[0], "ACCEPTED", None, None, None);
+        let cancel = backend.cancel("cal", &ids[0], None, None, None);
+        for err in [reply.unwrap_err(), cancel.unwrap_err()] {
+            let err = err.to_string();
+            assert!(err.contains("caldav, google"), "{err}");
+            assert!(err.contains("--source"), "{err}");
+        }
+        assert!(queued(&backend).is_empty());
+
+        let chosen = backend
+            .reply("cal", &ids[0], "ACCEPTED", None, None, Some("google"))
+            .unwrap();
+        assert_eq!(chosen.source, "google");
+        assert_eq!(queued(&backend)[0].1["source"], "google");
+    }
+
+    /// What a reply and a cancel queue reads back under the payload's own
+    /// schema (pimdir STORAGE Annex B.2), which a performer reads strictly:
+    /// a named performer, the item by its `seq` alone, a `partstat` of the
+    /// three on a reply and none on a cancel.
+    #[test]
+    fn a_queued_reply_and_cancel_read_back_under_their_schema() {
+        use io_pimdir::intent::{PimdirInvitation, PimdirPartstat as Partstat};
+
+        let (_dir, mut backend, ids) = store(&[INVITATION]);
+        let seq: i64 = ids[0].parse().unwrap();
+
+        for (partstat, expected) in [
+            ("ACCEPTED", Partstat::Accepted),
+            ("TENTATIVE", Partstat::Tentative),
+            ("DECLINED", Partstat::Declined),
+        ] {
+            backend
+                .reply("cal", &ids[0], partstat, None, Some("Noted"), None)
+                .unwrap();
+            let (kind, payload) = queued(&backend).pop().unwrap();
+            let read = PimdirInvitation::from_payload(&kind, &payload.to_string()).unwrap();
+            assert_eq!(read.source, "caldav");
+            assert_eq!(read.item, PimdirIntentItem::Seq(seq));
+            assert_eq!(read.partstat, Some(expected));
+        }
+
+        backend.cancel("cal", &ids[0], None, None, None).unwrap();
+        let (kind, payload) = queued(&backend).pop().unwrap();
+        assert_eq!(payload.get("partstat"), None);
+        let read = PimdirInvitation::from_payload(&kind, &payload.to_string()).unwrap();
+        assert_eq!((read.source.as_str(), read.partstat), ("caldav", None));
+    }
+
+    /// A participation outside the three a reply sends is refused before
+    /// anything is queued, as the payload's schema refuses it.
+    #[test]
+    fn a_reply_outside_the_three_participations_queues_nothing() {
+        let (_dir, mut backend, ids) = store(&[INVITATION]);
+
+        for partstat in ["NEEDS-ACTION", "DELEGATED", "accepted", ""] {
+            let err = backend
+                .reply("cal", &ids[0], partstat, None, None, None)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("PARTSTAT"), "{err}");
+        }
         assert!(queued(&backend).is_empty());
     }
 
@@ -1732,7 +1832,7 @@ mod tests {
             .reply("cal", &ids[0], "TENTATIVE", None, None, None)
             .unwrap();
 
-        assert_eq!(queued_row.source.as_deref(), Some("caldav"));
+        assert_eq!(queued_row.source, "caldav");
         assert_eq!(queued(&backend)[0].1["source"], "caldav");
     }
 
@@ -2123,7 +2223,9 @@ mod tests {
     /// edited in, naming the way out.
     #[test]
     fn a_to_do_into_an_events_only_calendar_names_the_way_out() {
-        use io_pimdir::capability::{CALENDAR, PimdirCapability, PimdirSupport, X_VTODO};
+        use io_pimdir::capability::{
+            CALENDAR, CALENDAR_COMPONENT_VTODO, PimdirCapability, PimdirSupport,
+        };
 
         let todo = |uid: &str| {
             resource(&component(
@@ -2147,7 +2249,7 @@ mod tests {
             .collect();
         declaration.push(PimdirCapability {
             collection: Some("cal".into()),
-            name: X_VTODO.into(),
+            name: CALENDAR_COMPONENT_VTODO.into(),
             support: PimdirSupport::None,
             detail: Some("events only".into()),
         });
@@ -2168,9 +2270,69 @@ mod tests {
             assert!(err.contains("takes no to-do"), "{err}");
             assert!(err.contains("caldav"), "{err}");
             assert!(err.contains("events only"), "{err}");
+            assert!(err.contains("calendar.component.vtodo none"), "{err}");
             assert!(err.contains("-k/--calendar"), "{err}");
         }
         assert_eq!(pending(&backend), 0);
+    }
+
+    /// `calendar.component.vtodo` is read only where a row states it
+    /// (pimdir STORAGE §15.6): `none` source-wide refuses a to-do, a row on
+    /// the calendar overrides the source-wide one, and a declaration
+    /// stating nothing of it, as one written before it was named, refuses
+    /// nothing.
+    #[test]
+    fn a_to_do_is_gated_only_where_a_row_states_it() {
+        use io_pimdir::capability::{
+            CALENDAR, CALENDAR_COMPONENT_VTODO, PimdirCapability, PimdirSupport,
+        };
+
+        let todo = resource(&component(
+            "VTODO",
+            "UID:todo@example.org\r\nSUMMARY:Call back\r\n",
+        ));
+        let row = |collection: Option<&str>, support| PimdirCapability {
+            collection: collection.map(Into::into),
+            name: CALENDAR_COMPONENT_VTODO.into(),
+            support,
+            detail: None,
+        };
+
+        let cases = [
+            (vec![row(None, PimdirSupport::None)], false),
+            (vec![], true),
+            (vec![row(None, PimdirSupport::Full)], true),
+            (
+                vec![
+                    row(None, PimdirSupport::None),
+                    row(Some("cal"), PimdirSupport::Full),
+                ],
+                true,
+            ),
+        ];
+
+        for (rows, accepted) in cases {
+            let (dir, mut backend, _) = store(&[ALONE]);
+            let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
+                .unwrap()
+                .for_source("caldav");
+            let mut declaration: Vec<_> = CALENDAR
+                .iter()
+                .map(|name| PimdirCapability {
+                    collection: None,
+                    name: name.to_string(),
+                    support: PimdirSupport::Full,
+                    detail: None,
+                })
+                .collect();
+            declaration.extend(rows.clone());
+            owner.declare("caldav", &declaration).unwrap();
+            drop(owner);
+
+            let created = backend.create_item("cal", todo.clone().into());
+            assert_eq!(created.is_ok(), accepted, "{rows:?}: {created:?}");
+            assert_eq!(pending(&backend), usize::from(accepted), "{rows:?}");
+        }
     }
 
     /// A create whose `UID` the calendar already holds, synced or queued,
@@ -2328,10 +2490,11 @@ mod tests {
         assert!(parked.error.contains(&landed), "{}", parked.error);
     }
 
-    /// A store its sync engine has not created, one a newer schema owns,
-    /// or a database declaring tables at `user_version` 0, another
-    /// program's, is refused with io-pimdir's code and a message saying
-    /// what to run or upgrade, never to delete the store.
+    /// A store its sync engine has not created, a database declaring
+    /// tables at `user_version` 0, another program's, and a store of
+    /// another format version, an earlier or a newer engine's, are refused
+    /// with io-pimdir's code and a message saying what to run or upgrade,
+    /// never to delete the store.
     #[test]
     fn a_store_calendula_cannot_open_carries_its_code() {
         use std::{
@@ -2365,17 +2528,43 @@ mod tests {
             drop(db);
             open(&dir)
         };
-        let newer = stamped(99);
         let foreign = stamped(0);
 
+        // NOTE: `store_meta.format_version` is the one place the database
+        // spells its version, so a version of the same length is written
+        // over it in place, the page staying well-formed.
+        let versioned = |version: &str| {
+            let (dir, _, _) = store(&[]);
+            let path = dir.path().join("pimdir.db");
+            let ours = io_pimdir::sql::FORMAT_VERSION.as_bytes();
+            assert_eq!(version.len(), ours.len());
+            let mut db = std::fs::read(&path).unwrap();
+            let at: Vec<usize> = db
+                .windows(ours.len())
+                .enumerate()
+                .filter(|(_, window)| *window == ours)
+                .map(|(at, _)| at)
+                .collect();
+            assert_eq!(at.len(), 1, "the version is spelled once");
+            db[at[0]..at[0] + ours.len()].copy_from_slice(version.as_bytes());
+            std::fs::write(&path, db).unwrap();
+            open(&dir)
+        };
+        let earlier = versioned("storage-draft-07");
+        let newer = versioned("storage-draft-09");
+
         assert_eq!(code_of(&uncreated), Some(ErrorCode::StoreUncreated));
-        assert_eq!(code_of(&newer), Some(ErrorCode::StoreNewer));
         assert_eq!(code_of(&foreign), Some(ErrorCode::StoreForeign));
+        assert_eq!(code_of(&earlier), Some(ErrorCode::StoreVersion));
+        assert_eq!(code_of(&newer), Some(ErrorCode::StoreVersion));
         assert!(
-            newer.to_string().contains("upgrade this program"),
-            "{newer}"
+            earlier
+                .to_string()
+                .contains("neverest sync --reset --force"),
+            "{earlier}"
         );
-        for err in [uncreated, newer, foreign] {
+        assert!(newer.to_string().contains("upgrade calendula"), "{newer}");
+        for err in [uncreated, foreign, earlier, newer] {
             assert!(!err.to_string().contains("delete"), "{err}");
         }
     }
@@ -2914,14 +3103,24 @@ mod tests {
         assert_eq!(found(&renamed, "renamed@example.org")[0].id, ids[1]);
     }
 
-    /// Makes the bodies of `ids` unreadable: each blob turns into a
-    /// directory, so any read of it fails the listing.
+    /// Makes the bodies of `ids` unreadable: each blob loses every
+    /// permission, so any read of it fails the listing.
+    ///
+    /// A blob turned into a directory no longer does: the store reads
+    /// such an entry as no body at all (pimdir STORAGE §5), the state of a
+    /// missing one, which a listing logs and passes. Run as root, the
+    /// open would still succeed.
     fn poison(backend: &PimdirBackend, ids: &[&String]) {
+        use std::os::unix::fs::PermissionsExt;
+
         for id in ids {
             let stored = backend.item("cal", id).unwrap();
-            let path = backend.client.blobs.path(stored.object.as_ref().unwrap());
-            std::fs::remove_file(&path).unwrap();
-            std::fs::create_dir(&path).unwrap();
+            let path = backend
+                .client
+                .blobs
+                .path(stored.object.as_ref().unwrap())
+                .unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
         }
     }
 
