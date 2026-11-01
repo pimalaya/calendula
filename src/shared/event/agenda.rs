@@ -214,13 +214,10 @@ impl EventAgendaCommand {
 
         match self.date_args.len() {
             3 => {
-                ctl.req.day = self.date_args[0].parse().unwrap_or(1);
                 ctl.req.month = parse_month(&self.date_args[1], &ctl.names)?;
                 ctl.req.year = parse_year(&self.date_args[2])?;
                 let dm = DAYS_IN_MONTH[leap_year(&ctl, ctl.req.year)][ctl.req.month];
-                if ctl.req.day > dm as i32 {
-                    bail!("Illegal day value: use 1-{dm}");
-                }
+                ctl.req.day = parse_day(&self.date_args[0], dm)?;
                 ctl.req.day = day_in_year(&ctl, ctl.req.day, ctl.req.month, ctl.req.year);
             }
             2 => {
@@ -230,6 +227,7 @@ impl EventAgendaCommand {
             // NOTE: as in cal, a lone number is a year and a lone name is
             // that month of the current year.
             1 if self.date_args[0].parse::<i32>().is_err() => {
+                ctl.req.day = now.ordinal() as i32;
                 ctl.req.month = parse_month(&self.date_args[0], &ctl.names)?;
                 ctl.req.year = now.year();
             }
@@ -442,6 +440,13 @@ fn pad_left(grid: &mut String, s: &str, width: usize) -> fmt::Result {
 fn pad_right(grid: &mut String, s: &str, width: usize) -> fmt::Result {
     let pad = width.saturating_sub(text_width(s));
     write!(grid, "{s}{}", " ".repeat(pad))
+}
+
+fn parse_day(s: &str, days_in_month: usize) -> Result<i32> {
+    match s.parse::<usize>() {
+        Ok(d) if (1..=days_in_month).contains(&d) => Ok(d as i32),
+        _ => bail!("Illegal day value: {s}: use 1-{days_in_month}"),
+    }
 }
 
 fn parse_year(s: &str) -> Result<i32> {
@@ -1399,6 +1404,14 @@ mod tests {
 
         assert!(parse_month("novembre", &names).is_err());
         assert!(parse_month("13", &names).is_err());
+    }
+
+    #[test]
+    fn an_unreadable_day_is_refused() {
+        assert_eq!(parse_day("30", 30).unwrap(), 30);
+        assert!(parse_day("31", 30).is_err());
+        assert!(parse_day("0", 30).is_err());
+        assert!(parse_day("1O", 30).is_err());
     }
 
     #[test]
