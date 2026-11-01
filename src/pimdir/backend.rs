@@ -336,6 +336,7 @@ impl PimdirBackend {
                 seq: stored.seq,
                 object: hash,
                 if_match: read,
+                resolves: None,
             }
         })?;
 
