@@ -33,6 +33,9 @@ impl ItemDeleteCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         client.delete_item(&calendar_id, &self.item_id, self.if_match.as_deref(), None)?;
-        printer.out(Message::new("Item successfully deleted"))
+        printer.out(Message::new(match client.queues_writes() {
+            true => "Item deletion queued for the next sync",
+            false => "Item successfully deleted",
+        }))
     }
 }

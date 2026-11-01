@@ -152,8 +152,8 @@ vdir.home-dir = "~/.local/share/vdirsyncer/calendars"
 # a listing runs beside a sync rather than locking it out.
 #
 # `account` names the account the sync groups these collections under. Leave it
-# unset: a store synced by one account is read as that one. Set it only for a
-# store several accounts share, where guessing would show the wrong calendars.
+# unset: a store synced by one account is read as that one. A store several
+# accounts share is refused until it names one.
 # --------------------------------------------------------------------------------
 
 #pimdir.root = "~/.local/state/neverest/example"

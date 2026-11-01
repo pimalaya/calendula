@@ -80,6 +80,7 @@ impl TodoUpdateCommand {
 
             return printer.out(TodoUpdateOutput::Applied(TodoUpdatedOutput {
                 id: self.todo_id,
+                queued: client.queues_writes(),
             }));
         }
 
@@ -109,6 +110,7 @@ impl TodoUpdateCommand {
 
         printer.out(TodoUpdateOutput::Applied(TodoUpdatedOutput {
             id: self.todo_id,
+            queued: client.queues_writes(),
         }))
     }
 }
@@ -143,10 +145,17 @@ impl fmt::Display for TodoUpdateOutput {
 pub struct TodoUpdatedOutput {
     /// Backend-specific identifier of the updated todo.
     pub id: String,
+    /// Whether the write was queued for a sync rather than made, which
+    /// only the wording tells.
+    #[serde(skip)]
+    pub queued: bool,
 }
 
 impl fmt::Display for TodoUpdatedOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Todo `{}` successfully updated", self.id)
+        match self.queued {
+            true => writeln!(f, "Todo `{}` update queued for the next sync", self.id),
+            false => writeln!(f, "Todo `{}` successfully updated", self.id),
+        }
     }
 }

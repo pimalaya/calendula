@@ -5,8 +5,8 @@ change: cli-alignment-leftovers
 
 # Tasks
 
-- [ ] C3: decide the wording of a pimdir write confirmation, which only queues locally (src/shared/event/create.rs:138), and apply it to every pimdir write
-- [ ] C4: resolve `pimdir.account` as himalaya does (himalaya/src/pimdir/client.rs:225): derive it when the store holds one account, error naming the accounts when it holds several (src/pimdir/client.rs:64, src/pimdir/backend.rs:451-457)
+- [x] C3: decide the wording of a pimdir write confirmation, which only queues locally (src/shared/event/create.rs:138), and apply it to every pimdir write (done by a-pimdir-write-says-it-is-queued, 2026-10-30)
+- [x] C4: resolve `pimdir.account` as himalaya does (himalaya/src/pimdir/client.rs:225): derive it when the store holds one account, error naming the accounts when it holds several (src/pimdir/client.rs:64, src/pimdir/backend.rs:451-457) (done by pimdir-reads-one-account, 2026-10-30)
 - [ ] B3: add an `alpn` key to the `caldav` block, defaulting to `http/1.1` (src/caldav/client.rs:146); update config.sample.toml
 - [ ] F1: rename `CalendulaCli` and `CalendulaCommand` to `Cli` and `Command` (src/cli.rs:58, :95, src/main.rs:162-211)
 - [ ] F7: add `footer!` from pimalaya-cli to the clap command

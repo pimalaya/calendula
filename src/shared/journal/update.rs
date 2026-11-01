@@ -86,6 +86,7 @@ impl JournalUpdateCommand {
 
             return printer.out(JournalUpdateOutput::Applied(JournalUpdatedOutput {
                 id: self.journal_id,
+                queued: client.queues_writes(),
             }));
         }
 
@@ -115,6 +116,7 @@ impl JournalUpdateCommand {
 
         printer.out(JournalUpdateOutput::Applied(JournalUpdatedOutput {
             id: self.journal_id,
+            queued: client.queues_writes(),
         }))
     }
 }
@@ -149,10 +151,17 @@ impl fmt::Display for JournalUpdateOutput {
 pub struct JournalUpdatedOutput {
     /// Backend-specific identifier of the updated journal entry.
     pub id: String,
+    /// Whether the write was queued for a sync rather than made, which
+    /// only the wording tells.
+    #[serde(skip)]
+    pub queued: bool,
 }
 
 impl fmt::Display for JournalUpdatedOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Journal `{}` successfully updated", self.id)
+        match self.queued {
+            true => writeln!(f, "Journal `{}` update queued for the next sync", self.id),
+            false => writeln!(f, "Journal `{}` successfully updated", self.id),
+        }
     }
 }

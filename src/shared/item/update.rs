@@ -80,6 +80,7 @@ impl ItemUpdateCommand {
 
             return printer.out(ItemUpdateOutput::Applied(ItemUpdatedOutput {
                 id: self.item_id,
+                queued: client.queues_writes(),
             }));
         }
 
@@ -109,6 +110,7 @@ impl ItemUpdateCommand {
 
         printer.out(ItemUpdateOutput::Applied(ItemUpdatedOutput {
             id: self.item_id,
+            queued: client.queues_writes(),
         }))
     }
 }
@@ -143,10 +145,17 @@ impl fmt::Display for ItemUpdateOutput {
 pub struct ItemUpdatedOutput {
     /// Backend-specific identifier of the updated item.
     pub id: String,
+    /// Whether the write was queued for a sync rather than made, which
+    /// only the wording tells.
+    #[serde(skip)]
+    pub queued: bool,
 }
 
 impl fmt::Display for ItemUpdatedOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Item `{}` successfully updated", self.id)
+        match self.queued {
+            true => writeln!(f, "Item `{}` update queued for the next sync", self.id),
+            false => writeln!(f, "Item `{}` successfully updated", self.id),
+        }
     }
 }

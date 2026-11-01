@@ -7,7 +7,7 @@
 //! Reads project the store's items through [`PimdirReader`], which
 //! takes no lock: an item whose body is not local lists from its
 //! summary and reads as "body not fetched", the cue to sync. It also
-//! overlays the queue (pimdir SPEC 15.4), so a staged change shows.
+//! overlays the queue (pimdir STORAGE §15.4), so a staged change shows.
 //!
 //! Writes are staged as queue actions for the store's owner to apply
 //! and push. A staged creation shows in no listing, having no public id

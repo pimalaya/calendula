@@ -21,7 +21,12 @@ The output of a shared command SHALL NOT carry a field that only one backend fil
 ### Requirement: A create reports the identifier it was given
 `create_calendar` and `create_item` SHALL return the identifier the backend actually assigned, and the command SHALL report that one.
 
-It is the requested id on every backend that lets a client name a collection, and a server-minted one where it does not, so a create never names a resource that does not exist.
+It is the requested id on every backend that lets a client name a collection, and a server-minted one where it does not, so a create never names a resource that does not exist. A queued create has no identifier yet: it SHALL report the link id it staged, never a placeholder (no `q<id>`, `0` or empty string), and no command accepts that id until a sync applies the create.
+
+### Requirement: A queued write is reported as queued
+A backend whose writes are queued for a sync to push, rather than made on the server, SHALL have its writes confirmed as queued: `create` as "`<Kind>` `<id>` queued for the next sync", `update` as "`<Kind>` `<id>` update queued for the next sync", `delete` as "`<Kind>` deletion queued for the next sync", for the `event`, `todo`, `journal` and `item` families. Every other backend SHALL keep "successfully created", "updated", "deleted". The JSON payloads SHALL be the same for every backend.
+
+pimdir is the only backend that queues its writes.
 
 ### Requirement: Backend selection order
 The shared commands SHALL target the backend the global `--backend` flag selects. Its default, `auto`, SHALL take the first configured-and-compiled backend in the order vdir, pimdir, CalDAV, gcal, msgraph, preferring a local read to a network round-trip and a protocol-standard server to a vendor API.
@@ -87,7 +92,7 @@ Collections come from the sync, so `create_calendar`, `update_calendar` and `del
 
 A collection SHALL be listed as a calendar when it declares `text/calendar`, or when it declares no kind at all (a sync created it before any consumer declared one).
 
-A store grouping its collections under accounts (pimdir SPEC 9.2) SHALL be narrowed to `pimdir.account` when that is set, and read whole when it is not.
+The backend SHALL read one account of the store (pimdir STORAGE §9.2): `pimdir.account` when set, else the one account every collection of the store is grouped under, or none when the store groups none. A store whose collections are grouped under several accounts, or partly ungrouped, SHALL be refused while `pimdir.account` is unset, the error naming the accounts and the key. Reads and writes SHALL be narrowed to that account's collections, and the producer bound to it.
 
 ### Requirement: pimdir takes the reader and producer roles, never the owner
 The pimdir backend SHALL read through a `PimdirReader` and write through a `PimdirProducer`, and SHALL NOT open a `PimdirStore`.
@@ -99,7 +104,7 @@ The reader SHALL be built with the pending overlay, so an action this process st
 ### Requirement: A pimdir calendar is its collection id
 The pimdir backend SHALL show and accept a calendar as the store's collection id, verbatim: the collection `caldav/default` is the calendar `caldav/default`. It SHALL NOT derive, strip or accept a shortened spelling, and no configuration SHALL offer one.
 
-A sync engine binds a source's collections under a namespace, so an id carries one. The store is opaque to it, neither parsing nor validating an id (pimdir SPEC 9.2) and modelling hierarchy through `parent` rather than through a separator.
+A sync engine binds a source's collections under a namespace, so an id carries one. The store is opaque to it, neither parsing nor validating an id (pimdir STORAGE §9.2) and modelling hierarchy through `parent` rather than through a separator.
 
 Shortening is therefore a guess at the producer's convention, and one that makes a single calendar answer to two spellings.
 
@@ -135,21 +140,41 @@ A range filter SHALL still apply to it, read off the stored `text/calendar` summ
 An item naming an object whose blob file is absent is a different state: the store is inconsistent rather than partially synced. It SHALL still list, and the listing SHALL log a warning naming the item, since the row renders the same as an unhydrated one and `get_item` refuses it outright.
 
 ### Requirement: pimdir writes are staged queue actions
-A pimdir write SHALL append one action to the store's queue (pimdir SPEC 15.1) through a producer opened for that write and dropped after it: `create_item` to `add`, `update_item` to `update`, `delete_item` to `remove`.
+A pimdir write SHALL append one action to the store's queue (pimdir STORAGE §15.1) through one producer opened for that write, before anything is written, and dropped after it: `create_item` to `add`, `update_item` to `update`, `delete_item` to `remove`.
 
-The body SHALL reach the blob tree through the blob writer, durably, before the row that pins it is appended, and the action SHALL address the item by the public `seq` that is already the item's shared id.
+A body SHALL be written with the row that pins it in one step, through that producer's `enqueue_with_body_checked`, which hashes it under the store's algorithm, runs the store's gate (pimdir STORAGE §15.6) and, for an `add`, the duplicate check on the bytes in hand, then writes the body durably and appends the row in one transaction under the producer's staging lock (§8): no collector can remove the body before its row pins it, and a refused write leaves no body in the tree. The partial supports the gate passed the action with, those the body asks for (`calendar.scheduling`, `calendar.online-meeting`, `calendar.occurrence.update`) included, SHALL each be logged as a warning. calendula SHALL NOT hash or write a body itself. The action SHALL address the item by the public `seq` that is already the item's shared id.
 
 `update_item` and `delete_item` SHALL honour `if_match` against the item's version. The engine still reconciles an applied edit against the base body it recorded at sync time: the precondition is the caller's, the merge the store's.
 
 Because a queued create carries no public id until the owner applies it, `create_item` SHALL report the item's link id instead.
 
 ### Requirement: pimdir refuses an online meeting no source can create
-A `create_item` or `update_item` whose body newly asks for an online meeting (`X-PIMDIR-ONLINE-MEETING:TRUE`, an ask the item already carried being none) SHALL be refused, before its body is staged and anything is queued, unless a source syncing the calendar declares `calendar.online-meeting` fully or in part (STORAGE Annex B.1, §15.6); a store whose sources declare nothing is refused too, since no sync engine there would act on the ask. The error SHALL start `Stage the pimdir action:` as the store's other refusals do, and name the capability and the sources declaring without it, or say no source of the store declares it. A source declaring it in part passes, with the store's partial-support warning.
+A `create_item` or `update_item` whose body newly asks for an online meeting (`X-PIMDIR-ONLINE-MEETING:TRUE`, an ask the item already carried being none) SHALL be refused, before its body is staged and anything is queued, unless a source concerned declares `calendar.online-meeting` fully or in part (STORAGE Annex B.1, §15.6): for a create, a source syncing the calendar; for an update, a source binding the item, the one that pushes it. A store whose sources declare nothing is refused too, since no sync engine there would act on the ask. The error SHALL start `Stage the pimdir action:` as the store's other refusals do, and name the capability and the sources declaring without it, or say no source of the store declares it. A source declaring it in part passes, with the store's partial-support warning.
+
+### Requirement: pimdir refuses a to-do where its calendar takes none
+A `create_item` or `update_item` whose body is a VTODO SHALL be refused, and nothing queued, when a source concerned states `x-vtodo` `none` for the calendar or source-wide (pimdir STORAGE §15.6): for a create, a source syncing the calendar; for an update, a source binding the item. The error SHALL start `Stage the pimdir action:`, say the calendar takes no to-do, name the source and its stated reason when it gives one, and point at `-k/--calendar` to store the to-do in another calendar.
+
+### Requirement: pimdir refuses a create whose UID the calendar holds
+A `create_item` whose link id (its `UID` under the store's derivation, pimdir STORAGE Annex A.3) names an item the calendar holds live, or a create already queued there, SHALL be refused through io-pimdir's `enqueue_with_body_checked`, whose duplicate check, body write and append are one transaction, and nothing queued nor written. The error SHALL carry the code `item-duplicate`, name the calendar and the link id, and name the live item by its id, to be updated instead, or the queued create by its queue row.
+
+### Requirement: account check takes both pimdir roles
+`account check` on pimdir SHALL open the store as a reader, then open a producer and probe it (`PimdirProducer::probe`), which takes and releases the staging lock without waiting and the database's write lock, writing nothing into the store. A store a write cannot reach fails the check rather than the first write, with io-pimdir's code: a collector holding the staging lock fails it at once with `store-busy`, and the check leaves nothing in objects/.
+
+### Requirement: A pimdir store failure carries io-pimdir's code
+A failure to open the store, or to stage into it, SHALL carry the stable code io-pimdir gives it (`PimdirError::code()`) when it is one a caller acts on: `store-uncreated`, `store-newer`, `store-foreign`, `store-stale`, `store-corrupt`, `store-hash-algo`, `store-busy`. A store older than calendula's schema SHALL be read as it stands, failing nothing. The message SHALL be io-pimdir's, which says to run or upgrade the store's sync engine, or to upgrade this program for a newer store, and never to delete the store.
 
 ### Requirement: A pimdir item's version is its body hash
 The pimdir backend SHALL report as an item's `etag` the store's hash of its body, the pending queue folded in, so a staged update moves it at once. An item whose body is not local SHALL report none.
 
 `update_item` and `delete_item` SHALL refuse, before anything is queued, a write whose `if_match` is not that version, surrounding double quotes ignored, with the code `precondition-failed` and an error starting `Precondition failed:`, naming the version found and the one expected. An item with no local body matches no version.
+
+### Requirement: A queued pimdir edit names the body it replaced
+An `update` that `update_item` queues SHALL state as its `if_match` (pimdir STORAGE §15.3) the item's body hash when the write was gated on a version, by `--if-match` or by the read an update starting from the stored item makes, and none when the caller read no body. The store's owner then parks, rather than applies, an edit whose item holds another body by the time it drains, and the parked row SHALL show in `pimdir status` as every parked action does.
+
+#### Scenario: A sync lands first
+- GIVEN an event read at version `A` and an `event update` queued from it
+- WHEN a sync replaces the event's body with `B` before the queue drains
+- THEN the owner parks the update, the event keeps `B`, and `pimdir status` lists the row with an error naming `A` and `B`
 
 ### Requirement: pimdir queues scheduling intents
 `pimdir reply <EVENT-ID> accept|tentative|decline` SHALL append one `calendar-reply` action `{ "v": 1, "source"?, "seq", "partstat": "ACCEPTED"|"TENTATIVE"|"DECLINED", "comment"?, "recurrence_id"? }`, and `pimdir cancel <EVENT-ID>` one `calendar-cancel` action `{ "v": 1, "source"?, "seq", "comment"?, "recurrence_id"? }` (pimdir STORAGE Annex B.2), built by io-pimdir's `PimdirInvitation`, anchored on the item's calendar, through the producer and its §15.6 gate, and SHALL touch no item.
@@ -158,7 +183,7 @@ The pimdir backend SHALL report as an item's `etag` the store's hash of its body
 
 `-r/--recurrence-id` SHALL limit either to one occurrence, carried as `recurrence_id`, spelled as the `recurrenceId` an expanded listing shows (the series' `DTSTART` form). When the body is local, a value naming no occurrence of the series, or naming one in another spelling, SHALL be refused. A performer not declaring `calendar.reply.occurrence` or `calendar.cancel.occurrence`, and a store declaring nothing, SHALL be refused with the code `occurrence-unsupported` and an error starting `Occurrence not supported:`, naming the capability and the source; nothing is queued.
 
-A reply to an event naming no `ORGANIZER`, or a cancellation of one naming no `ATTENDEE`, SHALL be refused when its body is local, the latter pointing at `event delete`.
+A reply to an event naming no `ORGANIZER`, or a cancellation of one naming no `ATTENDEE`, SHALL be refused when its body is local, the latter pointing at `event delete`. An event naming an object whose blob is absent SHALL refuse both, as `get_item` refuses its read, rather than queue them unchecked.
 
 ### Requirement: A pimdir body is named by the store's own hash
 The pimdir backend SHALL name a body it writes with the hash the store records in `store_meta.hash_algo`, read through the handle it holds, and SHALL NOT compute a digest of its own choosing. A body named under the wrong algorithm is a body no read ever finds.
@@ -178,7 +203,7 @@ calendula SHALL read that row to answer a date question about an item whose body
 ### Requirement: A UID is not an address
 The pimdir backend SHALL NOT assume an item's link id is the `UID` its body carries, nor that a `UID` identifies at most one item in a calendar.
 
-A store may hold two calendar object resources of one calendar sharing a `UID`, keyed apart by the store (pimdir SPEC 9), and both SHALL list, read and act as ordinary items, addressed by their own public `seq`.
+A store may hold two calendar object resources of one calendar sharing a `UID`, keyed apart by the store (pimdir STORAGE §9), and both SHALL list, read and act as ordinary items, addressed by their own public `seq`.
 
 What stays unique is the key and the public id: `(collection, link_id)` still names one item and `seq` still names one resource. What ends is the link id being derivable from the body, so a read that re-derives a `UID` in order to address a row is addressing an unknown number of them.
 

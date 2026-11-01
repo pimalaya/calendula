@@ -55,7 +55,10 @@ impl JournalCreateCommand {
 
         if !self.composer.interactive {
             let id = client.create_item(&calendar_id, seed, None)?;
-            return printer.out(JournalCreateOutput::Created(JournalCreatedOutput { id }));
+            return printer.out(JournalCreateOutput::Created(JournalCreatedOutput {
+                id,
+                queued: client.queues_writes(),
+            }));
         }
 
         let composer = IcalComposer {
@@ -72,7 +75,10 @@ impl JournalCreateCommand {
         let created = client.create_item(&calendar_id, draft.contents.clone(), None);
         let id = draft.finish(created)?;
 
-        printer.out(JournalCreateOutput::Created(JournalCreatedOutput { id }))
+        printer.out(JournalCreateOutput::Created(JournalCreatedOutput {
+            id,
+            queued: client.queues_writes(),
+        }))
     }
 }
 
@@ -106,10 +112,17 @@ impl fmt::Display for JournalCreateOutput {
 pub struct JournalCreatedOutput {
     /// Backend-assigned identifier of the new journal entry.
     pub id: String,
+    /// Whether the write was queued for a sync rather than made, which
+    /// only the wording tells.
+    #[serde(skip)]
+    pub queued: bool,
 }
 
 impl fmt::Display for JournalCreatedOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Journal `{}` successfully created", self.id)
+        match self.queued {
+            true => writeln!(f, "Journal `{}` queued for the next sync", self.id),
+            false => writeln!(f, "Journal `{}` successfully created", self.id),
+        }
     }
 }

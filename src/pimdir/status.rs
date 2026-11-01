@@ -15,14 +15,18 @@ use crate::pimdir::backend::PimdirBackend;
 /// Report what the local pimdir store holds.
 ///
 /// Shows the account this client reads, every account the store groups
-/// collections under, and one row per calendar with how many of its
-/// items carry a local body and how many creations are still queued.
+/// collections under, one row per calendar with how many of its items
+/// carry a local body and how many creations are still queued, and
+/// every write the store's owner parked in those calendars.
 ///
 /// A calendar whose items list but do not read is waiting on a sync to
-/// hydrate them, and this is where to see that coming.
+/// hydrate them, and this is where to see that coming. A parked write
+/// never lands: it is shown by its queue row (ROW), the id the store's
+/// own operator tooling retries or cancels it by.
 ///
 /// JSON output: `{"account", "accounts", "calendars": [{"id", "name",
-/// "total", "hydrated", "queued"}]}`.
+/// "total", "hydrated", "queued"}], "parked": [{"row", "calendarId",
+/// "action", "error"}]}`.
 #[derive(Debug, Parser)]
 pub struct PimdirStatusCommand;
 
@@ -42,6 +46,9 @@ pub struct PimdirStatusOutput {
     pub accounts: Vec<String>,
     /// One row per calendar collection.
     pub calendars: Vec<PimdirCalendarStatus>,
+    /// Every action the store's owner parked in those calendars, in the
+    /// order it was queued.
+    pub parked: Vec<PimdirParkedStatus>,
 }
 
 /// One calendar's row in a [`PimdirStatusOutput`].
@@ -63,13 +70,27 @@ pub struct PimdirCalendarStatus {
     pub queued: usize,
 }
 
+/// One parked action in a [`PimdirStatusOutput`].
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PimdirParkedStatus {
+    /// The queue row, which addresses the action rather than an item.
+    pub row: i64,
+    /// The calendar the action targets.
+    pub calendar_id: String,
+    /// The action kind (`add`, `update`, `remove`, `calendar-reply`…).
+    pub action: String,
+    /// Why the owner parked it.
+    pub error: String,
+}
+
 impl fmt::Display for PimdirStatusOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f)?;
 
         match &self.account {
             Some(account) => writeln!(f, "Reading account: {account}")?,
-            None => writeln!(f, "Reading account: every account in the store")?,
+            None => writeln!(f, "Reading account: none, the store groups no account")?,
         }
 
         match self.accounts.as_slice() {
@@ -90,6 +111,21 @@ impl fmt::Display for PimdirStatusOutput {
                 0 => writeln!(f)?,
                 queued => writeln!(f, ", {queued} queued for the next sync")?,
             }
+        }
+
+        if self.parked.is_empty() {
+            return Ok(());
+        }
+
+        writeln!(f)?;
+        writeln!(f, "Parked, never applied:")?;
+
+        for parked in &self.parked {
+            writeln!(
+                f,
+                "  ROW {} {} in {}: {}",
+                parked.row, parked.action, parked.calendar_id, parked.error
+            )?;
         }
 
         Ok(())

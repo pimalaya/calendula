@@ -89,6 +89,7 @@ pub struct CalendarItemQuery<'a> {
     /// without reading it, and the caller still compares every event it
     /// gets. Leaving items out would shift a page, so a backend honours
     /// it only on a listing naming no page size.
+    #[cfg_attr(not(feature = "pimdir"), allow(dead_code))]
     pub uid: Option<&'a str>,
 }
 

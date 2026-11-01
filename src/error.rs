@@ -12,6 +12,10 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 /// The stable codes, each serialised in kebab-case.
+///
+/// Every code so far is the pimdir backend's, so a build without it
+/// raises none, yet keeps the whole vocabulary in its schema.
+#[cfg_attr(not(feature = "pimdir"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ErrorCode {
@@ -25,4 +29,26 @@ pub enum ErrorCode {
     /// cannot act on alone: the caller acts on the whole series or not
     /// at all.
     OccurrenceUnsupported,
+    /// A pimdir create names a `UID` its calendar already holds or has
+    /// queued: the caller updates that item rather than creates it again.
+    ItemDuplicate,
+    /// The pimdir store has no schema yet: its sync engine creates it.
+    StoreUncreated,
+    /// The pimdir store's schema is newer than this calendula's: the
+    /// caller upgrades calendula.
+    StoreNewer,
+    /// The pimdir database is not a pimdir store, another program having
+    /// written it: the caller points calendula at the store its sync
+    /// engine fills.
+    StoreForeign,
+    /// The pimdir store was written by an earlier draft: its sync engine,
+    /// run or upgraded, brings it to the current schema.
+    StoreStale,
+    /// The pimdir store's two version stamps disagree.
+    StoreCorrupt,
+    /// The pimdir store names its bodies by a hash this calendula does not
+    /// know: the caller upgrades calendula.
+    StoreHashAlgo,
+    /// Another process holds the pimdir store: the caller retries.
+    StoreBusy,
 }

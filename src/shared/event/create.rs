@@ -87,7 +87,10 @@ impl EventCreateCommand {
             }
 
             let id = client.create_item(&calendar_id, seed, self.send_updates.send_updates)?;
-            return printer.out(EventCreateOutput::Created(EventCreatedOutput { id }));
+            return printer.out(EventCreateOutput::Created(EventCreatedOutput {
+                id,
+                queued: client.queues_writes(),
+            }));
         }
 
         let composer = IcalComposer {
@@ -108,7 +111,10 @@ impl EventCreateCommand {
         );
         let id = draft.finish(created)?;
 
-        printer.out(EventCreateOutput::Created(EventCreatedOutput { id }))
+        printer.out(EventCreateOutput::Created(EventCreatedOutput {
+            id,
+            queued: client.queues_writes(),
+        }))
     }
 }
 
@@ -142,11 +148,18 @@ impl fmt::Display for EventCreateOutput {
 pub struct EventCreatedOutput {
     /// Backend-assigned identifier of the new event.
     pub id: String,
+    /// Whether the write was queued for a sync rather than made, which
+    /// only the wording tells.
+    #[serde(skip)]
+    pub queued: bool,
 }
 
 impl fmt::Display for EventCreatedOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Event `{}` successfully created", self.id)
+        match self.queued {
+            true => writeln!(f, "Event `{}` queued for the next sync", self.id),
+            false => writeln!(f, "Event `{}` successfully created", self.id),
+        }
     }
 }
 

@@ -8,11 +8,12 @@
 //! a data-loss error. Its kind and its date answer from the typed
 //! summary the store keeps beside the row (pimdir STORAGE Annex A).
 //!
-//! Writes append one action to the store's queue (pimdir SPEC 15.1):
-//! the body reaches the blob tree first, then the row pinning it. The
-//! owner, a sync, derives the summary from that body, applies and
-//! pushes it, while the reader folds the pending queue over its reads
-//! so a staged change shows before that.
+//! Writes append one action to the store's queue (pimdir STORAGE §15.1):
+//! the producer writes the body and the row pinning it in one step under
+//! its staging lock (§8), once the store's checks passed, so a refused
+//! write leaves no body behind. The owner, a sync, derives the summary
+//! from that body, applies and pushes it, while the reader folds the
+//! pending queue over its reads so a staged change shows before that.
 //!
 //! Calendars come from the sync, so the collection verbs (create,
 //! update, delete) are not served here: a cache does not invent
@@ -21,27 +22,28 @@
 //! Ids are the store's public `seq`, stable across every collection an
 //! item is filed in, never the internal link id.
 
-use std::{io::Write, ops::ControlFlow, path::PathBuf};
+use std::{ops::ControlFlow, path::PathBuf};
 
 use anyhow::{Result, anyhow, bail};
 use ical::component::IcalComponentKind;
 use io_pimdir::{
     capability::{
         CALENDAR_CANCEL, CALENDAR_CANCEL_OCCURRENCE, CALENDAR_ONLINE_MEETING, CALENDAR_REPLY,
-        CALENDAR_REPLY_OCCURRENCE, CALENDAR_SCHEDULING, PimdirRefusal, PimdirSourceCapabilities,
-        PimdirSupport, required_by_content,
+        CALENDAR_REPLY_OCCURRENCE, CALENDAR_SCHEDULING, PimdirPartial, PimdirRefusal,
+        PimdirSourceCapabilities, PimdirSupport, X_VTODO,
     },
     client::{
-        PimdirError,
+        PimdirDuplicate, PimdirError,
+        producer::PimdirProducer,
         reader::{PimdirCollection, PimdirItem},
     },
     codec::PimdirAction,
     intent::{PimdirIntentItem, PimdirInvitation, PimdirPartstat},
-    object::PimdirObject,
+    object::PimdirHash,
     placement::PimdirFlags,
     summary::{
         PimdirSummary,
-        calendar::{PimdirTime, derive},
+        calendar::{PimdirTime, derive, online_meeting},
     },
 };
 use log::warn;
@@ -54,8 +56,8 @@ use crate::{
     config::PimdirConfig,
     error::ErrorCode,
     pimdir::{
-        client::PimdirClient,
-        status::{PimdirCalendarStatus, PimdirStatusOutput},
+        client::{PimdirClient, store_error},
+        status::{PimdirCalendarStatus, PimdirParkedStatus, PimdirStatusOutput},
     },
     shared::{
         calendar::{Calendar, CalendarDiff},
@@ -154,7 +156,7 @@ impl PimdirBackend {
 
     /// Refuses to create a calendar.
     ///
-    /// Declaring a collection is an owner write (pimdir SPEC 8) and
+    /// Declaring a collection is an owner write (pimdir STORAGE §8) and
     /// this backend is a producer, and a collection no sync knows about
     /// is one no sync would carry.
     pub fn create_calendar(
@@ -254,7 +256,7 @@ impl PimdirBackend {
 
         let stored = self.item(calendar_id, item_id)?;
 
-        let Some(hash) = stored.object else {
+        let Some(contents) = self.body(calendar_id, &stored)? else {
             return Err(CodedError::new(
                 ErrorCode::BodyPending,
                 format!(
@@ -265,14 +267,10 @@ impl PimdirBackend {
             .into());
         };
 
-        let contents = self.client.blobs.get(&hash)?.ok_or_else(|| {
-            anyhow!("Body blob missing for item `{item_id}` in calendar `{calendar_id}`")
-        })?;
-
         Ok(CalendarItem {
             id: stored.seq.to_string(),
             calendar_id: calendar_id.to_owned(),
-            etag: Some(hash.0),
+            etag: stored.object.map(|hash| hash.0),
             contents,
         })
     }
@@ -282,23 +280,23 @@ impl PimdirBackend {
     /// Returns the item's link id, its `UID` under the store's own
     /// derivation (pimdir STORAGE Annex A.3): a queued create carries no
     /// public `seq` until the store's owner applies it, so there is no
-    /// store-assigned id to report yet.
+    /// store-assigned id to report yet. A link id the calendar holds live
+    /// or has queued is refused by the store, nothing queued.
     pub fn create_item(&mut self, calendar_id: &str, contents: Vec<u8>) -> Result<String> {
         self.known_collection(calendar_id)?;
+        self.check_online_meeting(calendar_id, None, None, &contents)?;
 
         let link_id = derive(&contents).link_id;
-        let hash = self.client.reader.hash(&contents);
 
-        let action = PimdirAction::Add {
-            link_id: Some(link_id.clone()),
-            flags: PimdirFlags::default(),
-            object: Some(hash),
-            supersedes: None,
-        };
-        self.check_online_meeting(calendar_id, &action, None, &contents)?;
-
-        let object = self.stage_body(&contents)?;
-        self.enqueue(calendar_id, &action, Some(&object))?;
+        let mut producer = self.client.producer()?;
+        enqueue_with_body(&mut producer, calendar_id, &contents, |hash| {
+            PimdirAction::Add {
+                link_id: Some(link_id.clone()),
+                flags: PimdirFlags::default(),
+                object: Some(hash),
+                supersedes: None,
+            }
+        })?;
 
         Ok(link_id.0)
     }
@@ -306,8 +304,12 @@ impl PimdirBackend {
     /// Stages a body replacement as an `update` the next sync pushes.
     ///
     /// `if_match` gates the staging on the item's version, the store's
-    /// hash of its body with the pending queue folded in. The engine
-    /// still three-way merges the update against the base body it
+    /// hash of its body with the pending queue folded in. The action then
+    /// names that body as the one it replaces (pimdir STORAGE §15.3), so
+    /// the owner parks it, rather than applies it, when a sync replaced
+    /// the body while it waited in the queue. Without `if_match` no body
+    /// was read, and the edit applies over whatever the item holds. The
+    /// engine still three-way merges the update against the base body it
     /// recorded at sync time: the gate is the caller's, the merge the
     /// store's.
     pub fn update_item(
@@ -321,22 +323,32 @@ impl PimdirBackend {
 
         let stored = self.item(calendar_id, item_id)?;
         check_version(&stored, calendar_id, item_id, if_match)?;
+        let current = self.body(calendar_id, &stored)?;
+        self.check_online_meeting(calendar_id, Some(stored.seq), current.as_deref(), &contents)?;
 
-        let action = PimdirAction::Update {
-            seq: stored.seq,
-            object: self.client.reader.hash(&contents),
-        };
-        let current = self.body(&stored)?;
-        self.check_online_meeting(calendar_id, &action, current.as_deref(), &contents)?;
+        // NOTE: `check_version` passed, so `if_match` names the body the
+        // item holds.
+        let read = if_match.and(stored.object);
 
-        let object = self.stage_body(&contents)?;
-        self.enqueue(calendar_id, &action, Some(&object))
+        let mut producer = self.client.producer()?;
+        enqueue_with_body(&mut producer, calendar_id, &contents, |hash| {
+            PimdirAction::Update {
+                seq: stored.seq,
+                object: hash,
+                if_match: read,
+            }
+        })?;
+
+        Ok(())
     }
 
-    /// Refuses a write asking for an online meeting no source of the
-    /// store can create (pimdir STORAGE Annex B.1, §15.6).
+    /// Refuses a write asking for an online meeting no source concerned
+    /// can create (pimdir STORAGE Annex B.1, §15.6), before its body is
+    /// staged.
     ///
-    /// The store's own gate refuses a declared source lacking
+    /// The sources concerned are those syncing the calendar for a create,
+    /// and those binding the item `seq`, the ones that push it, for an
+    /// update. The store's own gate refuses a declared source lacking
     /// `calendar.online-meeting`, and lets a store whose sources declare
     /// nothing through: its owner would write the ask and nobody would
     /// act on it. So the ask passes only where a source declares the
@@ -345,21 +357,19 @@ impl PimdirBackend {
     fn check_online_meeting(
         &self,
         calendar_id: &str,
-        action: &PimdirAction,
+        seq: Option<i64>,
         current: Option<&[u8]>,
         new: &[u8],
     ) -> Result<()> {
-        let needed = required_by_content(CALENDAR_KIND, action, current, Some(new));
-
-        if !needed.iter().any(|name| name == CALENDAR_ONLINE_MEETING) {
+        if !online_meeting(new) || current.is_some_and(online_meeting) {
             return Ok(());
         }
 
-        let sources = self
-            .client
-            .producer()?
-            .capabilities(calendar_id)
-            .map_err(|err| anyhow!("Read the capabilities of `{calendar_id}`: {err}"))?;
+        let sources = match seq {
+            Some(seq) => self.client.reader.item_capabilities(calendar_id, seq),
+            None => self.client.reader.capabilities(calendar_id),
+        }
+        .map_err(|err| anyhow!("Read the capabilities of `{calendar_id}`: {err}"))?;
 
         let support = |source: &PimdirSourceCapabilities| {
             let declared = source.declared.as_ref()?;
@@ -404,11 +414,26 @@ impl PimdirBackend {
         let stored = self.item(calendar_id, item_id)?;
         check_version(&stored, calendar_id, item_id, if_match)?;
         let seq = stored.seq;
-        self.enqueue(calendar_id, &PimdirAction::Remove { seq }, None)
+
+        let action = PimdirAction::Remove { seq };
+
+        let mut producer = self.client.producer()?;
+        let partials = producer
+            .check(calendar_id, &action)
+            .map_err(staging_error)?;
+        producer
+            .enqueue(calendar_id, &action, None)
+            .map_err(staging_error)?;
+
+        for partial in &partials {
+            warn!("{partial}");
+        }
+
+        Ok(())
     }
 
-    /// Collects the accounts and per-calendar hydration state that
-    /// `pimdir status` reports.
+    /// Collects the accounts, the per-calendar hydration state and the
+    /// parked actions that `pimdir status` reports.
     pub fn status(&mut self) -> Result<PimdirStatusOutput> {
         let accounts = self.client.reader.list_accounts()?;
         let mut calendars = Vec::new();
@@ -437,17 +462,36 @@ impl PimdirBackend {
 
         calendars.sort_by(|a, b| a.name.cmp(&b.name));
 
+        let parked = self
+            .client
+            .reader
+            .parked_actions()?
+            .into_iter()
+            .filter(|parked| {
+                calendars
+                    .iter()
+                    .any(|calendar| calendar.id == parked.collection)
+            })
+            .map(|parked| PimdirParkedStatus {
+                row: parked.id,
+                calendar_id: parked.collection,
+                action: parked.action,
+                error: parked.error,
+            })
+            .collect();
+
         Ok(PimdirStatusOutput {
             account: self.client.account.clone(),
             accounts,
             calendars,
+            parked,
         })
     }
 
     /// The store's calendar collections.
     ///
-    /// Narrowed to the configured account when the store groups several
-    /// (pimdir SPEC 9.2).
+    /// Narrowed to the account read, configured or derived (pimdir
+    /// STORAGE §9.2), every collection when the store groups none.
     fn calendar_collections(&self) -> Result<Vec<PimdirCollection>> {
         let collections = match self.client.account.as_deref() {
             Some(account) => self
@@ -586,46 +630,6 @@ impl PimdirBackend {
         })
     }
 
-    /// Writes a body into the blob tree, returning the object it indexes.
-    ///
-    /// Durable before anything references it (pimdir SPEC 14), so the
-    /// queue row appended next pins a body that is already there.
-    fn stage_body(&self, contents: &[u8]) -> Result<PimdirObject> {
-        // NOTE: the hash is the store's, from `store_meta.hash_algo`,
-        // never one this crate picks: a body named under another
-        // algorithm is one no read ever finds.
-        let hash = self.client.reader.hash(contents);
-        let mut writer = self.client.blobs.writer()?;
-        writer.write_all(contents)?;
-        let size = writer.commit(&hash)?;
-
-        Ok(PimdirObject {
-            hash,
-            size: size as usize,
-        })
-    }
-
-    /// Appends one action to a collection's queue.
-    ///
-    /// The producer is opened for this write and dropped with it.
-    fn enqueue(
-        &mut self,
-        calendar_id: &str,
-        action: &PimdirAction,
-        object: Option<&PimdirObject>,
-    ) -> Result<()> {
-        let mut producer = self.client.producer()?;
-        let partials = producer.check(calendar_id, action).map_err(staging_error)?;
-        producer
-            .enqueue(calendar_id, action, object)
-            .map_err(staging_error)?;
-
-        for partial in &partials {
-            warn!("{partial}");
-        }
-        Ok(())
-    }
-
     /// Queues the account's reply to an invitation, the `calendar-reply`
     /// intent (pimdir STORAGE Annex B.2): the performer sends it to the
     /// organizer with `comment`, and the new `PARTSTAT` arrives with the
@@ -651,7 +655,7 @@ impl PimdirBackend {
             .ok_or_else(|| anyhow!("Invalid PARTSTAT `{partstat}` for a reply"))?;
 
         let stored = self.item(calendar_id, item_id)?;
-        if let Some(contents) = self.body(&stored)? {
+        if let Some(contents) = self.body(calendar_id, &stored)? {
             if !names(&contents, "ORGANIZER") {
                 bail!(
                     "Event `{item_id}` names no ORGANIZER, so it is not an invitation \
@@ -694,7 +698,7 @@ impl PimdirBackend {
         self.known_collection(calendar_id)?;
 
         let stored = self.item(calendar_id, item_id)?;
-        if let Some(contents) = self.body(&stored)? {
+        if let Some(contents) = self.body(calendar_id, &stored)? {
             if !names(&contents, "ATTENDEE") {
                 bail!(
                     "Event `{item_id}` names no ATTENDEE, so there is nobody to notify; \
@@ -800,12 +804,46 @@ impl PimdirBackend {
     }
 
     /// An item's local body, `None` when the sync has not fetched it.
-    fn body(&self, stored: &PimdirItem) -> Result<Option<Vec<u8>>> {
-        match &stored.object {
-            Some(hash) => Ok(self.client.blobs.get(hash)?),
-            None => Ok(None),
+    ///
+    /// An item naming an object whose blob is absent fails: the store is
+    /// inconsistent rather than partially synced, and a write or an
+    /// intent checked against no body would pass unchecked.
+    fn body(&self, calendar_id: &str, stored: &PimdirItem) -> Result<Option<Vec<u8>>> {
+        let Some(hash) = &stored.object else {
+            return Ok(None);
+        };
+
+        match self.client.blobs.get(hash)? {
+            Some(contents) => Ok(Some(contents)),
+            None => bail!(
+                "Body blob missing for item `{}` in calendar `{calendar_id}`",
+                stored.seq
+            ),
         }
     }
+}
+
+/// Stages `body` and appends the action `action` builds from its hash
+/// through `producer` as one step, past the store's gate and, for an
+/// `add`, its duplicate check (pimdir STORAGE §15.6, §15.1): a write the
+/// store refuses leaves no body in the tree.
+///
+/// Logs and answers the partial supports the gate passed the action
+/// with, read with the body in hand, those the body asks for included.
+fn enqueue_with_body(
+    producer: &mut PimdirProducer,
+    calendar_id: &str,
+    body: &[u8],
+    action: impl FnOnce(PimdirHash) -> PimdirAction,
+) -> Result<Vec<PimdirPartial>> {
+    let enqueued = producer
+        .enqueue_with_body_checked(calendar_id, body, action)
+        .map_err(staging_error)?;
+
+    for partial in &enqueued.partial {
+        warn!("{partial}");
+    }
+    Ok(enqueued.partial)
 }
 
 /// What a write the store refuses to stage reads as, naming the way out
@@ -830,7 +868,36 @@ fn staging_error(err: PimdirError) -> anyhow::Error {
                 refusal.capability,
             )
         }
-        err => anyhow!("Stage the pimdir action: {err}"),
+        PimdirError::Unsupported(refusal) if refusal.capability == X_VTODO => {
+            let why = match &refusal.detail {
+                Some(detail) => format!(" ({detail})"),
+                None => String::new(),
+            };
+            anyhow!(
+                "Stage the pimdir action: this calendar takes no to-do, source {} \
+                 states {} none{why}; store it in another calendar with -k/--calendar",
+                refusal.source,
+                refusal.capability,
+            )
+        }
+        PimdirError::Duplicate {
+            collection,
+            link_id,
+            existing,
+        } => {
+            let message = match existing {
+                PimdirDuplicate::Live(seq) => format!(
+                    "Stage the pimdir action: calendar `{collection}` already holds \
+                     `{link_id}` as item {seq}; update that item instead"
+                ),
+                PimdirDuplicate::Pending(row) => format!(
+                    "Stage the pimdir action: calendar `{collection}` already has a \
+                     create of `{link_id}` queued (row {row}) for the next sync"
+                ),
+            };
+            CodedError::new(ErrorCode::ItemDuplicate, message).into()
+        }
+        err => store_error(err, "Stage the pimdir action"),
     }
 }
 
@@ -1173,6 +1240,96 @@ mod tests {
         );
     }
 
+    /// A client reads one account: the one a store groups everything
+    /// under when `pimdir.account` is unset, and never several merged.
+    #[test]
+    fn an_unset_account_reads_the_only_one_and_refuses_several() {
+        let dir = tempfile::tempdir().unwrap();
+        let open = || {
+            PimdirBackend::new(crate::config::PimdirConfig {
+                root: dir.path().to_path_buf(),
+                account: None,
+            })
+        };
+
+        io_pimdir::client::PimdirStore::open(dir.path())
+            .unwrap()
+            .for_account("work")
+            .ensure_collection("caldav/work", CALENDAR_KIND)
+            .unwrap();
+        let mut backend = open().unwrap();
+        assert_eq!(backend.status().unwrap().account.as_deref(), Some("work"));
+        drop(backend);
+
+        io_pimdir::client::PimdirStore::open(dir.path())
+            .unwrap()
+            .for_account("home")
+            .ensure_collection("caldav/home", CALENDAR_KIND)
+            .unwrap();
+        let err = open().err().unwrap().to_string();
+        assert!(err.contains("home, work"), "{err}");
+        assert!(err.contains("pimdir.account"), "{err}");
+    }
+
+    /// A write the owner parks never lands, so status shows it by its
+    /// queue row, for the account read alone.
+    #[test]
+    fn status_shows_the_parked_actions_of_the_account_read() {
+        let dir = tempfile::tempdir().unwrap();
+        for (account, collection) in [("work", "caldav/work"), ("home", "caldav/home")] {
+            io_pimdir::client::PimdirStore::open(dir.path())
+                .unwrap()
+                .for_account(account)
+                .ensure_collection(collection, CALENDAR_KIND)
+                .unwrap();
+        }
+        let open = |account: &str| {
+            PimdirBackend::new(crate::config::PimdirConfig {
+                root: dir.path().to_path_buf(),
+                account: Some(account.into()),
+            })
+            .unwrap()
+        };
+
+        // NOTE: the second add of one `UID` is the one the owner parks,
+        // the first having made it live. calendula refuses it before
+        // queueing, so the producer stages it bare.
+        for (account, collection) in [("work", "caldav/work"), ("home", "caldav/home")] {
+            let mut backend = open(account);
+            backend.create_item(collection, ALONE.into()).unwrap();
+
+            let mut producer = backend.client.producer().unwrap();
+            let object = producer.stage_body(ALONE.as_bytes()).unwrap();
+            let add = PimdirAction::Add {
+                link_id: Some(derive(ALONE.as_bytes()).link_id),
+                flags: PimdirFlags::default(),
+                object: Some(object.hash.clone()),
+                supersedes: None,
+            };
+            producer.enqueue(collection, &add, Some(&object)).unwrap();
+        }
+        let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source("caldav");
+        assert_eq!(owner.drain().unwrap().parked, 2);
+        drop(owner);
+
+        let status = open("work").status().unwrap();
+        assert_eq!(status.parked.len(), 1, "{:?}", status.parked);
+        let parked = &status.parked[0];
+        assert_eq!(parked.calendar_id, "caldav/work");
+        assert_eq!(parked.action, "add");
+        assert!(
+            parked.error.contains("alone@example.org"),
+            "{}",
+            parked.error
+        );
+
+        let text = status.to_string();
+        assert!(text.contains(&format!("ROW {}", parked.row)), "{text}");
+        assert!(text.contains(&parked.error), "{text}");
+    }
+
     #[test]
     fn the_collection_refusal_points_at_the_sync() {
         let message = unsupported("create");
@@ -1181,7 +1338,7 @@ mod tests {
     }
 
     /// One calendar may hold two resources carrying one `UID` (pimdir
-    /// SPEC 9), which the store keys apart under their own public ids.
+    /// STORAGE §9), which the store keys apart under their own public ids.
     ///
     /// What addresses an item here is that id, never the identity its
     /// body states, and the two copies need not be the same event.
@@ -1909,6 +2066,504 @@ mod tests {
             .unwrap();
 
         assert_eq!(pending(&backend), 1);
+    }
+
+    /// An update is pushed by the sources binding its item, so another
+    /// source syncing the calendar and declaring the capability does not
+    /// make the ask one somebody acts on.
+    #[test]
+    fn an_online_meeting_on_an_update_is_gated_by_the_item_sources() {
+        use io_pimdir::{
+            capability::{CALENDAR, PimdirCapability, PimdirSupport},
+            change::PimdirWriteOp,
+            collection::{PimdirCheckpoint, PimdirCollectionId},
+            coroutine::PimdirYield,
+        };
+
+        let (dir, mut backend, ids) = store(&[ALONE]);
+
+        // NOTE: a checkpoint makes `gcal` sync the calendar without
+        // binding the item, which `caldav` alone binds and declares
+        // nothing for.
+        let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source("gcal");
+        owner
+            .service(PimdirYield::WantsWrite(vec![
+                PimdirWriteOp::SetCheckpoint {
+                    collection: PimdirCollectionId("cal".into()),
+                    checkpoint: PimdirCheckpoint(b"token".to_vec()),
+                },
+            ]))
+            .unwrap()
+            .unwrap();
+        let declaration: Vec<_> = CALENDAR
+            .iter()
+            .map(|name| PimdirCapability {
+                collection: None,
+                name: name.to_string(),
+                support: PimdirSupport::Full,
+                detail: None,
+            })
+            .collect();
+        owner.declare("gcal", &declaration).unwrap();
+        drop(owner);
+
+        let asked = ALONE.replace("SUMMARY", "X-PIMDIR-ONLINE-MEETING:TRUE\r\nSUMMARY");
+        let err = backend
+            .update_item("cal", &ids[0], asked.into(), None)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("calendar.online-meeting"), "{err}");
+        assert_eq!(pending(&backend), 0);
+    }
+
+    /// A calendar whose source takes no to-do refuses one, created or
+    /// edited in, naming the way out.
+    #[test]
+    fn a_to_do_into_an_events_only_calendar_names_the_way_out() {
+        use io_pimdir::capability::{CALENDAR, PimdirCapability, PimdirSupport, X_VTODO};
+
+        let todo = |uid: &str| {
+            resource(&component(
+                "VTODO",
+                &format!("UID:{uid}\r\nSUMMARY:Call back\r\n"),
+            ))
+        };
+        let (dir, mut backend, ids) = store(&[ALONE]);
+
+        let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source("caldav");
+        let mut declaration: Vec<_> = CALENDAR
+            .iter()
+            .map(|name| PimdirCapability {
+                collection: None,
+                name: name.to_string(),
+                support: PimdirSupport::Full,
+                detail: None,
+            })
+            .collect();
+        declaration.push(PimdirCapability {
+            collection: Some("cal".into()),
+            name: X_VTODO.into(),
+            support: PimdirSupport::None,
+            detail: Some("events only".into()),
+        });
+        owner.declare("caldav", &declaration).unwrap();
+        drop(owner);
+
+        let created = backend
+            .create_item("cal", todo("todo@example.org").into())
+            .unwrap_err()
+            .to_string();
+        let updated = backend
+            .update_item("cal", &ids[0], todo("alone@example.org").into(), None)
+            .unwrap_err()
+            .to_string();
+
+        for err in [created, updated] {
+            assert!(err.starts_with("Stage the pimdir action:"), "{err}");
+            assert!(err.contains("takes no to-do"), "{err}");
+            assert!(err.contains("caldav"), "{err}");
+            assert!(err.contains("events only"), "{err}");
+            assert!(err.contains("-k/--calendar"), "{err}");
+        }
+        assert_eq!(pending(&backend), 0);
+    }
+
+    /// A create whose `UID` the calendar already holds, synced or queued,
+    /// is refused before anything is queued: the sync engine would park
+    /// it, and the user would have read it as created.
+    /// A partial support the body asks for, read by the gate with the
+    /// body in hand, is reported: a gate run before the body is written
+    /// reads none and passes the action as if nothing were asked.
+    #[test]
+    fn a_partial_support_the_body_asks_for_is_reported() {
+        use io_pimdir::capability::{CALENDAR, PimdirCapability, PimdirSupport};
+
+        let (dir, backend, _) = store(&[ALONE]);
+        let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source("caldav");
+        let declaration: Vec<_> = CALENDAR
+            .iter()
+            .map(|name| PimdirCapability {
+                collection: None,
+                name: name.to_string(),
+                support: match *name == CALENDAR_SCHEDULING {
+                    true => PimdirSupport::Partial,
+                    false => PimdirSupport::Full,
+                },
+                detail: Some("no counter-proposals".into()),
+            })
+            .collect();
+        owner.declare("caldav", &declaration).unwrap();
+        drop(owner);
+
+        let mut producer = backend.client.producer().unwrap();
+        let partial = enqueue_with_body(&mut producer, "cal", INVITATION.as_bytes(), |hash| {
+            PimdirAction::Add {
+                link_id: None,
+                flags: PimdirFlags::default(),
+                object: Some(hash),
+                supersedes: None,
+            }
+        })
+        .unwrap();
+
+        let named: Vec<(&str, &str)> = partial
+            .iter()
+            .map(|partial| (partial.source.as_str(), partial.capability.as_str()))
+            .collect();
+        assert_eq!(named, [("caldav", CALENDAR_SCHEDULING)]);
+        assert_eq!(pending(&backend), 1);
+    }
+
+    #[test]
+    fn a_create_whose_uid_is_live_or_queued_is_refused() {
+        use pimalaya_cli::error::code_of;
+
+        let (_dir, mut backend, _) = store(&[ALONE]);
+        let fresh = ALONE.replace("alone@example.org", "fresh@example.org");
+        backend.create_item("cal", fresh.clone().into()).unwrap();
+
+        let live = backend.create_item("cal", ALONE.into()).unwrap_err();
+        let queued = backend.create_item("cal", fresh.into()).unwrap_err();
+
+        assert_eq!(code_of(&live), Some(ErrorCode::ItemDuplicate));
+        assert!(live.to_string().contains("as item 1; update"), "{live}");
+        assert_eq!(code_of(&queued), Some(ErrorCode::ItemDuplicate));
+        assert!(queued.to_string().contains("queued"), "{queued}");
+        assert_eq!(pending(&backend), 1);
+    }
+
+    /// A create the store refuses leaves no body behind: the body is
+    /// written in the transaction appending its row, after every check
+    /// passed, never before.
+    #[test]
+    fn a_refused_create_leaves_no_body_in_the_tree() {
+        let (dir, mut backend, _) = store(&[ALONE]);
+        let before = blob_files(dir.path());
+
+        let again = ALONE.replace("SUMMARY:Focus", "SUMMARY:Focus again");
+        backend.create_item("cal", again.into()).unwrap_err();
+
+        assert_eq!(blob_files(dir.path()), before);
+        assert_eq!(pending(&backend), 0);
+    }
+
+    /// An edit names the body it was made against: when the item holds
+    /// another by the time the store's owner applies it, the owner parks
+    /// it rather than drop the other write, and `pimdir status` shows it.
+    #[test]
+    fn an_edit_whose_body_changed_underneath_is_parked() {
+        use io_pimdir::{
+            change::PimdirWriteOp,
+            collection::PimdirCollectionId,
+            hub::PimdirSourceId,
+            object::PimdirObject,
+            placement::{PimdirBase, PimdirStatus},
+        };
+
+        let (dir, mut backend, ids) = store(&[ALONE]);
+        let mine = ALONE.replace("SUMMARY:Focus", "SUMMARY:Mine");
+        let theirs = ALONE.replace("SUMMARY:Focus", "SUMMARY:Theirs");
+
+        let etag = backend.get_item("cal", &ids[0]).unwrap().etag.unwrap();
+        backend
+            .update_item("cal", &ids[0], mine.into(), Some(&etag))
+            .unwrap();
+
+        // NOTE: a sync lands the server's own edit of the event while this
+        // one waits in the queue.
+        let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source("caldav");
+        let collection = PimdirCollectionId("cal".into());
+        let mut placement = owner
+            .load_hub("cal")
+            .unwrap()
+            .project(&collection, &PimdirSourceId("caldav".into()))
+            .remove(0);
+        let object = PimdirObject {
+            hash: backend.client.reader.hash(theirs.as_bytes()),
+            size: theirs.len(),
+        };
+        let landed = object.hash.0.clone();
+        let derived = derive(theirs.as_bytes());
+        placement.object = Some(object.hash.clone());
+        placement.summary = derived.summary;
+        placement.sort_key = derived.sort_key;
+        placement.status = PimdirStatus::Clean;
+        placement.origin = None;
+        placement.base = Some(PimdirBase {
+            flags: placement.flags.clone(),
+            revision: Some("2".into()),
+            object: Some(object.hash.clone()),
+        });
+        owner
+            .write(vec![
+                PimdirWriteOp::StoreObject {
+                    object,
+                    body: Some(theirs.clone().into_bytes()),
+                },
+                PimdirWriteOp::UpsertPlacement(placement),
+            ])
+            .unwrap();
+
+        let report = owner.drain().unwrap();
+        assert_eq!((report.applied, report.parked), (0, 1), "{report:?}");
+        drop(owner);
+
+        let held = backend.get_item("cal", &ids[0]).unwrap();
+        assert_eq!(held.contents, theirs.as_bytes());
+
+        let status = backend.status().unwrap();
+        assert_eq!(status.parked.len(), 1, "{:?}", status.parked);
+        let parked = &status.parked[0];
+        assert_eq!(parked.action, "update");
+        assert!(parked.error.contains(&etag), "{}", parked.error);
+        assert!(parked.error.contains(&landed), "{}", parked.error);
+    }
+
+    /// A store its sync engine has not created, one a newer schema owns,
+    /// or a database declaring tables at `user_version` 0, another
+    /// program's, is refused with io-pimdir's code and a message saying
+    /// what to run or upgrade, never to delete the store.
+    #[test]
+    fn a_store_calendula_cannot_open_carries_its_code() {
+        use std::{
+            fs::OpenOptions,
+            io::{Seek, SeekFrom, Write},
+        };
+
+        use pimalaya_cli::error::code_of;
+
+        let open = |dir: &tempfile::TempDir| {
+            PimdirBackend::new(PimdirConfig {
+                root: dir.path().to_path_buf(),
+                account: None,
+            })
+            .err()
+            .unwrap()
+        };
+
+        let uncreated = open(&tempfile::tempdir().unwrap());
+
+        // NOTE: SQLite keeps `PRAGMA user_version` big-endian at offset 60
+        // of the database header.
+        let stamped = |version: u32| {
+            let (dir, _, _) = store(&[]);
+            let mut db = OpenOptions::new()
+                .write(true)
+                .open(dir.path().join("pimdir.db"))
+                .unwrap();
+            db.seek(SeekFrom::Start(60)).unwrap();
+            db.write_all(&version.to_be_bytes()).unwrap();
+            drop(db);
+            open(&dir)
+        };
+        let newer = stamped(99);
+        let foreign = stamped(0);
+
+        assert_eq!(code_of(&uncreated), Some(ErrorCode::StoreUncreated));
+        assert_eq!(code_of(&newer), Some(ErrorCode::StoreNewer));
+        assert_eq!(code_of(&foreign), Some(ErrorCode::StoreForeign));
+        assert!(
+            newer.to_string().contains("upgrade this program"),
+            "{newer}"
+        );
+        for err in [uncreated, newer, foreign] {
+            assert!(!err.to_string().contains("delete"), "{err}");
+        }
+    }
+
+    /// A reply or a cancel reads the event's body to check it is an
+    /// invitation and holds the occurrence named: a body the store lists
+    /// but no longer has fails them, rather than letting them through
+    /// unchecked.
+    #[test]
+    fn a_reply_or_a_cancel_over_a_missing_body_queues_nothing() {
+        let (dir, mut backend, ids) = store(&[INVITATION]);
+        for blob in blob_files(dir.path()) {
+            std::fs::remove_file(blob).unwrap();
+        }
+
+        let replied = backend
+            .reply("cal", &ids[0], "ACCEPTED", None, None, None)
+            .unwrap_err();
+        let cancelled = backend
+            .cancel("cal", &ids[0], None, None, None)
+            .unwrap_err();
+
+        for err in [replied, cancelled] {
+            assert!(err.to_string().contains("Body blob missing"), "{err}");
+        }
+        assert_eq!(pending(&backend), 0);
+    }
+
+    /// Every file of the store's blob tree, a write's temporary one
+    /// included.
+    fn blob_files(dir: &std::path::Path) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        let mut dirs = vec![dir.join("objects")];
+
+        while let Some(dir) = dirs.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+
+            for entry in entries {
+                let path = entry.unwrap().path();
+                match path.is_dir() {
+                    true => dirs.push(path),
+                    false => files.push(path),
+                }
+            }
+        }
+
+        files.sort();
+        files
+    }
+
+    /// A write the next sync pushes is confirmed as queued, never as done.
+    #[test]
+    fn a_write_is_confirmed_as_queued() {
+        use clap::Parser;
+
+        use crate::{
+            backend::Backend,
+            config::{AccountConfig, Config},
+            shared::{
+                client::CalendarClient,
+                event::{
+                    create::EventCreateCommand, delete::EventDeleteCommand,
+                    update::EventUpdateCommand,
+                },
+            },
+        };
+
+        /// A printer keeping what it is handed, as text.
+        #[derive(Default)]
+        struct Capture(String);
+
+        impl Printer for Capture {
+            fn out<T: std::fmt::Display + serde::Serialize>(&mut self, data: T) -> Result<()> {
+                self.0.push_str(&data.to_string());
+                Ok(())
+            }
+
+            fn is_json(&self) -> bool {
+                false
+            }
+        }
+
+        let (dir, _, ids) = store(&[ALONE]);
+        let client = || {
+            let account = AccountConfig {
+                pimdir: Some(PimdirConfig {
+                    root: dir.path().to_path_buf(),
+                    account: None,
+                }),
+                ..Default::default()
+            };
+            CalendarClient::new(Config::default(), account, Backend::Auto).unwrap()
+        };
+        let mut out = Capture::default();
+
+        EventCreateCommand::try_parse_from(["create", "-k", "cal", "--summary", "Sync"])
+            .unwrap()
+            .execute(&mut out, client())
+            .unwrap();
+        EventUpdateCommand::try_parse_from(["update", "-k", "cal", &ids[0], "--summary", "Sync"])
+            .unwrap()
+            .execute(&mut out, client())
+            .unwrap();
+        EventDeleteCommand::try_parse_from(["delete", "-k", "cal", &ids[0]])
+            .unwrap()
+            .execute(&mut out, client())
+            .unwrap();
+
+        let lines: Vec<&str> = out.0.lines().collect();
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert!(
+            lines[0].ends_with("` queued for the next sync"),
+            "{lines:?}"
+        );
+        assert_eq!(
+            lines[1],
+            format!("Event `{}` update queued for the next sync", ids[0])
+        );
+        assert_eq!(lines[2], "Event deletion queued for the next sync");
+    }
+
+    /// A collector holds the staging lock exclusively across its file
+    /// walk and deletes every body no row pins (pimdir STORAGE §8), so a
+    /// body landing in the tree while it runs is one it may delete before
+    /// the enqueue pins it: the queued action then names a body that is
+    /// gone. A write waits for the collector before writing anything.
+    #[test]
+    fn a_write_puts_no_body_in_the_tree_while_a_collector_runs() {
+        let (dir, mut backend, ids) = store(&[ALONE]);
+        let before = blob_files(dir.path());
+
+        let created = ALONE.replace("alone@example.org", "new@example.org");
+        let edited = ALONE.replace("SUMMARY:Focus", "SUMMARY:Deep focus");
+
+        std::thread::scope(|scope| {
+            // NOTE: what `collect_garbage` takes, held here across the
+            // window, and released by unwinding if the assertion fails.
+            let collector = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(dir.path().join("objects.lock"))
+                .unwrap();
+            collector.lock().unwrap();
+
+            let writer = scope.spawn(|| {
+                backend.create_item("cal", created.into()).unwrap();
+                backend
+                    .update_item("cal", &ids[0], edited.into(), None)
+                    .unwrap();
+            });
+
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(300);
+            while std::time::Instant::now() < deadline && blob_files(dir.path()) == before {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert_eq!(
+                blob_files(dir.path()),
+                before,
+                "a body landed while the collector held the staging lock"
+            );
+
+            drop(collector);
+            writer.join().unwrap();
+        });
+
+        let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source("caldav");
+        owner.drain().unwrap();
+        owner.collect_garbage().unwrap();
+        drop(owner);
+
+        let mut backend = PimdirBackend::new(PimdirConfig {
+            root: dir.path().to_path_buf(),
+            account: None,
+        })
+        .unwrap();
+        let items = backend
+            .list_items("cal", CalendarItemQuery::default())
+            .unwrap();
+        assert_eq!(items.len(), 2);
+        for item in items {
+            backend.get_item("cal", &item.id).unwrap();
+        }
     }
 
     /// A whole iCalendar resource around `components`.

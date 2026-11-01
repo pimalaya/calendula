@@ -131,6 +131,7 @@ impl EventUpdateCommand {
 
             return printer.out(EventUpdateOutput::Applied(EventUpdatedOutput {
                 id: self.event_id,
+                queued: client.queues_writes(),
             }));
         }
 
@@ -164,6 +165,7 @@ impl EventUpdateCommand {
 
         printer.out(EventUpdateOutput::Applied(EventUpdatedOutput {
             id: self.event_id,
+            queued: client.queues_writes(),
         }))
     }
 }
@@ -198,15 +200,22 @@ impl fmt::Display for EventUpdateOutput {
 pub struct EventUpdatedOutput {
     /// Backend-specific identifier of the updated event.
     pub id: String,
+    /// Whether the write was queued for a sync rather than made, which
+    /// only the wording tells.
+    #[serde(skip)]
+    pub queued: bool,
 }
 
 impl fmt::Display for EventUpdatedOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Event `{}` successfully updated", self.id)
+        match self.queued {
+            true => writeln!(f, "Event `{}` update queued for the next sync", self.id),
+            false => writeln!(f, "Event `{}` successfully updated", self.id),
+        }
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "vdir", feature = "pimdir")))]
 mod tests {
     use core::fmt;
 

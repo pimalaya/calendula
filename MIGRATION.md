@@ -2,7 +2,7 @@
 
 ## 0.1.x -> 0.2.0
 
-calendula 0.2.0 drops `pimalaya-toolbox` and the inline CalDAV implementation in favour of the Pimalaya stack, and owns its cross-protocol layer rather than borrowing one: `pimalaya-cli` for the clap scaffolding, prompts, spinners and tables, `pimalaya-config` for the TOML loading and secrets, `pimalaya-stream` for the transport, `io-webdav` for CalDAV over WebDAV, `io-vdir` for the filesystem backend, `io-pimdir` and `io-replica` for the local store, `io-pim-discovery` for server discovery, and `ical-rs` for iCalendar.
+calendula 0.2.0 drops `pimalaya-toolbox` and the inline CalDAV implementation in favour of the Pimalaya stack, and owns its cross-protocol layer rather than borrowing one: `pimalaya-cli` for the clap scaffolding, prompts, spinners and tables, `pimalaya-config` for the TOML loading and secrets, `pimalaya-stream` for the transport, `io-webdav` for CalDAV over WebDAV, `io-vdir` for the filesystem backend, `io-pimdir` for the local store, `io-pim-discovery` for server discovery, and `ical-rs` for iCalendar.
 
 ### CLI
 

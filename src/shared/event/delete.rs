@@ -55,14 +55,16 @@ impl EventDeleteCommand {
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         let item_id = resolve(&mut client, &calendar_id, &self.event_id)?;
-        let send_updates = self.send_updates.send_updates;
         client.delete_item(
             &calendar_id,
             &item_id,
             self.if_match.as_deref(),
-            send_updates,
+            self.send_updates.send_updates,
         )?;
-        printer.out(Message::new("Event successfully deleted"))
+        printer.out(Message::new(match client.queues_writes() {
+            true => "Event deletion queued for the next sync",
+            false => "Event successfully deleted",
+        }))
     }
 }
 

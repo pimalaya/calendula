@@ -85,7 +85,7 @@ When discovery yields no supported configuration for the given input, the wizard
 It SHALL NOT prompt for a server field it could not discover, and SHALL NOT emit a partial account.
 
 ### Requirement: Local backend auto-detected
-A typed folder path or `file://` URL SHALL configure a local backend, auto-detecting the kind from on-disk markers: a pimdir index file or blob directory means pimdir, a directory holding at least one collection (a subdirectory carrying an `.ics` file or a vdir metadata marker) means vdir.
+A typed folder path or `file://` URL SHALL configure a local backend, auto-detecting the kind from on-disk markers: a pimdir index file (`pimdir.db`) means pimdir, a directory holding at least one collection (a subdirectory carrying an `.ics` file or a vdir metadata marker) means vdir. A blob directory without its index SHALL NOT mean pimdir: no reader opens a store its sync engine has not created.
 
 pimdir SHALL be tested first, since a store also holds subdirectories and testing vdir first would misread every store as a home.
 

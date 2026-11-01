@@ -55,7 +55,10 @@ impl ItemCreateCommand {
 
         if !self.composer.interactive {
             let id = client.create_item(&calendar_id, seed, None)?;
-            return printer.out(ItemCreateOutput::Created(ItemCreatedOutput { id }));
+            return printer.out(ItemCreateOutput::Created(ItemCreatedOutput {
+                id,
+                queued: client.queues_writes(),
+            }));
         }
 
         let composer = IcalComposer {
@@ -72,7 +75,10 @@ impl ItemCreateCommand {
         let created = client.create_item(&calendar_id, draft.contents.clone(), None);
         let id = draft.finish(created)?;
 
-        printer.out(ItemCreateOutput::Created(ItemCreatedOutput { id }))
+        printer.out(ItemCreateOutput::Created(ItemCreatedOutput {
+            id,
+            queued: client.queues_writes(),
+        }))
     }
 }
 
@@ -106,10 +112,17 @@ impl fmt::Display for ItemCreateOutput {
 pub struct ItemCreatedOutput {
     /// Backend-assigned identifier of the new item.
     pub id: String,
+    /// Whether the write was queued for a sync rather than made, which
+    /// only the wording tells.
+    #[serde(skip)]
+    pub queued: bool,
 }
 
 impl fmt::Display for ItemCreatedOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Item `{}` successfully created", self.id)
+        match self.queued {
+            true => writeln!(f, "Item `{}` queued for the next sync", self.id),
+            false => writeln!(f, "Item `{}` successfully created", self.id),
+        }
     }
 }

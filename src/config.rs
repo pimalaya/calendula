@@ -532,11 +532,11 @@ pub struct PimdirConfig {
     #[serde(deserialize_with = "shell_expanded_path")]
     pub root: PathBuf,
     /// The account whose collections this client reads, the name the
-    /// sync engine groups them under (pimdir SPEC 9.2).
+    /// sync engine groups them under (pimdir STORAGE §9.2).
     ///
     /// Usually left unset: a store synced by one account is read as
-    /// that one. Set it for a store several accounts share, where
-    /// guessing would show the wrong calendar set.
+    /// that one. A store several accounts share is refused until this
+    /// names one, rather than showing their calendars merged.
     #[serde(default)]
     pub account: Option<String>,
 }

@@ -26,6 +26,9 @@ use crate::{
 /// checked against the filesystem, CalDAV by opening the connection and
 /// resolving the calendar home-set, gcal by listing the calendars.
 ///
+/// A backend that fails fails the command, with one error naming each
+/// failed backend and why.
+///
 /// JSON output: `{"account", "backends": [{"backend", "ok", "error"}]}`.
 #[derive(Debug, Parser)]
 pub struct AccountCheckCommand;
@@ -51,6 +54,18 @@ impl AccountCheckCommand {
 
         if backends.is_empty() {
             bail!("No backend matching `{backend}` is configured for this account");
+        }
+
+        let failed: Vec<String> = backends
+            .iter()
+            .filter_map(|check| {
+                let err = check.error.as_ref()?;
+                Some(format!("{}: {err}", check.backend))
+            })
+            .collect();
+
+        if !failed.is_empty() {
+            bail!("Account `{name}` failed its check: {}", failed.join("; "));
         }
 
         printer.out(AccountCheckOutput {
@@ -155,12 +170,25 @@ fn check_vdir(config: crate::config::VdirConfig) -> Result<()> {
     Ok(())
 }
 
-/// Opening the store is the check: it creates the index when absent and
-/// fails loudly when the path is not a usable store.
+/// Opens the store as a reader, which creates nothing, so a path holding
+/// no store, or one this build cannot read, fails it; then probes a
+/// producer, which takes and releases the staging lock and the database's
+/// write lock without writing anything, so a store a write cannot reach
+/// fails here rather than on the first write.
 #[cfg(feature = "pimdir")]
 fn check_pimdir(config: crate::config::PimdirConfig) -> Result<()> {
-    crate::pimdir::client::PimdirClient::new(config)?;
-    Ok(())
+    use crate::pimdir::client::{PimdirClient, store_error};
+
+    let root = config.root.clone();
+    PimdirClient::new(config)?
+        .producer()?
+        .probe()
+        .map_err(|err| {
+            store_error(
+                err,
+                format_args!("Probe pimdir store `{}` as a producer", root.display()),
+            )
+        })
 }
 
 /// Connecting and resolving the calendar home-set exercises DNS,
@@ -240,5 +268,112 @@ impl fmt::Display for AccountCheckOutput {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(all(test, feature = "vdir"))]
+mod tests {
+    use core::fmt;
+
+    use anyhow::Result;
+    use pimalaya_cli::printer::Printer;
+    use serde::Serialize;
+
+    use crate::{account::check::AccountCheckCommand, backend::Backend};
+
+    /// A printer keeping what it is handed, as text.
+    #[derive(Default)]
+    struct Capture(String);
+
+    impl Printer for Capture {
+        fn out<T: fmt::Display + Serialize>(&mut self, data: T) -> Result<()> {
+            self.0.push_str(&data.to_string());
+            Ok(())
+        }
+
+        fn is_json(&self) -> bool {
+            false
+        }
+    }
+
+    /// A script reads the verdict from the exit code, so a backend that
+    /// fails fails the command, naming it and why.
+    #[test]
+    fn a_failed_backend_fails_the_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.toml");
+        let check = |home: &std::path::Path| {
+            std::fs::write(
+                &config,
+                format!(
+                    "[accounts.test]\ndefault = true\nvdir.home-dir = {:?}\n",
+                    home.display().to_string(),
+                ),
+            )
+            .unwrap();
+            let mut printer = Capture::default();
+            let result = AccountCheckCommand.execute(
+                &mut printer,
+                core::slice::from_ref(&config),
+                None,
+                Backend::Auto,
+            );
+            (result, printer.0)
+        };
+
+        let (result, out) = check(dir.path());
+        result.unwrap();
+        assert!(out.contains("vdir: OK"), "{out}");
+
+        let (result, _) = check(&dir.path().join("missing"));
+        let err = format!("{:#}", result.unwrap_err());
+        assert!(err.contains("vdir"), "{err}");
+        assert!(err.contains("does not exist"), "{err}");
+    }
+}
+
+#[cfg(all(test, feature = "pimdir"))]
+mod pimdir_tests {
+    use std::fs::{self, OpenOptions};
+
+    use io_pimdir::client::PimdirStore;
+    use pimalaya_cli::error::code_of;
+
+    use crate::{account::check::check_pimdir, config::PimdirConfig, error::ErrorCode};
+
+    /// A collector holding the staging lock fails the check at once with
+    /// `store-busy`, a store the reader opens being one a write may still
+    /// not reach, and the check stages nothing into the blob tree.
+    #[test]
+    fn a_held_staging_lock_fails_the_check_as_busy() {
+        let dir = tempfile::tempdir().unwrap();
+        PimdirStore::open(dir.path())
+            .unwrap()
+            .ensure_collection("cal", "text/calendar")
+            .unwrap();
+        let collector = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(dir.path().join("objects.lock"))
+            .unwrap();
+        collector.try_lock().unwrap();
+
+        let config = PimdirConfig {
+            root: dir.path().to_path_buf(),
+            account: None,
+        };
+        let err = check_pimdir(config.clone()).unwrap_err();
+        assert_eq!(code_of(&err), Some(ErrorCode::StoreBusy), "{err:#}");
+
+        drop(collector);
+        check_pimdir(config).unwrap();
+
+        let objects = dir.path().join("objects");
+        let left: Vec<_> = match fs::read_dir(&objects) {
+            Ok(entries) => entries.map(|entry| entry.unwrap().path()).collect(),
+            Err(_) => Vec::new(),
+        };
+        assert!(left.is_empty(), "{left:?}");
     }
 }

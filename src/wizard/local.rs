@@ -2,8 +2,7 @@
 //!
 //! A typed path pointing at an existing folder configures a local backend,
 //! its kind auto-detected from the directory's own markers: a pimdir store
-//! carries its SQLite index and blob tree, a vdir home one subdirectory per
-//! calendar.
+//! carries its SQLite index, a vdir home one subdirectory per calendar.
 //!
 //! When detection is inconclusive and both backends are compiled in, the user
 //! picks; otherwise the sole compiled backend is used.
@@ -20,10 +19,6 @@ use crate::config::VdirConfig;
 /// The file a pimdir store keeps its index in.
 #[cfg(feature = "pimdir")]
 const PIMDIR_INDEX: &str = "pimdir.db";
-
-/// The directory a pimdir store keeps its content-addressed bodies in.
-#[cfg(feature = "pimdir")]
-const PIMDIR_OBJECTS: &str = "objects";
 
 /// A configured local backend.
 pub enum Local {
@@ -48,14 +43,15 @@ pub fn configure(root: PathBuf) -> Result<Local> {
 ///
 /// pimdir is tested first, on its index file: a vdir home is just
 /// directories, so anything holding a `pimdir.db` is a store rather than a
-/// home that happens to contain one.
+/// home that happens to contain one. A blob tree alone is no store: the
+/// index is what a reader opens, and only the sync engine creates it.
 #[cfg_attr(
     not(all(feature = "vdir", feature = "pimdir")),
     allow(unused_variables)
 )]
 fn detect(root: &Path) -> Option<Local> {
     #[cfg(feature = "pimdir")]
-    if root.join(PIMDIR_INDEX).is_file() || root.join(PIMDIR_OBJECTS).is_dir() {
+    if root.join(PIMDIR_INDEX).is_file() {
         return Some(Local::Pimdir(PimdirConfig {
             root: root.to_path_buf(),
             account: None,
@@ -151,6 +147,19 @@ mod tests {
         fs::write(root.join(PIMDIR_INDEX), b"").unwrap();
 
         assert!(matches!(detect(&root), Some(Local::Pimdir(_))));
+    }
+
+    /// A blob tree without its index is no store a reader can open: the
+    /// backend would fail on its first command.
+    #[cfg(feature = "pimdir")]
+    #[test]
+    fn a_blob_tree_alone_marks_no_pimdir_store() {
+        let root = scratch("objects");
+        let shard = root.join("objects").join("ab");
+        fs::create_dir_all(&shard).unwrap();
+        fs::write(shard.join("abcdef"), b"BEGIN:VCALENDAR\r\n").unwrap();
+
+        assert!(!matches!(detect(&root), Some(Local::Pimdir(_))));
     }
 
     #[cfg(feature = "vdir")]

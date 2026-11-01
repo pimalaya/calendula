@@ -20,7 +20,7 @@ Adding a backend that cannot serve a shared operation SHALL move the operation o
 
 gcal covers the half of the Calendar API iCalendar cannot express: sharing, availability, recurrence expansion, server-side parsing and the palettes. vdir covers its collection verbs including `rename`, which the shared API has no home for.
 
-pimdir covers `status`, reporting the account being read, every account the store groups collections under, how much of each calendar is downloaded, and how many creations are queued for the next sync; and `reply` and `cancel`, the scheduling intents only its sync engine can perform.
+pimdir covers `status`, reporting the account being read, every account the store groups collections under, how much of each calendar is downloaded, how many creations are queued for the next sync, and every action the store's owner parked in those calendars, by its queue row (ROW), its calendar, its kind and the error that parked it; and `reply` and `cancel`, the scheduling intents only its sync engine can perform.
 
 A backend MAY exist without a family where its protocol adds nothing the shared surface lacks; a family SHALL NOT push protocol-specific concepts into the shared API instead.
 
@@ -65,7 +65,7 @@ The agenda SHALL render every event whose start falls at a given instant, never 
 
 The events at one instant SHALL print under one time column rather than repeating it, so a duplicated pair reads as two events rather than as two rows that happen to share a time.
 
-Two events may legitimately start at the same moment: two unrelated meetings at 09:00, and, since a collection may hold two resources under one `UID` (pimdir SPEC 9), two copies of what a server considers one identity.
+Two events may legitimately start at the same moment: two unrelated meetings at 09:00, and, since a collection may hold two resources under one `UID` (pimdir STORAGE §9), two copies of what a server considers one identity.
 
 A view keyed by the instant alone shows the last one written and reports nothing, which loses exactly the event the store went to the trouble of keeping.
 
@@ -177,6 +177,14 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 | `body-pending` | a listed item's body is not local yet (pimdir); a sync brings it |
 | `precondition-failed` | a write's `--if-match` names a version the item no longer has (pimdir) |
 | `occurrence-unsupported` | `pimdir reply` or `pimdir cancel` names an occurrence its performer cannot act on alone |
+| `item-duplicate` | a pimdir create names a `UID` its calendar holds or has queued |
+| `store-uncreated` | the pimdir store has no schema yet: its sync engine creates it |
+| `store-newer` | the pimdir store's schema is newer than calendula's: upgrade calendula |
+| `store-foreign` | the pimdir database is not a pimdir store: another program wrote it |
+| `store-stale` | the pimdir store was written by an earlier draft: run or upgrade its sync engine |
+| `store-corrupt` | the pimdir store's two version stamps disagree |
+| `store-hash-algo` | the pimdir store names its bodies by a hash this calendula does not know: upgrade calendula |
+| `store-busy` | another process holds the pimdir store; retry |
 
 #### Scenario: A stale version
 - GIVEN a pimdir event whose body changed since it was read
@@ -198,6 +206,9 @@ Each subcommand SHALL be a clap-derived struct carrying its own arguments, with 
 
 ### Requirement: Output goes to stdout
 All data and errors SHALL go to stdout through the printer, with `--json` switching every command to JSON; stderr SHALL carry logs and prompts only. A command SHALL return a `Serialize + Display` value to the printer rather than printing inline.
+
+### Requirement: account check fails when a backend fails
+`account check` SHALL exercise every backend of the account `--backend` allows and print one verdict per backend when all of them pass. When any fails, it SHALL exit non-zero with one error naming each failed backend and why, so a script reads the outcome from the exit code alone.
 
 ### Requirement: Help is the usage reference
 Each command's doc comment SHALL be its help text: the first paragraph is what `-h` shows, and the full text, ending with the command's JSON output shape, is what `--help` shows.

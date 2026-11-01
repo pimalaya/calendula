@@ -1,13 +1,17 @@
 ---
-cairn: spec
-capability: testing/pimdir-local
-status: current
+cairn: log
+change: pimdir-local-test-report
+landed: 2026-08-28
 ---
 
 # pimdir (local store): shared-command test report
 
+Moved here from cairn/spec/testing/pimdir-local.md on 2026-10-30 (change pimdir-docs-cite-storage-and-sync): it is a dated report, and spec/ holds current truth only. The run read a store synced from the maintainer's personal account, which no test may use any more; that account is not named here. Any rerun uses a store synced from a test account (Google pimalaya.org, Microsoft or Fastmail), never a personal one, and never writes to the account behind it.
+
+What changed since, so the report is not read as current: CD2 was fixed by a-family-page-holds-that-family (2026-09-01), every backend narrowing by kind before it cuts the page; io-replica was folded into io-pimdir on 2026-09-03; `io_pimdir::conventions::calendar` is now `io_pimdir::summary::calendar`; the queue wording observation was settled by a-pimdir-write-says-it-is-queued and the account observation by pimdir-reads-one-account (both 2026-10-30).
+
 - calendula: `--features rustls-ring,pimdir` (working tree; io-pimdir, io-replica and io-webdav at their current git revisions)
-- account: `posteo-local`, the same store the machine's own ~/.calendularc configures, driven here through a throwaway copy of that block in a scratch config (`--config <scratch>/calendula.toml`) so the run could not depend on or disturb the real file
+- account: the local account of the machine's own ~/.calendularc (a personal account's store), driven here through a throwaway copy of that block in a scratch config (`--config <scratch>/calendula.toml`) so the run could not depend on or disturb the real file
 - date: 2026-08-28
 - method: **read-only against a live store**, the first run of this backend against one a sync actually populated.
 
@@ -48,7 +52,7 @@ status: current
 
 ### Bugs / issues
 
-- **CD1: `pimdir status` claimed the store grouped no account: FIXED.** The unset-`pimdir.account` arm printed "Reading account: every collection (none grouped)" while the same report's next line listed `posteo` as a grouped account.
+- **CD1: `pimdir status` claimed the store grouped no account: FIXED.** The unset-`pimdir.account` arm printed "Reading account: every collection (none grouped)" while the same report's next line listed the store's one account as grouped.
 
   Reading every collection and the store grouping none are two different facts, and the message asserted the second from the first. It now reads "every account in the store", which is what the unset case actually does.
 
@@ -120,4 +124,4 @@ The write side is verified too, on a cloned index: `add`, `update` and `remove` 
 
 The body reaches the blob tree under the store's own name before the row that pins it, and the pending overlay makes all three visible before a sync runs.
 
-What no run here proves is the far half: an owner draining those rows and pushing them to Posteo. That needs a sync, and it is the outstanding work on this backend.
+What no run here proves is the far half: an owner draining those rows and pushing them to the server. That needs a sync, and it is the outstanding work on this backend.

@@ -225,6 +225,31 @@ impl CalendarClient {
         }
     }
 
+    /// Whether the backend queues a write for a sync to push rather than
+    /// make it on the server, so a write is confirmed as queued.
+    pub fn queues_writes(&self) -> bool {
+        match &self.config {
+            #[cfg(not(any(
+                feature = "vdir",
+                feature = "caldav",
+                feature = "pimdir",
+                feature = "gcal",
+                feature = "msgraph"
+            )))]
+            BackendConfig::Unused(never) => match *never {},
+            #[cfg(feature = "vdir")]
+            BackendConfig::Vdir(_) => false,
+            #[cfg(feature = "caldav")]
+            BackendConfig::Caldav(_) => false,
+            #[cfg(feature = "pimdir")]
+            BackendConfig::Pimdir(_) => true,
+            #[cfg(feature = "gcal")]
+            BackendConfig::Gcal(_) => false,
+            #[cfg(feature = "msgraph")]
+            BackendConfig::Msgraph(_) => false,
+        }
+    }
+
     /// The open backend, opening it when it is not.
     fn open(&mut self) -> Result<&mut BackendClient> {
         if self.inner.is_none() {

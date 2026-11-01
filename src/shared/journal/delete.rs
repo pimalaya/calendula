@@ -38,6 +38,9 @@ impl JournalDeleteCommand {
             self.if_match.as_deref(),
             None,
         )?;
-        printer.out(Message::new("Journal entry successfully deleted"))
+        printer.out(Message::new(match client.queues_writes() {
+            true => "Journal entry deletion queued for the next sync",
+            false => "Journal entry successfully deleted",
+        }))
     }
 }
