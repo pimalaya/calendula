@@ -5,16 +5,20 @@
 
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::printer::{Message, Printer};
+use pimalaya_cli::printer::Printer;
 
-use crate::shared::{arg::CalendarIdArg, client::CalendarClient};
+use crate::shared::{
+    arg::CalendarIdArg,
+    client::CalendarClient,
+    receipt::{Write, WriteReceipt},
+};
 
 /// Delete a single todo.
 ///
 /// Immediate and unconditional: the task is removed with no
 /// confirmation prompt and no copy kept.
 ///
-/// JSON output: `{"message": "..."}`.
+/// JSON output: `{"id", "queued"}`.
 #[derive(Debug, Parser)]
 pub struct TodoDeleteCommand {
     #[command(flatten)]
@@ -36,9 +40,11 @@ impl TodoDeleteCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         client.delete_item(&calendar_id, &self.todo_id, self.if_match.as_deref(), None)?;
-        printer.out(Message::new(match client.queues_writes() {
-            true => "Todo deletion queued for the next sync",
-            false => "Todo successfully deleted",
-        }))
+        printer.out(WriteReceipt {
+            id: self.todo_id,
+            queued: client.queues_writes(),
+            what: "Todo",
+            write: Write::Delete,
+        })
     }
 }

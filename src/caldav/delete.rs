@@ -5,15 +5,15 @@
 
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::printer::{Message, Printer};
+use pimalaya_cli::printer::Printer;
 
-use crate::caldav::client::CaldavClient;
+use crate::{caldav::client::CaldavClient, shared::receipt::IdReceipt};
 
 /// Delete a CalDAV calendar by id.
 ///
 /// The DELETE takes the collection and every resource filed in it.
 ///
-/// JSON output: `{"message": "..."}`.
+/// JSON output: `{"id"}`.
 #[derive(Debug, Parser)]
 pub struct CaldavCalendarDeleteCommand {
     /// Calendar identifier (last path segment of the calendar URL).
@@ -25,7 +25,9 @@ impl CaldavCalendarDeleteCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CaldavClient) -> Result<()> {
         client.delete_calendar(&self.id)?;
 
-        let msg = format!("Calendar `{}` successfully deleted", self.id);
-        printer.out(Message::new(msg))
+        printer.out(IdReceipt {
+            id: self.id,
+            done: "Calendar deleted",
+        })
     }
 }

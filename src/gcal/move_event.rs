@@ -5,9 +5,9 @@
 
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::printer::{Message, Printer};
+use pimalaya_cli::printer::Printer;
 
-use crate::gcal::client::GcalClient;
+use crate::{gcal::client::GcalClient, shared::receipt::IdReceipt};
 
 /// Move an event to another calendar.
 ///
@@ -18,7 +18,7 @@ use crate::gcal::client::GcalClient;
 /// Only a single event moves: an instance of a recurring series cannot
 /// leave its series.
 ///
-/// JSON output: `{"message": "..."}`.
+/// JSON output: `{"id"}`.
 #[derive(Debug, Parser)]
 pub struct GcalMoveCommand {
     /// The calendar currently holding the event. Falls back to
@@ -41,9 +41,9 @@ impl GcalMoveCommand {
 
         client.event_move(&calendar_id, &self.event_id, &self.destination, None)?;
 
-        printer.out(Message::new(format!(
-            "Event `{}` successfully moved to `{}`",
-            self.event_id, self.destination
-        )))
+        printer.out(IdReceipt {
+            id: self.event_id,
+            done: "Event moved",
+        })
     }
 }

@@ -41,7 +41,7 @@ use crate::shared::{
 ///
 /// JSON output: `{"contents", "method", "events": [...]}`, the raw
 /// iCalendar as text, the calendar's `METHOD` and its events shaped as
-/// `event read` prints them; or `{"message"}` with `-o`.
+/// `event read` prints them; or `{"path", "size"}` with `-o`.
 #[derive(Debug, Parser)]
 pub struct EventBuildCommand {
     #[command(flatten)]
@@ -157,6 +157,14 @@ mod tests {
     impl Printer for Capture {
         fn out<T: fmt::Display + Serialize>(&mut self, data: T) -> Result<()> {
             self.0.push(serde_json::to_value(data)?);
+            Ok(())
+        }
+
+        fn event<T: std::fmt::Display + serde::Serialize>(&mut self, _event: T) -> Result<()> {
+            Ok(())
+        }
+
+        fn out_bytes(&mut self, _bytes: pimalaya_cli::output::Bytes) -> Result<()> {
             Ok(())
         }
 

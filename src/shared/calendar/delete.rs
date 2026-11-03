@@ -5,13 +5,16 @@
 
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::printer::{Message, Printer};
+use pimalaya_cli::printer::Printer;
 
-use crate::shared::client::CalendarClient;
+use crate::shared::{
+    client::CalendarClient,
+    receipt::{Write, WriteReceipt},
+};
 
 /// Delete the given calendar and every item it contains.
 ///
-/// JSON output: `{"message": "..."}`.
+/// JSON output: `{"id", "queued"}`.
 #[derive(Debug, Parser)]
 pub struct CalendarDeleteCommand {
     /// Calendar to delete.
@@ -26,7 +29,11 @@ impl CalendarDeleteCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
         client.delete_calendar(&self.id)?;
 
-        let msg = format!("Calendar `{}` successfully deleted", self.id);
-        printer.out(Message::new(msg))
+        printer.out(WriteReceipt {
+            id: self.id,
+            queued: client.queues_writes(),
+            what: "Calendar",
+            write: Write::Delete,
+        })
     }
 }

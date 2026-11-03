@@ -6,13 +6,13 @@
 use anyhow::Result;
 use clap::Parser;
 use io_webdav::rfc4791::calendar::CaldavCalendar;
-use pimalaya_cli::printer::{Message, Printer};
+use pimalaya_cli::printer::Printer;
 
-use crate::caldav::client::CaldavClient;
+use crate::{caldav::client::CaldavClient, shared::receipt::IdReceipt};
 
 /// Create a CalDAV calendar under the resolved calendar home-set.
 ///
-/// JSON output: `{"message": "..."}`.
+/// JSON output: `{"id"}`.
 #[derive(Debug, Parser)]
 pub struct CaldavCalendarCreateCommand {
     /// Calendar identifier (last path segment of the calendar URL).
@@ -58,7 +58,9 @@ impl CaldavCalendarCreateCommand {
 
         client.create_calendar(&calendar)?;
 
-        let msg = format!("Calendar `{}` successfully created", self.id);
-        printer.out(Message::new(msg))
+        printer.out(IdReceipt {
+            id: self.id,
+            done: "Calendar created",
+        })
     }
 }

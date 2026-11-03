@@ -4,10 +4,10 @@
 //! prefixed `calendula-`, to the JSON Schema of that command's `--json`
 //! payload. [`JsonSchemaCommand`] writes one file per entry.
 //!
-//! Only a data command appears: a command answering a confirmation
-//! prints a `Message`, whose shape is the printer's rather than
-//! calendula's. A `build`, a `create` and an `update` answer data too,
-//! an abandoned edit being an outcome they report.
+//! Every runnable command appears, a write by its receipt, and a command
+//! printing one of two types is described by both, through `OneOf`. A
+//! `build`, a `create` and an `update` answer data too, an abandoned edit
+//! being an outcome they report.
 //!
 //! Protocol-specific entries are gated behind the same cargo features as
 //! their command modules, so the registry stays coherent under any
@@ -15,26 +15,29 @@
 //!
 //! [`JsonSchemaCommand`]: pimalaya_cli::clap::commands::JsonSchemaCommand
 
-use std::collections::BTreeMap;
-
 use pimalaya_cli::{clap::commands::JsonSchemaRegistry, error::ErrorReport};
-use schemars::schema_for;
+use schemars::JsonSchema;
 
-use crate::error::ErrorCode;
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "vdir"))]
+use crate::shared::receipt::IdReceipt;
+use crate::{
+    error::ErrorCode,
+    shared::{
+        build::{IcalBuildOutput, SavedOutput},
+        receipt::WriteReceipt,
+    },
+};
 
 /// Builds the command-to-schema registry consumed by `json-schema <DIR>`.
 ///
 /// Each value describes the type the command hands to the printer, and
 /// `calendula-error` the failure object every command prints instead.
 pub fn registry() -> JsonSchemaRegistry {
-    let mut schemas = BTreeMap::new();
+    let mut registry = JsonSchemaRegistry::new("calendula", env!("CARGO_PKG_VERSION"));
 
     macro_rules! insert {
         ($key:expr, $ty:ty) => {
-            schemas.insert(
-                $key.to_string(),
-                serde_json::to_value(schema_for!($ty)).unwrap(),
-            );
+            registry.insert::<$ty>($key);
         };
     }
 
@@ -92,9 +95,10 @@ pub fn registry() -> JsonSchemaRegistry {
         crate::shared::item::read::ItemReadOutput
     );
 
+    // NOTE: a build prints the item, or under `-o` the file written.
     insert!(
         "calendula-event-build",
-        crate::shared::event::build::EventBuildOutput
+        OneOf<crate::shared::event::build::EventBuildOutput, SavedOutput>
     );
     insert!(
         "calendula-event-create",
@@ -106,7 +110,7 @@ pub fn registry() -> JsonSchemaRegistry {
     );
     insert!(
         "calendula-todo-build",
-        crate::shared::build::IcalBuildOutput
+        OneOf<IcalBuildOutput, SavedOutput>
     );
     insert!(
         "calendula-todo-create",
@@ -118,7 +122,7 @@ pub fn registry() -> JsonSchemaRegistry {
     );
     insert!(
         "calendula-journal-build",
-        crate::shared::build::IcalBuildOutput
+        OneOf<IcalBuildOutput, SavedOutput>
     );
     insert!(
         "calendula-journal-create",
@@ -130,7 +134,7 @@ pub fn registry() -> JsonSchemaRegistry {
     );
     insert!(
         "calendula-item-build",
-        crate::shared::build::IcalBuildOutput
+        OneOf<IcalBuildOutput, SavedOutput>
     );
     insert!(
         "calendula-item-create",
@@ -140,6 +144,18 @@ pub fn registry() -> JsonSchemaRegistry {
         "calendula-item-update",
         crate::shared::item::update::ItemUpdateOutput
     );
+
+    for key in [
+        "calendula-calendar-create",
+        "calendula-calendar-update",
+        "calendula-calendar-delete",
+        "calendula-event-delete",
+        "calendula-todo-delete",
+        "calendula-journal-delete",
+        "calendula-item-delete",
+    ] {
+        insert!(key, WriteReceipt);
+    }
 
     #[cfg(all(
         feature = "wizard",
@@ -160,6 +176,8 @@ pub fn registry() -> JsonSchemaRegistry {
             "calendula-caldav-list",
             crate::caldav::list::CaldavCalendarListOutput
         );
+        insert!("calendula-caldav-create", IdReceipt);
+        insert!("calendula-caldav-delete", IdReceipt);
     }
 
     #[cfg(feature = "gcal")]
@@ -172,6 +190,11 @@ pub fn registry() -> JsonSchemaRegistry {
             "calendula-gcal-acl-list",
             crate::gcal::acl::list::GcalAclListOutput
         );
+        insert!("calendula-gcal-acl-create", IdReceipt);
+        insert!("calendula-gcal-acl-update", IdReceipt);
+        insert!("calendula-gcal-acl-delete", IdReceipt);
+        insert!("calendula-gcal-move", IdReceipt);
+        insert!("calendula-gcal-quick-add", IdReceipt);
         insert!(
             "calendula-gcal-free-busy",
             crate::gcal::free_busy::GcalFreeBusyOutput
@@ -207,24 +230,48 @@ pub fn registry() -> JsonSchemaRegistry {
     );
 
     #[cfg(feature = "vdir")]
-    insert!(
-        "calendula-vdir-list",
-        crate::vdir::list::VdirCollectionListOutput
-    );
+    {
+        insert!(
+            "calendula-vdir-list",
+            crate::vdir::list::VdirCollectionListOutput
+        );
+        insert!("calendula-vdir-create", IdReceipt);
+        insert!("calendula-vdir-rename", IdReceipt);
+        insert!("calendula-vdir-delete", IdReceipt);
+    }
 
     insert!("calendula-error", ErrorReport<ErrorCode>);
 
-    JsonSchemaRegistry {
-        bin: "calendula",
-        version: env!("CARGO_PKG_VERSION"),
-        schemas,
-    }
+    registry
+}
+
+/// The schema of a command printing one of two types, told apart by their
+/// keys.
+#[derive(JsonSchema)]
+#[serde(untagged)]
+#[allow(dead_code)]
+enum OneOf<A, B> {
+    A(A),
+    B(B),
 }
 
 #[cfg(test)]
 mod tests {
+    use clap::CommandFactory;
+
+    use crate::{cli::CalendulaCli, json_schema::registry};
+
+    /// The commands printing nothing a schema could describe.
+    const SILENT: &[&str] = &["calendula"];
+
     #[test]
     fn every_payload_is_an_object() {
-        assert_eq!(super::registry().non_object_roots(), Vec::<&str>::new());
+        assert_eq!(registry().non_object_roots(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn every_command_is_described() {
+        let problems = registry().check(&CalendulaCli::command(), SILENT);
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
     }
 }

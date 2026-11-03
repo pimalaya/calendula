@@ -4,13 +4,13 @@
 
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::printer::{Message, Printer};
+use pimalaya_cli::printer::Printer;
 
-use crate::gcal::client::GcalClient;
+use crate::{gcal::client::GcalClient, shared::receipt::IdReceipt};
 
 /// Revoke an access control rule.
 ///
-/// JSON output: `{"message": "..."}`.
+/// JSON output: `{"id"}`.
 #[derive(Debug, Parser)]
 pub struct GcalAclDeleteCommand {
     /// The calendar the rule applies to. Falls back to
@@ -28,6 +28,9 @@ impl GcalAclDeleteCommand {
         let calendar_id = client.account.calendar_id(self.calendar_id)?;
         client.acl_rule_delete(&calendar_id, &self.rule_id)?;
 
-        printer.out(Message::new("Rule successfully deleted"))
+        printer.out(IdReceipt {
+            id: self.rule_id,
+            done: "Rule deleted",
+        })
     }
 }

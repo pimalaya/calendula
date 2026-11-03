@@ -5,13 +5,17 @@
 
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::printer::{Message, Printer};
+use pimalaya_cli::printer::Printer;
 
-use crate::shared::{arg::CalendarIdArg, client::CalendarClient};
+use crate::shared::{
+    arg::CalendarIdArg,
+    client::CalendarClient,
+    receipt::{Write, WriteReceipt},
+};
 
 /// Delete a single journal entry.
 ///
-/// JSON output: `{"message": "..."}`.
+/// JSON output: `{"id", "queued"}`.
 #[derive(Debug, Parser)]
 pub struct JournalDeleteCommand {
     #[command(flatten)]
@@ -38,9 +42,11 @@ impl JournalDeleteCommand {
             self.if_match.as_deref(),
             None,
         )?;
-        printer.out(Message::new(match client.queues_writes() {
-            true => "Journal entry deletion queued for the next sync",
-            false => "Journal entry successfully deleted",
-        }))
+        printer.out(WriteReceipt {
+            id: self.journal_id,
+            queued: client.queues_writes(),
+            what: "Journal entry",
+            write: Write::Delete,
+        })
     }
 }

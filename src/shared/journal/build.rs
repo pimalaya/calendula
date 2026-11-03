@@ -18,7 +18,7 @@ use crate::shared::{build::IcalBuildArgs, ical::IcalFamily};
 /// `-i` needs the configured composer.
 ///
 /// JSON output: `{"contents"}`, the raw iCalendar as text, or
-/// `{"message"}` with `-o`.
+/// `{"path", "size"}` with `-o`.
 #[derive(Debug, Parser)]
 pub struct JournalBuildCommand {
     #[command(flatten)]

@@ -240,6 +240,14 @@ mod tests {
             Ok(())
         }
 
+        fn event<T: std::fmt::Display + serde::Serialize>(&mut self, _event: T) -> Result<()> {
+            Ok(())
+        }
+
+        fn out_bytes(&mut self, _bytes: pimalaya_cli::output::Bytes) -> Result<()> {
+            Ok(())
+        }
+
         fn is_json(&self) -> bool {
             true
         }

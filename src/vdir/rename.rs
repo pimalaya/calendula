@@ -6,16 +6,16 @@
 use anyhow::Result;
 use clap::Parser;
 use io_vdir::path::VdirPath;
-use pimalaya_cli::printer::{Message, Printer};
+use pimalaya_cli::printer::Printer;
 
-use crate::vdir::client::VdirClient;
+use crate::{shared::receipt::IdReceipt, vdir::client::VdirClient};
 
 /// Rename a vdir collection directory.
 ///
 /// The id is the directory name, so this renames the directory itself
 /// and leaves the item files inside it untouched.
 ///
-/// JSON output: `{"message": "..."}`.
+/// JSON output: `{"id"}`.
 #[derive(Debug, Parser)]
 pub struct VdirCollectionRenameCommand {
     /// Current collection identifier (directory name).
@@ -33,10 +33,9 @@ impl VdirCollectionRenameCommand {
         let new_id = self.new_id.clone();
         client.rename_collection(path, self.new_id)?;
 
-        let msg = format!(
-            "Collection `{}` successfully renamed to `{new_id}`",
-            self.id
-        );
-        printer.out(Message::new(msg))
+        printer.out(IdReceipt {
+            id: new_id,
+            done: "Collection renamed",
+        })
     }
 }

@@ -5,16 +5,21 @@
 
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::printer::{Message, Printer};
+use pimalaya_cli::printer::Printer;
 
-use crate::shared::{arg::CalendarIdArg, calendar::CalendarDiff, client::CalendarClient};
+use crate::shared::{
+    arg::CalendarIdArg,
+    calendar::CalendarDiff,
+    client::CalendarClient,
+    receipt::{Write, WriteReceipt},
+};
 
 /// Update a calendar's mutable properties.
 ///
 /// Each flag updates only its own field and an omitted one is left untouched.
 /// Pass an empty value to clear an optional field, as in `--description ""`.
 ///
-/// JSON output: `{"message": "..."}`.
+/// JSON output: `{"id", "queued"}`.
 #[derive(Debug, Parser)]
 pub struct CalendarUpdateCommand {
     #[command(flatten)]
@@ -48,7 +53,11 @@ impl CalendarUpdateCommand {
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         client.update_calendar(&calendar_id, patch)?;
 
-        let msg = format!("Calendar `{calendar_id}` successfully updated");
-        printer.out(Message::new(msg))
+        printer.out(WriteReceipt {
+            id: calendar_id,
+            queued: client.queues_writes(),
+            what: "Calendar",
+            write: Write::Update,
+        })
     }
 }

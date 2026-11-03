@@ -4,9 +4,12 @@
 
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::printer::{Message, Printer};
+use pimalaya_cli::printer::Printer;
 
-use crate::shared::client::CalendarClient;
+use crate::shared::{
+    client::CalendarClient,
+    receipt::{Write, WriteReceipt},
+};
 
 /// Create a new calendar.
 ///
@@ -14,7 +17,7 @@ use crate::shared::client::CalendarClient;
 /// commands address the calendar by. Every backend that lets a client name a
 /// collection keeps the id given here; Google mints its own instead.
 ///
-/// JSON output: `{"message": "..."}`.
+/// JSON output: `{"id", "queued"}`.
 #[derive(Debug, Parser)]
 pub struct CalendarCreateCommand {
     /// Stable calendar identifier.
@@ -43,7 +46,11 @@ impl CalendarCreateCommand {
             self.color.as_deref(),
         )?;
 
-        let msg = format!("Calendar `{id}` successfully created");
-        printer.out(Message::new(msg))
+        printer.out(WriteReceipt {
+            id,
+            queued: client.queues_writes(),
+            what: "Calendar",
+            write: Write::Create,
+        })
     }
 }

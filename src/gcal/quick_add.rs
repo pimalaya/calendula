@@ -5,9 +5,9 @@
 
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::printer::{Message, Printer};
+use pimalaya_cli::printer::Printer;
 
-use crate::gcal::client::GcalClient;
+use crate::{gcal::client::GcalClient, shared::receipt::IdReceipt};
 
 /// Create an event from a sentence.
 ///
@@ -16,7 +16,7 @@ use crate::gcal::client::GcalClient;
 /// understands is its own business, which is why this cannot be a shared
 /// command.
 ///
-/// JSON output: `{"message": "..."}`.
+/// JSON output: `{"id"}`.
 #[derive(Debug, Parser)]
 pub struct GcalQuickAddCommand {
     /// The calendar the event lands in. Falls back to
@@ -38,6 +38,9 @@ impl GcalQuickAddCommand {
             .response;
         let id = created.id.unwrap_or_default();
 
-        printer.out(Message::new(format!("Event `{id}` successfully created")))
+        printer.out(IdReceipt {
+            id,
+            done: "Event created",
+        })
     }
 }

@@ -6,16 +6,19 @@
 use anyhow::Result;
 use clap::Parser;
 use io_gcal::v3::rest::acl::GcalAclRule;
-use pimalaya_cli::printer::{Message, Printer};
+use pimalaya_cli::printer::Printer;
 
-use crate::gcal::{acl::GcalAclRuleArgs, client::GcalClient, render};
+use crate::{
+    gcal::{acl::GcalAclRuleArgs, client::GcalClient, render},
+    shared::receipt::IdReceipt,
+};
 
 /// Grant a scope a role on a calendar.
 ///
 /// The rule id is minted by the API from the scope, so it is reported
 /// rather than asked for.
 ///
-/// JSON output: `{"message": "..."}`.
+/// JSON output: `{"id"}`.
 #[derive(Debug, Parser)]
 pub struct GcalAclCreateCommand {
     /// The calendar the rule applies to. Falls back to
@@ -45,6 +48,9 @@ impl GcalAclCreateCommand {
             .response;
         let id = created.id.unwrap_or_default();
 
-        printer.out(Message::new(format!("Rule `{id}` successfully created")))
+        printer.out(IdReceipt {
+            id,
+            done: "Rule created",
+        })
     }
 }

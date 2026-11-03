@@ -6,16 +6,16 @@
 use anyhow::Result;
 use clap::Parser;
 use io_vdir::path::VdirPath;
-use pimalaya_cli::printer::{Message, Printer};
+use pimalaya_cli::printer::Printer;
 
-use crate::vdir::client::VdirClient;
+use crate::{shared::receipt::IdReceipt, vdir::client::VdirClient};
 
 /// Delete a vdir collection.
 ///
 /// Removes the collection directory and every item file in it, without
 /// asking and without a trash to recover them from.
 ///
-/// JSON output: `{"message": "..."}`.
+/// JSON output: `{"id"}`.
 #[derive(Debug, Parser)]
 pub struct VdirCollectionDeleteCommand {
     /// Collection identifier (directory name).
@@ -28,7 +28,9 @@ impl VdirCollectionDeleteCommand {
         let path = VdirPath::new(client.root().as_str()).join(&self.id);
         client.delete_collection(path)?;
 
-        let msg = format!("Collection `{}` successfully deleted", self.id);
-        printer.out(Message::new(msg))
+        printer.out(IdReceipt {
+            id: self.id,
+            done: "Collection deleted",
+        })
     }
 }

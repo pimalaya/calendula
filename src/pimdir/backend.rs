@@ -2645,6 +2645,14 @@ mod tests {
                 Ok(())
             }
 
+            fn event<T: std::fmt::Display + serde::Serialize>(&mut self, _event: T) -> Result<()> {
+                Ok(())
+            }
+
+            fn out_bytes(&mut self, _bytes: pimalaya_cli::output::Bytes) -> Result<()> {
+                Ok(())
+            }
+
             fn is_json(&self) -> bool {
                 false
             }
@@ -2686,7 +2694,10 @@ mod tests {
             lines[1],
             format!("Event `{}` update queued for the next sync", ids[0])
         );
-        assert_eq!(lines[2], "Event deletion queued for the next sync");
+        assert_eq!(
+            lines[2],
+            format!("Event `{}` deletion queued for the next sync", ids[0])
+        );
     }
 
     /// A collector holds the staging lock exclusively across its file

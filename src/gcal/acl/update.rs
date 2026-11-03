@@ -6,16 +6,19 @@
 use anyhow::Result;
 use clap::Parser;
 use io_gcal::v3::rest::acl::GcalAclRule;
-use pimalaya_cli::printer::{Message, Printer};
+use pimalaya_cli::printer::Printer;
 
-use crate::gcal::{acl::GcalAclRuleArgs, client::GcalClient, render};
+use crate::{
+    gcal::{acl::GcalAclRuleArgs, client::GcalClient, render},
+    shared::receipt::IdReceipt,
+};
 
 /// Change the role a rule grants.
 ///
 /// The rule is addressed by the id a listing showed, and the scope is
 /// restated because the API replaces the whole rule.
 ///
-/// JSON output: `{"message": "..."}`.
+/// JSON output: `{"id"}`.
 #[derive(Debug, Parser)]
 pub struct GcalAclUpdateCommand {
     /// The calendar the rule applies to. Falls back to
@@ -46,6 +49,9 @@ impl GcalAclUpdateCommand {
 
         client.acl_rule_update(&calendar_id, &self.rule_id, &rule, Some(self.notify))?;
 
-        printer.out(Message::new("Rule successfully updated"))
+        printer.out(IdReceipt {
+            id: self.rule_id,
+            done: "Rule updated",
+        })
     }
 }

@@ -5,13 +5,17 @@
 
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::printer::{Message, Printer};
+use pimalaya_cli::printer::Printer;
 
-use crate::shared::{arg::CalendarIdArg, client::CalendarClient};
+use crate::shared::{
+    arg::CalendarIdArg,
+    client::CalendarClient,
+    receipt::{Write, WriteReceipt},
+};
 
 /// Delete a single iCalendar item.
 ///
-/// JSON output: `{"message": "..."}`.
+/// JSON output: `{"id", "queued"}`.
 #[derive(Debug, Parser)]
 pub struct ItemDeleteCommand {
     #[command(flatten)]
@@ -33,9 +37,11 @@ impl ItemDeleteCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         client.delete_item(&calendar_id, &self.item_id, self.if_match.as_deref(), None)?;
-        printer.out(Message::new(match client.queues_writes() {
-            true => "Item deletion queued for the next sync",
-            false => "Item successfully deleted",
-        }))
+        printer.out(WriteReceipt {
+            id: self.item_id,
+            queued: client.queues_writes(),
+            what: "Item",
+            write: Write::Delete,
+        })
     }
 }

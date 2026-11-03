@@ -5,7 +5,7 @@
 
 use anyhow::{Result, bail};
 use clap::Parser;
-use pimalaya_cli::printer::{Message, Printer};
+use pimalaya_cli::printer::Printer;
 
 use crate::shared::{
     arg::{CalendarIdArg, SendUpdatesArg},
@@ -13,6 +13,7 @@ use crate::shared::{
     event::Event,
     ical::IcalFamily,
     item::{CalendarItem, CalendarItemQuery},
+    receipt::{Write, WriteReceipt},
 };
 
 /// Delete a single event.
@@ -25,7 +26,7 @@ use crate::shared::{
 /// `UID`. The id is tried first; a `UID` carried by several items of the
 /// calendar is refused, naming their ids.
 ///
-/// JSON output: `{"message": "..."}`.
+/// JSON output: `{"id", "queued"}`.
 #[derive(Debug, Parser)]
 pub struct EventDeleteCommand {
     #[command(flatten)]
@@ -61,10 +62,12 @@ impl EventDeleteCommand {
             self.if_match.as_deref(),
             self.send_updates.send_updates,
         )?;
-        printer.out(Message::new(match client.queues_writes() {
-            true => "Event deletion queued for the next sync",
-            false => "Event successfully deleted",
-        }))
+        printer.out(WriteReceipt {
+            id: item_id,
+            queued: client.queues_writes(),
+            what: "Event",
+            write: Write::Delete,
+        })
     }
 }
 
