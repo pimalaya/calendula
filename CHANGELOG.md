@@ -68,6 +68,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Fixed `pimdir reply` and `pimdir cancel` queueing their intent unchecked when the event's body blob is missing from the store: they now fail, as `event read` does.
 - Fixed the wizard taking a folder holding only a blob tree (`objects/`) for a pimdir store, which then failed on its first command: a store is detected by its `pimdir.db`.
 - Fixed `account check` exiting 0 when a backend failed: it now fails, naming each failed backend and why.
+- Fixed `event agenda` reading a lone month name as a year: `event agenda noviembre` drew the whole current year, where cal draws that month. It now draws that month of the current year, a lone number still being a year. A day that is not a number or not in the month, a month matching no name, a month number outside 1-12 or an unreadable year is refused, naming the value, instead of drawing the 1st, January or the current year.
 - Fixed `event agenda` placing a recurring series once, at its first start: a yearly event created years ago marked none of the days on screen. The agenda now reads the days its grid draws and expands each series over them, as `event list --from/--to` does.
 - Fixed the composed-item check refusing a whole-day, a zoned or an organized event: a `DATE` value and a `TZID` on `DTSTART`, `DTEND`, `DUE`, `RECURRENCE-ID`, `EXDATE` and `RDATE`, and a `CN` on `ORGANIZER`, all of which RFC 5545 allows.
 - Fixed a `TZID` with a leading slash (`/Europe/Paris`) read in the local zone rather than its own.

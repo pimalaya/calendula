@@ -18,7 +18,7 @@ use std::{
     fmt::{self, Write},
 };
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use chrono::{Datelike, Local, Locale, Months, NaiveDate, NaiveDateTime};
 use clap::Parser;
 use pimalaya_cli::printer::Printer;
@@ -63,7 +63,8 @@ pub struct EventAgendaCommand {
     ///
     /// Accepts `YEAR`, `MONTH YEAR` or `DAY MONTH YEAR`, the month
     /// being a number or a name, in English or in the language of the
-    /// time locale. A lone year shows the whole year.
+    /// time locale. A lone year shows the whole year; a lone month name
+    /// shows that month of the current year.
     #[arg(name = "DATE")]
     date_args: Vec<String>,
 
@@ -213,21 +214,25 @@ impl EventAgendaCommand {
 
         match self.date_args.len() {
             3 => {
-                ctl.req.day = self.date_args[0].parse().unwrap_or(1);
-                ctl.req.month = parse_month(&self.date_args[1], &ctl.names);
-                ctl.req.year = self.date_args[2].parse().unwrap_or(now.year());
+                ctl.req.month = parse_month(&self.date_args[1], &ctl.names)?;
+                ctl.req.year = parse_year(&self.date_args[2])?;
                 let dm = DAYS_IN_MONTH[leap_year(&ctl, ctl.req.year)][ctl.req.month];
-                if ctl.req.day > dm as i32 {
-                    bail!("Illegal day value: use 1-{dm}");
-                }
+                ctl.req.day = parse_day(&self.date_args[0], dm)?;
                 ctl.req.day = day_in_year(&ctl, ctl.req.day, ctl.req.month, ctl.req.year);
             }
             2 => {
-                ctl.req.month = parse_month(&self.date_args[0], &ctl.names);
-                ctl.req.year = self.date_args[1].parse().unwrap_or(now.year());
+                ctl.req.month = parse_month(&self.date_args[0], &ctl.names)?;
+                ctl.req.year = parse_year(&self.date_args[1])?;
+            }
+            // NOTE: as in cal, a lone number is a year and a lone name is
+            // that month of the current year.
+            1 if self.date_args[0].parse::<i32>().is_err() => {
+                ctl.req.day = now.ordinal() as i32;
+                ctl.req.month = parse_month(&self.date_args[0], &ctl.names)?;
+                ctl.req.year = now.year();
             }
             1 => {
-                ctl.req.year = self.date_args[0].parse().unwrap_or(now.year());
+                ctl.req.year = parse_year(&self.date_args[0])?;
                 if ctl.req.year < 1 {
                     bail!("Illegal year value: use positive integer");
                 }
@@ -437,22 +442,35 @@ fn pad_right(grid: &mut String, s: &str, width: usize) -> fmt::Result {
     write!(grid, "{s}{}", " ".repeat(pad))
 }
 
-fn parse_month(s: &str, names: &Names) -> usize {
-    if let Ok(m) = s.parse::<usize>()
-        && (1..=12).contains(&m)
-    {
-        return m;
+fn parse_day(s: &str, days_in_month: usize) -> Result<i32> {
+    match s.parse::<usize>() {
+        Ok(d) if (1..=days_in_month).contains(&d) => Ok(d as i32),
+        _ => bail!("Illegal day value: {s}: use 1-{days_in_month}"),
+    }
+}
+
+fn parse_year(s: &str) -> Result<i32> {
+    s.parse()
+        .map_err(|_| anyhow!("Illegal year value: {s}: use positive integer"))
+}
+
+fn parse_month(s: &str, names: &Names) -> Result<usize> {
+    if let Ok(m) = s.parse::<usize>() {
+        if (1..=12).contains(&m) {
+            return Ok(m);
+        }
+        bail!("Illegal month value: {s}: use 1-12");
     }
     let lower = s.to_lowercase();
     let english = Names::new(Locale::POSIX);
     for list in [&names.months, &english.months] {
         for (i, name) in list.iter().enumerate() {
             if name.to_lowercase().starts_with(&lower) {
-                return i + 1;
+                return Ok(i + 1);
             }
         }
     }
-    1
+    bail!("Unknown month name: {s}")
 }
 
 fn leap_year(ctl: &CalControl, year: i32) -> usize {
@@ -1374,10 +1392,32 @@ mod tests {
     fn a_month_is_read_in_english_or_in_the_locale() {
         let names = Names::new(Locale::es_ES);
 
-        assert_eq!(parse_month("octubre", &names), 10);
-        assert_eq!(parse_month("October", &names), 10);
-        assert_eq!(parse_month("ago", &names), 8);
-        assert_eq!(parse_month("10", &names), 10);
+        assert_eq!(parse_month("octubre", &names).unwrap(), 10);
+        assert_eq!(parse_month("October", &names).unwrap(), 10);
+        assert_eq!(parse_month("ago", &names).unwrap(), 8);
+        assert_eq!(parse_month("10", &names).unwrap(), 10);
+    }
+
+    #[test]
+    fn an_unknown_month_is_refused() {
+        let names = Names::new(Locale::es_ES);
+
+        assert!(parse_month("novembre", &names).is_err());
+        assert!(parse_month("13", &names).is_err());
+    }
+
+    #[test]
+    fn an_unreadable_day_is_refused() {
+        assert_eq!(parse_day("30", 30).unwrap(), 30);
+        assert!(parse_day("31", 30).is_err());
+        assert!(parse_day("0", 30).is_err());
+        assert!(parse_day("1O", 30).is_err());
+    }
+
+    #[test]
+    fn an_unreadable_year_is_refused() {
+        assert_eq!(parse_year("2026").unwrap(), 2026);
+        assert!(parse_year("2O26").is_err());
     }
 
     #[test]
