@@ -1268,8 +1268,28 @@ mod tests {
             .err()
             .unwrap()
             .to_string();
+        // NOTE: a terminal stdout (a Nix builder's pty) colours the drawing.
+        let drawn = strip_ansi(&drawn);
         assert!(drawn.contains("frm:alice"), "{drawn}");
         assert!(drawn.contains("fields: "), "{drawn}");
+    }
+
+    /// `text` without its ANSI escape sequences.
+    fn strip_ansi(text: &str) -> String {
+        let mut plain = String::with_capacity(text.len());
+        let mut chars = text.chars();
+        while let Some(c) = chars.next() {
+            if c != '\x1b' {
+                plain.push(c);
+                continue;
+            }
+            for c in chars.by_ref() {
+                if c.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        }
+        plain
     }
 
     #[test]
