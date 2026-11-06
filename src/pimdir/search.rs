@@ -6,7 +6,7 @@ use std::fmt;
 
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
-use io_pimdir::client::search::{PimdirSearchClock, PimdirSearchOptions, PimdirSearchSort};
+use io_pimdir::client::search::{PimdirSearchOptions, PimdirSearchSort};
 use jiff::tz::TimeZone;
 use pimalaya_cli::{
     printer::Printer,
@@ -19,8 +19,8 @@ use crate::{
     pimdir::{
         backend::PimdirBackend,
         index::{
-            PimdirCalendarCoverage, PimdirCalendarHit, PimdirCalendarHits, PimdirSearchKind,
-            parse_query,
+            PimdirCalendarCoverage, PimdirCalendarHit, PimdirCalendarHits, PimdirCalendarZones,
+            PimdirSearchKind, parse_query, search_clock,
         },
     },
     shared::event::list::table_times,
@@ -35,10 +35,11 @@ use crate::{
 /// events by default, in every calendar unless `-k` names one.
 ///
 /// `date:` matches occurrences, a series included. Days, `today` and
-/// `yesterday` are UTC days, not local ones.
+/// `yesterday` are read in the local zone (`TZ`, then the system's).
 ///
 /// The answer is the index as the sync engine last refreshed it: a queued
-/// write is not in it. A line under the table says what it could not see.
+/// write is not in it. A line under the table says what it could not see,
+/// another names the index's zone when it reads floating times in another.
 ///
 /// JSON output: `{"hits": [{...the kind's projection, "calendarId",
 /// "matched", "snippet"}], "more", "coverage": {"complete", "bodiless",
@@ -120,7 +121,7 @@ impl PimdirSearchCommand {
             sort: self.sort.into(),
             limit,
             offset: page.saturating_mul(limit),
-            clock: PimdirSearchClock::default(),
+            clock: search_clock(),
         };
 
         let page =
@@ -138,6 +139,7 @@ impl PimdirSearchCommand {
             hits: page.hits,
             more: page.more,
             coverage: page.coverage,
+            zones: page.zones,
         })
     }
 }
@@ -190,6 +192,9 @@ pub struct PimdirSearchOutput {
     pub more: bool,
     /// What the answer could not see.
     pub coverage: PimdirCalendarCoverage,
+    /// The zones, when the index reads floating times in another.
+    #[serde(skip)]
+    pub zones: Option<PimdirCalendarZones>,
 }
 
 impl fmt::Display for PimdirSearchOutput {
@@ -267,7 +272,12 @@ impl fmt::Display for PimdirSearchOutput {
 
         writeln!(f)?;
         writeln!(f, "{table}")?;
-        write!(f, "{}", self.coverage)
+        write!(f, "{}", self.coverage)?;
+        if let Some(zones) = &self.zones {
+            write!(f, "{zones}")?;
+        }
+
+        Ok(())
     }
 }
 
@@ -309,7 +319,7 @@ mod tests {
         pimdir::{
             index::{
                 PimdirCalendarCoverage, PimdirCalendarHit, PimdirCalendarHits,
-                PimdirCalendarMatched,
+                PimdirCalendarMatched, PimdirCalendarZones,
             },
             search::{PimdirSearchOutput, PimdirSearchTable},
         },
@@ -317,7 +327,7 @@ mod tests {
     };
 
     #[test]
-    fn a_todo_answer_renders_its_family_columns_and_its_coverage() {
+    fn a_todo_answer_renders_its_family_columns_coverage_and_zones() {
         let output = PimdirSearchOutput {
             table: PimdirSearchTable {
                 style: style_from_preset("||--+==+|-+||++++++"),
@@ -343,6 +353,10 @@ mod tests {
                 bodiless: 1,
                 ..Default::default()
             },
+            zones: Some(PimdirCalendarZones {
+                index: "UTC".into(),
+                search: "Europe/Paris".into(),
+            }),
         };
 
         let shown = output.to_string();
@@ -356,12 +370,17 @@ mod tests {
         for cell in ["IN-PROCESS", "40%", "cal", "summary", "the budget"] {
             assert!(shown.contains(cell), "{shown}");
         }
+        let [.., incomplete, zones] = lines.as_slice() else {
+            panic!("{shown}");
+        };
         assert!(
-            lines
-                .last()
-                .unwrap()
-                .starts_with("Incomplete: 1 item(s) have no local body"),
+            incomplete.starts_with("Incomplete: 1 item(s) have no local body"),
             "{shown}"
+        );
+        assert_eq!(
+            *zones,
+            "The index reads floating times and dates in UTC, this search reads days in \
+             Europe/Paris"
         );
     }
 }

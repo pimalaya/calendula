@@ -45,12 +45,12 @@ clap = { version = "4.4", features = ["derive", "env", "wrap_help"] }
 crossterm = { version = "0.29", default-features = false, features = ["serde"] }
 getrandom = "0.4"
 humansize = "2"
-ical-rs = { version = "0.6", default-features = false, features = ["parser", "tzdb"] }
+ical-rs = { version = "0.7", default-features = false, features = ["parser", "tzdb"] }
 io-gcal = { version = "0.2", default-features = false, features = ["client"], optional = true }
 io-msgraph = { version = "0.6", default-features = false, optional = true }
 io-http = { version = "0.6", default-features = false, optional = true }
 io-pim-discovery = { version = "0.9", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "stream"] }
-io-pimdir = { version = "0.8", default-features = false, features = ["client"], optional = true }
+io-pimdir = { version = "0.9", default-features = false, features = ["client"], optional = true }
 io-vdir = { version = "0.2", default-features = false, features = ["client", "serde"], optional = true }
 io-webdav = { version = "0.7", default-features = false, features = ["client"], optional = true }
 jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-bundle-always"] }
@@ -71,4 +71,4 @@ ical-rs = { git = "https://github.com/pimalaya/ical", rev = "99b92736a6a076c7293
 io-gcal = { git = "https://github.com/pimalaya/io-gcal", rev = "90537616dd6d7659c6bfe81df9b4a1428e143f06" }
 io-http = { git = "https://github.com/pimalaya/io-http", rev = "e1815307771c1ec65a86b77256d46c33241d3038" }
 io-msgraph = { git = "https://github.com/pimalaya/io-msgraph", rev = "2ae26370aefa671c16316dbad98107634436bce6" }
-io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "0c701447473a03e5cf9effcd0039a49a78419c4d" }
+io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "5c18a026b9c85b470984192452c2aa66e060a3fe" }

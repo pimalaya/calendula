@@ -4,10 +4,10 @@
 
 ### pimdir store
 
-The pimdir backend follows pimdir storage-draft-08, and a store is never migrated: one any earlier neverest wrote is refused with the code `store-version`. Reinstall it, in this order, so no queued write is lost:
+The pimdir backend follows pimdir storage-draft-09, and a store is never migrated: one any earlier neverest wrote is refused with the code `store-version`. Reinstall it, in this order, so no queued write is lost:
 
 1. Run `neverest sync` with the neverest that wrote the store until nothing is queued: the writes calendula queued live in that store alone.
-2. Upgrade to a neverest following storage-draft-08.
+2. Upgrade to a neverest following storage-draft-09.
 3. Run `neverest sync --reset --force -a <account>`, which moves the store aside into a sibling `<dir>.reset-<instant>` directory, deleting nothing, and syncs a new one.
 
 The store keeps its path, so `pimdir.root` does not change.

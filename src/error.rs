@@ -67,8 +67,8 @@ pub enum ErrorCode {
     /// The pimdir search index is of another draft or shape: its sync
     /// engine rebuilds one of an earlier draft, and leaves any other.
     IndexVersion,
-    /// The zone the pimdir search index reads floating times in is not
-    /// one of the IANA time zone database.
+    /// The zone the pimdir search index reads floating times in, or the one
+    /// a search reads days in, is not one of the IANA time zone database.
     IndexZoneUnknown,
     /// The SQLite calendula links lacks what the pimdir search index
     /// needs (FTS5, 3.43 or later).

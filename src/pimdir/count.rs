@@ -12,12 +12,14 @@ use serde::Serialize;
 
 use crate::pimdir::{
     backend::PimdirBackend,
-    index::{PimdirCalendarCoverage, PimdirSearchKind, parse_query},
+    index::{
+        PimdirCalendarCoverage, PimdirCalendarZones, PimdirSearchKind, parse_query, search_clock,
+    },
 };
 
 /// Count the account's items a query matches.
 ///
-/// Takes what `pimdir search` takes, days read in UTC.
+/// Takes what `pimdir search` takes.
 ///
 /// JSON output: `{"count", "coverage": {"complete", "bodiless",
 /// "unindexed", "behind", "since", "until", "filling", "horizonLeft",
@@ -45,15 +47,18 @@ impl PimdirCountCommand {
             backend.known_collection(calendar)?;
         }
 
-        let (count, coverage) =
-            backend
-                .client
-                .count_items(query, self.kind, self.calendar.as_deref())?;
+        let count = backend.client.count_items(
+            query,
+            self.kind,
+            self.calendar.as_deref(),
+            &search_clock(),
+        )?;
 
         printer.out(PimdirCountOutput {
             kind: self.kind,
-            count,
-            coverage,
+            count: count.count,
+            coverage: count.coverage,
+            zones: count.zones,
         })
     }
 }
@@ -69,6 +74,9 @@ pub struct PimdirCountOutput {
     pub count: u64,
     /// What the count could not see.
     pub coverage: PimdirCalendarCoverage,
+    /// The zones, when the index reads floating times in another.
+    #[serde(skip)]
+    pub zones: Option<PimdirCalendarZones>,
 }
 
 impl fmt::Display for PimdirCountOutput {
@@ -80,6 +88,11 @@ impl fmt::Display for PimdirCountOutput {
         };
 
         writeln!(f, "{} {kind}", self.count)?;
-        write!(f, "{}", self.coverage)
+        write!(f, "{}", self.coverage)?;
+        if let Some(zones) = &self.zones {
+            write!(f, "{zones}")?;
+        }
+
+        Ok(())
     }
 }

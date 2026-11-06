@@ -268,7 +268,7 @@ pimdir.root = "~/.local/state/neverest/example"
 
 Run `calendula pimdir status` to see which account you are reading, how much of each calendar is downloaded, and how many creations are still queued. An item that is listed but not downloaded reads as "body not fetched" until a sync hydrates it.
 
-Run `calendula pimdir search <query>` to search the account's events (`--kind todo` or `journal` for the others) through the search index the sync engine keeps, in the [pimdir SEARCH](https://github.com/pimalaya/pimdir) query language: `budget location:lisbon`, `attendee:carol@example.org date:2026-11`, `--kind todo status:in-process priority:high`. Days are read in UTC for now, and a write still queued shows once a sync indexed it. `calendula pimdir count <query>` counts the same.
+Run `calendula pimdir search <query>` to search the account's events (`--kind todo` or `journal` for the others) through the search index the sync engine keeps, in the [pimdir SEARCH](https://github.com/pimalaya/pimdir) query language: `budget location:lisbon`, `attendee:carol@example.org date:2026-11`, `--kind todo status:in-process priority:high`. Days, `today` and `yesterday` are read in the local zone (`TZ`, then the system's); a line under the table names the index's zone when the sync engine reads floating times and dates in another. A write still queued shows once a sync indexed it. `calendula pimdir count <query>` counts the same.
 
 ## Usage
 

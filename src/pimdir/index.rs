@@ -25,6 +25,8 @@ use io_pimdir::{
     },
     summary::{PimdirSummary, calendar::PimdirTime},
 };
+use jiff::tz::TimeZone;
+use log::warn;
 use pimalaya_cli::error::CodedError;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -114,25 +116,29 @@ impl PimdirClient {
             hits,
             more: answer.more,
             coverage: PimdirCalendarCoverage::from(&answer.coverage),
+            zones: PimdirCalendarZones::of(&index, &options.clock)?,
         })
     }
 
-    /// How many items of `kind` `query` matches in the account.
+    /// How many items of `kind` `query` matches in the account, its dates
+    /// read against `clock`.
     pub fn count_items(
         &self,
         query: PimdirQuery,
         kind: PimdirSearchKind,
         calendar: Option<&str>,
-    ) -> Result<(u64, PimdirCalendarCoverage)> {
-        let answer = self
-            .index()?
-            .count(
-                &self.scope(query, kind, calendar),
-                &PimdirSearchClock::default(),
-            )
+        clock: &PimdirSearchClock,
+    ) -> Result<PimdirCalendarCount> {
+        let index = self.index()?;
+        let answer = index
+            .count(&self.scope(query, kind, calendar), clock)
             .map_err(|err| store_error(err, "Count in the pimdir index"))?;
 
-        Ok((answer.count, PimdirCalendarCoverage::from(&answer.coverage)))
+        Ok(PimdirCalendarCount {
+            count: answer.count,
+            coverage: PimdirCalendarCoverage::from(&answer.coverage),
+            zones: PimdirCalendarZones::of(&index, clock)?,
+        })
     }
 
     /// Opens the store's search index read-only.
@@ -198,6 +204,20 @@ impl From<PimdirSearchKind> for PimdirQueryKind {
             PimdirSearchKind::Journal => Self::Journal,
         }
     }
+}
+
+/// The clock of a search: now, in the zone the tables read times in
+/// (`TZ`, then the system's), UTC when that zone has no IANA name.
+pub fn search_clock() -> PimdirSearchClock {
+    let zone = TimeZone::try_system()
+        .ok()
+        .and_then(|zone| zone.iana_name().map(ToOwned::to_owned));
+
+    if zone.is_none() {
+        warn!("cannot name the local time zone, reading search days in UTC; set TZ");
+    }
+
+    PimdirSearchClock { now: None, zone }
 }
 
 /// Parses the words of a query, joined by spaces (pimdir SEARCH §8.3),
@@ -267,6 +287,51 @@ pub struct PimdirCalendarPage {
     pub more: bool,
     /// What the answer could not see.
     pub coverage: PimdirCalendarCoverage,
+    /// The zones, when the index reads floating times in another.
+    pub zones: Option<PimdirCalendarZones>,
+}
+
+/// A count of hits.
+pub struct PimdirCalendarCount {
+    /// How many items the query matches.
+    pub count: u64,
+    /// What the count could not see.
+    pub coverage: PimdirCalendarCoverage,
+    /// The zones, when the index reads floating times in another.
+    pub zones: Option<PimdirCalendarZones>,
+}
+
+/// The zones of an index reading floating times and dates in another zone
+/// than the search reads days in (pimdir SEARCH §7, §8.1).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PimdirCalendarZones {
+    /// The zone the index reads floating times and dates in.
+    pub index: String,
+    /// The zone the search reads days in.
+    pub search: String,
+}
+
+impl PimdirCalendarZones {
+    /// The zones of `index` and `clock`, `None` when they are one.
+    fn of(index: &PimdirIndex, clock: &PimdirSearchClock) -> Result<Option<Self>> {
+        let index = index
+            .floating_zone()
+            .map_err(|err| store_error(err, "Read the zone of the pimdir index"))?;
+        let search = clock.zone.clone().unwrap_or_else(|| String::from("UTC"));
+
+        Ok((index != search).then_some(Self { index, search }))
+    }
+}
+
+/// The line under a table.
+impl fmt::Display for PimdirCalendarZones {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "The index reads floating times and dates in {}, this search reads days in {}",
+            self.index, self.search
+        )
+    }
 }
 
 /// The hits of one kind.
@@ -559,7 +624,9 @@ mod tests {
         change::PimdirWriteOp,
         client::{
             PimdirStore,
-            search::{PimdirIndex, PimdirIndexRefreshOptions, PimdirSearchOptions},
+            search::{
+                PimdirIndex, PimdirIndexRefreshOptions, PimdirSearchClock, PimdirSearchOptions,
+            },
         },
         collection::PimdirCollectionId,
         placement::{
@@ -582,7 +649,7 @@ mod tests {
             client::PimdirClient,
             index::{
                 PimdirCalendarCoverage, PimdirCalendarHits, PimdirCalendarMatched,
-                PimdirCalendarPage, PimdirSearchKind, parse_query,
+                PimdirCalendarPage, PimdirCalendarZones, PimdirSearchKind, parse_query,
             },
         },
     };
@@ -774,6 +841,63 @@ mod tests {
         summaries(client, text, PimdirSearchKind::Event, None)
     }
 
+    /// A clock at [`NOW`] reading days in `zone`.
+    fn clock(zone: &str) -> PimdirSearchClock {
+        PimdirSearchClock {
+            now: Some(NOW),
+            zone: Some(zone.into()),
+        }
+    }
+
+    /// The summaries of the events `text` matches, its days read in `zone`.
+    fn events_in(client: &PimdirClient, text: &str, zone: &str) -> Vec<String> {
+        let options = PimdirSearchOptions {
+            clock: clock(zone),
+            ..Default::default()
+        };
+        let page = client
+            .search_items(query(text), PimdirSearchKind::Event, None, &options)
+            .unwrap();
+        let PimdirCalendarHits::Events(hits) = page.hits else {
+            panic!("expected events");
+        };
+
+        let mut summaries: Vec<String> = hits.into_iter().map(|hit| hit.item.summary).collect();
+        summaries.sort();
+        summaries
+    }
+
+    /// A store of `items` in `cal`, indexed at [`NOW`] reading floating
+    /// times and dates in `zone`.
+    fn zoned_store(zone: &str, items: &[String]) -> (tempfile::TempDir, PimdirBackend) {
+        let dir = tempfile::tempdir().unwrap();
+        PimdirStore::open(dir.path())
+            .unwrap()
+            .ensure_collection("cal", "text/calendar")
+            .unwrap();
+
+        let mut backend = backend(dir.path(), None);
+        for item in items {
+            backend
+                .create_item("cal", item.clone().into_bytes())
+                .unwrap();
+        }
+
+        let mut owner = PimdirStore::open(dir.path()).unwrap().for_source("caldav");
+        owner.drain().unwrap();
+        drop(owner);
+        PimdirIndex::open(dir.path())
+            .unwrap()
+            .refresh(&PimdirIndexRefreshOptions {
+                now: Some(NOW),
+                floating_zone: zone.into(),
+                ..Default::default()
+            })
+            .unwrap();
+
+        (dir, backend)
+    }
+
     #[test]
     fn a_word_of_a_description_is_found_with_its_snippet() {
         let (_dir, backend) = indexed_store();
@@ -826,11 +950,94 @@ mod tests {
     }
 
     #[test]
-    fn a_day_is_a_utc_day() {
-        let (_dir, backend) = indexed_store();
+    fn a_day_is_the_local_day() {
+        let late = body(
+            "VEVENT",
+            "late",
+            "DTSTART;TZID=Europe/Paris:20261107T003000\r\n\
+             DTEND;TZID=Europe/Paris:20261107T013000\r\nSUMMARY:Late call\r\n",
+        );
+        let (_dir, backend) = zoned_store("Europe/Paris", &[late]);
+        let client = &backend.client;
 
-        assert_eq!(events(&backend.client, "date:2026-11-07"), ["Offsite"]);
-        assert!(events(&backend.client, "date:2026-11-06").is_empty());
+        assert_eq!(
+            events_in(client, "date:2026-11-07", "Europe/Paris"),
+            ["Late call"]
+        );
+        assert!(events_in(client, "date:2026-11-06", "Europe/Paris").is_empty());
+
+        let count = client
+            .count_items(
+                query("date:2026-11-07"),
+                PimdirSearchKind::Event,
+                None,
+                &clock("Europe/Paris"),
+            )
+            .unwrap();
+        assert_eq!(count.count, 1);
+        assert_eq!(count.zones, None);
+    }
+
+    #[test]
+    fn an_all_day_event_stays_on_its_day() {
+        let holiday = body(
+            "VEVENT",
+            "holiday",
+            "DTSTART;VALUE=DATE:20261107\r\nDTEND;VALUE=DATE:20261108\r\n\
+             SUMMARY:Holiday\r\n",
+        );
+
+        for zone in ["Europe/Paris", "America/New_York"] {
+            let (_dir, backend) = zoned_store(zone, std::slice::from_ref(&holiday));
+            let client = &backend.client;
+
+            assert_eq!(events_in(client, "date:2026-11-07", zone), ["Holiday"]);
+            assert!(
+                events_in(client, "date:2026-11-06", zone).is_empty(),
+                "{zone}"
+            );
+            assert!(
+                events_in(client, "date:2026-11-08", zone).is_empty(),
+                "{zone}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_index_read_in_another_zone_is_named() {
+        let (_dir, backend) = indexed_store();
+        let client = &backend.client;
+        let zones = |clock: PimdirSearchClock| {
+            let options = PimdirSearchOptions {
+                clock: clock.clone(),
+                ..Default::default()
+            };
+            let page = client
+                .search_items(query("budget"), PimdirSearchKind::Event, None, &options)
+                .unwrap();
+            let count = client
+                .count_items(query("budget"), PimdirSearchKind::Event, None, &clock)
+                .unwrap();
+            assert_eq!(page.zones, count.zones);
+            page.zones
+        };
+
+        let paris = zones(clock("Europe/Paris")).unwrap();
+        assert_eq!(
+            paris,
+            PimdirCalendarZones {
+                index: "UTC".into(),
+                search: "Europe/Paris".into(),
+            }
+        );
+        assert_eq!(
+            paris.to_string(),
+            "The index reads floating times and dates in UTC, this search reads days in \
+             Europe/Paris\n"
+        );
+
+        assert_eq!(zones(clock("UTC")), None);
+        assert_eq!(zones(PimdirSearchClock::default()), None);
     }
 
     #[test]
@@ -861,9 +1068,9 @@ mod tests {
         let count = |text, kind| {
             backend
                 .client
-                .count_items(query(text), kind, None)
+                .count_items(query(text), kind, None, &PimdirSearchClock::default())
                 .unwrap()
-                .0
+                .count
         };
         assert_eq!(count("budget", PimdirSearchKind::Event), 2);
         assert_eq!(count("budget", PimdirSearchKind::Todo), 1);
@@ -1078,7 +1285,12 @@ mod tests {
             assert_eq!(code_of(&err), Some(code), "{err:#}");
             let count = backend
                 .client
-                .count_items(query("budget"), PimdirSearchKind::Event, None)
+                .count_items(
+                    query("budget"),
+                    PimdirSearchKind::Event,
+                    None,
+                    &PimdirSearchClock::default(),
+                )
                 .err()
                 .unwrap();
             assert_eq!(code_of(&count), Some(code), "{count:#}");
@@ -1096,19 +1308,19 @@ mod tests {
 
         // NOTE: the version is spelled once, overwritten in place.
         refresh(dir.path());
-        let ours = b"search-draft-08";
+        let ours = io_pimdir::sql::search::FORMAT_VERSION.as_bytes();
         let mut db = std::fs::read(&index).unwrap();
         let at: Vec<usize> = db
             .windows(ours.len())
             .enumerate()
-            .filter(|(_, window)| window == ours)
+            .filter(|(_, window)| *window == ours)
             .map(|(at, _)| at)
             .collect();
         assert_eq!(at.len(), 1, "the version is spelled once");
-        db[at[0]..at[0] + ours.len()].copy_from_slice(b"search-draft-07");
+        db[at[0]..at[0] + ours.len()].copy_from_slice(b"search-draft-08");
         std::fs::write(&index, db).unwrap();
         let err = assert_coded(ErrorCode::IndexVersion);
-        assert!(err.contains("search-draft-07"), "{err}");
+        assert!(err.contains("search-draft-08"), "{err}");
 
         for name in ["index.db", "index.db-wal", "index.db-shm"] {
             let _ = std::fs::remove_file(dir.path().join(name));

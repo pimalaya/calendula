@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: pimdir-search-reads-local-days
-status: active
+status: landed
 created: 2026-11-06
 ---
 
