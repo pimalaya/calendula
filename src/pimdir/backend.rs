@@ -80,9 +80,9 @@ const SCAN_BATCH: usize = 7;
 
 /// The shared-API glue over a pimdir store.
 pub struct PimdirBackend {
-    client: PimdirClient,
-    /// The `calendar.default` of the account, when built from one.
-    calendar_default: Option<String>,
+    pub(crate) client: PimdirClient,
+    /// The account's settings, default when built from no account.
+    pub(crate) account: Account,
 }
 
 impl PimdirBackend {
@@ -90,7 +90,7 @@ impl PimdirBackend {
     pub fn new(config: PimdirConfig) -> Result<Self> {
         Ok(Self {
             client: PimdirClient::new(config)?,
-            calendar_default: None,
+            account: Account::default(),
         })
     }
 
@@ -116,14 +116,14 @@ impl PimdirBackend {
         let account = Account::from(config).merge(Account::from(account_config));
 
         let mut backend = Self::new(pimdir_config)?;
-        backend.calendar_default = account.calendar_default;
+        backend.account = account;
         Ok(backend)
     }
 
     /// The calendar a `pimdir` command operates on: the `-k/--calendar`
     /// flag, then `calendar.default`.
     pub fn calendar_id(&self, flag: Option<String>) -> Result<String> {
-        flag.or_else(|| self.calendar_default.clone())
+        flag.or_else(|| self.account.calendar_default.clone())
             .ok_or_else(|| {
                 anyhow!("Missing calendar id; pass -k/--calendar or set calendar.default")
             })
@@ -513,7 +513,7 @@ impl PimdirBackend {
     /// The read seam answers an unknown collection with an empty page
     /// and the queue takes any name, so a typo in `-k` would read as an
     /// empty calendar and stage into one nothing ever applies.
-    fn known_collection(&self, calendar_id: &str) -> Result<()> {
+    pub(crate) fn known_collection(&self, calendar_id: &str) -> Result<()> {
         let mut ids: Vec<String> = self
             .calendar_collections()?
             .into_iter()

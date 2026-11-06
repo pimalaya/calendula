@@ -58,4 +58,25 @@ pub enum ErrorCode {
     /// A queue action's payload is one its schema refuses: refused before
     /// anything is queued.
     ActionMalformed,
+    /// The pimdir store has no search index yet: its sync engine builds
+    /// it.
+    IndexMissing,
+    /// The pimdir search index was built otherwise or from another store:
+    /// its sync engine rebuilds it.
+    IndexOutdated,
+    /// The pimdir search index is of another draft or shape: its sync
+    /// engine rebuilds one of an earlier draft, and leaves any other.
+    IndexVersion,
+    /// The zone the pimdir search index reads floating times in is not
+    /// one of the IANA time zone database.
+    IndexZoneUnknown,
+    /// The SQLite calendula links lacks what the pimdir search index
+    /// needs (FTS5, 3.43 or later).
+    IndexFts5Missing,
+    /// The pimdir search query is malformed or names an unknown field or
+    /// value: nothing was searched.
+    QueryRefused,
+    /// The pimdir search index could not answer an accepted query, an
+    /// implementation fault.
+    QueryUnanswerable,
 }

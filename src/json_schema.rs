@@ -228,6 +228,16 @@ pub fn registry() -> JsonSchemaRegistry {
         "calendula-pimdir-cancel",
         crate::pimdir::intent::PimdirIntentOutput
     );
+    #[cfg(feature = "pimdir")]
+    insert!(
+        "calendula-pimdir-search",
+        crate::pimdir::search::PimdirSearchOutput
+    );
+    #[cfg(feature = "pimdir")]
+    insert!(
+        "calendula-pimdir-count",
+        crate::pimdir::count::PimdirCountOutput
+    );
 
     #[cfg(feature = "vdir")]
     {

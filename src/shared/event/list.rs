@@ -215,7 +215,7 @@ impl fmt::Display for EventListOutput {
 /// timed event at its instants in `zone`, a whole-day one by its days,
 /// the end inclusive. An event whose times did not resolve shows them
 /// as iCalendar spells them.
-fn table_times(event: &Event, zone: &TimeZone) -> (String, String) {
+pub(crate) fn table_times(event: &Event, zone: &TimeZone) -> (String, String) {
     if event.all_day {
         let start = event
             .starts_at

@@ -1,0 +1,1170 @@
+//! # Pimdir index
+//!
+//! The read-only query client of the store's search index (pimdir
+//! SEARCH), behind `pimdir search` and `pimdir count`.
+
+use std::{
+    fmt,
+    io::{IsTerminal, stdout},
+};
+
+use anyhow::Result;
+use ariadne::{Color, Config, Label, Report, ReportKind, Source};
+use clap::ValueEnum;
+use io_pimdir::{
+    client::{
+        reader::PimdirItem,
+        search::{PimdirIndex, PimdirSearchClock, PimdirSearchMatched, PimdirSearchOptions},
+    },
+    search::{
+        coverage::{PimdirSearchCoverage, PimdirSearchTemporal},
+        query::{
+            PimdirQuery, PimdirQueryError, PimdirQueryErrorCode, PimdirQueryKind,
+            PimdirQueryPredicate, PimdirQueryTerm,
+        },
+    },
+    summary::{PimdirSummary, calendar::PimdirTime},
+};
+use pimalaya_cli::error::CodedError;
+use schemars::JsonSchema;
+use serde::Serialize;
+
+use crate::{
+    error::ErrorCode,
+    pimdir::client::{PimdirClient, store_error},
+    shared::{
+        event::{Event, EventPerson},
+        item::CalendarItem,
+        journal::Journal,
+        todo::Todo,
+    },
+};
+
+impl PimdirClient {
+    /// One page of the items of `kind` `query` matches in the account.
+    pub fn search_items(
+        &self,
+        query: PimdirQuery,
+        kind: PimdirSearchKind,
+        calendar: Option<&str>,
+        options: &PimdirSearchOptions,
+    ) -> Result<PimdirCalendarPage> {
+        let index = self.index()?;
+        let answer = index
+            .search(&self.scope(query, kind, calendar), options)
+            .map_err(|err| store_error(err, "Search the pimdir index"))?;
+
+        let mut hits = match kind {
+            PimdirSearchKind::Event => PimdirCalendarHits::Events(Vec::new()),
+            PimdirSearchKind::Todo => PimdirCalendarHits::Todos(Vec::new()),
+            PimdirSearchKind::Journal => PimdirCalendarHits::Journals(Vec::new()),
+        };
+
+        for hit in answer.hits {
+            let placement = hit
+                .placements
+                .iter()
+                .find(|placement| Some(placement.collection.as_str()) == calendar)
+                .or(hit.placements.first());
+            let Some(calendar_id) = placement.map(|placement| placement.collection.clone()) else {
+                continue;
+            };
+
+            let stored = index
+                .reader()
+                .get_item(&calendar_id, hit.seq)
+                .map_err(|err| store_error(err, format_args!("Read item `{}`", hit.seq)))?;
+            let object = stored.as_ref().and_then(|stored| stored.object.as_ref());
+            let contents = match object {
+                Some(hash) => self.blobs.get(hash)?.unwrap_or_default(),
+                None => Vec::new(),
+            };
+            let item = CalendarItem {
+                id: hit.seq.to_string(),
+                calendar_id: calendar_id.clone(),
+                etag: object.map(|hash| hash.0.clone()),
+                contents,
+            };
+            let matched = hit.matched.map(PimdirCalendarMatched::from);
+
+            // NOTE: an item dropped since the refresh has no row, only a title.
+            match &mut hits {
+                PimdirCalendarHits::Events(events) => events.push(PimdirCalendarHit {
+                    item: event_hit(&item, stored.as_ref(), hit.title),
+                    calendar_id,
+                    matched,
+                    snippet: hit.snippet,
+                }),
+                PimdirCalendarHits::Todos(todos) => todos.push(PimdirCalendarHit {
+                    item: todo_hit(&item, stored.as_ref(), hit.title),
+                    calendar_id,
+                    matched,
+                    snippet: hit.snippet,
+                }),
+                PimdirCalendarHits::Journals(journals) => journals.push(PimdirCalendarHit {
+                    item: journal_hit(&item, stored.as_ref(), hit.title),
+                    calendar_id,
+                    matched,
+                    snippet: hit.snippet,
+                }),
+            }
+        }
+
+        Ok(PimdirCalendarPage {
+            hits,
+            more: answer.more,
+            coverage: PimdirCalendarCoverage::from(&answer.coverage),
+        })
+    }
+
+    /// How many items of `kind` `query` matches in the account.
+    pub fn count_items(
+        &self,
+        query: PimdirQuery,
+        kind: PimdirSearchKind,
+        calendar: Option<&str>,
+    ) -> Result<(u64, PimdirCalendarCoverage)> {
+        let answer = self
+            .index()?
+            .count(
+                &self.scope(query, kind, calendar),
+                &PimdirSearchClock::default(),
+            )
+            .map_err(|err| store_error(err, "Count in the pimdir index"))?;
+
+        Ok((answer.count, PimdirCalendarCoverage::from(&answer.coverage)))
+    }
+
+    /// Opens the store's search index read-only.
+    fn index(&self) -> Result<PimdirIndex> {
+        PimdirIndex::open_query(&self.root).map_err(|err| {
+            store_error(
+                err,
+                format_args!("Open the pimdir search index of `{}`", self.root.display()),
+            )
+        })
+    }
+
+    /// `query` scoped by top-level `kind:`, `account:` and `collection:`
+    /// conjuncts.
+    // NOTE: io-pimdir reads the coverage's scope from top-level terms alone.
+    fn scope(
+        &self,
+        query: PimdirQuery,
+        kind: PimdirSearchKind,
+        calendar: Option<&str>,
+    ) -> PimdirQuery {
+        let mut conjuncts = match query {
+            PimdirQuery::And(conjuncts) => conjuncts,
+            query => vec![query],
+        };
+        let term = |predicate| {
+            PimdirQuery::Term(PimdirQueryTerm {
+                predicate,
+                start: 0,
+                end: 0,
+            })
+        };
+
+        conjuncts.push(term(PimdirQueryPredicate::Kind(kind.into())));
+        if let Some(account) = &self.account {
+            conjuncts.push(term(PimdirQueryPredicate::Account(account.clone())));
+        }
+        if let Some(calendar) = calendar {
+            conjuncts.push(term(PimdirQueryPredicate::Collection(calendar.into())));
+        }
+
+        PimdirQuery::And(conjuncts)
+    }
+}
+
+/// The component kind a search reads.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum PimdirSearchKind {
+    /// VEVENTs (`kind:event`).
+    #[default]
+    Event,
+    /// VTODOs (`kind:task`).
+    Todo,
+    /// VJOURNALs (`kind:journal`).
+    Journal,
+}
+
+impl From<PimdirSearchKind> for PimdirQueryKind {
+    fn from(kind: PimdirSearchKind) -> Self {
+        match kind {
+            PimdirSearchKind::Event => Self::Event,
+            PimdirSearchKind::Todo => Self::Task,
+            PimdirSearchKind::Journal => Self::Journal,
+        }
+    }
+}
+
+/// Parses the words of a query, joined by spaces (pimdir SEARCH §8.3),
+/// a refusal coded `query-refused`.
+pub fn parse_query(words: &[String], json: bool) -> Result<PimdirQuery> {
+    let query = words.join(" ");
+
+    PimdirQuery::parse(&query).map_err(|err| {
+        let message = match json {
+            true => refusal_line(&err),
+            false => refusal_report(&query, &err),
+        };
+        CodedError::new(ErrorCode::QueryRefused, message).into()
+    })
+}
+
+/// A refusal as one line, for JSON.
+fn refusal_line(err: &PimdirQueryError) -> String {
+    let mut line = format!(
+        "Query refused, {} at {}..{}: {}",
+        err.code.as_str(),
+        err.start,
+        err.end,
+        err.message
+    );
+
+    if !err.expected.is_empty() {
+        line.push_str(&format!("; expected {}", err.expected.join(", ")));
+    }
+
+    line
+}
+
+/// A refusal drawn over the query with ariadne.
+fn refusal_report(query: &str, err: &PimdirQueryError) -> String {
+    let name = "query";
+    let config = Config::default().with_color(stdout().is_terminal());
+    // NOTE: an empty span past the end is drawn on the last character.
+    let end = err.end.max(err.start + 1);
+
+    let mut report = Report::build(ReportKind::Error, (name, err.start..end))
+        .with_config(config)
+        .with_code(err.code.as_str())
+        .with_message("Query refused")
+        .with_label(
+            Label::new((name, err.start..end))
+                .with_message(&err.message)
+                .with_color(Color::Red),
+        );
+    if !err.expected.is_empty() {
+        report = report.with_note(format!("expected {}", err.expected.join(", ")));
+    }
+    if err.code == PimdirQueryErrorCode::UnknownField {
+        report = report.with_help(format!("fields: {}", err.fields.join(", ")));
+    }
+
+    let mut buf = Vec::new();
+    let _ = report.finish().write((name, Source::from(query)), &mut buf);
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
+/// One page of hits.
+pub struct PimdirCalendarPage {
+    /// The hits, in the order asked.
+    pub hits: PimdirCalendarHits,
+    /// Whether hits follow this page.
+    pub more: bool,
+    /// What the answer could not see.
+    pub coverage: PimdirCalendarCoverage,
+}
+
+/// The hits of one kind.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum PimdirCalendarHits {
+    /// Events.
+    Events(Vec<PimdirCalendarHit<Event>>),
+    /// Todos.
+    Todos(Vec<PimdirCalendarHit<Todo>>),
+    /// Journal entries.
+    Journals(Vec<PimdirCalendarHit<Journal>>),
+}
+
+/// An item the index matched.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(rename = "PimdirCalendarHitOf{T}")]
+pub struct PimdirCalendarHit<T> {
+    /// The item as its family projects it.
+    #[serde(flatten)]
+    pub item: T,
+    /// The calendar holding it.
+    pub calendar_id: String,
+    /// What a text term matched, `null` when only field terms did.
+    pub matched: Option<PimdirCalendarMatched>,
+    /// A passage naming a query word, `null` without an indexed body.
+    pub snippet: Option<String>,
+}
+
+/// What a text term matched (pimdir SEARCH §8.2).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum PimdirCalendarMatched {
+    /// The local body.
+    Body,
+    /// The summary of an item whose body is not local.
+    Summary,
+}
+
+impl From<PimdirSearchMatched> for PimdirCalendarMatched {
+    fn from(matched: PimdirSearchMatched) -> Self {
+        match matched {
+            PimdirSearchMatched::Body => Self::Body,
+            PimdirSearchMatched::Summary => Self::Summary,
+        }
+    }
+}
+
+impl fmt::Display for PimdirCalendarMatched {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Body => "body",
+            Self::Summary => "summary",
+        })
+    }
+}
+
+/// What an answer could not see (pimdir SEARCH §8.2).
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PimdirCalendarCoverage {
+    /// Whether every other field is at rest.
+    pub complete: bool,
+    /// Items in scope whose body is not local.
+    pub bodiless: u64,
+    /// Items in scope whose last change the index has not folded in.
+    pub unindexed: u64,
+    /// Changes the store drew since the index was refreshed, store-wide.
+    pub behind: u64,
+    /// The instant below which the store may lack items of the range.
+    pub since: Option<String>,
+    /// The instant from which it may lack them.
+    pub until: Option<String>,
+    /// Whether a first sync is still listing a calendar in scope.
+    pub filling: bool,
+    /// Whether the date range leaves the index's horizon.
+    pub horizon_left: bool,
+    /// Series in scope whose occurrences stop before the range's end.
+    pub cut: u64,
+}
+
+impl From<&PimdirSearchCoverage> for PimdirCalendarCoverage {
+    fn from(coverage: &PimdirSearchCoverage) -> Self {
+        let (since, until, filling) = match &coverage.temporal {
+            PimdirSearchTemporal::Full => (None, None, false),
+            PimdirSearchTemporal::Bounded {
+                since,
+                until,
+                filling,
+            } => (since.clone(), until.clone(), *filling),
+        };
+
+        Self {
+            complete: coverage.is_complete() && coverage.local.behind == 0,
+            bodiless: coverage.local.bodiless.values().sum(),
+            unindexed: coverage.local.unindexed,
+            behind: coverage.local.behind,
+            since,
+            until,
+            filling,
+            horizon_left: coverage.horizon_left,
+            cut: coverage.cut,
+        }
+    }
+}
+
+/// The line under a table, empty when complete.
+impl fmt::Display for PimdirCalendarCoverage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let day = |instant: &str| instant.get(..10).unwrap_or(instant).to_owned();
+        let mut parts = Vec::new();
+
+        if self.bodiless > 0 {
+            parts.push(format!(
+                "{} item(s) have no local body and matched on their summary alone",
+                self.bodiless
+            ));
+        }
+        if let Some(since) = &self.since {
+            parts.push(format!("items before {} are not synced", day(since)));
+        }
+        if let Some(until) = &self.until {
+            parts.push(format!("items from {} on are not synced", day(until)));
+        }
+        if self.filling {
+            parts.push(String::from("a first sync is still listing a calendar"));
+        }
+        if self.horizon_left {
+            parts.push(String::from(
+                "the dates reach outside the occurrences the index holds",
+            ));
+        }
+        if self.cut > 0 {
+            parts.push(format!(
+                "{} series stop their occurrences before the range ends",
+                self.cut
+            ));
+        }
+        if self.unindexed > 0 {
+            parts.push(format!(
+                "{} item(s) changed since the index was refreshed",
+                self.unindexed
+            ));
+        }
+        if self.behind > 0 {
+            parts.push(format!(
+                "the index is {} change(s) behind the store, which the sync engine refreshes",
+                self.behind
+            ));
+        }
+
+        if !parts.is_empty() {
+            writeln!(f, "Incomplete: {}", parts.join("; "))?;
+        }
+
+        Ok(())
+    }
+}
+
+/// The event a hit renders as: from its body, its summary or its title.
+fn event_hit(item: &CalendarItem, stored: Option<&PimdirItem>, title: String) -> Event {
+    let events = Event::project(item);
+    let master = events
+        .iter()
+        .find(|event| event.recurrence_id.is_none())
+        .or(events.first());
+    if let Some(event) = master {
+        return event.clone();
+    }
+
+    let Some(PimdirSummary::Event(summary)) = stored.and_then(|stored| stored.summary.as_ref())
+    else {
+        return Event {
+            id: item.id.clone(),
+            summary: title,
+            ..Default::default()
+        };
+    };
+
+    // NOTE: projected as a body, so the times resolve as a listing's do.
+    let mut contents = String::from(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Pimalaya//calendula//EN\r\n\
+         BEGIN:VEVENT\r\n",
+    );
+    if let Some(start) = &summary.dtstart {
+        contents.push_str(&time_line("DTSTART", start, &start.value));
+        if let Some(end) = &summary.dtend {
+            contents.push_str(&time_line("DTEND", start, end));
+        }
+    }
+    contents.push_str("END:VEVENT\r\nEND:VCALENDAR\r\n");
+
+    let times = CalendarItem {
+        contents: contents.into_bytes(),
+        ..item.clone()
+    };
+    let event = Event::project(&times)
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+
+    Event {
+        id: item.id.clone(),
+        etag: None,
+        uid: summary.uid.clone().unwrap_or_default(),
+        summary: summary.summary.clone(),
+        location: summary.location.clone().unwrap_or_default(),
+        recurring: summary.recurring.unwrap_or_default(),
+        organizer: summary.organizer.as_ref().map(|organizer| EventPerson {
+            email: organizer.address.clone(),
+            name: organizer.name.clone(),
+        }),
+        ..event
+    }
+}
+
+/// A time property `name` holding `value`, in the form of `start`.
+fn time_line(name: &str, start: &PimdirTime, value: &str) -> String {
+    if start.date {
+        return format!("{name};VALUE=DATE:{value}\r\n");
+    }
+
+    match &start.tzid {
+        Some(tzid) if !value.ends_with(['Z', 'z']) => {
+            format!("{name};TZID=\"{}\":{value}\r\n", tzid.replace('"', ""))
+        }
+        _ => format!("{name}:{value}\r\n"),
+    }
+}
+
+/// The todo a hit renders as: from its body, its summary or its title.
+fn todo_hit(item: &CalendarItem, stored: Option<&PimdirItem>, title: String) -> Todo {
+    if let Some(todo) = Todo::project(item).into_iter().next() {
+        return todo;
+    }
+
+    match stored.and_then(|stored| stored.summary.as_ref()) {
+        Some(PimdirSummary::Task(summary)) => Todo {
+            id: item.id.clone(),
+            summary: summary.summary.clone(),
+            due: summary
+                .due
+                .as_ref()
+                .map(|due| due.value.clone())
+                .unwrap_or_default(),
+            status: summary.status.clone().unwrap_or_default(),
+            priority: summary.priority,
+            percent_complete: summary.percent,
+        },
+        _ => Todo {
+            id: item.id.clone(),
+            summary: title,
+            ..Default::default()
+        },
+    }
+}
+
+/// The journal entry a hit renders as: from its body, its summary or its
+/// title.
+fn journal_hit(item: &CalendarItem, stored: Option<&PimdirItem>, title: String) -> Journal {
+    if let Some(journal) = Journal::project(item).into_iter().next() {
+        return journal;
+    }
+
+    match stored.and_then(|stored| stored.summary.as_ref()) {
+        Some(PimdirSummary::Journal(summary)) => Journal {
+            id: item.id.clone(),
+            summary: summary.summary.clone(),
+            start: summary
+                .dtstart
+                .as_ref()
+                .map(|start| start.value.clone())
+                .unwrap_or_default(),
+            status: String::new(),
+        },
+        _ => Journal {
+            id: item.id.clone(),
+            summary: title,
+            ..Default::default()
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use io_pimdir::{
+        change::PimdirWriteOp,
+        client::{
+            PimdirStore,
+            search::{PimdirIndex, PimdirIndexRefreshOptions, PimdirSearchOptions},
+        },
+        collection::PimdirCollectionId,
+        placement::{
+            PimdirBase, PimdirFlags, PimdirHandle, PimdirLevel, PimdirLinkId, PimdirPlacement,
+            PimdirStatus,
+        },
+        search::{coverage::PimdirSearchCoverage, query::PimdirQuery},
+        summary::{
+            PimdirSummary,
+            calendar::{PimdirEventSummary, PimdirTime},
+        },
+    };
+    use pimalaya_cli::error::code_of;
+
+    use crate::{
+        config::PimdirConfig,
+        error::ErrorCode,
+        pimdir::{
+            backend::PimdirBackend,
+            client::PimdirClient,
+            index::{
+                PimdirCalendarCoverage, PimdirCalendarHits, PimdirCalendarMatched,
+                PimdirCalendarPage, PimdirSearchKind, parse_query,
+            },
+        },
+    };
+
+    /// 2026-11-06T00:00:00Z, the instant the test index is refreshed at.
+    const NOW: i64 = 1_793_923_200;
+
+    /// One component of `kind` carrying `lines`, alone in a calendar.
+    fn body(kind: &str, uid: &str, lines: &str) -> String {
+        format!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\nBEGIN:{kind}\r\n\
+             UID:{uid}@example.org\r\nDTSTAMP:20261001T080000Z\r\n{lines}END:{kind}\r\n\
+             END:VCALENDAR\r\n"
+        )
+    }
+
+    /// A weekly meeting begun on Monday 2019-01-07.
+    fn standup() -> String {
+        body(
+            "VEVENT",
+            "standup",
+            "DTSTART:20190107T090000Z\r\nDTEND:20190107T091500Z\r\n\
+             RRULE:FREQ=WEEKLY\r\nSUMMARY:Stand-up\r\n",
+        )
+    }
+
+    /// An event at 00:30 UTC on 2026-11-07, naming a place and a guest.
+    fn offsite() -> String {
+        body(
+            "VEVENT",
+            "offsite",
+            "DTSTART:20261107T003000Z\r\nDTEND:20261107T013000Z\r\nSUMMARY:Offsite\r\n\
+             DESCRIPTION:Budget review for the quarter\r\nLOCATION:Lisbon\r\n\
+             ORGANIZER:mailto:alice@example.org\r\n\
+             ATTENDEE;PARTSTAT=ACCEPTED:mailto:carol@example.org\r\n",
+        )
+    }
+
+    /// An indexed store of two calendars, `cal` and `work`, one item of
+    /// the latter bodiless.
+    fn indexed_store() -> (tempfile::TempDir, PimdirBackend) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = PimdirStore::open(dir.path()).unwrap();
+        store.ensure_collection("cal", "text/calendar").unwrap();
+        store.ensure_collection("work", "text/calendar").unwrap();
+        drop(store);
+
+        let mut backend = backend(dir.path(), None);
+        let items = [
+            ("cal", standup()),
+            ("cal", offsite()),
+            (
+                "cal",
+                body(
+                    "VTODO",
+                    "report",
+                    "DUE:20261110T170000Z\r\nSUMMARY:Write the budget report\r\n\
+                     STATUS:IN-PROCESS\r\nPRIORITY:1\r\nPERCENT-COMPLETE:40\r\n",
+                ),
+            ),
+            (
+                "cal",
+                body(
+                    "VTODO",
+                    "plants",
+                    "SUMMARY:Water the plants\r\nSTATUS:NEEDS-ACTION\r\nPRIORITY:9\r\n",
+                ),
+            ),
+            (
+                "cal",
+                body(
+                    "VJOURNAL",
+                    "retro",
+                    "DTSTART;VALUE=DATE:20261105\r\nSUMMARY:Retro notes\r\n\
+                     DESCRIPTION:The budget slipped\r\n",
+                ),
+            ),
+            (
+                "work",
+                body(
+                    "VEVENT",
+                    "planning",
+                    "DTSTART:20261112T100000Z\r\nSUMMARY:Planning\r\n\
+                     DESCRIPTION:Budget planning\r\n",
+                ),
+            ),
+        ];
+        for (calendar, item) in items {
+            backend.create_item(calendar, item.into_bytes()).unwrap();
+        }
+
+        let mut owner = PimdirStore::open(dir.path()).unwrap().for_source("caldav");
+        assert_eq!(owner.drain().unwrap().applied, 6);
+        owner
+            .write(vec![PimdirWriteOp::UpsertPlacement(bodiless("work"))])
+            .unwrap();
+        drop(owner);
+        refresh(dir.path());
+
+        (dir, backend)
+    }
+
+    /// An event of `calendar` listed with its summary alone.
+    fn bodiless(calendar: &str) -> PimdirPlacement {
+        PimdirPlacement {
+            collection: PimdirCollectionId(calendar.into()),
+            handle: PimdirHandle("invoice.ics".into()),
+            link_id: Some(PimdirLinkId("invoice@example.org".into())),
+            object: None,
+            level: PimdirLevel::Meta,
+            summary: Some(PimdirSummary::Event(PimdirEventSummary {
+                uid: Some("invoice@example.org".into()),
+                summary: "Invoice review".into(),
+                dtstart: Some(PimdirTime {
+                    value: "20261120T140000Z".into(),
+                    ..Default::default()
+                }),
+                dtend: Some("20261120T150000Z".into()),
+                ..Default::default()
+            })),
+            sort_key: "2026-11-20T14:00:00Z".into(),
+            flags: PimdirFlags::default(),
+            status: PimdirStatus::Clean,
+            conflict_revision: None,
+            conflict_object: None,
+            base: Some(PimdirBase {
+                flags: PimdirFlags::default(),
+                revision: None,
+                object: None,
+            }),
+            origin: None,
+        }
+    }
+
+    fn backend(dir: &Path, account: Option<&str>) -> PimdirBackend {
+        PimdirBackend::new(PimdirConfig {
+            root: dir.to_path_buf(),
+            account: account.map(Into::into),
+        })
+        .unwrap()
+    }
+
+    /// Refreshes the index at [`NOW`], as the store's owner does.
+    fn refresh(dir: &Path) {
+        PimdirIndex::open(dir)
+            .unwrap()
+            .refresh(&PimdirIndexRefreshOptions {
+                now: Some(NOW),
+                ..Default::default()
+            })
+            .unwrap();
+    }
+
+    fn query(text: &str) -> PimdirQuery {
+        parse_query(&[text.to_string()], true).unwrap()
+    }
+
+    fn page(
+        client: &PimdirClient,
+        text: &str,
+        kind: PimdirSearchKind,
+        calendar: Option<&str>,
+    ) -> PimdirCalendarPage {
+        let options = PimdirSearchOptions::default();
+        client
+            .search_items(query(text), kind, calendar, &options)
+            .unwrap()
+    }
+
+    /// The summaries of the hits of `text`, sorted.
+    fn summaries(
+        client: &PimdirClient,
+        text: &str,
+        kind: PimdirSearchKind,
+        calendar: Option<&str>,
+    ) -> Vec<String> {
+        let mut summaries: Vec<String> = match page(client, text, kind, calendar).hits {
+            PimdirCalendarHits::Events(hits) => hits.into_iter().map(|h| h.item.summary).collect(),
+            PimdirCalendarHits::Todos(hits) => hits.into_iter().map(|h| h.item.summary).collect(),
+            PimdirCalendarHits::Journals(hits) => {
+                hits.into_iter().map(|h| h.item.summary).collect()
+            }
+        };
+        summaries.sort();
+        summaries
+    }
+
+    fn events(client: &PimdirClient, text: &str) -> Vec<String> {
+        summaries(client, text, PimdirSearchKind::Event, None)
+    }
+
+    #[test]
+    fn a_word_of_a_description_is_found_with_its_snippet() {
+        let (_dir, backend) = indexed_store();
+
+        let PimdirCalendarHits::Events(hits) =
+            page(&backend.client, "quarter", PimdirSearchKind::Event, None).hits
+        else {
+            panic!("expected events");
+        };
+        assert_eq!(hits.len(), 1);
+        let hit = &hits[0];
+        assert_eq!(hit.item.summary, "Offsite");
+        assert_eq!(hit.item.location, "Lisbon");
+        assert_eq!(hit.calendar_id, "cal");
+        assert_eq!(hit.matched, Some(PimdirCalendarMatched::Body));
+        assert!(
+            hit.snippet.as_deref().unwrap().contains("quarter"),
+            "{hit:?}"
+        );
+        assert_eq!(
+            hit.item.starts_at.as_deref(),
+            Some("2026-11-07T00:30:00+00:00")
+        );
+        let read = backend
+            .client
+            .reader
+            .get_item("cal", hit.item.id.parse().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(read.link_id.0, "offsite@example.org");
+
+        assert_eq!(events(&backend.client, "location:lisbon"), ["Offsite"]);
+        assert_eq!(
+            events(&backend.client, "attendee:carol@example.org"),
+            ["Offsite"]
+        );
+        assert_eq!(
+            events(&backend.client, "organizer:alice@example.org"),
+            ["Offsite"]
+        );
+    }
+
+    #[test]
+    fn a_weekly_series_begun_years_ago_is_found_on_a_later_week() {
+        let (_dir, backend) = indexed_store();
+
+        assert_eq!(events(&backend.client, "date:2026-11-09"), ["Stand-up"]);
+        assert_eq!(events(&backend.client, "date:2026-11-16"), ["Stand-up"]);
+        assert!(events(&backend.client, "date:2026-11-10").is_empty());
+    }
+
+    #[test]
+    fn a_day_is_a_utc_day() {
+        let (_dir, backend) = indexed_store();
+
+        assert_eq!(events(&backend.client, "date:2026-11-07"), ["Offsite"]);
+        assert!(events(&backend.client, "date:2026-11-06").is_empty());
+    }
+
+    #[test]
+    fn a_search_reads_the_kind_asked_alone() {
+        let (_dir, backend) = indexed_store();
+        let todos = |text| summaries(&backend.client, text, PimdirSearchKind::Todo, None);
+
+        assert_eq!(events(&backend.client, "budget"), ["Offsite", "Planning"]);
+        assert_eq!(todos("budget"), ["Write the budget report"]);
+        assert_eq!(
+            summaries(&backend.client, "budget", PimdirSearchKind::Journal, None),
+            ["Retro notes"]
+        );
+
+        assert_eq!(todos("status:in-process"), ["Write the budget report"]);
+        assert_eq!(todos("priority:high"), ["Write the budget report"]);
+        assert_eq!(todos("priority:low"), ["Water the plants"]);
+
+        let PimdirCalendarHits::Todos(hits) =
+            page(&backend.client, "budget", PimdirSearchKind::Todo, None).hits
+        else {
+            panic!("expected todos");
+        };
+        assert_eq!(hits[0].item.status, "IN-PROCESS");
+        assert_eq!(hits[0].item.priority, Some(1));
+        assert_eq!(hits[0].item.progress(), "40%");
+
+        let count = |text, kind| {
+            backend
+                .client
+                .count_items(query(text), kind, None)
+                .unwrap()
+                .0
+        };
+        assert_eq!(count("budget", PimdirSearchKind::Event), 2);
+        assert_eq!(count("budget", PimdirSearchKind::Todo), 1);
+    }
+
+    #[test]
+    fn a_bodiless_event_matches_on_its_summary() {
+        let (_dir, backend) = indexed_store();
+
+        let invoice = page(&backend.client, "invoice", PimdirSearchKind::Event, None);
+        let PimdirCalendarHits::Events(hits) = &invoice.hits else {
+            panic!("expected events");
+        };
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].matched, Some(PimdirCalendarMatched::Summary));
+        assert_eq!(hits[0].calendar_id, "work");
+        assert_eq!(hits[0].item.summary, "Invoice review");
+        assert_eq!(hits[0].item.uid, "invoice@example.org");
+        assert_eq!(
+            hits[0].item.starts_at.as_deref(),
+            Some("2026-11-20T14:00:00+00:00")
+        );
+        assert_eq!(
+            hits[0].item.ends_at.as_deref(),
+            Some("2026-11-20T15:00:00+00:00")
+        );
+        assert_eq!(invoice.coverage.bodiless, 1);
+        assert!(!invoice.coverage.complete);
+        assert!(
+            invoice
+                .coverage
+                .to_string()
+                .contains("1 item(s) have no local body"),
+            "{}",
+            invoice.coverage
+        );
+    }
+
+    #[test]
+    fn a_calendar_narrows_the_hits_and_the_coverage() {
+        let (_dir, backend) = indexed_store();
+        let client = &backend.client;
+
+        assert_eq!(
+            summaries(client, "budget", PimdirSearchKind::Event, Some("work")),
+            ["Planning"]
+        );
+        assert_eq!(
+            summaries(client, "budget", PimdirSearchKind::Event, Some("cal")),
+            ["Offsite"]
+        );
+
+        let all = page(client, "budget", PimdirSearchKind::Event, None).coverage;
+        let cal = page(client, "budget", PimdirSearchKind::Event, Some("cal")).coverage;
+        assert_eq!(all.bodiless, 1);
+        assert_eq!(cal.bodiless, 0);
+        assert!(cal.complete, "{cal:?}");
+        assert_eq!(cal.to_string(), "");
+    }
+
+    #[test]
+    fn a_range_outside_the_horizon_is_reported() {
+        let (_dir, backend) = indexed_store();
+
+        let past = page(&backend.client, "date:2030", PimdirSearchKind::Event, None).coverage;
+        assert!(past.horizon_left);
+        assert!(!past.complete);
+        assert!(
+            past.to_string().contains("outside the occurrences"),
+            "{past}"
+        );
+
+        let within = page(
+            &backend.client,
+            "date:2026-11-09",
+            PimdirSearchKind::Event,
+            Some("cal"),
+        )
+        .coverage;
+        assert!(!within.horizon_left);
+    }
+
+    #[test]
+    fn a_queued_event_is_not_found_until_drained_and_refreshed() {
+        let (dir, mut backend) = indexed_store();
+        let zeppelin = body(
+            "VEVENT",
+            "zeppelin",
+            "DTSTART:20261201T100000Z\r\nSUMMARY:Zeppelin ride\r\n",
+        );
+        backend.create_item("cal", zeppelin.into_bytes()).unwrap();
+
+        let queued = page(&backend.client, "zeppelin", PimdirSearchKind::Event, None);
+        assert!(
+            events(&backend.client, "zeppelin").is_empty(),
+            "a queued add is listed"
+        );
+        assert_eq!(queued.coverage.behind, 0);
+
+        let mut owner = PimdirStore::open(dir.path()).unwrap().for_source("caldav");
+        assert_eq!(owner.drain().unwrap().applied, 1);
+        drop(owner);
+        let drained = page(&backend.client, "zeppelin", PimdirSearchKind::Event, None);
+        assert!(
+            events(&backend.client, "zeppelin").is_empty(),
+            "an unindexed add is listed"
+        );
+        assert!(drained.coverage.behind > 0);
+        assert!(!drained.coverage.complete);
+        assert!(
+            drained.coverage.to_string().contains("behind the store"),
+            "{}",
+            drained.coverage
+        );
+
+        refresh(dir.path());
+        assert_eq!(events(&backend.client, "zeppelin"), ["Zeppelin ride"]);
+    }
+
+    #[test]
+    fn a_search_reads_the_configured_account_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        for account in ["work", "home"] {
+            PimdirStore::open(dir.path())
+                .unwrap()
+                .for_account(account)
+                .ensure_collection(format!("{account}/cal"), "text/calendar")
+                .unwrap();
+        }
+        let (mut work, mut home) = (
+            backend(dir.path(), Some("work")),
+            backend(dir.path(), Some("home")),
+        );
+        let lunch = |uid| {
+            body(
+                "VEVENT",
+                uid,
+                "DTSTART:20261110T120000Z\r\nSUMMARY:Lunch\r\n",
+            )
+        };
+        work.create_item("work/cal", lunch("w").into_bytes())
+            .unwrap();
+        home.create_item("home/cal", lunch("h").into_bytes())
+            .unwrap();
+        let mut owner = PimdirStore::open(dir.path()).unwrap().for_source("caldav");
+        assert_eq!(owner.drain().unwrap().applied, 2);
+        drop(owner);
+        refresh(dir.path());
+
+        for (backend, calendar) in [(&work, "work/cal"), (&home, "home/cal")] {
+            let PimdirCalendarHits::Events(hits) =
+                page(&backend.client, "lunch", PimdirSearchKind::Event, None).hits
+            else {
+                panic!("expected events");
+            };
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0].calendar_id, calendar);
+        }
+    }
+
+    #[test]
+    fn a_refused_query_names_its_code_in_both_renderings() {
+        let long = "a".repeat(1025);
+        let cases = [
+            ("()", "empty-query"),
+            ("frm:alice", "unknown-field"),
+            ("status:done", "invalid-value"),
+            ("date:2026-13-45", "invalid-date"),
+            ("\"hello", "unterminated-phrase"),
+            ("(hello", "unbalanced-parenthesis"),
+            ("hello and", "dangling-operator"),
+            ("he*llo", "invalid-wildcard"),
+            (long.as_str(), "limit-exceeded"),
+        ];
+
+        for (text, code) in cases {
+            for json in [true, false] {
+                let err = parse_query(&[text.to_string()], json).err().unwrap();
+                assert_eq!(code_of(&err), Some(ErrorCode::QueryRefused), "{text}");
+                let shown = err.to_string();
+                assert!(shown.contains(code), "{text}: {shown}");
+                assert_eq!(shown.lines().count() == 1, json, "{shown}");
+            }
+        }
+
+        let err = parse_query(&[String::from("frm:alice")], true)
+            .err()
+            .unwrap();
+        assert!(
+            err.to_string()
+                .starts_with("Query refused, unknown-field at 0..4"),
+            "{err}"
+        );
+        let drawn = parse_query(&[String::from("frm:alice")], false)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(drawn.contains("frm:alice"), "{drawn}");
+        assert!(drawn.contains("fields: "), "{drawn}");
+    }
+
+    #[test]
+    fn a_missing_or_outdated_index_says_to_run_the_sync_engine() {
+        let (dir, backend) = indexed_store();
+        let assert_coded = |code| {
+            let options = PimdirSearchOptions::default();
+            let err = backend
+                .client
+                .search_items(query("budget"), PimdirSearchKind::Event, None, &options)
+                .err()
+                .unwrap();
+            assert_eq!(code_of(&err), Some(code), "{err:#}");
+            let count = backend
+                .client
+                .count_items(query("budget"), PimdirSearchKind::Event, None)
+                .err()
+                .unwrap();
+            assert_eq!(code_of(&count), Some(code), "{count:#}");
+            let err = format!("{err:#}");
+            assert!(err.contains("sync engine"), "{err}");
+            assert!(!err.contains("delete"), "{err}");
+            err
+        };
+        let index = dir.path().join("index.db");
+
+        // NOTE: another store's index reads as outdated.
+        let (other, _) = indexed_store();
+        std::fs::copy(other.path().join("index.db"), &index).unwrap();
+        assert_coded(ErrorCode::IndexOutdated);
+
+        // NOTE: the version is spelled once, overwritten in place.
+        refresh(dir.path());
+        let ours = b"search-draft-08";
+        let mut db = std::fs::read(&index).unwrap();
+        let at: Vec<usize> = db
+            .windows(ours.len())
+            .enumerate()
+            .filter(|(_, window)| window == ours)
+            .map(|(at, _)| at)
+            .collect();
+        assert_eq!(at.len(), 1, "the version is spelled once");
+        db[at[0]..at[0] + ours.len()].copy_from_slice(b"search-draft-07");
+        std::fs::write(&index, db).unwrap();
+        let err = assert_coded(ErrorCode::IndexVersion);
+        assert!(err.contains("search-draft-07"), "{err}");
+
+        for name in ["index.db", "index.db-wal", "index.db-shm"] {
+            let _ = std::fs::remove_file(dir.path().join(name));
+        }
+        assert_coded(ErrorCode::IndexMissing);
+        assert!(!index.exists(), "the index was built");
+    }
+
+    #[test]
+    fn a_complete_answer_prints_no_coverage_line() {
+        let coverage = PimdirCalendarCoverage::from(&PimdirSearchCoverage::default());
+
+        assert!(coverage.complete);
+        assert_eq!(coverage.to_string(), "");
+    }
+
+    #[test]
+    fn coverage_renders_as_camel_case_json_and_one_line() {
+        let coverage = PimdirCalendarCoverage {
+            complete: false,
+            bodiless: 2,
+            unindexed: 1,
+            behind: 3,
+            since: Some("2026-05-15T00:00:00Z".into()),
+            until: None,
+            filling: true,
+            horizon_left: true,
+            cut: 4,
+        };
+
+        assert_eq!(
+            serde_json::to_value(&coverage).unwrap(),
+            serde_json::json!({
+                "complete": false,
+                "bodiless": 2,
+                "unindexed": 1,
+                "behind": 3,
+                "since": "2026-05-15T00:00:00Z",
+                "until": null,
+                "filling": true,
+                "horizonLeft": true,
+                "cut": 4,
+            })
+        );
+        let line = coverage.to_string();
+        assert_eq!(line.lines().count(), 1, "{line}");
+        for part in [
+            "2 item(s) have no local body",
+            "items before 2026-05-15 are not synced",
+            "a first sync is still listing a calendar",
+            "the dates reach outside the occurrences the index holds",
+            "4 series stop their occurrences before the range ends",
+            "1 item(s) changed since the index was refreshed",
+            "the index is 3 change(s) behind the store",
+        ] {
+            assert!(line.contains(part), "{line}");
+        }
+    }
+}

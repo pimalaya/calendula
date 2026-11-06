@@ -44,8 +44,8 @@ pub struct PimdirClient {
     /// The blob store item bodies are read from, read-only: a body is
     /// staged through a producer, under its lock.
     pub(crate) blobs: PimdirBlobs,
-    /// The expanded store root, which a producer is opened against.
-    root: PathBuf,
+    /// The expanded store root, which a producer and the index open.
+    pub(crate) root: PathBuf,
     /// The account collections are grouped under, configured or derived,
     /// `None` when the store groups none.
     pub(crate) account: Option<String>,
@@ -144,12 +144,13 @@ fn resolve_account(reader: &PimdirReader, configured: Option<String>) -> Result<
 /// has to create, one of another format version, a database another
 /// program wrote, one whose two version stamps disagree, one naming its
 /// bodies by a hash calendula does not know, one another process holds,
-/// one another user can reach, and an action or a flag the store refuses
-/// before anything is queued. The message is io-pimdir's, but for a store
-/// of another format version: a store is never migrated (pimdir STORAGE
-/// §6), so one an earlier sync engine wrote is reinstalled by the engine
-/// that owns it, which moves it aside, and one a newer engine wrote needs
-/// a newer calendula. No message advises deleting the store.
+/// one another user can reach, an action or a flag the store refuses
+/// before anything is queued, a search index state, and a search query
+/// refused or unanswered. The message is io-pimdir's, but for a store of
+/// another format version: a store is never migrated (pimdir STORAGE §6),
+/// so one an earlier sync engine wrote is reinstalled by the engine that
+/// owns it, which moves it aside, and one a newer engine wrote needs a
+/// newer calendula. No message advises deleting the store.
 pub(crate) fn store_error(err: PimdirError, context: impl fmt::Display) -> anyhow::Error {
     let code = match err.code() {
         "store-uncreated" => ErrorCode::StoreUncreated,
@@ -161,6 +162,13 @@ pub(crate) fn store_error(err: PimdirError, context: impl fmt::Display) -> anyho
         "store-exposed" => ErrorCode::StoreExposed,
         "flag-invalid" => ErrorCode::FlagInvalid,
         "action-malformed" => ErrorCode::ActionMalformed,
+        "index-missing" => ErrorCode::IndexMissing,
+        "index-outdated" => ErrorCode::IndexOutdated,
+        "index-version" => ErrorCode::IndexVersion,
+        "index-zone-unknown" => ErrorCode::IndexZoneUnknown,
+        "index-fts5-missing" => ErrorCode::IndexFts5Missing,
+        "query-refused" => ErrorCode::QueryRefused,
+        "query-unanswerable" => ErrorCode::QueryUnanswerable,
         _ => return anyhow!("{context}: {err}"),
     };
 
@@ -211,7 +219,7 @@ fn version_message(found: Option<&str>, context: impl fmt::Display) -> String {
 
 #[cfg(test)]
 mod tests {
-    use io_pimdir::{client::PimdirError, codec::PimdirActionError};
+    use io_pimdir::{client::PimdirError, codec::PimdirActionError, search::query::PimdirQuery};
     use pimalaya_cli::error::code_of;
 
     use crate::{error::ErrorCode, pimdir::client::store_error};
@@ -239,6 +247,16 @@ mod tests {
             PimdirError::Exposed("/tmp/store".into()),
             PimdirError::Flag("two words".into()),
             PimdirError::Action(PimdirActionError::MissingField("source")),
+            PimdirError::IndexMissing("/tmp/store/index.db".into()),
+            PimdirError::IndexOutdated("/tmp/store/index.db".into()),
+            PimdirError::IndexVersion {
+                path: "/tmp/store/index.db".into(),
+                version: Some("search-draft-07".into()),
+                shape: Some("canonical".into()),
+            },
+            PimdirError::IndexZone("Mars/Olympus".into()),
+            PimdirError::Fts5 { version: "3.31.0" },
+            PimdirError::Query(PimdirQuery::parse("frm:alice").unwrap_err()),
         ];
 
         for err in failures {

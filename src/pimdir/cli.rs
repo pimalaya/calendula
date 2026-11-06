@@ -9,15 +9,18 @@ use pimalaya_cli::printer::Printer;
 
 use crate::pimdir::{
     backend::PimdirBackend,
+    count::PimdirCountCommand,
     intent::{PimdirCancelCommand, PimdirReplyCommand},
+    search::PimdirSearchCommand,
     status::PimdirStatusCommand,
 };
 
 /// pimdir CLI.
 ///
 /// Direct access to the local pimdir store behind the account: what it
-/// holds and how much of it is downloaded, and the scheduling messages
-/// (a reply, a cancellation) only its sync engine can send.
+/// holds and how much of it is downloaded, the scheduling messages (a
+/// reply, a cancellation) only its sync engine can send, and its search
+/// index.
 ///
 /// The store's own operator tooling, the `pimdir` binary io-pimdir
 /// ships, covers the rest, including the queue and the retained items.
@@ -27,6 +30,8 @@ pub enum PimdirCommand {
     Status(PimdirStatusCommand),
     Reply(PimdirReplyCommand),
     Cancel(PimdirCancelCommand),
+    Search(PimdirSearchCommand),
+    Count(PimdirCountCommand),
 }
 
 impl PimdirCommand {
@@ -35,6 +40,8 @@ impl PimdirCommand {
             Self::Status(cmd) => cmd.execute(printer, backend),
             Self::Reply(cmd) => cmd.execute(printer, backend),
             Self::Cancel(cmd) => cmd.execute(printer, backend),
+            Self::Search(cmd) => cmd.execute(printer, backend),
+            Self::Count(cmd) => cmd.execute(printer, backend),
         }
     }
 }

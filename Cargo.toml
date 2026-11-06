@@ -20,7 +20,7 @@ caldav = ["dep:io-webdav", "dep:io-http", "dep:secrecy"]
 gcal = ["dep:io-gcal", "dep:secrecy", "io-gcal/ical"]
 msgraph = ["dep:io-msgraph", "dep:secrecy", "io-msgraph/client", "io-msgraph/ical"]
 vdir = ["dep:io-vdir"]
-pimdir = ["dep:io-pimdir"]
+pimdir = ["dep:ariadne", "dep:io-pimdir", "io-pimdir/search"]
 vendored = ["pimalaya-stream/vendored", "io-webdav?/vendored", "io-gcal?/vendored", "io-msgraph?/vendored", "io-pimdir?/vendored"]
 wizard = ["pimalaya-cli/wizard", "pimalaya-cli/caldav", "pimalaya-cli/spinner"]
 
@@ -39,6 +39,7 @@ toml = "1.1"
 
 [dependencies]
 anyhow = "1"
+ariadne = { version = "0.6", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "unstable-locales"] }
 clap = { version = "4.4", features = ["derive", "env", "wrap_help"] }
 crossterm = { version = "0.29", default-features = false, features = ["serde"] }

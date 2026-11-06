@@ -268,6 +268,8 @@ pimdir.root = "~/.local/state/neverest/example"
 
 Run `calendula pimdir status` to see which account you are reading, how much of each calendar is downloaded, and how many creations are still queued. An item that is listed but not downloaded reads as "body not fetched" until a sync hydrates it.
 
+Run `calendula pimdir search <query>` to search the account's events (`--kind todo` or `journal` for the others) through the search index the sync engine keeps, in the [pimdir SEARCH](https://github.com/pimalaya/pimdir) query language: `budget location:lisbon`, `attendee:carol@example.org date:2026-11`, `--kind todo status:in-process priority:high`. Days are read in UTC for now, and a write still queued shows once a sync indexed it. `calendula pimdir count <query>` counts the same.
+
 ## Usage
 
 Run `calendula --help` for the full command tree, and `calendula <command> --help` for any subcommand's arguments and its JSON output shape (printed when the global `--json` flag is set). `calendula json-schema --dir ./schemas` writes the JSON Schema of every `--json` payload.
@@ -285,6 +287,7 @@ calendula event build -i -o event.ics
 calendula event create --calendar personal -i
 calendula todo update --calendar tasks -i todo-1.ics
 calendula pimdir status
+calendula pimdir search budget date:2026-11
 calendula gcal free-busy --from 2026-08-10 --to 2026-08-14
 calendula gcal quick-add "Lunch with Ada tomorrow at noon"
 ```

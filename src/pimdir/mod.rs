@@ -13,6 +13,8 @@
 //! and push. A staged creation shows in no listing, having no public id
 //! until the owner applies it, which is what `pimdir status` counts.
 //!
+//! Searches read the store's search index, never refreshing it.
+//!
 //! Calendars come from the sync, so the collection verbs (create,
 //! update, delete) are not served here: a cache does not invent
 //! collections its source does not have.
@@ -23,5 +25,8 @@
 pub mod backend;
 pub mod cli;
 pub mod client;
+pub mod count;
+pub mod index;
 pub mod intent;
+pub mod search;
 pub mod status;
