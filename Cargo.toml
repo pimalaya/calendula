@@ -49,7 +49,7 @@ ical-rs = { version = "0.7", default-features = false, features = ["parser", "tz
 io-gcal = { version = "0.2", default-features = false, features = ["client"], optional = true }
 io-msgraph = { version = "0.6", default-features = false, optional = true }
 io-http = { version = "0.6", default-features = false, optional = true }
-io-pim-discovery = { version = "0.11", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc9728", "stream"] }
+io-pim-discovery = { version = "0.11", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "stream"] }
 io-pimdir = { version = "0.9", default-features = false, features = ["client"], optional = true }
 io-vdir = { version = "0.2", default-features = false, features = ["client", "serde"], optional = true }
 io-webdav = { version = "0.7", default-features = false, features = ["client"], optional = true }
