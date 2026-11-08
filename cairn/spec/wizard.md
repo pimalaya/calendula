@@ -54,7 +54,7 @@ The parallel discovery run SHALL be bounded by a short deadline, so a single unr
 
 Each mechanism runs independently; any that has not reported by the deadline is abandoned, and only what completed in time is offered.
 
-### Requirement: The Auto plan and the review
+### Requirement: Each domain gets its best option, listed in a review
 Every discovered way to reach the calendars SHALL be one route: a protocol, a server and a sign-in (a password, an API token or OAuth). Two routes with the same protocol, server and sign-in SHALL be one, a server offering OAuth through several grants SHALL be one OAuth route, and a server advertising no sign-in SHALL get a password route. A discovered server that is not `https` SHALL be dropped.
 
 The routes SHALL be ranked, the first being Auto: a provider's own calendar API before CalDAV, servers in the order discovery found them, and within one server OAuth, then an API token, then a password when `ortie` is on the `PATH`, and a password, then an API token, then OAuth when it is not.
@@ -79,7 +79,7 @@ Before a password or an API token is typed, the wizard SHALL print, through pima
 - WHEN the password is asked
 - THEN stderr reads `Your password goes to https://dav.example.net/, not on example.org`
 
-### Requirement: A password is typed once and stored
+### Requirement: A password is typed once, tested, then stored
 A password or an API token SHALL be asked once, masked, without confirmation, then tested. Once its test passed, the wizard SHALL offer where to keep it through pimalaya-cli's `keyring::prompt_store`, at the keyring entry `calendula-<account name>-caldav`, and SHALL write what reads it back: the keyring's read command, a custom command, or the raw value.
 
 The login SHALL be the advertised username when it is an address, else the typed address, and SHALL be asked (`Login:`) only when neither is known.
@@ -109,7 +109,7 @@ Each sign-in SHALL be tested as soon as it is typed, before anything is stored o
 
 The test is the same one `account check` runs, under a spinner. Its failure SHALL name each backend that failed and why: on stderr, followed by the refusal menu, for a sign-in; as the wizard's error for a local backend.
 
-### Requirement: The refusal menu
+### Requirement: A refusal offers a way on
 A sign-in whose test fails SHALL name on stderr each backend that failed and why, then offer `Try again` (the secret typed again, or the sign-in run again), `Change the login` (a password only: the login asked, then the password), and `Back to the review`. calendula sets up one domain, so no entry leaves it out.
 
 #### Scenario: A mistyped password
