@@ -33,7 +33,7 @@ CLI to manage calendars.
 - **Composer**: `-i/--interactive` on `build`, `create` and `update` opens the item in the command `item.composer` names, your editor included, and what it leaves in the file is the decision.
 - **Build without an account**: `<family> build` applies a source and the composer and prints the iCalendar rather than sending it, on a machine holding no configuration at all.
 - **Discovery**: an email address is enough to find a provider's server, through SRV records, `.well-known` and the provider configuration documents.
-- **Interactive wizard**: `calendula configure` discovers an account, tests it, and saves it; a first run with no configuration is offered it.
+- **Interactive wizard**: `calendula configure` discovers an account, picks the best way to your calendars, signs it in and tests it, stores your password, and saves the account; a first run with no configuration is offered it.
 - **Multi-account**: one TOML file, one block per account, several files deep-merged when you want secrets apart.
 - **JSON output**: every command switches to JSON with `--json`, for scripts and other tools, and `calendula json-schema` describes the shape each one returns.
 - Full standard, blocking client with **TLS** support:
@@ -141,9 +141,13 @@ Override the path with `calendula -c <PATH>` or `CALENDULA_CONFIG=<PATH>`; multi
 
 Run `calendula configure` to launch the wizard. It asks one question, taking an email address, a server URL or a local folder path, and the shape of what you type decides the rest.
 
-An address is discovered: every reachable server is offered, and picking one prompts only its credentials. A URL is taken as the CalDAV context root, which is how a self-hosted server publishing no SRV record gets configured. A folder is detected as a vdir home or a pimdir store.
+An address is discovered, and the best way to your calendars is picked for you: the provider's own calendar API where one is known (Google Calendar, Microsoft Graph), else CalDAV, signing in through your browser when [Ortie](https://github.com/pimalaya/ortie) is installed, else with your password. A review shows the pick in plain words, any other way found or a server URL of your own being one change away. When nothing is discovered, the wizard asks for your server URL.
 
-The wizard tests the account before showing you anything, then offers to save it: to a new configuration file, or appended to the one you already have, leaving its comments and formatting untouched.
+A URL is taken as the CalDAV context root, which is how a self-hosted server publishing no SRV record gets configured. Only encrypted servers are accepted: `https://`, or `caldav://` and `caldavs://`, both read as `https`. A folder is detected as a vdir home or a pimdir store.
+
+Your password, or API token, is typed once, after the wizard names the server it goes to, and tested right away; a refused one can be typed again, or its login changed. Once it works, the wizard offers to store it in a keyring it finds installed, reading it back to check, or to keep a command of your own, or the raw value. An OAuth sign-in is handed off to Ortie, whose token command the account reads.
+
+The wizard then offers to save the account: to a new configuration file, or appended to the one you already have, leaving its comments and formatting untouched.
 
 A bare `calendula` finding no configuration offers the wizard, as does any command needing an account; once you have one, bare `calendula` prints the help.
 
@@ -172,7 +176,7 @@ calendar.default = "home"
 
 ### Google
 
-Use the `gcal` backend, which speaks the [Calendar API v3](https://developers.google.com/workspace/calendar/api/v3/reference) directly. Both routes need [OAuth 2.0](https://developers.google.com/workspace/calendar/caldav/v2/guide), and an access token expires within the hour, so point the token at a broker such as [Ortie](https://github.com/pimalaya/ortie) rather than pasting one in.
+Use the `gcal` backend, which speaks the [Calendar API v3](https://developers.google.com/workspace/calendar/api/v3/reference) directly. Both routes need [OAuth 2.0](https://developers.google.com/workspace/calendar/caldav/v2/guide), and an access token expires within the hour, so point the token at a broker such as [Ortie](https://github.com/pimalaya/ortie) rather than pasting one in. `calendula configure` with a Google address picks this backend and signs in through Ortie, writing `["ortie", "token", "show", "-a", "calendula-<account>"]`.
 
 ```toml
 [accounts.example]
@@ -207,7 +211,12 @@ calendar.default = "example@gmail.com/events"
 
 ### Microsoft
 
-Not supported *yet*: Microsoft offers no CalDAV for calendars, only the [Graph API](https://learn.microsoft.com/en-us/graph/api/resources/calendar). Native Graph support is planned.
+Use the `msgraph` backend, which speaks the [Graph API](https://learn.microsoft.com/en-us/graph/api/resources/calendar): Microsoft offers no CalDAV for calendars. Graph takes an OAuth 2.0 token with the `Calendars.ReadWrite` scope, so point the token at a broker such as [Ortie](https://github.com/pimalaya/ortie). `calendula configure` with a Microsoft address picks this backend and signs in through Ortie.
+
+```toml
+[accounts.example]
+msgraph.auth.token.command = ["ortie", "token", "show", "-a", "calendula-example"]
+```
 
 ### Proton
 

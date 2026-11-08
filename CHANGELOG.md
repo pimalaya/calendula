@@ -29,8 +29,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Added `pimdir reply --recurrence-id` and `pimdir cancel --recurrence-id`, limiting the intent to one occurrence (`recurrence_id`, pimdir STORAGE Annex B.2); a performer unable to act on one occurrence is refused with `occurrence-unsupported`. Their JSON adds `recurrenceId`.
 - Added a stable `code` to the `--json` error output for failures a caller acts on: `body-pending`, `precondition-failed`, `occurrence-unsupported`, `item-duplicate`, and the pimdir store states io-pimdir names `store-uncreated`, `store-version`, `store-foreign`, `store-corrupt`, `store-hash-algo`, `store-busy`, `store-exposed`, `flag-invalid` and `action-malformed`.
 - Added the parked actions to `pimdir status`: every write the sync engine could not apply in the calendars shown, by its queue row (ROW), its calendar, its action and the error that parked it. Its JSON adds `parked`.
+- Added the Google Calendar API and Microsoft Graph calendars to the wizard.
+
+  Where a provider rule matches the address, by its domain or its MX hosts, the gcal or msgraph backend is picked before CalDAV and signed in through Ortie, its block written as config.sample.toml documents it.
 
 ### Changed
+
+- Changed the wizard to pick the best way to the calendars itself and show it in a review, instead of listing every server then asking the authentication scheme, the username and how the secret is read.
+
+  The review reads in plain words (`CalDAV at dav.example.org, with your password`), and `Change calendar` lists every other way found and a custom server URL.
+- Changed the wizard to ask a password or an API token once, after naming the server it goes to and flagging one off the address's domain, then test it and offer to store it in an installed keyring, read back to check, at `calendula-<account>-caldav`.
+
+  The login is the address, asked only when none was typed. A refused sign-in offers to try again, to change the login or to go back to the review.
+- Changed the wizard to hand an OAuth sign-in off to Ortie (`ortie configure` then `ortie auth get`, under the Ortie account `calendula-<account>`), offering the token brokers when Ortie is not installed.
+- Changed the wizard to ask `Server URL:` when nothing is discovered instead of stopping, an empty answer still stopping it.
+- Changed the wizard to accept encrypted servers only: a typed `http://` URL is refused unless it names this machine, a discovered one is dropped, and `caldav://` now reads as `https` like `caldavs://`.
+- Changed io-pim-discovery to 0.11, and the wizard to look up the Google Calendar API and Microsoft Graph calendars beside CalDAV.
+
+  A CalDAV root is resolved through its well-known URI (RFC 6764), a provider is recognized through the domain's MX hosts, and OAuth grants are read from protected resource metadata (RFC 9728); a DNS resolver that does not answer fails the lookup, naming it.
 
 - Changed the pimdir backend to read one account of the store: with `pimdir.account` unset, the account every collection is grouped under, and a store several accounts share is refused, naming them, rather than read with their calendars merged. **Breaking.**
 - Changed the pimdir write confirmations to say the write is queued for the next sync (`Event <id> queued for the next sync`, `... update queued ...`, `... deletion queued ...`) rather than created, updated or deleted. The JSON output is unchanged; a queued create's `id` is the link id it staged, which no command addresses before a sync applies it.

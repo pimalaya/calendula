@@ -11,10 +11,11 @@
 # rest are deep-merged on top of it.
 #
 # Run `calendula` with no command to launch the wizard. One question takes an
-# email address, a server URL or a local folder path; it discovers what it can,
-# tests the account, then prints a ready-to-save configuration on stdout.
+# email address, a server URL or a local folder path; it picks the best way to
+# your calendars, signs in and tests the account, then offers to store your
+# password in a keyring and to save a ready-to-use configuration.
 #
-# It writes nothing on its own: redirect it, or let it save the file when asked.
+# It writes nothing without asking: redirect it, or let it save the file.
 # ================================================================================
 
 # --------------------------------------------------------------------------------
@@ -175,7 +176,8 @@ vdir.home-dir = "~/.local/share/vdirsyncer/calendars"
 #    discovery. Convenient but adds DNS + HTTP round-trips on every run.
 #
 # The wizard records `server`: discovery already ran once, so pinning what it
-# found spares every later run those round-trips.
+# found spares every later run those round-trips. A password it stores in a
+# keyring goes to the entry `calendula-<account>-caldav`.
 # --------------------------------------------------------------------------------
 
 #caldav.discover = "example.org"
@@ -221,7 +223,9 @@ caldav.auth.basic.password.command = "pass show example"
 # to `calendar create` is reported back rather than honoured.
 #
 # An access token expires within the hour, so a token written here is useless by
-# the second run: point `command` at a broker such as Ortie.
+# the second run: point `command` at a broker such as Ortie. The wizard picks
+# this backend for a Google address and signs in through Ortie, under the Ortie
+# account `calendula-<account>`.
 # --------------------------------------------------------------------------------
 
 # Bearer authentication (RFC 6750), the only kind the Calendar API takes.
@@ -245,7 +249,9 @@ caldav.auth.basic.password.command = "pass show example"
 # Calendar ids are the ones `calendula calendar list` shows. Graph mints the id
 # of a calendar it creates, and keeps no description nor RGB colour. Only the
 # series master of a recurring event is written back. The token needs the
-# `Calendars.ReadWrite` scope.
+# `Calendars.ReadWrite` scope. The wizard picks this backend for a Microsoft
+# address and signs in through Ortie, under the Ortie account
+# `calendula-<account>`.
 # --------------------------------------------------------------------------------
 
 # The calendar owner, `me` by default.

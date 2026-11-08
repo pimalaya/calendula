@@ -17,8 +17,8 @@
 //! fills it.
 //!
 //! [`io_http`] is the request and response state machines WebDAV and the REST
-//! clients run on, `io_pim_discovery` the RFC 6764 CalDAV discovery, and
-//! `ical` the iCalendar parser and editor.
+//! clients run on, `io_pim_discovery` the RFC 6764 CalDAV discovery and the
+//! wizard's lookup, and `ical` the iCalendar parser and editor.
 //!
 //! The `pimalaya_cli`, `pimalaya_config` and `pimalaya_stream` toolkits supply
 //! the clap scaffolding, the TOML loading and secrets, and the blocking
@@ -104,7 +104,9 @@
 //!
 //! `calendula configure` runs the wizard ([`wizard::discover`] builds the
 //! account, [`wizard::configure`] places it). One prompt takes an address, a
-//! server URL or a folder path, and its shape orients the flow.
+//! server URL or a folder path, and its shape orients the flow: discovery's
+//! best route is picked and reviewed, then signed in and tested as typed, a
+//! password stored by the wizard and OAuth handed off to Ortie.
 //!
 //! The account is saved to a configuration that does not exist, appended to
 //! one that does, or printed when stdout is redirected. The wizard is also

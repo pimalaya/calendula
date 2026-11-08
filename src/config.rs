@@ -653,7 +653,10 @@ pub struct GcalAuthConfig {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct MsgraphConfig {
     /// Graph user id, `me` by default: the authenticated user.
-    #[serde(default = "default_msgraph_user_id")]
+    #[serde(
+        default = "default_msgraph_user_id",
+        skip_serializing_if = "is_default_msgraph_user_id"
+    )]
     pub user_id: String,
     /// TLS configuration.
     #[serde(default)]
@@ -669,6 +672,12 @@ pub struct MsgraphConfig {
 #[cfg(feature = "msgraph")]
 fn default_msgraph_user_id() -> String {
     String::from("me")
+}
+
+/// Whether `user_id` is the default one, which a generated block leaves out.
+#[cfg(feature = "msgraph")]
+fn is_default_msgraph_user_id(user_id: &str) -> bool {
+    user_id == "me"
 }
 
 /// ALPN identifiers msgraph offers when `msgraph.alpn` names none, pinning

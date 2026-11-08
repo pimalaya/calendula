@@ -61,8 +61,11 @@ impl ConfigureCommand {
         let path = Config::target_path(config_paths)?;
         let existing = ExistingConfig::read(&path)?;
 
-        let (base_name, mut account) = discover::run()?;
-        let name = account_name(&base_name, existing.as_ref());
+        let taken = existing
+            .as_ref()
+            .map(|config| config.names.as_slice())
+            .unwrap_or_default();
+        let (name, mut account) = discover::run(taken)?;
 
         // NOTE: two `default = true` would make the account every command
         // picks depend on map ordering.
@@ -144,9 +147,10 @@ pub fn print_welcome(path: &Path) {
     eprintln!();
     eprintln!("Welcome to Calendula, the CLI to manage calendars.");
     eprintln!();
-    eprintln!("Calendula talks to your existing calendars over CalDAV or Google Calendar,");
-    eprintln!("or reads a local vdir home or pimdir store. It needs one account to know");
-    eprintln!("which calendars to read, and no configuration file was found at:");
+    eprintln!("Calendula talks to your existing calendars over CalDAV, Google Calendar or");
+    eprintln!("Microsoft Graph, or reads a local vdir home or pimdir store. It needs one");
+    eprintln!("account to know which calendars to read, and no configuration file was");
+    eprintln!("found at:");
     eprintln!();
     eprintln!("  {}", path.display());
     eprintln!();
@@ -160,34 +164,6 @@ pub fn print_welcome(path: &Path) {
     eprintln!();
     eprintln!("  calendula configure");
     eprintln!();
-}
-
-/// The name discovery proposes, suffixed until the configuration does not
-/// already hold it.
-///
-/// Not prompted, the name being only the TOML table key. It still has to be
-/// free: a second `[accounts.<name>]` table makes the whole document fail to
-/// parse, taking the working accounts down with it.
-fn account_name(base: &str, existing: Option<&ExistingConfig>) -> String {
-    let taken = existing
-        .map(|config| config.names.as_slice())
-        .unwrap_or(&[]);
-
-    if !taken.iter().any(|name| name == base) {
-        return base.to_string();
-    }
-
-    let mut suffix = 2;
-
-    loop {
-        let name = format!("{base}-{suffix}");
-
-        if !taken.contains(&name) {
-            return name;
-        }
-
-        suffix += 1;
-    }
 }
 
 /// Offers to write the generated account to a configuration file that does
@@ -358,18 +334,6 @@ mod tests {
         assert!(content.starts_with("# my accounts"));
 
         fs::remove_file(&path).expect("remove the config");
-    }
-
-    #[test]
-    fn a_taken_name_gets_a_suffix() {
-        let existing = ExistingConfig {
-            names: vec![String::from("perso"), String::from("perso-2")],
-            has_default: true,
-        };
-
-        assert_eq!(account_name("perso", None), "perso");
-        assert_eq!(account_name("perso", Some(&existing)), "perso-3");
-        assert_eq!(account_name("work", Some(&existing)), "work");
     }
 
     #[test]

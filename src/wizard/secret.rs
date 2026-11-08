@@ -1,23 +1,15 @@
-//! # Secret prompts
+//! # Secrets
 //!
-//! Delegates to pimalaya-cli's OS-aware pickers: [`configure_password`]
-//! offers the OS keyrings, [`configure_token`] the OAuth 2.0 token brokers.
+//! Turns what pimalaya-cli's secret prompts answer into the [`Secret`] the
+//! configuration stores, and offers the OAuth 2.0 token brokers when Ortie
+//! cannot sign in itself.
 //!
 //! A known provider or broker yields an argv command, which serializes as a
-//! TOML array; a custom command is a shell string. calendula only reads a
-//! secret, so a missing one surfaces when the account is tested right after.
+//! TOML array; a custom command is a shell string.
 
 use anyhow::{Result, bail};
 use pimalaya_cli::wizard::keyring::{self, SecretChoice};
 use pimalaya_config::{command::CommandConfig, secret::Secret};
-
-/// Prompts for a password through the shared keyring picker.
-///
-/// `key_default` seeds the keyring entry, typically `<account>-caldav`, and
-/// is used verbatim, so a pre-existing secret is read exactly as named.
-pub fn configure_password(label: &str, key_default: &str) -> Result<Secret> {
-    to_secret(keyring::prompt_secret(label, key_default)?)
-}
 
 /// Prompts for an API token through the shared token picker.
 ///
@@ -28,7 +20,7 @@ pub fn configure_token(label: &str, key_default: &str, oauth: bool) -> Result<Se
 }
 
 /// Turns a picker choice into the [`Secret`] the configuration stores.
-fn to_secret(choice: SecretChoice) -> Result<Secret> {
+pub fn to_secret(choice: SecretChoice) -> Result<Secret> {
     Ok(match choice {
         SecretChoice::Command(argv) => command_secret(argv)?,
         SecretChoice::Shell(line) => shell_secret(&line)?,
@@ -63,7 +55,7 @@ fn shell_secret(line: &str) -> Result<Secret> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::wizard::secret::*;
 
     #[test]
     fn empty_command_secret_is_rejected() {
