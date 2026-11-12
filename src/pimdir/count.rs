@@ -12,12 +12,10 @@ use serde::Serialize;
 
 use crate::pimdir::{
     backend::PimdirBackend,
-    index::{
-        PimdirCalendarCoverage, PimdirCalendarZones, PimdirSearchKind, parse_query, search_clock,
-    },
+    index::{PimdirCalendarCoverage, PimdirCalendarZones, parse_query, search_clock},
 };
 
-/// Count the account's items a query matches.
+/// Count the account's events a query matches.
 ///
 /// Takes what `pimdir search` takes.
 ///
@@ -29,10 +27,6 @@ pub struct PimdirCountCommand {
     /// Calendar to count in alone; every calendar when omitted.
     #[arg(short = 'k', long = "calendar", value_name = "CALENDAR-ID")]
     pub calendar: Option<String>,
-
-    /// Kind of item to count.
-    #[arg(long, value_enum, default_value_t)]
-    pub kind: PimdirSearchKind,
 
     /// The query, its words joined by spaces.
     #[arg(value_name = "QUERY", required = true)]
@@ -47,15 +41,11 @@ impl PimdirCountCommand {
             backend.known_collection(calendar)?;
         }
 
-        let count = backend.client.count_items(
-            query,
-            self.kind,
-            self.calendar.as_deref(),
-            &search_clock(),
-        )?;
+        let count = backend
+            .client
+            .count_items(query, self.calendar.as_deref(), &search_clock())?;
 
         printer.out(PimdirCountOutput {
-            kind: self.kind,
             count: count.count,
             coverage: count.coverage,
             zones: count.zones,
@@ -67,10 +57,7 @@ impl PimdirCountCommand {
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PimdirCountOutput {
-    /// The kind counted.
-    #[serde(skip)]
-    pub kind: PimdirSearchKind,
-    /// How many items the query matches.
+    /// How many events the query matches.
     pub count: u64,
     /// What the count could not see.
     pub coverage: PimdirCalendarCoverage,
@@ -81,13 +68,7 @@ pub struct PimdirCountOutput {
 
 impl fmt::Display for PimdirCountOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let kind = match self.kind {
-            PimdirSearchKind::Event => "event(s)",
-            PimdirSearchKind::Todo => "todo(s)",
-            PimdirSearchKind::Journal => "journal entry(ies)",
-        };
-
-        writeln!(f, "{} {kind}", self.count)?;
+        writeln!(f, "{} event(s)", self.count)?;
         write!(f, "{}", self.coverage)?;
         if let Some(zones) = &self.zones {
             write!(f, "{zones}")?;

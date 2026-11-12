@@ -51,30 +51,29 @@
 //! ## Three command families
 //!
 //! The command tree ([`cli`]) is split into three groups, in this order. The
-//! shared API (`calendar`, `event`, `todo`, `journal`, `item`) is the portable
-//! surface, where every operation works the same whichever backend serves the
-//! account.
+//! shared API (`calendar`, `event`, `item`) is the portable surface, where
+//! every operation works the same whichever backend serves the account.
 //!
 //! The protocol-specific APIs (`caldav`, `gcal`, `pimdir`, `vdir`) each expose
 //! what only one backend has, gated behind its own cargo feature. The meta
 //! commands (`account`, `completions`, `manuals`) inspect the configuration
 //! and generate the shell integration.
 //!
-//! ### The component families against item
+//! ### Events against item
 //!
-//! A calendar collection mixes component kinds, so the shared API offers two
-//! kinds of view over the same resources. `item` is the raw, unfiltered one:
-//! it lists, reads, writes and deletes any iCalendar object by id, leaving the
-//! bytes untouched.
+//! calendula is the Pimalaya CLI for events: VTODO belongs to unfog and
+//! VJOURNAL to journal, one CLI per iCalendar domain. A calendar collection
+//! may still mix component kinds, so the shared API offers two kinds of view
+//! over the same resources. `item` is the raw, unfiltered one: it lists,
+//! reads, writes and deletes any iCalendar object by id, a to-do or a journal
+//! entry included, leaving the bytes untouched.
 //!
-//! The component families are the projected ones, one per kind a calendar
-//! stores: `event` (VEVENT) renders summary and time columns and draws a
-//! cal(1)-style agenda, `todo` (VTODO) due date, status, priority and
-//! completion, `journal` (VJOURNAL) a dated note. Each drops the other kinds.
+//! `event` is the projected one: it keeps VEVENT, renders summary and time
+//! columns and draws a cal(1)-style agenda.
 //!
-//! They all share the `-k/--calendar` selector and the same item API; only the
-//! rendering and the filter differ, so a component family costs a projection
-//! and a table and adds no backend operation.
+//! Both share the `-k/--calendar` selector and the same item API; only the
+//! rendering and the filter differ, so the projection adds no backend
+//! operation.
 //!
 //! VFREEBUSY and VTIMEZONE get no family: the first is the answer to a query
 //! rather than a stored resource, and the second defines the zones the others

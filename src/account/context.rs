@@ -15,7 +15,7 @@ use pimalaya_config::command::CommandConfig;
 use crate::{
     config::{
         AccountConfig, CalendarListTableConfig, Config, EventListTableConfig, ItemListTableConfig,
-        JournalListTableConfig, TableArrangementConfig, TodoListTableConfig,
+        TableArrangementConfig,
     },
     shared::table::{DEFAULT_PRESET, style_from_preset},
 };
@@ -33,10 +33,6 @@ pub struct Account {
     pub table_arrangement: Option<TableArrangementConfig>,
     /// Page size `event list` falls back to.
     pub events_list_page_size: Option<u32>,
-    /// Page size `todo list` falls back to.
-    pub todos_list_page_size: Option<u32>,
-    /// Page size `journal list` falls back to.
-    pub journals_list_page_size: Option<u32>,
     /// Page size `item list` falls back to.
     pub items_list_page_size: Option<u32>,
     /// Fallback calendar id for `event` and `item` commands when their
@@ -49,10 +45,6 @@ pub struct Account {
     pub calendars_list_table: CalendarListTableConfig,
     /// Per-column colors of the `event list` table.
     pub events_list_table: EventListTableConfig,
-    /// Per-column colors of the `todo list` table.
-    pub todos_list_table: TodoListTableConfig,
-    /// Per-column colors of the `journal list` table.
-    pub journals_list_table: JournalListTableConfig,
     /// Per-column colors of the `item list` table.
     pub items_list_table: ItemListTableConfig,
 }
@@ -65,10 +57,6 @@ impl Account {
             table_arrangement: other.table_arrangement.or(self.table_arrangement),
 
             events_list_page_size: other.events_list_page_size.or(self.events_list_page_size),
-            todos_list_page_size: other.todos_list_page_size.or(self.todos_list_page_size),
-            journals_list_page_size: other
-                .journals_list_page_size
-                .or(self.journals_list_page_size),
             items_list_page_size: other.items_list_page_size.or(self.items_list_page_size),
 
             calendar_default: other.calendar_default.or(self.calendar_default),
@@ -79,11 +67,6 @@ impl Account {
                 other.calendars_list_table,
             ),
             events_list_table: merge_event_table(self.events_list_table, other.events_list_table),
-            todos_list_table: merge_todo_table(self.todos_list_table, other.todos_list_table),
-            journals_list_table: merge_journal_table(
-                self.journals_list_table,
-                other.journals_list_table,
-            ),
             items_list_table: merge_item_table(self.items_list_table, other.items_list_table),
         }
     }
@@ -104,17 +87,6 @@ impl Account {
     /// Page size `event list` uses when `-s/--page-size` is omitted.
     pub fn events_list_page_size(&self) -> u32 {
         self.events_list_page_size.unwrap_or(DEFAULT_LIST_PAGE_SIZE)
-    }
-
-    /// Page size `todo list` uses when `-s/--page-size` is omitted.
-    pub fn todos_list_page_size(&self) -> u32 {
-        self.todos_list_page_size.unwrap_or(DEFAULT_LIST_PAGE_SIZE)
-    }
-
-    /// Page size `journal list` uses when `-s/--page-size` is omitted.
-    pub fn journals_list_page_size(&self) -> u32 {
-        self.journals_list_page_size
-            .unwrap_or(DEFAULT_LIST_PAGE_SIZE)
     }
 
     /// Page size `item list` uses when `-s/--page-size` is omitted.
@@ -187,36 +159,6 @@ impl Account {
         map_color_or(self.events_list_table.end_color, Color::DarkYellow)
     }
 
-    /// Color of the ID column of `todo list`, red by default.
-    pub fn todos_list_table_id_color(&self) -> TableColor {
-        map_color_or(self.todos_list_table.id_color, Color::Red)
-    }
-    /// Color of the SUMMARY column of `todo list`, green by default.
-    pub fn todos_list_table_summary_color(&self) -> TableColor {
-        map_color_or(self.todos_list_table.summary_color, Color::Green)
-    }
-    /// Color of the DUE column of `todo list`, yellow by default.
-    pub fn todos_list_table_due_color(&self) -> TableColor {
-        map_color_or(self.todos_list_table.due_color, Color::DarkYellow)
-    }
-    /// Color of the STATUS column of `todo list`, unset by default.
-    pub fn todos_list_table_status_color(&self) -> TableColor {
-        map_color_or(self.todos_list_table.status_color, Color::Reset)
-    }
-
-    /// Color of the ID column of `journal list`, red by default.
-    pub fn journals_list_table_id_color(&self) -> TableColor {
-        map_color_or(self.journals_list_table.id_color, Color::Red)
-    }
-    /// Color of the SUMMARY column of `journal list`, green by default.
-    pub fn journals_list_table_summary_color(&self) -> TableColor {
-        map_color_or(self.journals_list_table.summary_color, Color::Green)
-    }
-    /// Color of the START column of `journal list`, yellow by default.
-    pub fn journals_list_table_start_color(&self) -> TableColor {
-        map_color_or(self.journals_list_table.start_color, Color::DarkYellow)
-    }
-
     /// Color of the ID column of `item list`, red by default.
     pub fn items_list_table_id_color(&self) -> TableColor {
         map_color_or(self.items_list_table.id_color, Color::Red)
@@ -281,26 +223,6 @@ fn merge_event_table(
     }
 }
 
-fn merge_todo_table(base: TodoListTableConfig, over: TodoListTableConfig) -> TodoListTableConfig {
-    TodoListTableConfig {
-        id_color: over.id_color.or(base.id_color),
-        summary_color: over.summary_color.or(base.summary_color),
-        due_color: over.due_color.or(base.due_color),
-        status_color: over.status_color.or(base.status_color),
-    }
-}
-
-fn merge_journal_table(
-    base: JournalListTableConfig,
-    over: JournalListTableConfig,
-) -> JournalListTableConfig {
-    JournalListTableConfig {
-        id_color: over.id_color.or(base.id_color),
-        summary_color: over.summary_color.or(base.summary_color),
-        start_color: over.start_color.or(base.start_color),
-    }
-}
-
 fn merge_item_table(base: ItemListTableConfig, over: ItemListTableConfig) -> ItemListTableConfig {
     ItemListTableConfig {
         id_color: over.id_color.or(base.id_color),
@@ -315,15 +237,11 @@ impl From<Config> for Account {
             table_preset: config.table.preset,
             table_arrangement: config.table.arrangement,
             events_list_page_size: config.event.list.page_size,
-            todos_list_page_size: config.todo.list.page_size,
-            journals_list_page_size: config.journal.list.page_size,
             items_list_page_size: config.item.list.page_size,
             calendar_default: config.calendar.default,
             item_composer: config.item.composer,
             calendars_list_table: config.calendar.list.table,
             events_list_table: config.event.list.table,
-            todos_list_table: config.todo.list.table,
-            journals_list_table: config.journal.list.table,
             items_list_table: config.item.list.table,
         }
     }
@@ -335,15 +253,11 @@ impl From<AccountConfig> for Account {
             table_preset: config.table.preset,
             table_arrangement: config.table.arrangement,
             events_list_page_size: config.event.list.page_size,
-            todos_list_page_size: config.todo.list.page_size,
-            journals_list_page_size: config.journal.list.page_size,
             items_list_page_size: config.item.list.page_size,
             calendar_default: config.calendar.default,
             item_composer: config.item.composer,
             calendars_list_table: config.calendar.list.table,
             events_list_table: config.event.list.table,
-            todos_list_table: config.todo.list.table,
-            journals_list_table: config.journal.list.table,
             items_list_table: config.item.list.table,
         }
     }

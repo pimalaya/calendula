@@ -10,7 +10,9 @@
 //!
 //! `deny_unknown_fields` is set on the leaf blocks but deliberately not
 //! on [`Config`] and [`AccountConfig`], so a future TUI reading the same
-//! file can add its own sections without breaking this one.
+//! file can add its own sections without breaking this one. The `todo`
+//! and `journal` tables are refused by name instead, their domains having
+//! moved to unfog and journal.
 
 use std::{collections::HashMap, path::PathBuf};
 
@@ -37,7 +39,7 @@ use pimalaya_config::toml::to_string;
 use pimalaya_config::{command::CommandConfig, toml::TomlConfig};
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error};
 #[cfg(feature = "caldav")]
 use url::Url;
 
@@ -60,15 +62,17 @@ pub struct Config {
     /// `event` command options.
     #[serde(default)]
     pub event: EventConfig,
-    /// `todo` command options.
-    #[serde(default)]
-    pub todo: TodoConfig,
-    /// `journal` command options.
-    #[serde(default)]
-    pub journal: JournalConfig,
     /// `item` command options.
     #[serde(default)]
     pub item: ItemConfig,
+    /// Refused: the to-dos moved to unfog.
+    #[serde(default, skip_serializing)]
+    #[allow(dead_code)]
+    pub todo: Option<TodoMovedConfig>,
+    /// Refused: the journal entries moved to journal.
+    #[serde(default, skip_serializing)]
+    #[allow(dead_code)]
+    pub journal: Option<JournalMovedConfig>,
     /// `account list` rendering options, read from this block only.
     #[serde(default)]
     pub account: AccountListingConfig,
@@ -106,9 +110,8 @@ impl TomlConfig for Config {
 /// What the account is, then the backend it reads calendars from, then
 /// the rendering options. An unlisted key still renders, after these,
 /// so a new [`AccountConfig`] field can never go missing from one.
-const RENDER_ORDER: [&str; 11] = [
-    "default", "vdir", "pimdir", "caldav", "gcal", "msgraph", "calendar", "event", "todo",
-    "journal", "item",
+const RENDER_ORDER: [&str; 9] = [
+    "default", "vdir", "pimdir", "caldav", "gcal", "msgraph", "calendar", "event", "item",
 ];
 
 #[cfg(all(
@@ -238,15 +241,17 @@ pub struct AccountConfig {
     /// `event` command options.
     #[serde(default)]
     pub event: EventConfig,
-    /// `todo` command options.
-    #[serde(default)]
-    pub todo: TodoConfig,
-    /// `journal` command options.
-    #[serde(default)]
-    pub journal: JournalConfig,
     /// `item` command options.
     #[serde(default)]
     pub item: ItemConfig,
+    /// Refused: the to-dos moved to unfog.
+    #[serde(default, skip_serializing)]
+    #[allow(dead_code)]
+    pub todo: Option<TodoMovedConfig>,
+    /// Refused: the journal entries moved to journal.
+    #[serde(default, skip_serializing)]
+    #[allow(dead_code)]
+    pub journal: Option<JournalMovedConfig>,
     /// vdir backend: one local directory per calendar.
     #[cfg(feature = "vdir")]
     pub vdir: Option<VdirConfig>,
@@ -333,78 +338,37 @@ pub struct EventListTableConfig {
     pub end_color: Option<Color>,
 }
 
-/// Todo-level rendering options.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct TodoConfig {
-    /// `todo list` options.
-    #[serde(default)]
-    pub list: TodoListConfig,
+/// The `todo` table, which no configuration holds any more.
+#[derive(Clone, Debug)]
+pub enum TodoMovedConfig {}
+
+impl<'de> Deserialize<'de> for TodoMovedConfig {
+    fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+        Err(D::Error::custom(
+            "The `todo` table moved to `unfog`, the Pimalaya CLI for tasks; \
+             remove it from the calendula configuration",
+        ))
+    }
 }
 
-/// `todo list` options.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct TodoListConfig {
-    /// Default `-s/--page-size` value for `todo list`, 25 when unset.
-    pub page_size: Option<u32>,
-    /// Per-column colors of the rendered table.
-    #[serde(default)]
-    pub table: TodoListTableConfig,
-}
+/// The `journal` table, which no configuration holds any more.
+#[derive(Clone, Debug)]
+pub enum JournalMovedConfig {}
 
-/// Per-column colors of the `todo list` table.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct TodoListTableConfig {
-    /// Color of the ID column, red by default.
-    pub id_color: Option<Color>,
-    /// Color of the SUMMARY column, green by default.
-    pub summary_color: Option<Color>,
-    /// Color of the DUE column, dark yellow by default.
-    pub due_color: Option<Color>,
-    /// Color of the STATUS column, uncolored by default.
-    pub status_color: Option<Color>,
-}
-
-/// Journal-level rendering options.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct JournalConfig {
-    /// `journal list` options.
-    #[serde(default)]
-    pub list: JournalListConfig,
-}
-
-/// `journal list` options.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct JournalListConfig {
-    /// Default `-s/--page-size` value for `journal list`, 25 when
-    /// unset.
-    pub page_size: Option<u32>,
-    /// Per-column colors of the rendered table.
-    #[serde(default)]
-    pub table: JournalListTableConfig,
-}
-
-/// Per-column colors of the `journal list` table.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct JournalListTableConfig {
-    /// Color of the ID column, red by default.
-    pub id_color: Option<Color>,
-    /// Color of the SUMMARY column, green by default.
-    pub summary_color: Option<Color>,
-    /// Color of the START column, dark yellow by default.
-    pub start_color: Option<Color>,
+impl<'de> Deserialize<'de> for JournalMovedConfig {
+    fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+        Err(D::Error::custom(
+            "The `journal` table moved to `journal`, the Pimalaya CLI for \
+             journal entries; remove it from the calendula configuration",
+        ))
+    }
 }
 
 /// Item-level options.
 ///
-/// The composer lives here rather than under a component family: the
-/// four families are views over the same items, and what is edited is an
-/// iCalendar object, which is what `item` names.
+/// The composer lives here rather than under `event`: `event` and `item`
+/// are views over the same items, and what is edited is an iCalendar
+/// object, which is what `item` names.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ItemConfig {
@@ -829,6 +793,24 @@ mod tests {
             let config: CaldavConfig = toml::from_str(&document).unwrap();
             assert_eq!(config.server.as_deref(), Some(spelling));
         }
+    }
+
+    #[test]
+    fn a_leftover_todo_table_is_refused_naming_unfog() {
+        let document = "[todo.list]\npage-size = 50\n\n[accounts.personal]\n";
+        let err = toml::from_str::<Config>(document).unwrap_err().to_string();
+
+        assert!(err.contains("`todo` table moved to `unfog`"), "{err}");
+        assert!(err.contains("line 1"), "{err}");
+    }
+
+    #[test]
+    fn a_leftover_journal_table_in_an_account_is_refused_naming_journal() {
+        let document = "[accounts.personal.journal]\nlist.page-size = 50\n";
+        let err = toml::from_str::<Config>(document).unwrap_err().to_string();
+
+        assert!(err.contains("`journal` table moved to `journal`"), "{err}");
+        assert!(err.contains("line 1"), "{err}");
     }
 
     /// The wizard writes no `default = false` line, the rest of the

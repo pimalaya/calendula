@@ -10,7 +10,6 @@ use std::{
 
 use anyhow::Result;
 use ariadne::{Color, Config, Label, Report, ReportKind, Source};
-use clap::ValueEnum;
 use io_pimdir::{
     client::{
         reader::PimdirItem,
@@ -37,30 +36,23 @@ use crate::{
     shared::{
         event::{Event, EventPerson},
         item::CalendarItem,
-        journal::Journal,
-        todo::Todo,
     },
 };
 
 impl PimdirClient {
-    /// One page of the items of `kind` `query` matches in the account.
+    /// One page of the events `query` matches in the account.
     pub fn search_items(
         &self,
         query: PimdirQuery,
-        kind: PimdirSearchKind,
         calendar: Option<&str>,
         options: &PimdirSearchOptions,
     ) -> Result<PimdirCalendarPage> {
         let index = self.index()?;
         let answer = index
-            .search(&self.scope(query, kind, calendar), options)
+            .search(&self.scope(query, calendar), options)
             .map_err(|err| store_error(err, "Search the pimdir index"))?;
 
-        let mut hits = match kind {
-            PimdirSearchKind::Event => PimdirCalendarHits::Events(Vec::new()),
-            PimdirSearchKind::Todo => PimdirCalendarHits::Todos(Vec::new()),
-            PimdirSearchKind::Journal => PimdirCalendarHits::Journals(Vec::new()),
-        };
+        let mut hits = Vec::new();
 
         for hit in answer.hits {
             let placement = hit
@@ -90,26 +82,12 @@ impl PimdirClient {
             let matched = hit.matched.map(PimdirCalendarMatched::from);
 
             // NOTE: an item dropped since the refresh has no row, only a title.
-            match &mut hits {
-                PimdirCalendarHits::Events(events) => events.push(PimdirCalendarHit {
-                    item: event_hit(&item, stored.as_ref(), hit.title),
-                    calendar_id,
-                    matched,
-                    snippet: hit.snippet,
-                }),
-                PimdirCalendarHits::Todos(todos) => todos.push(PimdirCalendarHit {
-                    item: todo_hit(&item, stored.as_ref(), hit.title),
-                    calendar_id,
-                    matched,
-                    snippet: hit.snippet,
-                }),
-                PimdirCalendarHits::Journals(journals) => journals.push(PimdirCalendarHit {
-                    item: journal_hit(&item, stored.as_ref(), hit.title),
-                    calendar_id,
-                    matched,
-                    snippet: hit.snippet,
-                }),
-            }
+            hits.push(PimdirCalendarHit {
+                event: event_hit(&item, stored.as_ref(), hit.title),
+                calendar_id,
+                matched,
+                snippet: hit.snippet,
+            });
         }
 
         Ok(PimdirCalendarPage {
@@ -120,18 +98,17 @@ impl PimdirClient {
         })
     }
 
-    /// How many items of `kind` `query` matches in the account, its dates
-    /// read against `clock`.
+    /// How many events `query` matches in the account, its dates read
+    /// against `clock`.
     pub fn count_items(
         &self,
         query: PimdirQuery,
-        kind: PimdirSearchKind,
         calendar: Option<&str>,
         clock: &PimdirSearchClock,
     ) -> Result<PimdirCalendarCount> {
         let index = self.index()?;
         let answer = index
-            .count(&self.scope(query, kind, calendar), clock)
+            .count(&self.scope(query, calendar), clock)
             .map_err(|err| store_error(err, "Count in the pimdir index"))?;
 
         Ok(PimdirCalendarCount {
@@ -151,15 +128,10 @@ impl PimdirClient {
         })
     }
 
-    /// `query` scoped by top-level `kind:`, `account:` and `collection:`
-    /// conjuncts.
+    /// `query` scoped by top-level `kind:event`, `account:` and
+    /// `collection:` conjuncts.
     // NOTE: io-pimdir reads the coverage's scope from top-level terms alone.
-    fn scope(
-        &self,
-        query: PimdirQuery,
-        kind: PimdirSearchKind,
-        calendar: Option<&str>,
-    ) -> PimdirQuery {
+    fn scope(&self, query: PimdirQuery, calendar: Option<&str>) -> PimdirQuery {
         let mut conjuncts = match query {
             PimdirQuery::And(conjuncts) => conjuncts,
             query => vec![query],
@@ -172,7 +144,7 @@ impl PimdirClient {
             })
         };
 
-        conjuncts.push(term(PimdirQueryPredicate::Kind(kind.into())));
+        conjuncts.push(term(PimdirQueryPredicate::Kind(PimdirQueryKind::Event)));
         if let Some(account) = &self.account {
             conjuncts.push(term(PimdirQueryPredicate::Account(account.clone())));
         }
@@ -181,28 +153,6 @@ impl PimdirClient {
         }
 
         PimdirQuery::And(conjuncts)
-    }
-}
-
-/// The component kind a search reads.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
-pub enum PimdirSearchKind {
-    /// VEVENTs (`kind:event`).
-    #[default]
-    Event,
-    /// VTODOs (`kind:task`).
-    Todo,
-    /// VJOURNALs (`kind:journal`).
-    Journal,
-}
-
-impl From<PimdirSearchKind> for PimdirQueryKind {
-    fn from(kind: PimdirSearchKind) -> Self {
-        match kind {
-            PimdirSearchKind::Event => Self::Event,
-            PimdirSearchKind::Todo => Self::Task,
-            PimdirSearchKind::Journal => Self::Journal,
-        }
     }
 }
 
@@ -282,7 +232,7 @@ fn refusal_report(query: &str, err: &PimdirQueryError) -> String {
 /// One page of hits.
 pub struct PimdirCalendarPage {
     /// The hits, in the order asked.
-    pub hits: PimdirCalendarHits,
+    pub hits: Vec<PimdirCalendarHit>,
     /// Whether hits follow this page.
     pub more: bool,
     /// What the answer could not see.
@@ -334,26 +284,13 @@ impl fmt::Display for PimdirCalendarZones {
     }
 }
 
-/// The hits of one kind.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(untagged)]
-pub enum PimdirCalendarHits {
-    /// Events.
-    Events(Vec<PimdirCalendarHit<Event>>),
-    /// Todos.
-    Todos(Vec<PimdirCalendarHit<Todo>>),
-    /// Journal entries.
-    Journals(Vec<PimdirCalendarHit<Journal>>),
-}
-
-/// An item the index matched.
+/// An event the index matched.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-#[schemars(rename = "PimdirCalendarHitOf{T}")]
-pub struct PimdirCalendarHit<T> {
-    /// The item as its family projects it.
+pub struct PimdirCalendarHit {
+    /// The event, projected as `event read` projects it.
     #[serde(flatten)]
-    pub item: T,
+    pub event: Event,
     /// The calendar holding it.
     pub calendar_id: String,
     /// What a text term matched, `null` when only field terms did.
@@ -563,59 +500,6 @@ fn time_line(name: &str, start: &PimdirTime, value: &str) -> String {
     }
 }
 
-/// The todo a hit renders as: from its body, its summary or its title.
-fn todo_hit(item: &CalendarItem, stored: Option<&PimdirItem>, title: String) -> Todo {
-    if let Some(todo) = Todo::project(item).into_iter().next() {
-        return todo;
-    }
-
-    match stored.and_then(|stored| stored.summary.as_ref()) {
-        Some(PimdirSummary::Task(summary)) => Todo {
-            id: item.id.clone(),
-            summary: summary.summary.clone(),
-            due: summary
-                .due
-                .as_ref()
-                .map(|due| due.value.clone())
-                .unwrap_or_default(),
-            status: summary.status.clone().unwrap_or_default(),
-            priority: summary.priority,
-            percent_complete: summary.percent,
-        },
-        _ => Todo {
-            id: item.id.clone(),
-            summary: title,
-            ..Default::default()
-        },
-    }
-}
-
-/// The journal entry a hit renders as: from its body, its summary or its
-/// title.
-fn journal_hit(item: &CalendarItem, stored: Option<&PimdirItem>, title: String) -> Journal {
-    if let Some(journal) = Journal::project(item).into_iter().next() {
-        return journal;
-    }
-
-    match stored.and_then(|stored| stored.summary.as_ref()) {
-        Some(PimdirSummary::Journal(summary)) => Journal {
-            id: item.id.clone(),
-            summary: summary.summary.clone(),
-            start: summary
-                .dtstart
-                .as_ref()
-                .map(|start| start.value.clone())
-                .unwrap_or_default(),
-            status: String::new(),
-        },
-        _ => Journal {
-            id: item.id.clone(),
-            summary: title,
-            ..Default::default()
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -648,8 +532,8 @@ mod tests {
             backend::PimdirBackend,
             client::PimdirClient,
             index::{
-                PimdirCalendarCoverage, PimdirCalendarHits, PimdirCalendarMatched,
-                PimdirCalendarPage, PimdirCalendarZones, PimdirSearchKind, parse_query,
+                PimdirCalendarCoverage, PimdirCalendarMatched, PimdirCalendarPage,
+                PimdirCalendarZones, parse_query,
             },
         },
     };
@@ -807,38 +691,23 @@ mod tests {
         parse_query(&[text.to_string()], true).unwrap()
     }
 
-    fn page(
-        client: &PimdirClient,
-        text: &str,
-        kind: PimdirSearchKind,
-        calendar: Option<&str>,
-    ) -> PimdirCalendarPage {
+    fn page(client: &PimdirClient, text: &str, calendar: Option<&str>) -> PimdirCalendarPage {
         let options = PimdirSearchOptions::default();
         client
-            .search_items(query(text), kind, calendar, &options)
+            .search_items(query(text), calendar, &options)
             .unwrap()
     }
 
     /// The summaries of the hits of `text`, sorted.
-    fn summaries(
-        client: &PimdirClient,
-        text: &str,
-        kind: PimdirSearchKind,
-        calendar: Option<&str>,
-    ) -> Vec<String> {
-        let mut summaries: Vec<String> = match page(client, text, kind, calendar).hits {
-            PimdirCalendarHits::Events(hits) => hits.into_iter().map(|h| h.item.summary).collect(),
-            PimdirCalendarHits::Todos(hits) => hits.into_iter().map(|h| h.item.summary).collect(),
-            PimdirCalendarHits::Journals(hits) => {
-                hits.into_iter().map(|h| h.item.summary).collect()
-            }
-        };
+    fn summaries(client: &PimdirClient, text: &str, calendar: Option<&str>) -> Vec<String> {
+        let hits = page(client, text, calendar).hits;
+        let mut summaries: Vec<String> = hits.into_iter().map(|h| h.event.summary).collect();
         summaries.sort();
         summaries
     }
 
     fn events(client: &PimdirClient, text: &str) -> Vec<String> {
-        summaries(client, text, PimdirSearchKind::Event, None)
+        summaries(client, text, None)
     }
 
     /// A clock at [`NOW`] reading days in `zone`.
@@ -855,14 +724,10 @@ mod tests {
             clock: clock(zone),
             ..Default::default()
         };
-        let page = client
-            .search_items(query(text), PimdirSearchKind::Event, None, &options)
-            .unwrap();
-        let PimdirCalendarHits::Events(hits) = page.hits else {
-            panic!("expected events");
-        };
+        let page = client.search_items(query(text), None, &options).unwrap();
 
-        let mut summaries: Vec<String> = hits.into_iter().map(|hit| hit.item.summary).collect();
+        let mut summaries: Vec<String> =
+            page.hits.into_iter().map(|hit| hit.event.summary).collect();
         summaries.sort();
         summaries
     }
@@ -902,15 +767,11 @@ mod tests {
     fn a_word_of_a_description_is_found_with_its_snippet() {
         let (_dir, backend) = indexed_store();
 
-        let PimdirCalendarHits::Events(hits) =
-            page(&backend.client, "quarter", PimdirSearchKind::Event, None).hits
-        else {
-            panic!("expected events");
-        };
+        let hits = page(&backend.client, "quarter", None).hits;
         assert_eq!(hits.len(), 1);
         let hit = &hits[0];
-        assert_eq!(hit.item.summary, "Offsite");
-        assert_eq!(hit.item.location, "Lisbon");
+        assert_eq!(hit.event.summary, "Offsite");
+        assert_eq!(hit.event.location, "Lisbon");
         assert_eq!(hit.calendar_id, "cal");
         assert_eq!(hit.matched, Some(PimdirCalendarMatched::Body));
         assert!(
@@ -918,13 +779,13 @@ mod tests {
             "{hit:?}"
         );
         assert_eq!(
-            hit.item.starts_at.as_deref(),
+            hit.event.starts_at.as_deref(),
             Some("2026-11-07T00:30:00+00:00")
         );
         let read = backend
             .client
             .reader
-            .get_item("cal", hit.item.id.parse().unwrap())
+            .get_item("cal", hit.event.id.parse().unwrap())
             .unwrap()
             .unwrap();
         assert_eq!(read.link_id.0, "offsite@example.org");
@@ -967,12 +828,7 @@ mod tests {
         assert!(events_in(client, "date:2026-11-06", "Europe/Paris").is_empty());
 
         let count = client
-            .count_items(
-                query("date:2026-11-07"),
-                PimdirSearchKind::Event,
-                None,
-                &clock("Europe/Paris"),
-            )
+            .count_items(query("date:2026-11-07"), None, &clock("Europe/Paris"))
             .unwrap();
         assert_eq!(count.count, 1);
         assert_eq!(count.zones, None);
@@ -1013,11 +869,9 @@ mod tests {
                 ..Default::default()
             };
             let page = client
-                .search_items(query("budget"), PimdirSearchKind::Event, None, &options)
+                .search_items(query("budget"), None, &options)
                 .unwrap();
-            let count = client
-                .count_items(query("budget"), PimdirSearchKind::Event, None, &clock)
-                .unwrap();
+            let count = client.count_items(query("budget"), None, &clock).unwrap();
             assert_eq!(page.zones, count.zones);
             page.zones
         };
@@ -1040,61 +894,38 @@ mod tests {
         assert_eq!(zones(PimdirSearchClock::default()), None);
     }
 
+    /// The store holds a to-do and a journal entry naming the budget too.
     #[test]
-    fn a_search_reads_the_kind_asked_alone() {
+    fn a_search_reads_events_alone() {
         let (_dir, backend) = indexed_store();
-        let todos = |text| summaries(&backend.client, text, PimdirSearchKind::Todo, None);
 
         assert_eq!(events(&backend.client, "budget"), ["Offsite", "Planning"]);
-        assert_eq!(todos("budget"), ["Write the budget report"]);
-        assert_eq!(
-            summaries(&backend.client, "budget", PimdirSearchKind::Journal, None),
-            ["Retro notes"]
-        );
+        assert!(events(&backend.client, "status:in-process").is_empty());
 
-        assert_eq!(todos("status:in-process"), ["Write the budget report"]);
-        assert_eq!(todos("priority:high"), ["Write the budget report"]);
-        assert_eq!(todos("priority:low"), ["Water the plants"]);
-
-        let PimdirCalendarHits::Todos(hits) =
-            page(&backend.client, "budget", PimdirSearchKind::Todo, None).hits
-        else {
-            panic!("expected todos");
-        };
-        assert_eq!(hits[0].item.status, "IN-PROCESS");
-        assert_eq!(hits[0].item.priority, Some(1));
-        assert_eq!(hits[0].item.progress(), "40%");
-
-        let count = |text, kind| {
-            backend
-                .client
-                .count_items(query(text), kind, None, &PimdirSearchClock::default())
-                .unwrap()
-                .count
-        };
-        assert_eq!(count("budget", PimdirSearchKind::Event), 2);
-        assert_eq!(count("budget", PimdirSearchKind::Todo), 1);
+        let count = backend
+            .client
+            .count_items(query("budget"), None, &PimdirSearchClock::default())
+            .unwrap();
+        assert_eq!(count.count, 2);
     }
 
     #[test]
     fn a_bodiless_event_matches_on_its_summary() {
         let (_dir, backend) = indexed_store();
 
-        let invoice = page(&backend.client, "invoice", PimdirSearchKind::Event, None);
-        let PimdirCalendarHits::Events(hits) = &invoice.hits else {
-            panic!("expected events");
-        };
+        let invoice = page(&backend.client, "invoice", None);
+        let hits = &invoice.hits;
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].matched, Some(PimdirCalendarMatched::Summary));
         assert_eq!(hits[0].calendar_id, "work");
-        assert_eq!(hits[0].item.summary, "Invoice review");
-        assert_eq!(hits[0].item.uid, "invoice@example.org");
+        assert_eq!(hits[0].event.summary, "Invoice review");
+        assert_eq!(hits[0].event.uid, "invoice@example.org");
         assert_eq!(
-            hits[0].item.starts_at.as_deref(),
+            hits[0].event.starts_at.as_deref(),
             Some("2026-11-20T14:00:00+00:00")
         );
         assert_eq!(
-            hits[0].item.ends_at.as_deref(),
+            hits[0].event.ends_at.as_deref(),
             Some("2026-11-20T15:00:00+00:00")
         );
         assert_eq!(invoice.coverage.bodiless, 1);
@@ -1114,17 +945,11 @@ mod tests {
         let (_dir, backend) = indexed_store();
         let client = &backend.client;
 
-        assert_eq!(
-            summaries(client, "budget", PimdirSearchKind::Event, Some("work")),
-            ["Planning"]
-        );
-        assert_eq!(
-            summaries(client, "budget", PimdirSearchKind::Event, Some("cal")),
-            ["Offsite"]
-        );
+        assert_eq!(summaries(client, "budget", Some("work")), ["Planning"]);
+        assert_eq!(summaries(client, "budget", Some("cal")), ["Offsite"]);
 
-        let all = page(client, "budget", PimdirSearchKind::Event, None).coverage;
-        let cal = page(client, "budget", PimdirSearchKind::Event, Some("cal")).coverage;
+        let all = page(client, "budget", None).coverage;
+        let cal = page(client, "budget", Some("cal")).coverage;
         assert_eq!(all.bodiless, 1);
         assert_eq!(cal.bodiless, 0);
         assert!(cal.complete, "{cal:?}");
@@ -1135,7 +960,7 @@ mod tests {
     fn a_range_outside_the_horizon_is_reported() {
         let (_dir, backend) = indexed_store();
 
-        let past = page(&backend.client, "date:2030", PimdirSearchKind::Event, None).coverage;
+        let past = page(&backend.client, "date:2030", None).coverage;
         assert!(past.horizon_left);
         assert!(!past.complete);
         assert!(
@@ -1143,13 +968,7 @@ mod tests {
             "{past}"
         );
 
-        let within = page(
-            &backend.client,
-            "date:2026-11-09",
-            PimdirSearchKind::Event,
-            Some("cal"),
-        )
-        .coverage;
+        let within = page(&backend.client, "date:2026-11-09", Some("cal")).coverage;
         assert!(!within.horizon_left);
     }
 
@@ -1163,7 +982,7 @@ mod tests {
         );
         backend.create_item("cal", zeppelin.into_bytes()).unwrap();
 
-        let queued = page(&backend.client, "zeppelin", PimdirSearchKind::Event, None);
+        let queued = page(&backend.client, "zeppelin", None);
         assert!(
             events(&backend.client, "zeppelin").is_empty(),
             "a queued add is listed"
@@ -1173,7 +992,7 @@ mod tests {
         let mut owner = PimdirStore::open(dir.path()).unwrap().for_source("caldav");
         assert_eq!(owner.drain().unwrap().applied, 1);
         drop(owner);
-        let drained = page(&backend.client, "zeppelin", PimdirSearchKind::Event, None);
+        let drained = page(&backend.client, "zeppelin", None);
         assert!(
             events(&backend.client, "zeppelin").is_empty(),
             "an unindexed add is listed"
@@ -1221,11 +1040,7 @@ mod tests {
         refresh(dir.path());
 
         for (backend, calendar) in [(&work, "work/cal"), (&home, "home/cal")] {
-            let PimdirCalendarHits::Events(hits) =
-                page(&backend.client, "lunch", PimdirSearchKind::Event, None).hits
-            else {
-                panic!("expected events");
-            };
+            let hits = page(&backend.client, "lunch", None).hits;
             assert_eq!(hits.len(), 1);
             assert_eq!(hits[0].calendar_id, calendar);
         }
@@ -1299,18 +1114,13 @@ mod tests {
             let options = PimdirSearchOptions::default();
             let err = backend
                 .client
-                .search_items(query("budget"), PimdirSearchKind::Event, None, &options)
+                .search_items(query("budget"), None, &options)
                 .err()
                 .unwrap();
             assert_eq!(code_of(&err), Some(code), "{err:#}");
             let count = backend
                 .client
-                .count_items(
-                    query("budget"),
-                    PimdirSearchKind::Event,
-                    None,
-                    &PimdirSearchClock::default(),
-                )
+                .count_items(query("budget"), None, &PimdirSearchClock::default())
                 .err()
                 .unwrap();
             assert_eq!(code_of(&count), Some(code), "{count:#}");

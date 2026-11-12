@@ -2,6 +2,14 @@
 
 ## 0.2.x -> unreleased
 
+### Events only
+
+calendula is the Pimalaya CLI for events: the `todo` and `journal` commands are gone, with every subcommand they had. Manage to-dos with [unfog](https://github.com/pimalaya/unfog), the Pimalaya CLI for tasks, and journal entries with [journal](https://github.com/pimalaya/journal), the Pimalaya CLI for journal entries. `item` still lists, reads, writes and deletes any calendar object raw, a VTODO or a VJOURNAL included.
+
+A `todo` or `journal` table left in the configuration, at the top level or under an account (`todo.list.page-size`, `[accounts.<name>.journal]`, ...), is refused when the configuration loads, naming the CLI that took it over. Remove it from the calendula configuration.
+
+`item build -i` and `item create -i` given no source still mint nothing; their error now names `calendula event`, `unfog` and `journal` as what composes an event, a to-do and a journal entry.
+
 ### pimdir store
 
 The pimdir backend follows pimdir storage-draft-09, and a store is never migrated: one any earlier neverest wrote is refused with the code `store-version`. Reinstall it, in this order, so no queued write is lost:

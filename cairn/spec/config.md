@@ -19,12 +19,25 @@ The top-level rendering options SHALL be folded under the selected account, the 
 ### Requirement: Unknown fields
 `deny_unknown_fields` SHALL be set on the leaf blocks, so a typo in an option is reported rather than ignored, and SHALL NOT be set on the top-level and account blocks, so a future TUI reading the same file can add its own sections without breaking this one.
 
+### Requirement: A leftover todo or journal table is refused by name
+A `todo` or `journal` table left in a configuration, at the top level or under an account, SHALL fail the load, naming the CLI that took the domain over (unfog, the Pimalaya CLI for tasks, for `todo`; journal, the Pimalaya CLI for journal entries, for `journal`) and saying to remove the table. The top-level and account blocks still deny no unknown key: these two tables are refused by name, as the family refuses its removed keys, rather than read or ignored.
+
+#### Scenario: An upgraded configuration
+- GIVEN a configuration written for 0.2 with a `[todo.list]` table
+- WHEN any calendula command loads it
+- THEN the command fails before reaching a backend, the error locating the table (its line, or its key once several files are merged) and naming unfog
+
+#### Scenario: A table under an account
+- GIVEN a configuration with an `[accounts.work.journal]` table
+- WHEN any calendula command loads it
+- THEN the command fails, the error naming journal
+
 ### Requirement: Backend blocks
 An account SHALL carry an optional block per compiled backend: `vdir` with a `home-dir`, `pimdir` with a `root` and an optional `account`, `caldav` with its endpoint, TLS and authentication, `gcal` with TLS and authentication.
 
 An account MAY carry several; which one a shared command uses is the backend capability's business.
 
-Every listing family SHALL additionally carry a rendering block naming its default page size and its column colours: `calendar.list`, `event.list`, `todo.list`, `journal.list` and `item.list`.
+Every listing family SHALL additionally carry a rendering block naming its default page size and its column colours: `calendar.list`, `event.list` and `item.list`.
 
 ### Requirement: Credentials nest under `auth`
 Every backend that authenticates SHALL carry its credentials under an `auth` sub-block, so the same concept is spelled the same way across the Pimalaya CLIs: `caldav.auth.basic.password`, `gcal.auth.token`, as cardamum spells `people.auth.token` and `msgraph.auth.token`.
@@ -76,4 +89,4 @@ A generated account SHALL omit a scalar equal to its type's default, `default = 
 ### Requirement: The composer is a command, not a library
 `item.composer` SHALL hold the command an item is edited through, at the top level and per account, as a shell line or an argv list. calendula SHALL spawn it rather than embed an editor: what edits an iCalendar is the user's choice, and a terminal editor, a graphical one and a purpose-built one are all one configuration line apart.
 
-The key SHALL sit under `item` rather than under a component family: the four families are views over the same resources, and what is edited is an iCalendar object, which is what `item` names.
+The key SHALL sit under `item` rather than under `event`: `event` and `item` are views over the same resources, and what is edited is an iCalendar object, which is what `item` names.

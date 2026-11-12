@@ -30,19 +30,15 @@ use crate::shared::uuid::uuid_v4;
 /// `PRODID` a minted item is stamped with (RFC 5545 3.7.3).
 const PRODID: &str = "-//Pimalaya//calendula//EN";
 
-/// One of the four shared command families, and the component kind it
-/// names.
+/// One of the two shared command families writing items, and the
+/// component kind it names.
 ///
 /// The families are views over the same items, so a pipeline they share
-/// takes this rather than four copies of itself.
+/// takes this rather than two copies of itself.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum IcalFamily {
     /// The `event` family, over VEVENT.
     Event,
-    /// The `todo` family, over VTODO.
-    Todo,
-    /// The `journal` family, over VJOURNAL.
-    Journal,
     /// The `item` family, over any kind, which is why it names none.
     Item,
 }
@@ -52,8 +48,6 @@ impl IcalFamily {
     pub fn kind(&self) -> Option<IcalComponentKind> {
         match self {
             Self::Event => Some(IcalComponentKind::VEvent),
-            Self::Todo => Some(IcalComponentKind::VTodo),
-            Self::Journal => Some(IcalComponentKind::VJournal),
             Self::Item => None,
         }
     }
@@ -62,8 +56,6 @@ impl IcalFamily {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Event => "Event",
-            Self::Todo => "Todo",
-            Self::Journal => "Journal",
             Self::Item => "Item",
         }
     }
@@ -216,35 +208,31 @@ pub fn holds_kind(contents: &[u8], kind: IcalComponentKind) -> bool {
 /// invent a `UID`: a backend may key the item on it, and an editor
 /// handed an empty file mints none.
 ///
-/// A VEVENT also carries a DTSTART of now, which [`missing_dtstart`]
+/// The VEVENT also carries a DTSTART of now, which [`missing_dtstart`]
 /// would otherwise refuse the moment the composer handed it back. The
 /// value is a placeholder like the identity is, and an event with no time
-/// is not an event; a VTODO and a VJOURNAL owe none and get none.
+/// is not an event.
 ///
-/// `item` names no component kind, so it mints nothing and says which
-/// families do.
+/// `item` names no component kind, so it mints nothing and says what
+/// does.
 pub fn blank_item(family: IcalFamily) -> Result<Vec<u8>> {
     let Some(kind) = family.kind() else {
         bail!(
-            "`item` names no component kind to mint; give an iCalendar, \
-             or compose one with `event`, `todo` or `journal`"
+            "`item` names no component kind to mint; give an iCalendar, or \
+             compose an event with `calendula event`, a to-do with `unfog` \
+             or a journal entry with `journal`"
         )
     };
 
     let now = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
 
-    let mut props = vec![
-        text_prop(IcalPropKind::Uid, uuid_v4()?),
-        stamp_prop(IcalPropKind::DtStamp, &now),
-    ];
-
-    if kind == IcalComponentKind::VEvent {
-        props.push(stamp_prop(IcalPropKind::DtStart, &now));
-    }
-
     let component = IcalComponent {
         name: IcalComponentName::Kind(kind),
-        props,
+        props: vec![
+            text_prop(IcalPropKind::Uid, uuid_v4()?),
+            stamp_prop(IcalPropKind::DtStamp, &now),
+            stamp_prop(IcalPropKind::DtStart, &now),
+        ],
         components: Vec::new(),
     };
 
@@ -299,31 +287,24 @@ mod tests {
 
     #[test]
     fn a_minted_item_passes_the_check_it_will_be_held_to() {
-        for family in [IcalFamily::Event, IcalFamily::Todo, IcalFamily::Journal] {
-            let item = blank_item(family).unwrap();
-            let text = String::from_utf8(item.clone()).unwrap();
+        let item = blank_item(IcalFamily::Event).unwrap();
+        let text = String::from_utf8(item.clone()).unwrap();
 
-            assert!(text.contains("PRODID:"), "{text}");
-            assert!(text.contains("UID:"), "{text}");
-            assert!(text.contains("DTSTAMP:"), "{text}");
-            assert!(check(&item).is_empty(), "{:?}", check(&item));
-
-            // NOTE: RFC 5545 3.6.1 owes a DTSTART on a VEVENT alone.
-            assert_eq!(
-                text.contains("DTSTART:"),
-                family == IcalFamily::Event,
-                "{text}"
-            );
-        }
+        assert!(text.contains("PRODID:"), "{text}");
+        assert!(text.contains("BEGIN:VEVENT"), "{text}");
+        assert!(text.contains("UID:"), "{text}");
+        assert!(text.contains("DTSTAMP:"), "{text}");
+        assert!(text.contains("DTSTART:"), "{text}");
+        assert!(check(&item).is_empty(), "{:?}", check(&item));
     }
 
     #[test]
     fn the_item_family_mints_nothing_and_names_the_ones_that_do() {
         let err = blank_item(IcalFamily::Item).unwrap_err().to_string();
 
-        assert!(err.contains("event"), "{err}");
-        assert!(err.contains("todo"), "{err}");
-        assert!(err.contains("journal"), "{err}");
+        assert!(err.contains("`calendula event`"), "{err}");
+        assert!(err.contains("`unfog`"), "{err}");
+        assert!(err.contains("`journal`"), "{err}");
     }
 
     #[cfg(any(feature = "vdir", feature = "pimdir"))]

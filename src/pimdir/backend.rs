@@ -3096,7 +3096,7 @@ mod tests {
             .list_items(
                 "cal",
                 CalendarItemQuery {
-                    kind: IcalFamily::Todo.kind(),
+                    kind: Some(IcalComponentKind::VTodo),
                     ..Default::default()
                 },
             )
@@ -3236,9 +3236,12 @@ mod tests {
             .map(|(id, _)| id)
             .collect();
         poison(&backend, &events);
-        for (family, count) in [(IcalFamily::Todo, 4), (IcalFamily::Journal, 3)] {
+        for (kind, count) in [
+            (IcalComponentKind::VTodo, 4),
+            (IcalComponentKind::VJournal, 3),
+        ] {
             let query = CalendarItemQuery {
-                kind: family.kind(),
+                kind: Some(kind),
                 ..all()
             };
             assert_eq!(backend.list_items("cal", query).unwrap().len(), count);

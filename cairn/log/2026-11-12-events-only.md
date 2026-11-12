@@ -1,0 +1,23 @@
+---
+cairn: log
+change: events-only
+landed: 2026-11-12
+---
+
+# calendula is the events CLI
+
+The owner unblocked the 2026-10-27 draft on 2026-11-12, as change 2 of the-family-standards: calendula owns VEVENT, VTODO goes to unfog and VJOURNAL to journal (crate `journal`, "CLI to manage journal entries"), neither released yet, which is accepted.
+
+- src/shared/todo.rs, src/shared/journal.rs and their two directories (16 files, 1,715 lines) are gone, with the `todo` and `journal` commands and their `todos` and `journals` aliases (src/cli.rs), the `calendula-todo-*` and `calendula-journal-*` schemas (12, src/json_schema.rs), and 7 tests (the two projections and the DUE window).
+- src/config.rs: `TodoConfig`, `JournalConfig` and their list and table types are gone, top level and per account, and the wizard's `RENDER_ORDER` drops `todo` and `journal`. src/account/context.rs drops their page sizes, colours and merges.
+- A leftover table is refused, not ignored as the draft had it: `Config` and `AccountConfig` carry `todo: Option<TodoMovedConfig>` and `journal: Option<JournalMovedConfig>`, uninhabited types whose `Deserialize` always fails, skipped on serialization and `#[allow(dead_code)]` (never read). From one file, toml prints the line: `TOML parse error at line 1, column 2` over `[todo.list]`, then "The `todo` table moved to `unfog`, the Pimalaya CLI for tasks; remove it from the calendula configuration"; under an account, "The `journal` table moved to `journal`, the Pimalaya CLI for journal entries; ...". From merged files the line is lost and the key stays (`in todo`).
+- `pimdir search` and `pimdir count` lose `--kind`, `PimdirSearchKind` and the to-do and journal hits: they search events (`kind:event`), `hits` an array of `PimdirCalendarHit`, its event under `event` (flattened, so the JSON keys are unchanged), and the count prints `<n> event(s)`. `pimdir search` never shipped (added after 0.2.0), so this breaks no release. The help drops `status:` and `priority:`, VTODO fields in the query language.
+- `IcalFamily` keeps `Event` and `Item`; `blank_item` mints a VEVENT alone, and `item build -i` and `item create -i` given no source bail naming `calendula event`, `unfog` and `journal`. `CalendarTimeRange::contains`, used by the to-do and journal windows on every build, is gated on vdir, msgraph or pimdir, its remaining users.
+- Kept: `item` over any kind, the listing query's generic `kind` and each backend's answer to a non-VEVENT kind, the pimdir refusal of a to-do written through `item` into a calendar taking none, and the pimdir summary reading of task and journal rows. The shared `calendar create` was checked on each backend and left as is: CalDAV names no component set, so the server's default applies.
+- README, config.sample.toml (the `todo` and `journal` lines only), MIGRATION.md (Events only, under 0.2.x -> unreleased), the src/main.rs header, and CHANGELOG: one Removed entry marked **Breaking.**, and the Unreleased entries naming the families or `--kind` trimmed to what ships.
+
+Tests: `a_leftover_todo_table_is_refused_naming_unfog` (top-level `[todo.list]`) and `a_leftover_journal_table_in_an_account_is_refused_naming_journal` (`[accounts.personal.journal]`) failed on the old code, which accepted both; the bail test now asserts `unfog`, failing on the old message. `a_search_reads_events_alone` replaces the kind test, a to-do and a journal entry matching the query left out; the search rendering test renders an event hit.
+
+Verified: `cargo fmt --check`; `cargo test --all-features` (284 tests); `cargo clippy --all-targets -D warnings` with the default features, `--all-features`, and `--no-default-features --features rustls-ring` with each of vdir, caldav, gcal, msgraph and pimdir. `--no-default-features` alone still fails on 28 errors in code this change did not touch, for every-feature-set-builds-clean. `json-schema` matches the old binary's structurally (descriptions stripped, jq-sorted) but for the 12 schemas gone and `calendula-pimdir-search`, whose `hits` is now an array of the same hit shape rather than a union of three.
+
+Spec: config (A leftover todo or journal table is refused by name added; Backend blocks, The composer is a command, not a library modified), commands (The component families against item, One family per stored component kind, Columns follow the kind, Only events draw an agenda, A component window is applied locally, A delete can be gated on a version, A minted item carries an identity, and its family names its kind, An event build answers its projection, pimdir searches calendar items through the store's index modified), backends (A queued write is reported as queued modified).

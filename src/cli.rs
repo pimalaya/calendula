@@ -46,7 +46,7 @@ use crate::{
     json_schema,
     shared::{
         calendar::cli::CalendarCommand, client::CalendarClient, event::cli::EventCommand,
-        item::cli::ItemCommand, journal::cli::JournalCommand, todo::cli::TodoCommand,
+        item::cli::ItemCommand,
     },
 };
 
@@ -97,10 +97,6 @@ pub enum CalendulaCommand {
     Calendar(CalendarCommand),
     #[command(subcommand, alias = "events")]
     Event(EventCommand),
-    #[command(subcommand, alias = "todos")]
-    Todo(TodoCommand),
-    #[command(subcommand, alias = "journals")]
-    Journal(JournalCommand),
     #[command(subcommand, alias = "items")]
     Item(ItemCommand),
     #[cfg(feature = "caldav")]
@@ -247,11 +243,9 @@ impl CalendulaCommand {
                 cmd.execute(printer, client)
             }
 
-            // NOTE: the four component families resolve per subcommand,
-            // `build` reaching no backend and so needing no account.
+            // NOTE: `event` and `item` resolve per subcommand, `build`
+            // reaching no backend and so needing no account.
             Self::Event(cmd) => cmd.execute(printer, config_paths, account_name, backend),
-            Self::Todo(cmd) => cmd.execute(printer, config_paths, account_name, backend),
-            Self::Journal(cmd) => cmd.execute(printer, config_paths, account_name, backend),
             Self::Item(cmd) => cmd.execute(printer, config_paths, account_name, backend),
 
             #[cfg(feature = "caldav")]

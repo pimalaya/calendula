@@ -21,7 +21,10 @@ use crate::shared::{
 /// Create a new iCalendar item from an iCalendar source.
 ///
 /// The source and `-i` stack: the source is the item to start from,
-/// and `-i` opens it in the composer. `item` names no component kind, so it mints nothing: with no source the command bails, naming `event`, `todo` and `journal` as the families that can.
+/// and `-i` opens it in the composer. `item` names no component kind,
+/// so it mints nothing: with no source the command bails, naming
+/// `event` for an event, unfog for a to-do and journal for a journal
+/// entry.
 ///
 /// The bytes are stored as given, so they carry the UID the item is
 /// addressed by afterwards.

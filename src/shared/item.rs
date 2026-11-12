@@ -30,8 +30,8 @@ use crate::shared::event::Event;
 
 /// A calendar object resource: one iCalendar file.
 ///
-/// The contents mix component kinds (VEVENT, VTODO, VJOURNAL): the component
-/// families filter them, the `item` family does not.
+/// The contents mix component kinds (VEVENT, VTODO, VJOURNAL): the `event`
+/// family filters them, the `item` family does not.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CalendarItem {
@@ -69,10 +69,10 @@ impl CalendarItem {
 
 /// What narrows an item listing, and in which order.
 ///
-/// The kind is applied before the page, so a page of a component family
-/// is a page of that family: filtering after paginating would make a
-/// listing show the VTODOs among the first 25 items of any kind, which
-/// is nothing at all on a calendar of events.
+/// The kind is applied before the page, so a page of `event list` is a
+/// page of events: filtering after paginating would make it show the
+/// VEVENTs among the first 25 items of any kind, which is nothing at all
+/// on a calendar of to-dos.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CalendarItemQuery<'a> {
     /// 1-indexed page, `None` being the first.
@@ -139,9 +139,8 @@ impl CalendarTimeRange {
     /// Whether an iCalendar date or date-time falls inside the range.
     ///
     /// Comparison is lexicographic on the leading `YYYYMMDD`, enough for a
-    /// day window and keeping the CLI out of time-zone resolution. The `todo`
-    /// and `journal` families need it whatever the backend: a server-side
-    /// filter wants a start and an end (RFC 4791 9.9) they lack.
+    /// day window and keeping the CLI out of time-zone resolution.
+    #[cfg(any(feature = "vdir", feature = "msgraph", feature = "pimdir"))]
     pub fn contains(&self, stamp: &str) -> bool {
         let day = &stamp[..stamp.len().min(8)];
 
@@ -212,6 +211,7 @@ mod tests {
         assert!(CalendarTimeRange::from_days(Some(from), Some(to)).is_err());
     }
 
+    #[cfg(any(feature = "vdir", feature = "msgraph", feature = "pimdir"))]
     #[test]
     fn containment_covers_both_bounds_and_both_stamp_shapes() {
         let range = CalendarTimeRange {

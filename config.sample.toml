@@ -39,10 +39,6 @@
 # the hard fallback is 25.
 #event.list.page-size = 50
 
-# Default page size for `todos list` and `journals list`, resolved the same way.
-#todo.list.page-size = 50
-#journal.list.page-size = 50
-
 # Default page size for `items list`, resolved the same way.
 #item.list.page-size = 50
 
@@ -72,23 +68,6 @@
 #event.list.table.summary-color = "green"
 #event.list.table.start-color = "dark-yellow"
 #event.list.table.end-color = "dark-yellow"
-
-# --------------------------------------------------------------------------------
-# Table rendering: todos list
-# --------------------------------------------------------------------------------
-
-#todo.list.table.id-color = "red"
-#todo.list.table.summary-color = "green"
-#todo.list.table.due-color = "dark-yellow"
-#todo.list.table.status-color = "reset"
-
-# --------------------------------------------------------------------------------
-# Table rendering: journals list
-# --------------------------------------------------------------------------------
-
-#journal.list.table.id-color = "red"
-#journal.list.table.summary-color = "green"
-#journal.list.table.start-color = "dark-yellow"
 
 # --------------------------------------------------------------------------------
 # Table rendering: items list

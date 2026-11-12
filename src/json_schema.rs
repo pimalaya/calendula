@@ -71,22 +71,6 @@ pub fn registry() -> JsonSchemaRegistry {
         crate::shared::event::list::EventListOutput
     );
     insert!(
-        "calendula-todo-list",
-        crate::shared::todo::list::TodoListOutput
-    );
-    insert!(
-        "calendula-todo-read",
-        crate::shared::todo::read::TodoReadOutput
-    );
-    insert!(
-        "calendula-journal-list",
-        crate::shared::journal::list::JournalListOutput
-    );
-    insert!(
-        "calendula-journal-read",
-        crate::shared::journal::read::JournalReadOutput
-    );
-    insert!(
         "calendula-item-list",
         crate::shared::item::list::ItemListOutput
     );
@@ -109,30 +93,6 @@ pub fn registry() -> JsonSchemaRegistry {
         crate::shared::event::update::EventUpdateOutput
     );
     insert!(
-        "calendula-todo-build",
-        OneOf<IcalBuildOutput, SavedOutput>
-    );
-    insert!(
-        "calendula-todo-create",
-        crate::shared::todo::create::TodoCreateOutput
-    );
-    insert!(
-        "calendula-todo-update",
-        crate::shared::todo::update::TodoUpdateOutput
-    );
-    insert!(
-        "calendula-journal-build",
-        OneOf<IcalBuildOutput, SavedOutput>
-    );
-    insert!(
-        "calendula-journal-create",
-        crate::shared::journal::create::JournalCreateOutput
-    );
-    insert!(
-        "calendula-journal-update",
-        crate::shared::journal::update::JournalUpdateOutput
-    );
-    insert!(
         "calendula-item-build",
         OneOf<IcalBuildOutput, SavedOutput>
     );
@@ -150,8 +110,6 @@ pub fn registry() -> JsonSchemaRegistry {
         "calendula-calendar-update",
         "calendula-calendar-delete",
         "calendula-event-delete",
-        "calendula-todo-delete",
-        "calendula-journal-delete",
         "calendula-item-delete",
     ] {
         insert!(key, WriteReceipt);

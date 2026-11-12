@@ -19,20 +19,20 @@ use crate::{
     pimdir::{
         backend::PimdirBackend,
         index::{
-            PimdirCalendarCoverage, PimdirCalendarHit, PimdirCalendarHits, PimdirCalendarZones,
-            PimdirSearchKind, parse_query, search_clock,
+            PimdirCalendarCoverage, PimdirCalendarHit, PimdirCalendarZones, parse_query,
+            search_clock,
         },
     },
     shared::event::list::table_times,
 };
 
-/// Search the account's items with the pimdir query language.
+/// Search the account's events with the pimdir query language.
 ///
 /// The query is pimdir SEARCH.md §8: words, "phrases", `field:value`
-/// terms (`summary:`, `body:`, `location:`, `attendee:`, `status:`,
-/// `priority:`, `category:`, `date:2026-11-09`, `date:2026-01..2026-03`),
-/// `and`, `or`, `not` or `-`, and parentheses. One kind is searched,
-/// events by default, in every calendar unless `-k` names one.
+/// terms (`summary:`, `body:`, `location:`, `attendee:`, `organizer:`,
+/// `category:`, `date:2026-11-09`, `date:2026-01..2026-03`), `and`, `or`,
+/// `not` or `-`, and parentheses. Every calendar is searched unless `-k`
+/// names one.
 ///
 /// `date:` matches occurrences, a series included. Days, `today` and
 /// `yesterday` are read in the local zone (`TZ`, then the system's).
@@ -41,7 +41,7 @@ use crate::{
 /// write is not in it. A line under the table says what it could not see,
 /// another names the index's zone when it reads floating times in another.
 ///
-/// JSON output: `{"hits": [{...the kind's projection, "calendarId",
+/// JSON output: `{"hits": [{...the event projection, "calendarId",
 /// "matched", "snippet"}], "more", "coverage": {"complete", "bodiless",
 /// "unindexed", "behind", "since", "until", "filling", "horizonLeft",
 /// "cut"}}`.
@@ -51,10 +51,6 @@ pub struct PimdirSearchCommand {
     #[arg(short = 'k', long = "calendar", value_name = "CALENDAR-ID")]
     pub calendar: Option<String>,
 
-    /// Kind of item to search.
-    #[arg(long, value_enum, default_value_t)]
-    pub kind: PimdirSearchKind,
-
     /// Order of the hits.
     #[arg(long, value_enum, default_value_t)]
     pub sort: PimdirSearchSortArg,
@@ -63,7 +59,7 @@ pub struct PimdirSearchCommand {
     #[arg(short, long, value_name = "N")]
     pub page: Option<u32>,
 
-    /// Number of hits per page, the kind's `list` page size by default.
+    /// Number of hits per page, the `event list` page size by default.
     #[arg(short = 's', long, value_name = "N")]
     pub page_size: Option<u32>,
 
@@ -85,37 +81,15 @@ impl PimdirSearchCommand {
         }
 
         let account = &backend.account;
-        let (page_size, colors) = match self.kind {
-            PimdirSearchKind::Event => (
-                account.events_list_page_size(),
-                [
-                    account.events_list_table_id_color(),
-                    account.events_list_table_summary_color(),
-                    account.events_list_table_start_color(),
-                    account.events_list_table_end_color(),
-                ],
-            ),
-            PimdirSearchKind::Todo => (
-                account.todos_list_page_size(),
-                [
-                    account.todos_list_table_id_color(),
-                    account.todos_list_table_summary_color(),
-                    account.todos_list_table_due_color(),
-                    account.todos_list_table_status_color(),
-                ],
-            ),
-            PimdirSearchKind::Journal => (
-                account.journals_list_page_size(),
-                [
-                    account.journals_list_table_id_color(),
-                    account.journals_list_table_summary_color(),
-                    account.journals_list_table_start_color(),
-                    Color::Reset,
-                ],
-            ),
-        };
+        let colors = [
+            account.events_list_table_id_color(),
+            account.events_list_table_summary_color(),
+            account.events_list_table_start_color(),
+            account.events_list_table_end_color(),
+        ];
 
-        let limit = self.page_size.unwrap_or(page_size).max(1) as usize;
+        let page_size = self.page_size.unwrap_or(account.events_list_page_size());
+        let limit = page_size.max(1) as usize;
         let page = self.page.unwrap_or(1).max(1) as usize - 1;
         let options = PimdirSearchOptions {
             sort: self.sort.into(),
@@ -124,10 +98,9 @@ impl PimdirSearchCommand {
             clock: search_clock(),
         };
 
-        let page =
-            backend
-                .client
-                .search_items(query, self.kind, self.calendar.as_deref(), &options)?;
+        let page = backend
+            .client
+            .search_items(query, self.calendar.as_deref(), &options)?;
 
         printer.out(PimdirSearchOutput {
             table: PimdirSearchTable {
@@ -175,7 +148,7 @@ pub struct PimdirSearchTable {
     pub arrangement: ContentArrangement,
     /// The `--max-width` cap, when one was given.
     pub max_width: Option<u16>,
-    /// The colors of the kind's `list` table, first four columns.
+    /// The colors of the `event list` table.
     pub colors: [Color; 4],
 }
 
@@ -187,7 +160,7 @@ pub struct PimdirSearchOutput {
     #[serde(skip)]
     pub table: PimdirSearchTable,
     /// The hits of this page.
-    pub hits: PimdirCalendarHits,
+    pub hits: Vec<PimdirCalendarHit>,
     /// Whether hits follow this page.
     pub more: bool,
     /// What the answer could not see.
@@ -199,68 +172,46 @@ pub struct PimdirSearchOutput {
 
 impl fmt::Display for PimdirSearchOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let [id, summary, third, fourth] = self.table.colors;
+        let [id, summary, start, end] = self.table.colors;
+        let zone = TimeZone::try_system().unwrap_or(TimeZone::UTC);
         let mut table = Table::new();
 
         table
             .load_style(self.table.style)
-            .set_content_arrangement(self.table.arrangement.clone());
+            .set_content_arrangement(self.table.arrangement.clone())
+            .set_header(Row::from([
+                "ID", "SUMMARY", "START", "END", "CALENDAR", "MATCHED", "SNIPPET",
+            ]));
+
+        for hit in &self.hits {
+            let (starts, ends) = table_times(&hit.event, &zone);
+            let matched = hit
+                .matched
+                .map(|matched| matched.to_string())
+                .unwrap_or_default();
+            let snippet = hit
+                .snippet
+                .as_deref()
+                .unwrap_or_default()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            let mut row = Row::from([
+                Cell::new(&hit.event.id).fg(id),
+                Cell::new(sanitize(&hit.event.summary)).fg(summary),
+                Cell::new(starts).fg(start),
+                Cell::new(ends).fg(end),
+                Cell::new(sanitize(&hit.calendar_id)),
+                Cell::new(matched),
+                Cell::new(sanitize(&snippet)),
+            ]);
+            row.max_height(1);
+            table.add_row(row);
+        }
 
         // NOTE: a truncated id or time is useless, so they stay whole.
-        let whole = match &self.hits {
-            PimdirCalendarHits::Events(events) => {
-                let zone = TimeZone::try_system().unwrap_or(TimeZone::UTC);
-                table.set_header(header(&["SUMMARY", "START", "END"]));
-                table.add_rows(events.iter().map(|hit| {
-                    let (start, end) = table_times(&hit.item, &zone);
-                    row(
-                        hit,
-                        [
-                            Cell::new(&hit.item.id).fg(id),
-                            Cell::new(sanitize(&hit.item.summary)).fg(summary),
-                            Cell::new(start).fg(third),
-                            Cell::new(end).fg(fourth),
-                        ],
-                    )
-                }));
-                vec![0, 2, 3]
-            }
-            PimdirCalendarHits::Todos(todos) => {
-                table.set_header(header(&["SUMMARY", "DUE", "STATUS", "PRIORITY", "DONE"]));
-                table.add_rows(todos.iter().map(|hit| {
-                    let priority = hit.item.priority.map(|priority| priority.to_string());
-                    row(
-                        hit,
-                        [
-                            Cell::new(&hit.item.id).fg(id),
-                            Cell::new(sanitize(&hit.item.summary)).fg(summary),
-                            Cell::new(&hit.item.due).fg(third),
-                            Cell::new(&hit.item.status).fg(fourth),
-                            Cell::new(priority.unwrap_or_default()),
-                            Cell::new(hit.item.progress()),
-                        ],
-                    )
-                }));
-                vec![0]
-            }
-            PimdirCalendarHits::Journals(journals) => {
-                table.set_header(header(&["SUMMARY", "DATE", "STATUS"]));
-                table.add_rows(journals.iter().map(|hit| {
-                    row(
-                        hit,
-                        [
-                            Cell::new(&hit.item.id).fg(id),
-                            Cell::new(sanitize(&hit.item.summary)).fg(summary),
-                            Cell::new(&hit.item.start).fg(third),
-                            Cell::new(&hit.item.status),
-                        ],
-                    )
-                }));
-                vec![0]
-            }
-        };
-
-        for index in whole {
+        for index in [0, 2, 3] {
             if let Some(column) = table.column_mut(index) {
                 column.set_constraint(ColumnConstraint::ContentWidth);
             }
@@ -281,36 +232,6 @@ impl fmt::Display for PimdirSearchOutput {
     }
 }
 
-/// The header of a hit table around the kind's `columns`.
-fn header(columns: &[&str]) -> Row {
-    let mut header = vec!["ID"];
-    header.extend_from_slice(columns);
-    header.extend_from_slice(&["CALENDAR", "MATCHED", "SNIPPET"]);
-    Row::from(header)
-}
-
-/// A hit's row around the kind's `cells`.
-fn row<T, const N: usize>(hit: &PimdirCalendarHit<T>, cells: [Cell; N]) -> Row {
-    let snippet = hit
-        .snippet
-        .as_deref()
-        .unwrap_or_default()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    let matched = hit
-        .matched
-        .map(|matched| matched.to_string())
-        .unwrap_or_default();
-
-    let mut row = Row::from(cells);
-    row.max_height(1);
-    row.add_cell(Cell::new(sanitize(&hit.calendar_id)));
-    row.add_cell(Cell::new(matched));
-    row.add_cell(Cell::new(sanitize(&snippet)));
-    row
-}
-
 #[cfg(test)]
 mod tests {
     use pimalaya_cli::table::{Color, ContentArrangement};
@@ -318,16 +239,16 @@ mod tests {
     use crate::{
         pimdir::{
             index::{
-                PimdirCalendarCoverage, PimdirCalendarHit, PimdirCalendarHits,
-                PimdirCalendarMatched, PimdirCalendarZones,
+                PimdirCalendarCoverage, PimdirCalendarHit, PimdirCalendarMatched,
+                PimdirCalendarZones,
             },
             search::{PimdirSearchOutput, PimdirSearchTable},
         },
-        shared::{table::style_from_preset, todo::Todo},
+        shared::{event::Event, table::style_from_preset},
     };
 
     #[test]
-    fn a_todo_answer_renders_its_family_columns_coverage_and_zones() {
+    fn an_answer_renders_the_event_columns_coverage_and_zones() {
         let output = PimdirSearchOutput {
             table: PimdirSearchTable {
                 style: style_from_preset("||--+==+|-+||++++++"),
@@ -335,19 +256,21 @@ mod tests {
                 max_width: None,
                 colors: [Color::Reset; 4],
             },
-            hits: PimdirCalendarHits::Todos(vec![PimdirCalendarHit {
-                item: Todo {
+            hits: vec![PimdirCalendarHit {
+                event: Event {
                     id: "7".into(),
-                    summary: "Write the budget report".into(),
-                    due: "20261110T170000Z".into(),
-                    status: "IN-PROCESS".into(),
-                    priority: Some(1),
-                    percent_complete: Some(40),
+                    summary: "Budget review".into(),
+                    start: "20261110".into(),
+                    end: "20261111".into(),
+                    all_day: true,
+                    starts_at: Some("2026-11-10".into()),
+                    ends_at: Some("2026-11-11".into()),
+                    ..Default::default()
                 },
                 calendar_id: "cal".into(),
                 matched: Some(PimdirCalendarMatched::Summary),
                 snippet: Some("the\nbudget".into()),
-            }]),
+            }],
             more: false,
             coverage: PimdirCalendarCoverage {
                 bodiless: 1,
@@ -363,12 +286,18 @@ mod tests {
         let lines: Vec<&str> = shown.lines().collect();
 
         for column in [
-            "ID", "SUMMARY", "DUE", "STATUS", "PRIORITY", "DONE", "CALENDAR", "MATCHED", "SNIPPET",
+            "ID", "SUMMARY", "START", "END", "CALENDAR", "MATCHED", "SNIPPET",
         ] {
             assert!(lines[2].contains(column), "{shown}");
         }
-        for cell in ["IN-PROCESS", "40%", "cal", "summary", "the budget"] {
-            assert!(shown.contains(cell), "{shown}");
+        for cell in [
+            "Budget review",
+            "| 2026-11-10 | 2026-11-10 |",
+            "cal",
+            "summary",
+            "the budget",
+        ] {
+            assert!(lines[4].contains(cell), "{shown}");
         }
         let [.., incomplete, zones] = lines.as_slice() else {
             panic!("{shown}");

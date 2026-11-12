@@ -1,8 +1,8 @@
 //! # Item build
 //!
-//! The pipeline the `build` verb of every component family runs: an
-//! iCalendar source, set by the family's field flags, refined in the
-//! composer and printed, rather than written to a backend.
+//! The pipeline `event build` and `item build` run: an iCalendar source,
+//! set by the family's field flags, refined in the composer and printed,
+//! rather than written to a backend.
 
 use core::fmt;
 
@@ -31,7 +31,7 @@ use crate::{
 
 /// What a family sets on the item between its source and the composer.
 ///
-/// Only `event` has field flags; the other families pass [`NoFields`].
+/// Only `event` has field flags; `item` passes [`NoFields`].
 pub trait IcalFields {
     /// Whether nothing is set, the source then passing through.
     fn is_empty(&self) -> bool;

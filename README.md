@@ -21,8 +21,8 @@ CLI to manage calendars.
 
 ## Features
 
-- **Shared API**: `calendar`, `event`, `todo`, `journal` and `item` work the same whichever backend serves the account.
-- **One family per component kind**: `event` (VEVENT), `todo` (VTODO) and `journal` (VJOURNAL) each render the columns their kind is read by; `item` keeps the raw, unfiltered view.
+- **Shared API**: `calendar`, `event` and `item` work the same whichever backend serves the account.
+- **Events, and the raw view**: `event` renders the columns an event is read by; `item` keeps the raw, unfiltered view over any component. To-dos belong to [unfog](https://github.com/pimalaya/unfog) and journal entries to [journal](https://github.com/pimalaya/journal), the Pimalaya CLIs for tasks and journal entries.
 - **Microsoft Graph**: Outlook and Microsoft 365 calendars through the Graph API, the iCalendar document synthesized both ways, Windows time zones read as their IANA names.
 - **Protocol-specific APIs**: `caldav`, `gcal`, `pimdir` and `vdir` each expose what only that backend has.
 - **CalDAV**: talk to any standard calendar server, with basic or bearer authentication.
@@ -55,7 +55,7 @@ CLI to manage calendars.
 | [4791] | CalDAV: calendar collections, calendar object resources, and the `calendar-query` REPORT with its time-range filter |
 | [4918] | WebDAV: the `PROPFIND`, `PROPPATCH`, `MKCOL`, `GET`, `PUT` and `DELETE` methods CalDAV builds on |
 | [5397] | Current-user-principal, the first step of the CalDAV discovery walk                           |
-| [5545] | iCalendar: parsing and editing the event, to-do and journal components a calendar holds       |
+| [5545] | iCalendar: parsing and editing events, and carrying any other component a calendar holds     |
 | [6764] | CalDAV service discovery: the `_caldav` and `_caldavs` SRV records, and `.well-known/caldav`  |
 | [6578] | Collection synchronization, whose sync token a CalDAV calendar listing reports                |
 | [7617] | HTTP Basic authentication                                                                     |
@@ -277,7 +277,7 @@ pimdir.root = "~/.local/state/neverest/example"
 
 Run `calendula pimdir status` to see which account you are reading, how much of each calendar is downloaded, and how many creations are still queued. An item that is listed but not downloaded reads as "body not fetched" until a sync hydrates it.
 
-Run `calendula pimdir search <query>` to search the account's events (`--kind todo` or `journal` for the others) through the search index the sync engine keeps, in the [pimdir SEARCH](https://github.com/pimalaya/pimdir) query language: `budget location:lisbon`, `attendee:carol@example.org date:2026-11`, `--kind todo status:in-process priority:high`. Days, `today` and `yesterday` are read in the local zone (`TZ`, then the system's); a line under the table names the index's zone when the sync engine reads floating times and dates in another. A write still queued shows once a sync indexed it. `calendula pimdir count <query>` counts the same.
+Run `calendula pimdir search <query>` to search the account's events through the search index the sync engine keeps, in the [pimdir SEARCH](https://github.com/pimalaya/pimdir) query language: `budget location:lisbon`, `attendee:carol@example.org date:2026-11`, `organizer:alice@example.org category:work`. Days, `today` and `yesterday` are read in the local zone (`TZ`, then the system's); a line under the table names the index's zone when the sync engine reads floating times and dates in another. A write still queued shows once a sync indexed it. `calendula pimdir count <query>` counts the same.
 
 ## Usage
 
@@ -289,12 +289,10 @@ A few real command lines:
 calendula calendar list
 calendula event list --calendar personal --from 2026-08-01 --to 2026-08-31
 calendula event agenda -3
-calendula todo list --calendar tasks
-calendula journal list --calendar notes
 calendula item read --calendar personal event-1.ics
 calendula event build -i -o event.ics
 calendula event create --calendar personal -i
-calendula todo update --calendar tasks -i todo-1.ics
+calendula event update --calendar personal -i event-1.ics
 calendula pimdir status
 calendula pimdir search budget date:2026-11
 calendula gcal free-busy --from 2026-08-10 --to 2026-08-14
