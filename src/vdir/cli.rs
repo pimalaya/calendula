@@ -15,7 +15,7 @@ use crate::vdir::{
 /// Vdir CLI.
 ///
 /// Direct access to the on-disk vdir backend: list, create, rename,
-/// delete collections without going through the shared calendar API.
+/// delete collections without going through the unified calendar API.
 #[derive(Debug, Subcommand)]
 #[command(rename_all = "kebab-case")]
 pub enum VdirCommand {

@@ -11,6 +11,13 @@ CLI to manage calendars.
 - [RFC coverage](#rfc-coverage)
 - [Installation](#installation)
 - [Configuration](#configuration)
+  - [Apple](#apple)
+  - [Google](#google)
+  - [Microsoft](#microsoft)
+  - [Proton](#proton)
+  - [Fastmail](#fastmail)
+  - [Posteo](#posteo)
+  - [Local calendars](#local-calendars)
 - [Usage](#usage)
 - [Migration](./MIGRATION.md)
 - [AI policy](https://github.com/pimalaya/.github/blob/master/AI_POLICY.md)
@@ -21,43 +28,33 @@ CLI to manage calendars.
 
 ## Features
 
-- **Unified API**: `calendar`, `event` and `item` mean the same whichever backend serves the account, and carry the union of what the backends serve: `account capability` lists what each backend of an account serves, each command's `--help` ends with the backends serving it, and what a backend does not serve fails with `capability-missing` before anything connects.
-- **Events, and the raw view**: `event` renders the columns an event is read by; `item` keeps the raw, unfiltered view over any component. To-dos belong to [unfog](https://github.com/pimalaya/unfog) and journal entries to [journal](https://github.com/pimalaya/journal), the Pimalaya CLIs for tasks and journal entries.
-- **Microsoft Graph**: Outlook and Microsoft 365 calendars through the Graph API, the iCalendar document synthesized both ways, Windows time zones read as their IANA names.
-- **Protocol-specific APIs**: `caldav`, `gcal`, `pimdir` and `vdir` each expose what only that backend has.
-- **CalDAV**: talk to any standard calendar server, with basic or bearer authentication.
-- **Google Calendar**: the native API v3, where Google's CalDAV bridge is crippled, with the iCalendar document synthesized both ways. `gcal` adds sharing, free/busy, recurrence expansion and quick add.
-- **vdir**: read and write a local [vdir](https://vdirsyncer.pimutils.org/en/stable/vdir.html) home, one directory per calendar.
-- **pimdir**: read and stage writes against a local [pimdir](https://github.com/pimalaya/pimdir) store, the offline cache a sync engine fills.
-- **Agenda view**: `event agenda` draws a cal(1)-style grid marking the days that carry an event.
-- **Composer**: `-i/--interactive` on `build`, `create` and `update` opens the item in the command `item.composer` names, your editor included, and what it leaves in the file is the decision.
-- **REPL and MCP**: `calendula repl` runs commands over one account in a session, and `calendula mcp` serves the unified API to an AI agent over the Model Context Protocol, reads only unless `--allow-write`, never inviting anyone unless `--allow-send`.
-- **Build without an account**: `<family> build` applies a source and the composer and prints the iCalendar rather than sending it, on a machine holding no configuration at all.
-- **Discovery**: `caldav.discover` resolves a bare domain to its CalDAV server on each run, through SRV records and `.well-known`.
-- **Multi-account**: one TOML file, one block per account, several files deep-merged when you want secrets apart.
-- **JSON output**: every command switches to JSON with `--json`, for scripts and other tools, and `calendula json-schema` describes the shape each one returns.
-- Full standard, blocking client with **TLS** support:
-  - [Rustls](https://crates.io/crates/rustls) with ring crypto (requires `rustls-ring` feature, enabled by default)
-  - [Rustls](https://crates.io/crates/rustls) with aws crypto (requires `rustls-aws` feature)
-  - [Native TLS](https://crates.io/crates/native-tls) (requires `native-tls` feature)
+- **Unified API**: `calendar`, `event` and `item` serve the union of the backends, refusing what one does not serve.
+- **Remote backends**: CalDAV, the Google Calendar API, and Microsoft Graph for Outlook and Microsoft 365.
+- **Local stores**: a vdir home, or a pimdir store a sync engine fills, its writes queued and its index searched.
+- **Tested sample**: config.sample.toml holds a section per backend and provider, the first run printing how to copy it.
+- **REPL**: `calendula repl` runs commands over one account, the backend connecting once for the session.
+- **MCP server**: `calendula mcp` serves the unified API to an agent, read-only unless `--allow-write`.
+- **JSON output**: `--json` on every command, its schema given by `calendula json-schema`.
+- **Full client**: TLS via Rustls (`rustls-ring` default, `rustls-aws`) or Native TLS (`native-tls`).
 
 > [!TIP]
 > Each backend sits behind its own cargo feature (`caldav`, `gcal`, `msgraph`, `vdir`, `pimdir`), all enabled by default. Build with `--no-default-features` and pick the ones you need.
 >
-> The default `vendored` feature builds SQLite from source; leave it out to link the system one.
+> The default `vendored` feature builds SQLite, and OpenSSL under `native-tls`, from source; leave it out to link the system ones.
 
 ## RFC coverage
 
 | RFC    | What is covered                                                                              |
 |--------|----------------------------------------------------------------------------------------------|
-| [4791] | CalDAV: calendar collections, calendar object resources, and the `calendar-query` REPORT with its time-range filter |
-| [4918] | WebDAV: the `PROPFIND`, `PROPPATCH`, `MKCOL`, `GET`, `PUT` and `DELETE` methods CalDAV builds on |
+| [4791] | CalDAV: calendar collections, calendar object resources, and the calendar-query report with its time-range filter |
+| [4918] | WebDAV: the PROPFIND, PROPPATCH, MKCOL, GET, PUT and DELETE methods CalDAV builds on         |
 | [5397] | Current-user-principal, the first step of the CalDAV discovery walk                           |
 | [5545] | iCalendar: parsing and editing events, and carrying any other component a calendar holds     |
-| [6764] | CalDAV service discovery: the `_caldav` and `_caldavs` SRV records, and `.well-known/caldav`  |
 | [6578] | Collection synchronization, whose sync token a CalDAV calendar listing reports                |
-| [7617] | HTTP Basic authentication                                                                     |
 | [6750] | HTTP Bearer authentication, for a provider-issued or broker-refreshed API token               |
+| [6764] | CalDAV service discovery: the SRV records and the well-known path leading to a server        |
+| [7617] | HTTP Basic authentication                                                                     |
+| [7986] | iCalendar extensions: the conference property an event's online meeting link is read from     |
 
 [4791]: https://www.rfc-editor.org/rfc/rfc4791
 [4918]: https://www.rfc-editor.org/rfc/rfc4918
@@ -67,6 +64,7 @@ CLI to manage calendars.
 [6750]: https://www.rfc-editor.org/rfc/rfc6750
 [6764]: https://www.rfc-editor.org/rfc/rfc6764
 [7617]: https://www.rfc-editor.org/rfc/rfc7617
+[7986]: https://www.rfc-editor.org/rfc/rfc7986
 
 ## Installation
 
@@ -129,25 +127,29 @@ nix run
 
 ## Configuration
 
-calendula reads a TOML configuration you write, and never writes one. [config.sample.toml](./config.sample.toml) holds one account: the options every account shares with their values, then one commented section per backend or provider, yours to uncomment: CalDAV, Google Calendar, Google CalDAV, Microsoft Graph, Fastmail, vdir and pimdir. The OAuth 2.0 sections read their token from [Ortie](https://github.com/pimalaya/ortie), whose sample has the matching Google and Microsoft Graph sections. Releases and packages ship it as share/doc/calendula/config.sample.toml.
+calendula reads a TOML configuration you write, and never writes one. [config.sample.toml](./config.sample.toml) holds one account: the options every account shares with their values, then one commented section per backend or provider, each a working account once uncommented: CalDAV, Google Calendar, Google CalDAV, Microsoft Graph, Fastmail, vdir and pimdir. Releases and packages ship it as share/doc/calendula/config.sample.toml.
+
+The OAuth 2.0 sections read their token from `ortie token show`: calendula runs no OAuth flow and refreshes no token, so [Ortie](https://github.com/pimalaya/ortie), whose sample has the matching Google and Microsoft Graph sections, or another broker printing a fresh token, does it.
 
 Run without a configuration at a terminal, calendula welcomes you with the commands copying the shipped sample in place, or downloading it when none ships, then the first command to run. Under `--json` or in a script, it fails naming the path it looked at and the sample.
 
-The `caldav` block takes one authentication: `basic` with a `username` and a `password`, `bearer` with a `token`, or `caldav.auth = "none"` for a server asking for none. `gcal.auth` and `msgraph.auth` take a `token`. A secret is given as `raw` or as `command`, a shell string or an argument list printing it.
+The `caldav` block reaches its server one way: `caldav.server`, a URL or a bare authority to walk from, `caldav.discover`, a domain resolved through SRV records and `.well-known` on every run, or `caldav.home`, the calendar home set itself.
+
+It takes one authentication: `basic` with a `username` and a `password`, `bearer` with a `token`, or `caldav.auth = "none"` for a server asking for none. `gcal.auth` and `msgraph.auth` take a `token`. A secret is given as `raw` or as `command`, a shell string or an argument list printing it.
 
 `calendar.default`, `event.list.page-size`, `item.list.page-size` and `item.composer` may also sit at the top level, before any table, as the fallback of every account not setting them: drop the sample's default lines from an account for the top level to apply.
 
-A configuration is loaded from every existing path among the following, each one deep-merged on top of the ones before, so `$HOME/.calendularc` overrides the others:
+A configuration is loaded from every existing path among the following, each one deep-merged on top of the ones before, so $HOME/.calendularc overrides the others:
 
-- `$XDG_CONFIG_HOME/calendula/config.toml`
-- `$HOME/.config/calendula/config.toml`
-- `$HOME/.calendularc`
+- $XDG_CONFIG_HOME/calendula/config.toml
+- $HOME/.config/calendula/config.toml
+- $HOME/.calendularc
 
 At most one account may be marked `default = true` across them: several are refused, naming them, and so is an unknown `-a <NAME>`, naming the accounts the configuration holds.
 
 Override those paths with `-c <PATH>`. Repeat it to merge several files, such as `-c public.toml -c private.toml`: the first one is the base and the next ones are deep-merged on top. Each `-c` takes one path, never split, and no environment variable is read: a path kept in a shell variable goes through the flag, as `-c "$CALENDULA_CONFIG"`.
 
-To add an account, add an `[accounts.<name>]` table to your configuration. `calendula account list` and `calendula account check` inspect and validate the accounts declared.
+To add an account, add an `[accounts.<name>]` table to your configuration. `calendula account list` and `calendula account check` inspect and validate the accounts declared, and `calendula account capability` lists what each of its backends serves.
 
 ### Apple
 
@@ -155,9 +157,8 @@ Apple exposes calendars via CalDAV, but you cannot use your regular password. Yo
 
 ```toml
 [accounts.example]
-caldav.discover = "icloud.com"
 caldav.server = "https://caldav.icloud.com/"
-# The home URL is usually of this shape:
+# The home URL, skipping discovery, is usually of this shape:
 #caldav.home = "https://caldav.icloud.com/<id>/calendars/"
 
 caldav.auth.basic.username = "example@icloud.com"
@@ -223,7 +224,7 @@ caldav.auth.basic.username = "example@fastmail.com"
 caldav.auth.basic.password.command = "pass show fastmail"
 ```
 
-Run `calendula calendar list` once connected to read the calendar ids (the ID column), then set `calendar.default` to the one you want.
+Run `calendula calendar list` once connected to read the calendar ids (the first line of each record), then set `calendar.default` to the one you want.
 
 ### Posteo
 
@@ -231,9 +232,8 @@ Standard CalDAV with the mailbox address and its password.
 
 ```toml
 [accounts.posteo]
-caldav.discover = "posteo.de"
 caldav.server = "https://posteo.de:8443/"
-# The home URL is usually of this shape:
+# The home URL, skipping discovery, is usually of this shape:
 #caldav.home = "https://posteo.de:8443/calendars/<username>/"
 
 caldav.auth.basic.username = "example@posteo.net"
@@ -265,45 +265,46 @@ pimdir.root = "~/.local/state/neverest"
 #pimdir.account = "example"
 ```
 
-Run `calendula pimdir status` to see which account you are reading, how much of each calendar is downloaded, and how many creations are still queued. An item that is listed but not downloaded reads as "body not fetched" until a sync hydrates it.
+Run `calendula pimdir status` to see which account you are reading, how much of each calendar is downloaded, how many creations are still queued and which writes the sync engine parked. An item that is listed but not downloaded reads as "body not fetched" until a sync hydrates it.
 
-Run `calendula pimdir search <query>` to search the account's events through the search index the sync engine keeps, in the [pimdir SEARCH](https://github.com/pimalaya/pimdir) query language: `budget location:lisbon`, `attendee:carol@example.org date:2026-11`, `organizer:alice@example.org category:work`. Days, `today` and `yesterday` are read in the local zone (`TZ`, then the system's); a line under the hits names the index's zone when the sync engine reads floating times and dates in another. A write still queued shows once a sync indexed it. `calendula pimdir count <query>` counts the same.
+Run `calendula pimdir search <query>` to search the account's events through the search index the sync engine keeps, in the [pimdir SEARCH](https://github.com/pimalaya/pimdir) query language: `budget location:lisbon`, `attendee:carol@example.org date:2026-11`, `organizer:alice@example.org category:work`. `calendula pimdir count <query>` counts the same.
+
+Days, `today` and `yesterday` are read in the local zone (`TZ`, then the system's); a line under the hits names the index's zone when the sync engine reads floating times and dates in another. A write still queued shows once a sync indexed it.
 
 ## Usage
 
-Run `calendula --help` for the full command tree, and `calendula <command> --help` for any subcommand's arguments and its JSON output shape (printed when the global `--json` flag is set). `calendula json-schema --dir ./schemas` writes the JSON Schema of every `--json` payload.
+Every command and flag is documented behind `--help`: `calendula --help` for the command tree, `calendula <command> --help` for a command's arguments, the backends serving it and the shape of its `--json` output. `calendula json-schema --dir ./schemas` writes the JSON Schema of every `--json` output.
 
 A few real command lines:
 
 ```sh
 calendula calendar list
-calendula event list --calendar personal --from 2026-08-01 --to 2026-08-31
+calendula event list --calendar personal --from 2026-11-16 --to 2026-11-22
 calendula event agenda -3
-calendula item read --calendar personal event-1.ics
-calendula event build -i -o event.ics
-calendula event create --calendar personal -i
-calendula event update --calendar personal -i event-1.ics
-calendula pimdir status
+calendula event create --calendar personal --summary Lunch --start 2026-11-20T12:00 --duration PT1H
+calendula event update --calendar personal -i <EVENT-ID>
+calendula item read --calendar personal <ITEM-ID>
+calendula account capability
 calendula pimdir search budget date:2026-11
-calendula gcal free-busy --from 2026-08-10 --to 2026-08-14
+calendula gcal free-busy --from 2026-11-16 --to 2026-11-20
 calendula gcal quick-add "Lunch with Ada tomorrow at noon"
 ```
 
 ### REPL
 
-`calendula repl` keeps one account open and runs the CLI's own commands, one per line, until `exit` or EOF, the backend connecting once for the whole session. A line takes `--json` for itself, a `#` starts a comment, and what cannot finish inside a session is refused by name: another session, the composer (`-i`), an iCalendar read from stdin (`stdin-taken`), and the flags the session fixes (`-a`, `-c`, `-b`, `--log-level`). A program can spawn `calendula repl --json` and read one JSON value per line, failures included.
+`calendula repl` runs the CLI's commands over one account, one per line until `exit` or EOF, the backend connecting once for the session; a program can spawn `calendula repl --json` and read one JSON value per line.
 
 ```
 $ calendula repl
 calendula> calendar list
 calendula> event list --from 2026-11-16 --to 2026-11-22
-calendula> event read standup
+calendula> event agenda
 calendula> exit
 ```
 
 ### MCP
 
-`calendula mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio for one account, exposing the unified API as tools (`calendar_list`, `event_list`, `event_read`, `event_find`, `item_read`, and so on), each taking the arguments of its command as spelled on the command line and answering the same JSON as `--json`. Only the tools that read are listed by default. `--allow-write` adds the calendar, event and item writes, without the arguments inviting anyone; `--allow-send` adds those (`attendee`, `organizer`, `send-updates`) and lets a write or a delete touch an event naming attendees, which the server or a sync may notify. Without it such a write is refused, since an invitation an agent reads can tell it to cancel or move a meeting. Tools never read a local file: an iCalendar is given as text.
+`calendula mcp` serves the unified API as [Model Context Protocol](https://modelcontextprotocol.io) tools over stdio, answering the JSON of `--json`: reads only by default, the writes under `--allow-write`, and under `--allow-send` too the attendee arguments and any write or delete touching an item that names attendees.
 
 ```json
 {

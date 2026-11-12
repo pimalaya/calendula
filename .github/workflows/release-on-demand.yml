@@ -7,7 +7,7 @@ on:
         description: Operating system
         type: choice
         required: true
-        default: ubuntu-latest
+        default: ubuntu-24.04
         options:
           - ubuntu-24.04
           - macos-13

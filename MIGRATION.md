@@ -2,31 +2,29 @@
 
 ## 0.2.x -> unreleased
 
+The next release brings calendula onto the standards Himalaya, Ortie and cardamum share: it manages events alone, drops the configuration wizard, takes one configuration path per `-c`, prints plain text with no table nor colour, serves a unified API whose backends say what they serve, and adds a REPL and an MCP server.
+
+A 0.2 configuration loads as it is, unless it holds a `todo`, `journal`, `table` or top-level `account` table, a colour key, a non-ASCII CalDAV host, or several default accounts.
+
+The text output changes everywhere, a few JSON outputs and exit codes move, and some commands fail earlier. The CHANGELOG lists every change; these are the ones to act on.
+
 ### Events only
 
-calendula is the Pimalaya CLI for events: the `todo` and `journal` commands are gone, with every subcommand they had. Manage to-dos with [unfog](https://github.com/pimalaya/unfog), the Pimalaya CLI for tasks, and journal entries with [journal](https://github.com/pimalaya/journal), the Pimalaya CLI for journal entries. `item` still lists, reads, writes and deletes any calendar object raw, a VTODO or a VJOURNAL included.
+- **`todo` and `journal` are gone**, with every subcommand they had. Manage to-dos with [unfog](https://github.com/pimalaya/unfog), the Pimalaya CLI for tasks, and journal entries with [journal](https://github.com/pimalaya/journal), the Pimalaya CLI for journal entries.
+- **`item` still lists, reads, writes and deletes any calendar object raw**, a VTODO or a VJOURNAL included, so a script reading or writing raw to-dos keeps working through it.
 
-A `todo` or `journal` table left in the configuration, at the top level or under an account (`todo.list.page-size`, `[accounts.<name>.journal]`, ...), is refused when the configuration loads, naming the CLI that took it over. Remove it from the calendula configuration.
+### Configuration and first run
 
-`item build -i` and `item create -i` given no source still mint nothing; their error now names `calendula event`, `unfog` and `journal` as what composes an event, a to-do and a journal entry.
-
-### No wizard
-
-The configuration wizard is gone: `calendula configure` (alias `wizard`), the offer a bare `calendula` and a command without a configuration made, the `wizard` cargo feature and the `calendula-configure` JSON Schema. Write the configuration by hand from [config.sample.toml](./config.sample.toml), copied to `~/.config/calendula/config.toml`: keep the blocks of the backends your account uses and fill them in. A configuration the wizard wrote keeps working as it is.
-
-Run without a configuration at a terminal, calendula prints the commands creating it from the sample, then the first command to run; a script or a `--json` caller gets the error naming the path looked at and the sample. A bare `calendula` prints the help when a configuration exists. A build naming the `wizard` feature (`--features wizard`) must drop it.
-
-### Configuration path
-
-`-c` takes one path per flag and never splits it: `-c public.toml:private.toml` is one path now. Repeat the flag instead, `-c public.toml -c private.toml`, the first one the base. `CALENDULA_CONFIG` is no longer read: pass a path kept in a variable through the flag, `-c "$CALENDULA_CONFIG"`.
-
-Several accounts marked `default = true`, across every file loaded, are refused, naming them: keep the mark on one, or name the account with `-a <NAME>`.
-
-### Plain text output
-
-Text output is plain text: no border, no colour, nothing sized to the terminal, and `-w/--max-width` is gone from every list. A script reading the text should read `--json` instead, whose keys are unchanged; `event list`, `event find` and `item list` add `nextPage`. In text, `event list` prints one line per event (id, start, end, summary) between a header (`Account:`, `Calendar:`) and a footer (`Page:`, `Next page:`); `calendar list` prints one record per calendar.
-
-The table and colour options are gone and refused: remove `table.preset`, `table.arrangement`, the `*-color` keys under `calendar.list.table`, `event.list.table`, `item.list.table` and `account.list.table`, and the `table` and top-level `account` tables holding them. `event.list.page-size` and `item.list.page-size` stay.
+- **The wizard is gone.** Bare `calendula` prints the help, `calendula configure` (alias `wizard`) and its `calendula-configure` schema no longer exist, and no command offers to create a configuration. A configuration the wizard wrote keeps working.
+- **Write a new configuration from the sample.** [config.sample.toml](./config.sample.toml), shipped as share/doc/calendula/config.sample.toml, holds one section per backend and provider: uncomment yours. Run at a terminal without a configuration, calendula prints the commands copying it in place; a script or a `--json` caller gets the error naming the path it looked at and the sample.
+- **The `wizard` cargo feature is gone.** Drop it from a build's `--features`.
+- **`-c` takes one path per flag.** A value is no longer split on `:`, so a Windows path stays whole. Repeat the flag to merge several files: `-c public.toml -c private.toml`, the first one the base.
+- **`CALENDULA_CONFIG` is no longer read.** Pass `-c "$CALENDULA_CONFIG"` for one path, and one `-c` per path for what was a `:`-separated list.
+- **Every default path is read, as layers.** $XDG_CONFIG_HOME/calendula/config.toml, $HOME/.config/calendula/config.toml and $HOME/.calendularc are each deep-merged on top of the ones before, where 0.2 read the first one found. An rc file left beside a config.toml now overrides it: delete the one you do not use.
+- **Several `default = true` accounts are refused**, naming them, where 0.2 took one at random. Keep the mark on one account across the merged files, or name the account with `-a <NAME>`.
+- **A `todo` or `journal` table is refused**, at the top level or under an account (`todo.list.page-size`, `[accounts.<name>.journal]`), naming the CLI that took it over: remove it.
+- **Table and colour keys are refused.** Remove the `table` table (`table.preset`, `table.arrangement`), at the top level or under an account, and the top-level `account` table (`account.list.table`), both refused by name, and the `*-color` keys of `calendar.list.table`, `event.list.table` and `item.list.table`, refused as unknown keys of their block. `event.list.page-size` and `item.list.page-size` stay.
+- **CalDAV hosts are ASCII.** A `caldav.server` or `caldav.home` with an internationalised host is refused, `home` when the configuration loads and `server` when the account connects: write the host in Punycode (`https://xn--bcher-kva.example/` for `bücher.example`).
 
 ### pimdir store
 
@@ -38,17 +36,50 @@ The pimdir backend follows pimdir storage-draft-09, and a store is never migrate
 
 The store keeps its path, so `pimdir.root` does not change.
 
-### Error codes
+With `pimdir.account` unset, the backend reads the one account the store groups its collections under, and refuses a store several accounts share, naming them, where 0.2 merged their calendars: set `pimdir.account` to the one to read.
 
-The `--json` error codes `store-newer` and `store-stale` are gone: a store of another format version, earlier or newer, is `store-version`. `store-exposed` (a store path another user can reach, or a link), `flag-invalid` and `action-malformed` are new.
+### Text output
 
-### pimdir reply and cancel
+- **Every list is plain text**, with no border, no colour and nothing sized to the terminal. A script cutting the 0.2 tables reads `--json` instead.
+- **`event list` prints one line per event**, `id  start  end  summary`, the times in the local zone (a whole-day event by its days) and an empty cell as `-`, between `Account:` and `Calendar:` above and `Page:` and `Next page:` under it, each block a blank line apart. `item list` prints its entity tag, size and id the same way, and `gcal instances` its id, status, start, end and summary.
+- **Other lists print columns or records.** `account list`, `vdir list`, `gcal acl list` and `gcal colors` print columns under an uppercase header; `calendar list`, `caldav list`, `gcal calendars` and `gcal free-busy` print records the way `git log` prints commits; `account check`, `caldav discover`, `gcal settings` and `pimdir status` print `Label: value` lines.
+- **`event agenda` highlights no day.** Its grid writes no escape any more, today and the days holding an event included; the events listed under it name their days.
+- **`-w/--max-width` is gone** from `calendar list`, `event list` and `item list`: a command passing it now fails, so drop it.
+- **`-s 0` lists every item**, where it listed none.
+- **`--help` prints without colour**, each paragraph on one line for the terminal to fold.
 
-Every `calendar-reply` and `calendar-cancel` now names the source performing it, so the `source` of their JSON output is never `null`. In a calendar whose sources declare no capability, it is `--source`, else the one source syncing the calendar; a calendar several sources sync needs `--source`.
+The greps the 0.2 tables allowed read `--json` with jq:
 
-### To-dos
+```sh
+# id, start, end and summary, one event per line
+calendula event list --json | jq -r '.events[] | [.id, .startsAt, .endsAt, .summary] | @tsv'
+# the ids of the events whose summary mentions a meeting
+calendula event list --json | jq -r '.events[] | select(.summary // "" | test("meeting"; "i")) | .id'
+# the whole-day events of a week
+calendula event list --from 2026-11-16 --to 2026-11-22 --json | jq -r '.events[] | select(.allDay) | .summary'
+# the calendar ids
+calendula calendar list --json | jq -r '.calendars[].id'
+```
 
-A calendar refuses a to-do where its sync engine states `calendar.component.vtodo` `none` (pimdir STORAGE §15.6), no longer `x-vtodo`; a sync engine stating nothing refuses none.
+### JSON output
+
+- **Writes print a receipt.** The `{"message": ...}` confirmations are gone: `calendar create|update|delete` and `event|item delete` print `{id, queued}`, the item acted on and whether the write waits for a sync; `caldav create|delete`, `vdir create|rename|delete`, `gcal acl create|update|delete`, `gcal move` and `gcal quick-add` print `{id}`; `event|item build -o` prints `{path, size}`.
+- **Piped `--json` prints one value per line**, and every schema `json-schema` writes carries an `$id` naming the contract version.
+- **A failure carries a stable `code`** when a caller is expected to act on it (`capability-missing`, `precondition-failed`, `item-duplicate`, `body-pending`, the pimdir store and index codes), described by the `calendula-error` schema, and `null` otherwise. Match on the code, never on the message, which may be reworded.
+- **Listings say whether more follow.** `event list` and `item list` print `nextPage`, the next page number as a string, `null` once the listing is complete: give it back through `--page-token`.
+- **A failed `account check` prints its report and exits 2**, each backend carrying `ok`, its failure's `code` and `error`, where 0.2 exited 0 whatever failed. Read which backends passed from `backends`.
+
+### Commands that now fail earlier
+
+- **A verb or a flag the account's backend does not serve is refused before connecting**, with the `capability-missing` code, naming the backend of the account that serves it: a description or a colour on a Graph calendar, refused once its token command ran in 0.2, `calendar create|update|delete` on pimdir, refused once the store was open, and `--if-match` on a vdir `event update` or `item update`, which 0.2 ignored.
+- **`calendula account capability` lists what each backend of an account serves**, and each `calendar`, `event` and `item` command's `--help` ends with a `Backends:` section naming the backends serving it.
+- **pimdir writes are checked before they are queued**: a create whose `UID` the calendar holds or has queued (`item-duplicate`), an update or a delete naming a version the item no longer has (`precondition-failed`), a to-do into a calendar whose source takes none, and a write no source of the store supports are refused, where 0.2 queued them for the sync engine to park or ignored the version.
+
+### New
+
+- `calendula repl` runs commands over one account, the unified client connecting once, and `calendula mcp` serves the unified API to an AI agent, reads only unless `--allow-write`, and nothing reaching an attendee unless `--allow-send`.
+- `event build`, `event create` and `event update` take field flags (`--summary`, `--start`, `--attendee`, `--alarm`...), `event list --from/--to` expands recurring series, and `event find` reads the events carrying a `UID`.
+- `pimdir search`, `pimdir count`, `pimdir reply` and `pimdir cancel` query the store's index and queue the replies and cancellations its sync engine sends.
 
 ## 0.1.x -> 0.2.0
 

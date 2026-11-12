@@ -12,18 +12,21 @@
 //! ## The stack below
 //!
 //! [`io_webdav`] carries the CalDAV coroutines (RFC 4791 over RFC 4918),
-//! [`io_gcal`] the Google Calendar API v3 ones, [`io_vdir`] the local vdir
-//! filesystem, [`io_pimdir`] the offline store and the sync engine that
-//! fills it.
+//! [`io_gcal`] the Google Calendar API v3 ones, [`io_msgraph`] the
+//! Microsoft Graph calendar ones, [`io_vdir`] the local vdir filesystem,
+//! [`io_pimdir`] the offline store a sync engine fills, its reader, its
+//! producer queueing writes and its search index.
 //!
 //! [`io_http`] is the request and response state machines WebDAV and the REST
-//! clients run on, `io_pim_discovery` the RFC 6764 CalDAV discovery, and
-//! `ical` the iCalendar parser and editor.
+//! clients run on, `io_pim_discovery` the RFC 6764 CalDAV discovery behind
+//! `caldav.discover`, and `ical` the iCalendar parser and editor.
 //!
 //! The `pimalaya_cli`, `pimalaya_config` and `pimalaya_stream` toolkits supply
-//! the clap scaffolding, the TOML loading and secrets, and the blocking
-//! transport. Every coroutine lives in those libraries and calendula
-//! implements none: all real I/O is concentrated there.
+//! the clap scaffolding, the printer and its plain text shapes, the welcome,
+//! the REPL and MCP core; the TOML loading, the accounts and the secrets;
+//! and the blocking transport with its TLS providers. Every coroutine lives
+//! in those libraries and calendula implements none: all real I/O is
+//! concentrated there.
 //!
 //! ## The cross-protocol layer calendula owns
 //!
@@ -33,8 +36,10 @@
 //! own dispatcher ([`shared::client::CalendarClient`]), an enum holding
 //! exactly one backend.
 //!
-//! Each protocol module carries a backend submodule adapting that library to
-//! the unified surface.
+//! Five backends sit behind it, each behind its own cargo feature: caldav
+//! over io-webdav, gcal over io-gcal, msgraph over io-msgraph, vdir over
+//! io-vdir and pimdir over io-pimdir. Each protocol module carries a backend
+//! submodule adapting that library to the unified surface.
 //!
 //! ### The capability union
 //!
@@ -53,16 +58,18 @@
 //! when it gives the result every other declarer gives, and leaves another
 //! result to its protocol-specific API.
 //!
-//! ### The projected backend
+//! ### The projected backends
 //!
-//! Three backends speak iCalendar natively and store the bytes verbatim.
-//! Google does not: it holds a JSON event and exposes no per-event iCalendar
-//! representation.
+//! CalDAV, vdir and pimdir speak iCalendar natively and store the bytes
+//! verbatim. Google Calendar and Microsoft Graph do not: each holds a JSON
+//! event and exposes no per-event iCalendar representation.
 //!
-//! So io-gcal's `ical` feature synthesizes [`shared::item::CalendarItem`]'s
-//! contents on read and re-projects them on write, stashing whatever the
-//! projection neither manages nor mints so it survives a round-trip. The
-//! policy is written down in cairn/spec/projection.md.
+//! So the `ical` features of io-gcal and io-msgraph synthesize
+//! [`shared::item::CalendarItem`]'s contents on read and re-project them on
+//! write, a recurring series and its exceptions folded into one item,
+//! stashing whatever the projection neither manages nor mints so it
+//! survives a round-trip. The policy is written down in
+//! cairn/spec/projection.md, Graph's limits in cairn/spec/backends.md.
 //!
 //! ## Three command families
 //!
@@ -123,12 +130,16 @@
 //! tool call parsed back into a unified API command. Both run on
 //! pimalaya-cli's shared core (its `repl` loop, its `mcp` protocol answers
 //! and tool grammar), which claims stdin, so a command reading its input
-//! there is refused under `stdin-taken`.
+//! there is refused under `stdin-taken`, and so is the composer, an editor
+//! fighting the session for the terminal, and a session inside a session.
 //!
-//! The server lists writes under `--allow-write` alone, and leaves what
-//! reaches people beyond the account behind `--allow-send` as well: the
-//! scheduling arguments, and any write or delete of an item naming an
-//! attendee, which the server or a sync may notify.
+//! The server lists a tool only when the account's backend serves its verb
+//! ([`capability::serves`]), the writes under `--allow-write` alone, and
+//! leaves what reaches people beyond the account behind `--allow-send` as
+//! well: the scheduling arguments, and any write or delete of an item
+//! naming an attendee, which the server or a sync may notify. That last
+//! guard runs in the unified client itself, on the contents written and on
+//! the stored copy, so it holds on every backend.
 //!
 //! ## Configuration
 //!
@@ -142,12 +153,17 @@
 //! each carrying an optional sub-block per backend, and the global block is
 //! folded under the selected account.
 //!
-//! calendula never writes a configuration: a person writes it from the
-//! documented sample. A person running calendula without one meets the
+//! calendula never writes a configuration: a person writes it from
+//! config.sample.toml, one section per backend and provider, which the test
+//! suite parses variant by variant and the packages ship in
+//! share/doc/calendula. A person running calendula without one meets the
 //! welcome ([`cli::welcome`], pimalaya-cli's in calendula's words), which
-//! creates it from the sample shipped beside the binary or downloads it; a
-//! script or a JSON caller gets the error instead. A bare `calendula` prints
-//! the help when a configuration exists.
+//! creates it from the shipped sample or downloads it; a script or a JSON
+//! caller gets the error instead. A bare `calendula` prints the help.
+//!
+//! A key or a table calendula no longer reads (`todo`, `journal`, `table`,
+//! the top-level `account`) is refused by name, saying where it went, rather
+//! than ignored.
 //!
 //! ## Output
 //!
@@ -157,12 +173,21 @@
 //! MCP server, whose stdout is the protocol's. A command returns a
 //! `Serialize + Display` value rather than printing inline.
 //!
+//! A failure prints through pimalaya-cli's `ErrorReport` with the stable
+//! [`error::ErrorCode`] a caller acts on, `null` otherwise, and exits 1; a
+//! result whose outcome is not a full success, a failed `account check`,
+//! prints its report and exits 2. Every write prints a receipt, the item it
+//! acted on and whether it waits for a sync.
+//!
 //! Text output is plain text, with no border, no colour and nothing sized
 //! to the terminal: a list of short rows prints as aligned columns, a wide
 //! one as records the way `git log` prints commits, and a record as aligned
 //! `Label: value` lines, every string a server or a file gave defused first.
-//! `event list` prints its events one line each between a header naming the
-//! account and the calendar and a footer saying where the page stands.
+//! `event list` and `item list` print one line each between a header naming
+//! the account and the calendar and a footer saying where the page stands;
+//! their JSON names the next page as `nextPage`, which `--page-token` takes
+//! back. A read prints the stored iCalendar defused of what could drive the
+//! terminal, its JSON keeping the bytes.
 //!
 //! Each command's doc comment is its help text, which makes `calendula
 //! <command> --help` the usage reference for both humans and agents, and is
