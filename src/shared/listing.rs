@@ -45,12 +45,12 @@ impl Listing {
     }
 
     /// Writes the header, the `rows` and the footer, `next_page` being
-    /// the page following this one.
+    /// the number of the page following this one.
     pub fn write(
         &self,
         f: &mut fmt::Formatter<'_>,
         rows: &str,
-        next_page: Option<u32>,
+        next_page: Option<&str>,
     ) -> fmt::Result {
         write_fields(f, &self.header)?;
         writeln!(f)?;
@@ -65,7 +65,7 @@ impl Listing {
 
     /// The fields under the rows: the page with the items it holds, and
     /// the flag reaching the next page while one follows.
-    fn footer(&self, next_page: Option<u32>) -> Vec<(&'static str, String)> {
+    fn footer(&self, next_page: Option<&str>) -> Vec<(&'static str, String)> {
         let [one, several] = self.nouns;
         let count = self.count as u64;
         let (page, first) = match (self.page, self.page_size) {

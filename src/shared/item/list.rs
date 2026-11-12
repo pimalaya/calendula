@@ -5,10 +5,10 @@
 
 use std::fmt;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use humansize::{BINARY, format_size};
-use pimalaya_cli::{columns::Columns, printer::Printer, sanitize};
+use pimalaya_cli::{clap::args::PageTokenArg, columns::Columns, printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -29,8 +29,9 @@ use crate::shared::{
 /// the page stands.
 ///
 /// JSON output: `{"items": [{"id", "calendarId", "etag", "contents"}],
-/// "nextPage"}`, `nextPage` being the page number following this one, or
-/// `null` once the listing is complete.
+/// "nextPage"}`, `nextPage` being the number of the page following this
+/// one as a string, which `--page-token` takes back, or `null` once the
+/// listing is complete.
 #[derive(Debug, Parser)]
 pub struct ItemListCommand {
     #[command(flatten)]
@@ -43,16 +44,28 @@ pub struct ItemListCommand {
     /// Number of items per page, zero listing every one.
     #[arg(short = 's', long, value_name = "N")]
     pub page_size: Option<u32>,
+
+    #[command(flatten)]
+    pub page_token: PageTokenArg,
 }
 
 impl ItemListCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+        let page = match &self.page_token.token {
+            Some(token) => Some(
+                token
+                    .parse::<u32>()
+                    .with_context(|| format!("Invalid page token `{token}`"))?,
+            ),
+            None => self.page,
+        };
+
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         let page_size = self
             .page_size
             .or(Some(client.account.items_list_page_size()))
             .filter(|size| *size > 0);
-        let page = page_size.map(|_| self.page.unwrap_or(1).max(1));
+        let page = page_size.map(|_| page.unwrap_or(1).max(1));
 
         let query = CalendarItemQuery::default();
         let listed = client.list_items(&calendar_id, page, page_size, query)?;
@@ -65,7 +78,7 @@ impl ItemListCommand {
         listing.count = listed.items.len();
 
         let next_page = match page {
-            Some(page) if listed.more => Some(page + 1),
+            Some(page) if listed.more => Some((page + 1).to_string()),
             _ => None,
         };
 
@@ -86,8 +99,9 @@ pub struct ItemListOutput {
     pub listing: Listing,
     /// The items of the page, in the order the backend listed them.
     pub items: Vec<CalendarItem>,
-    /// The page following this one, `null` once the listing is complete.
-    pub next_page: Option<u32>,
+    /// The number of the page following this one, given back through
+    /// `--page-token`, `null` once the listing is complete.
+    pub next_page: Option<String>,
 }
 
 impl fmt::Display for ItemListOutput {
@@ -104,7 +118,8 @@ impl fmt::Display for ItemListOutput {
             ]);
         }
 
-        self.listing.write(f, &columns.to_string(), self.next_page)
+        self.listing
+            .write(f, &columns.to_string(), self.next_page.as_deref())
     }
 }
 

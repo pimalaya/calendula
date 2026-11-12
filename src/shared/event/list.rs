@@ -5,11 +5,11 @@
 
 use std::fmt;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::NaiveDate;
 use clap::Parser;
 use jiff::{Timestamp, civil::Date, tz::TimeZone};
-use pimalaya_cli::{columns::Columns, printer::Printer, sanitize};
+use pimalaya_cli::{clap::args::PageTokenArg, columns::Columns, printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -56,8 +56,9 @@ use crate::shared::{
 /// "endsAt", "timeZone", "recurring", "status", "transparency",
 /// "busyStatus", "organizer": {"email", "name"}, "attendees": [{"email",
 /// "name", "partstat", "role", "rsvp", "cutype"}], "onlineMeetingUrl"}],
-/// "nextPage"}`, `nextPage` being the page number following this one, or
-/// `null` once the listing is complete.
+/// "nextPage"}`, `nextPage` being the number of the page following this
+/// one as a string, which `--page-token` takes back, or `null` once the
+/// listing is complete.
 #[derive(Debug, Parser)]
 pub struct EventListCommand {
     #[command(flatten)]
@@ -71,6 +72,9 @@ pub struct EventListCommand {
     #[arg(short = 's', long, value_name = "N")]
     pub page_size: Option<u32>,
 
+    #[command(flatten)]
+    pub page_token: PageTokenArg,
+
     /// Only list events on or after this day (inclusive, YYYY-MM-DD).
     #[arg(long, value_name = "DATE")]
     pub from: Option<NaiveDate>,
@@ -82,6 +86,15 @@ pub struct EventListCommand {
 
 impl EventListCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+        let page = match &self.page_token.token {
+            Some(token) => Some(
+                token
+                    .parse::<u32>()
+                    .with_context(|| format!("Invalid page token `{token}`"))?,
+            ),
+            None => self.page,
+        };
+
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         let range = CalendarTimeRange::from_days(self.from, self.to)?;
 
@@ -94,7 +107,7 @@ impl EventListCommand {
                 .or(Some(client.account.events_list_page_size())),
         };
         let page_size = page_size.filter(|size| *size > 0);
-        let page = page_size.map(|_| self.page.unwrap_or(1).max(1));
+        let page = page_size.map(|_| page.unwrap_or(1).max(1));
 
         let query = CalendarItemQuery {
             range: range.as_ref(),
@@ -122,7 +135,7 @@ impl EventListCommand {
         listing.count = listed.items.len();
 
         let next_page = match page {
-            Some(page) if listed.more => Some(page + 1),
+            Some(page) if listed.more => Some((page + 1).to_string()),
             _ => None,
         };
 
@@ -150,8 +163,9 @@ pub struct EventListOutput {
     pub zone: TimeZone,
     /// The listed events, in the order the backend returned them.
     pub events: Vec<Event>,
-    /// The page following this one, `null` once the listing is complete.
-    pub next_page: Option<u32>,
+    /// The number of the page following this one, given back through
+    /// `--page-token`, `null` once the listing is complete.
+    pub next_page: Option<String>,
 }
 
 impl fmt::Display for EventListOutput {
@@ -169,7 +183,8 @@ impl fmt::Display for EventListOutput {
             ]);
         }
 
-        self.listing.write(f, &columns.to_string(), self.next_page)
+        self.listing
+            .write(f, &columns.to_string(), self.next_page.as_deref())
     }
 }
 
@@ -271,7 +286,7 @@ mod tests {
             listing: listing(Some(1), 2),
             zone: TimeZone::UTC,
             events: vec![standup, holiday],
-            next_page: Some(2),
+            next_page: Some(String::from("2")),
         };
 
         let expected = "\
