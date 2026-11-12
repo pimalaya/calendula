@@ -12,11 +12,14 @@ use pimalaya_cli::{clap::args::PageTokenArg, columns::Columns, printer::Printer,
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::shared::{
-    arg::CalendarIdArg,
-    client::CalendarClient,
-    item::{CalendarItem, CalendarItemQuery},
-    listing::Listing,
+use crate::{
+    capability::Capability,
+    shared::{
+        arg::CalendarIdArg,
+        client::CalendarClient,
+        item::{CalendarItem, CalendarItemQuery},
+        listing::Listing,
+    },
 };
 
 /// List the raw iCalendar items of a calendar.
@@ -51,6 +54,8 @@ pub struct ItemListCommand {
 
 impl ItemListCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+        client.require(&[Capability::ItemList])?;
+
         let page = match &self.page_token.token {
             Some(token) => Some(
                 token

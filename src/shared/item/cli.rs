@@ -14,6 +14,7 @@ use pimalaya_cli::printer::Printer;
 
 use crate::{
     backend::Backend,
+    capability,
     shared::{
         client::CalendarClient,
         item::{
@@ -27,11 +28,15 @@ use crate::{
 #[derive(Debug, Subcommand)]
 pub enum ItemCommand {
     Build(ItemBuildCommand),
-    #[command(visible_alias = "ls")]
+    #[command(visible_alias = "ls", after_long_help = capability::help("item", "list"))]
     List(ItemListCommand),
+    #[command(after_long_help = capability::help("item", "read"))]
     Read(ItemReadCommand),
+    #[command(after_long_help = capability::help("item", "create"))]
     Create(ItemCreateCommand),
+    #[command(after_long_help = capability::help("item", "update"))]
     Update(ItemUpdateCommand),
+    #[command(after_long_help = capability::help("item", "delete"))]
     Delete(ItemDeleteCommand),
 }
 

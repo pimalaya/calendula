@@ -61,14 +61,15 @@ pub struct Cli {
     pub account: AccountFlag,
     /// Force a specific backend for the cross-protocol commands.
     ///
-    /// Only the unified commands (`calendar`, `event`, `item`) read it:
-    /// the protocol-specific subcommands each already name their
-    /// backend.
+    /// The unified commands (`calendar`, `event`, `item`), `account
+    /// check` and `account capability` read it: the protocol-specific
+    /// subcommands each already name their backend.
     ///
     /// With `auto`, the first configured backend wins, in calendula's
-    /// priority order (vdir, pimdir, caldav, gcal). Any other value
-    /// pins that one, and the command bails when the account carries
-    /// no matching block.
+    /// priority order (vdir, pimdir, caldav, gcal, msgraph), whatever
+    /// the command needs: one it does not serve is refused, naming the
+    /// backend of the account that does. Any other value pins that one,
+    /// and the command bails when the account carries no matching block.
     #[arg(short, long, global = true, default_value_t)]
     pub backend: Backend,
     #[command(flatten)]

@@ -16,7 +16,10 @@ use pimalaya_cli::{
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::shared::{calendar::Calendar, client::CalendarClient};
+use crate::{
+    capability::Capability,
+    shared::{calendar::Calendar, client::CalendarClient},
+};
 
 /// List the calendars of the active account.
 ///
@@ -30,6 +33,8 @@ pub struct CalendarListCommand;
 
 impl CalendarListCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+        client.require(&[Capability::CalendarList])?;
+
         let calendars = client.list_calendars()?;
         printer.out(CalendarListOutput { calendars })
     }

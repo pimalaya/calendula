@@ -13,6 +13,7 @@ use pimalaya_cli::printer::Printer;
 
 use crate::{
     backend::Backend,
+    capability,
     shared::{
         client::CalendarClient,
         event::{
@@ -26,14 +27,20 @@ use crate::{
 /// Manage events (VEVENT) using the unified API.
 #[derive(Debug, Subcommand)]
 pub enum EventCommand {
+    #[command(after_long_help = capability::help("event", "agenda"))]
     Agenda(EventAgendaCommand),
     Build(Box<EventBuildCommand>),
-    #[command(visible_alias = "ls")]
+    #[command(visible_alias = "ls", after_long_help = capability::help("event", "list"))]
     List(EventListCommand),
+    #[command(after_long_help = capability::help("event", "read"))]
     Read(EventReadCommand),
+    #[command(after_long_help = capability::help("event", "find"))]
     Find(EventFindCommand),
+    #[command(after_long_help = capability::help("event", "create"))]
     Create(Box<EventCreateCommand>),
+    #[command(after_long_help = capability::help("event", "update"))]
     Update(Box<EventUpdateCommand>),
+    #[command(after_long_help = capability::help("event", "delete"))]
     Delete(EventDeleteCommand),
 }
 

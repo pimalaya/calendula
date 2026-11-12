@@ -13,13 +13,16 @@ use pimalaya_cli::{clap::args::PageTokenArg, columns::Columns, printer::Printer,
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::shared::{
-    arg::CalendarIdArg,
-    client::CalendarClient,
-    event::Event,
-    ical::IcalFamily,
-    item::{CalendarItemQuery, CalendarTimeRange},
-    listing::Listing,
+use crate::{
+    capability::Capability,
+    shared::{
+        arg::CalendarIdArg,
+        client::CalendarClient,
+        event::Event,
+        ical::IcalFamily,
+        item::{CalendarItemQuery, CalendarTimeRange},
+        listing::Listing,
+    },
 };
 
 /// List the events of a calendar.
@@ -86,6 +89,8 @@ pub struct EventListCommand {
 
 impl EventListCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+        client.require(&[Capability::ItemList])?;
+
         let page = match &self.page_token.token {
             Some(token) => Some(
                 token

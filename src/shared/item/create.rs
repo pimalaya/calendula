@@ -11,11 +11,14 @@ use pimalaya_cli::{printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::shared::{
-    arg::{CalendarIdArg, IcalComposerArgs},
-    client::CalendarClient,
-    composer::IcalComposer,
-    ical::{IcalFamily, blank_item, read_source},
+use crate::{
+    capability::Capability,
+    shared::{
+        arg::{CalendarIdArg, IcalComposerArgs},
+        client::CalendarClient,
+        composer::IcalComposer,
+        ical::{IcalFamily, blank_item, read_source},
+    },
 };
 
 /// Create a new iCalendar item from an iCalendar source.
@@ -45,6 +48,8 @@ pub struct ItemCreateCommand {
 
 impl ItemCreateCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+        client.require(&[Capability::ItemAdd])?;
+
         if self.ical.is_none() && !self.composer.interactive {
             bail!("Nothing to create; give an iCalendar, or -i to compose one");
         }

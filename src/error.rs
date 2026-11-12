@@ -13,12 +13,17 @@ use serde::Serialize;
 
 /// The stable codes, each serialised in kebab-case.
 ///
-/// Every code so far is the pimdir backend's, so a build without it
-/// raises none, yet keeps the whole vocabulary in its schema.
+/// Every code but `capability-missing` is the pimdir backend's, so a
+/// build without it raises none of them, yet keeps the whole vocabulary
+/// in its schema.
 #[cfg_attr(not(feature = "pimdir"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ErrorCode {
+    /// The backend the account resolves to does not serve a capability
+    /// the command reaches, refused before connecting: the caller picks
+    /// another backend or leaves the option out.
+    CapabilityMissing,
     /// The item is listed but its body is not local yet: a sync will
     /// bring it, so the caller waits rather than reports a loss.
     BodyPending,

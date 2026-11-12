@@ -7,13 +7,16 @@ use anyhow::{Result, bail};
 use clap::Parser;
 use pimalaya_cli::printer::Printer;
 
-use crate::shared::{
-    arg::{CalendarIdArg, SendUpdatesArg},
-    client::CalendarClient,
-    event::Event,
-    ical::IcalFamily,
-    item::{CalendarItem, CalendarItemQuery},
-    receipt::{Write, WriteReceipt},
+use crate::{
+    capability::Capability,
+    shared::{
+        arg::{CalendarIdArg, SendUpdatesArg},
+        client::CalendarClient,
+        event::Event,
+        ical::IcalFamily,
+        item::{CalendarItem, CalendarItemQuery},
+        receipt::{Write, WriteReceipt},
+    },
 };
 
 /// Delete a single event.
@@ -52,7 +55,14 @@ pub struct EventDeleteCommand {
 
 impl EventDeleteCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
-        self.send_updates.check_backend(client.backend_name())?;
+        let mut capabilities = vec![Capability::ItemRemove];
+        if self.if_match.is_some() {
+            capabilities.push(Capability::ItemRemoveIfMatch);
+        }
+        if self.send_updates.send_updates.is_some() {
+            capabilities.push(Capability::SchedulingSendUpdates);
+        }
+        client.require(&capabilities)?;
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         let item_id = resolve(&mut client, &calendar_id, &self.event_id)?;

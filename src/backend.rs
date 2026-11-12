@@ -11,9 +11,10 @@ use clap::Parser;
 /// Selects which backend a cross-protocol command targets.
 ///
 /// [`Auto`](Self::Auto) takes the first configured and compiled backend
-/// of calendula's priority order (vdir, pimdir, CalDAV, gcal): a local
-/// store before a network round-trip, a standard protocol before a
-/// vendor API. A named variant pins that one instead.
+/// of calendula's priority order (vdir, pimdir, CalDAV, gcal, msgraph): a
+/// local store before a network round-trip, a standard protocol before a
+/// vendor API, whatever capability the command needs. A named variant
+/// pins that one instead.
 #[derive(Clone, Copy, Debug, Default, Parser, PartialEq, Eq)]
 pub enum Backend {
     /// The first configured backend, in calendula's priority order.

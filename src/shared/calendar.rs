@@ -3,8 +3,8 @@
 //! The calendar collection shared by every backend, and the `calendar`
 //! command family built on it.
 //!
-//! [`Calendar`] is calendula's own least-common-denominator shape, no library
-//! sitting between the CLI and the io-* crates. Each backend adapter projects
+//! [`Calendar`] is calendula's own cross-protocol shape, no library sitting
+//! between the CLI and the io-* crates. Each backend adapter projects
 //! its native collection onto it, and [`CalendarDiff`] carries a partial
 //! update back.
 

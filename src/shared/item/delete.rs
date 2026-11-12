@@ -7,10 +7,13 @@ use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::Printer;
 
-use crate::shared::{
-    arg::CalendarIdArg,
-    client::CalendarClient,
-    receipt::{Write, WriteReceipt},
+use crate::{
+    capability::Capability,
+    shared::{
+        arg::CalendarIdArg,
+        client::CalendarClient,
+        receipt::{Write, WriteReceipt},
+    },
 };
 
 /// Delete a single iCalendar item.
@@ -35,6 +38,12 @@ pub struct ItemDeleteCommand {
 
 impl ItemDeleteCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+        let mut capabilities = vec![Capability::ItemRemove];
+        if self.if_match.is_some() {
+            capabilities.push(Capability::ItemRemoveIfMatch);
+        }
+        client.require(&capabilities)?;
+
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         client.delete_item(&calendar_id, &self.item_id, self.if_match.as_deref(), None)?;
         printer.out(WriteReceipt {

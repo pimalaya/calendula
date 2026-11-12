@@ -54,46 +54,10 @@ pub struct AccountRow {
 
 impl AccountRow {
     fn from_account(name: &str, account: &AccountConfig) -> Self {
-        #[cfg_attr(
-            not(any(
-                feature = "vdir",
-                feature = "caldav",
-                feature = "pimdir",
-                feature = "gcal",
-                feature = "msgraph"
-            )),
-            allow(unused_mut)
-        )]
-        let mut backends = Vec::new();
-
-        #[cfg(feature = "vdir")]
-        if account.vdir.is_some() {
-            backends.push("vdir");
-        }
-
-        #[cfg(feature = "pimdir")]
-        if account.pimdir.is_some() {
-            backends.push("pimdir");
-        }
-
-        #[cfg(feature = "caldav")]
-        if account.caldav.is_some() {
-            backends.push("caldav");
-        }
-
-        #[cfg(feature = "gcal")]
-        if account.gcal.is_some() {
-            backends.push("gcal");
-        }
-        #[cfg(feature = "msgraph")]
-        if account.msgraph.is_some() {
-            backends.push("msgraph");
-        }
-
         Self {
             name: name.to_owned(),
             default: account.default,
-            backends,
+            backends: account.backends(),
         }
     }
 }

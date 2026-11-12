@@ -13,7 +13,7 @@ calendula owns those types; no aggregator library sits between it and the io-* c
 ### Requirement: Unified operation set
 The shared adapters SHALL cover, per backend: `list_calendars`, `create_calendar`, `update_calendar`, `delete_calendar`, `list_items`, `get_item`, `create_item`, `update_item` and `delete_item`.
 
-A backend that cannot model an operation SHALL refuse it with a message naming what to do instead, rather than emulating it.
+A backend that cannot model an operation SHALL declare its capability `none` in its table, the detail naming what to do instead, rather than emulate it, and its adapter MAY refuse it again.
 
 ### Requirement: Unified outputs carry no backend details
 The output of a unified command SHALL NOT carry a field that only one backend fills. A backend detail worth showing SHALL be logged by that backend's adapter or shown by its own namespace.
@@ -30,6 +30,8 @@ pimdir is the only backend that queues its writes.
 
 ### Requirement: Backend selection order
 The unified commands SHALL target the backend the global `--backend` flag selects. Its default, `auto`, SHALL take the first configured-and-compiled backend in the order vdir, pimdir, CalDAV, gcal, msgraph, preferring a local read to a network round-trip and a protocol-standard server to a vendor API.
+
+`auto` SHALL NOT skip a backend for a capability it lacks: every unified verb exchanges calendar or item ids the others take, so all resolve to that one backend, and a refusal names the backend of the account serving the capability.
 
 A named value SHALL pin the command to that backend and bail when the account carries no matching configuration block. The protocol-specific commands SHALL ignore the flag.
 
@@ -76,19 +78,19 @@ A [`CalendarTimeRange`](#requirement-time-range-filtering) SHALL reach gcal as t
 An item whose iCalendar carries no VEVENT SHALL be refused by component name rather than emulated, since Google models neither VTODO nor VJOURNAL. How the VEVENT itself projects is the [projection](./projection.md) capability's business.
 
 ### Requirement: Microsoft Graph backend
-msgraph SHALL adapt io-msgraph's calendars and events. A calendar is a Graph calendar, its colour the read-only `hexColor`, and an item a lone event or a series master, keyed by the event id Graph returned, its `changeKey` as etag, its iCalendar contents synthesized by io-msgraph's `ical` projection with the exceptions of a series folded in, read from the instances of its own date range. Graph keeps no calendar description and names colours from a palette, so a create or update naming either SHALL be refused.
+msgraph SHALL adapt io-msgraph's calendars and events. A calendar is a Graph calendar, its colour the read-only `hexColor`, and an item a lone event or a series master, keyed by the event id Graph returned, its `changeKey` as etag, its iCalendar contents synthesized by io-msgraph's `ical` projection with the exceptions of a series folded in, read from the instances of its own date range. Graph keeps no calendar description and names colours from a palette, so msgraph SHALL declare `calendar.description` and `calendar.color` `none`, a create or update naming either refused before connecting.
 
 Graph narrows a listing by time only through the calendar view, which expands every series, so a range SHALL filter the listed items locally, as on vdir. Graph models a VEVENT and nothing else, so another kind SHALL be answered empty without a round-trip. Only the series master SHALL be written back: an exception edited here does not push, and an update naming an etag SHALL be refused when the master's `changeKey` moved.
 
 ### Requirement: vdir backend
 vdir SHALL adapt io-vdir. A collection directory is a calendar and its metadata marker files carry the display name, description and color; each `.ics` file inside is an item, and a `.vcf` file is not.
 
-vdir has no entity tag, so `if_match` SHALL be ignored rather than refused. An update SHALL read the current metadata before writing, so a field the patch leaves untouched survives.
+vdir has no entity tag, so it SHALL declare `item.update.if-match` and `item.remove.if-match` `none`, `--if-match` refused before anything is read. An update SHALL read the current metadata before writing, so a field the patch leaves untouched survives.
 
 ### Requirement: pimdir backend
 pimdir SHALL adapt io-pimdir, the store and the sync engine in one crate. The store is an offline cache a sync engine fills, not a server: reads project the store's items and writes are queue actions a later sync applies and propagates.
 
-Collections come from the sync, so `create_calendar`, `update_calendar` and `delete_calendar` SHALL refuse with a message pointing at the account the store syncs.
+Collections come from the sync, so pimdir SHALL declare `calendar.create`, `calendar.rename`, `calendar.delete`, `calendar.description` and `calendar.color` `none`, a calendar write refused before the store is opened with a detail pointing at the account the store syncs; `create_calendar`, `update_calendar` and `delete_calendar` SHALL refuse it again.
 
 A collection SHALL be listed as a calendar when it declares `text/calendar`, or when it declares no kind at all (a sync created it before any consumer declared one).
 

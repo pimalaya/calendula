@@ -285,26 +285,12 @@ impl EventFieldsArgs {
             && !self.online_meeting
     }
 
-    /// Refuses `--online-meeting` on a backend that cannot serve it,
-    /// `backend` naming the one serving the account.
-    ///
-    /// Only a pimdir store hands the ask to a sync engine able to create
-    /// the meeting; anywhere else the property would be written and never
-    /// acted upon. Whether the store's sources can is the pimdir
-    /// backend's own check, made before it queues the write.
-    ///
-    /// An `--alarm` lead the backend cannot hold is refused too, never
-    /// rounded: Google keeps whole minutes up to four weeks, and the
-    /// Outlook projection reads a lead in whole minutes, spelled without
-    /// days or weeks, as its one reminder.
+    /// Refuses an `--alarm` lead the backend cannot hold, never rounded,
+    /// `backend` naming the one serving the account: Google keeps whole
+    /// minutes up to four weeks, and the Outlook projection reads a lead
+    /// in whole minutes, spelled without days or weeks, as its one
+    /// reminder.
     pub fn check_backend(&self, backend: &str) -> Result<()> {
-        if self.online_meeting && backend != "pimdir" {
-            bail!(
-                "--online-meeting needs the pimdir backend, whose sync engine creates the \
-                 meeting; the {backend} backend serves this account"
-            );
-        }
-
         let Some(value) = &self.alarm else {
             return Ok(());
         };

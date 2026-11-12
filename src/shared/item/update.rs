@@ -11,11 +11,14 @@ use pimalaya_cli::{printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::shared::{
-    arg::{CalendarIdArg, IcalComposerArgs},
-    client::CalendarClient,
-    composer::IcalComposer,
-    ical::read_source,
+use crate::{
+    capability::Capability,
+    shared::{
+        arg::{CalendarIdArg, IcalComposerArgs},
+        client::CalendarClient,
+        composer::IcalComposer,
+        ical::read_source,
+    },
 };
 
 /// Overwrite an existing iCalendar item from an iCalendar source.
@@ -56,6 +59,12 @@ pub struct ItemUpdateCommand {
 
 impl ItemUpdateCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+        let mut capabilities = vec![Capability::ItemUpdate];
+        if self.if_match.is_some() {
+            capabilities.push(Capability::ItemUpdateIfMatch);
+        }
+        client.require(&capabilities)?;
+
         if self.ical.is_none() && !self.composer.interactive {
             bail!("Nothing to update; give an iCalendar, or -i to edit the item");
         }

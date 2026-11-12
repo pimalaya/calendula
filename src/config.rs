@@ -141,6 +141,51 @@ pub struct AccountConfig {
     pub msgraph: Option<MsgraphConfig>,
 }
 
+impl AccountConfig {
+    /// The backends the account carries a block for, as `--backend`
+    /// spells them, in the order `auto` tries them.
+    pub fn backends(&self) -> Vec<&'static str> {
+        #[cfg_attr(
+            not(any(
+                feature = "vdir",
+                feature = "caldav",
+                feature = "pimdir",
+                feature = "gcal",
+                feature = "msgraph"
+            )),
+            allow(unused_mut)
+        )]
+        let mut backends = Vec::new();
+
+        #[cfg(feature = "vdir")]
+        if self.vdir.is_some() {
+            backends.push("vdir");
+        }
+
+        #[cfg(feature = "pimdir")]
+        if self.pimdir.is_some() {
+            backends.push("pimdir");
+        }
+
+        #[cfg(feature = "caldav")]
+        if self.caldav.is_some() {
+            backends.push("caldav");
+        }
+
+        #[cfg(feature = "gcal")]
+        if self.gcal.is_some() {
+            backends.push("gcal");
+        }
+
+        #[cfg(feature = "msgraph")]
+        if self.msgraph.is_some() {
+            backends.push("msgraph");
+        }
+
+        backends
+    }
+}
+
 /// Calendar-level options.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]

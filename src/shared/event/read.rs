@@ -11,8 +11,9 @@ use pimalaya_cli::printer::Printer;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::shared::{
-    arg::CalendarIdArg, client::CalendarClient, event::Event, item::read::printable,
+use crate::{
+    capability::Capability,
+    shared::{arg::CalendarIdArg, client::CalendarClient, event::Event, item::read::printable},
 };
 
 /// Read a single event (its iCalendar).
@@ -44,6 +45,8 @@ pub struct EventReadCommand {
 
 impl EventReadCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+        client.require(&[Capability::ItemRead])?;
+
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         let item = client.get_item(&calendar_id, &self.event_id)?;
 

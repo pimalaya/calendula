@@ -6,12 +6,24 @@ status: current
 
 # Commands
 
-The command tree is split into three groups, in this order: the unified API, the protocol-specific escape hatches, and the meta commands. This is the standard Pimalaya CLI split, a portable surface plus per-protocol hatches.
+The command tree is split into three groups, in this order: the unified API, the protocol-specific escape hatches, and the meta commands. This is the standard Pimalaya CLI split, a portable surface plus per-protocol hatches. The unified API is the union of what the backends serve, held coherent by one meaning per verb, a backend that cannot give a verb's result declaring it unserved rather than giving another.
 
-### Requirement: The unified API is a strict least common denominator
-The `calendar`, `event` and `item` families SHALL expose only operations every compiled backend can serve identically. A concept one backend has and another does not SHALL NOT appear here; it belongs to that backend's own family.
+### Requirement: The unified API is the union of the backends
+The `calendar`, `event` and `item` families SHALL expose what any backend serves, each backend declaring what it serves of them. A backend SHALL declare a capability served only when it gives the result every other declarer gives; a backend whose result differs SHALL declare it `none` and keep its own operation in its protocol-specific family, so a verb keeps one meaning. A backend added that cannot serve a unified operation SHALL declare it `none` rather than emulate it.
 
-Adding a backend that cannot serve a unified operation SHALL move the operation out rather than have it emulated.
+### Requirement: Capability registry
+Each backend SHALL declare, in one table per backend (src/capability.rs) keyed by the name `--backend` takes and compiled into every build, compiled-out backends included, each unified capability: `calendar.list`, `calendar.create`, `calendar.rename`, `calendar.delete`, `calendar.description`, `calendar.color`, `item.list`, `item.read`, `item.add`, `item.update`, `item.remove`, `item.update.if-match`, `item.remove.if-match`, `online-meeting` and `scheduling.send-updates`, named in pimdir STORAGE Annex B's grammar without the domain word, the collection read as the calendar and the calendar resource as the item. Each SHALL be at a level: `full`; `partial`, with a detail saying what differs; `server`, with a detail saying what the server may refuse; or `none`, with a detail saying why and what serves it instead. The registry SHALL hold the capabilities a unified verb or flag reaches, and nothing a protocol-specific family alone reaches.
+
+### Requirement: An unserved verb is refused before connecting
+A unified command SHALL require the capabilities its verb and its flags reach (`--if-match`, `--online-meeting`, `--send-updates`, a calendar's name, description or colour) from the backend the account resolves to, before it reads a store, resolves a credential or connects. One the backend declares `none` SHALL fail with the code `capability-missing` and a message naming the backend, the capability and the detail, and, when another backend of the account serves it, that backend and the `--backend` reaching it. A capability served `partial` or `server` SHALL pass, the adapter, the server or the store refusing the case it cannot serve; an adapter MAY keep its own refusal as a second guard.
+
+#### Scenario: A version on vdir
+- GIVEN an account whose vdir home holds the event `1` and which configures a CalDAV block too
+- WHEN `calendula --json item delete -k cal --if-match x 1` runs
+- THEN it fails with `capability-missing` naming `item.remove.if-match`, the vdir backend and `--backend caldav`, the event file untouched and the CalDAV password command never run
+
+### Requirement: A served verb keeps its output
+Requiring the capabilities SHALL leave the output of every verb a backend serves unchanged. Only a verb or a flag a backend declares `none` changes: from an uncoded refusal, or from a flag ignored (`--if-match` on a vdir update), to `capability-missing` before anything is reached.
 
 ### Requirement: Protocol-specific families
 `caldav`, `gcal`, `pimdir` and `vdir` SHALL each expose what only that backend has, gated behind its own cargo feature. CalDAV covers `discover`, its own calendar listing (carrying the ctag, the sync token and the accepted component kinds), `create` and `delete`.
@@ -181,7 +193,7 @@ The listing query MAY carry a `UID`, which `event find` sets. A backend MAY leav
 `event delete <EVENT-ID>` SHALL take the id `event list` reports or the event's iCalendar `UID`. It SHALL try the id first, by a read, then list the calendar's events and look for an item of that id, then for the items carrying that `UID`. One item SHALL be deleted whole; several carrying the `UID` SHALL be refused, naming their ids; none SHALL be a clear miss.
 
 ### Requirement: A delete can be gated on a version
-`event delete` and `item delete` SHALL take `--if-match <ETAG>`. CalDAV and gcal SHALL send it as `If-Match`, msgraph SHALL compare it with the event's `changeKey`, and pimdir SHALL check it as an update does. A backend that cannot gate a delete (vdir) SHALL refuse the flag rather than drop it.
+`event delete` and `item delete` SHALL take `--if-match <ETAG>`. CalDAV and gcal SHALL send it as `If-Match`, msgraph SHALL compare it with the event's `changeKey`, and pimdir SHALL check it as an update does. A backend that cannot gate a write (vdir) SHALL declare `item.update.if-match` and `item.remove.if-match` `none`, so `--if-match` on an update or a delete is refused with `capability-missing` rather than dropped.
 
 `item read` SHALL add the `etag` of the version read to its JSON, `null` when the backend has none.
 
@@ -190,6 +202,7 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 
 | Code | Raised when |
 |---|---|
+| `capability-missing` | the backend the account resolves to does not serve a capability the command reaches; nothing was read, opened or connected |
 | `body-pending` | a listed item's body is not local yet (pimdir); a sync brings it |
 | `precondition-failed` | a write's `--if-match` names a version the item no longer has (pimdir) |
 | `occurrence-unsupported` | `pimdir reply` or `pimdir cancel` names an occurrence its performer cannot act on alone |
@@ -247,7 +260,7 @@ A list whose items carry more than one value of unbounded length SHALL print thr
 - `gcal free-busy`: the calendar id; `busy` or `free`, neither when the answer failed; `Busy`, one `<start> to <end>` line per period, and `Errors`.
 - `pimdir search`: the item id; `Start`, `End`, `Calendar` and, when a text term matched, `Matched`; the summary, then the snippet after a blank line. What the answer could not see prints after a blank line.
 
-Every other list SHALL print through pimalaya-cli's `Columns`: a header of uppercase labels, then one item per line, the cells two spaces apart and padded to the widest of their column, an empty cell as `-`, the free-text column last, several values in one cell joined with `,`: `account list` (NAME, BACKENDS, DEFAULT), `vdir list` (ID, PATH, NAME), `gcal acl list` (ID, SCOPE, ROLE, VALUE), `gcal colors` (PALETTE, ID, BACKGROUND, FOREGROUND), and the calendars (ID, DOWNLOADED, QUEUED, NAME) and parked actions (ROW, ACTION, CALENDAR, ERROR) of `pimdir status`.
+Every other list SHALL print through pimalaya-cli's `Columns`: a header of uppercase labels, then one item per line, the cells two spaces apart and padded to the widest of their column, an empty cell as `-`, the free-text column last, several values in one cell joined with `,`: `account list` (NAME, BACKENDS, DEFAULT), `account capability` (CAPABILITY, BACKEND, LEVEL, DETAIL, one row per capability of each backend), `vdir list` (ID, PATH, NAME), `gcal acl list` (ID, SCOPE, ROLE, VALUE), `gcal colors` (PALETTE, ID, BACKGROUND, FOREGROUND), and the calendars (ID, DOWNLOADED, QUEUED, NAME) and parked actions (ROW, ACTION, CALENDAR, ERROR) of `pimdir status`.
 
 A record SHALL print through pimalaya-cli's `Fields`: one `Label: value` line per field, the values aligned past the longest label: `account check` (`Account:`, then one `<backend>:` line, `OK` or `FAIL (<why>)`), `caldav discover`, `gcal settings` (one field per setting) and the head of `pimdir status` (`Reading account:`, `Grouped accounts:`).
 
@@ -297,10 +310,21 @@ A bare `calendula` SHALL print the help when a configuration exists, a broken on
 - THEN it prints `Account:  test`, `vdir:     OK` and `pimdir:   FAIL (<why>)`, and exits 2
 - AND `calendula --json account check` prints the same report as its result, the pimdir verdict carrying `"code":"store-uncreated"` and the vdir one `"code":null`, and exits 2, and `calendula --backend vdir account check` exits 0
 
+### Requirement: An account lists what it serves
+`account capability` SHALL print, for each backend the account configures that `--backend` allows, in the order `auto` tries them, every capability with its level and detail, reading the configuration and the tables and connecting nowhere: `{"account", "backends": [{"backend", "capabilities": [{"name", "level", "detail"}]}]}`, `detail` `null` for a full one. A `--backend` naming no block of the account SHALL be refused as `account check` refuses it.
+
+#### Scenario: A vdir account
+- GIVEN the account `test` configuring a vdir home alone
+- WHEN `calendula account capability` runs
+- THEN it prints the header `CAPABILITY  BACKEND  LEVEL  DETAIL` and fifteen `vdir` rows, each `full` but `item.update.if-match`, `item.remove.if-match`, `online-meeting` and `scheduling.send-updates`, each `none` with why
+
 ### Requirement: Help is the usage reference
 Each command's doc comment SHALL be its help text: the first paragraph is what `-h` shows, and the full text, ending with the command's JSON output shape, is what `--help` shows.
 
 `calendula <command> --help` is therefore the canonical usage reference for both humans and agents, which is why the README documents no per-command usage.
+
+### Requirement: The help names what each backend serves
+The `--help` of each unified leaf reaching a backend SHALL end with a `Backends:` footer generated from the tables: per capability the leaf reaches, flag-dependent ones included, the backends grouped by level, then each detail with the backends it applies to. A `build` reaches no backend and SHALL carry none, `-h` SHALL show none, and the top-level help SHALL keep the Pimalaya footer.
 
 ### Requirement: Every data command returns a named output type
 A command answering with data SHALL hand the printer a `*Output` type deriving `Display`, `Serialize` and `JsonSchema`, named after its command path. A write with no payload of its own SHALL print a receipt rather than a sentence: a unified write `{id, queued}` (`WriteReceipt`), the id of the item acted on and whether a sync engine applies the write later, and a write in a protocol namespace `{id}` (`IdReceipt`), the id as it is after the write (a renamed collection's new one). The sentence is the text form only.
@@ -402,12 +426,12 @@ An empty value given to `--summary`, `--description`, `--location`, `--url`, `--
 `event update` SHALL set `DTSTAMP` to the time of the write, in UTC (`YYYYMMDDTHHMMSSZ`), and `LAST-MODIFIED` to the same instant when the event carries one, whatever it writes: field flags, a source, or what `-i` hands back. Every VEVENT of the item is revised, one lacking a `DTSTAMP` getting one after its last property; every other line SHALL keep its bytes. The revision SHALL belong to the shared update pipeline, so every backend stores an event revised alike.
 
 ### Requirement: An online meeting can be asked for
-`--online-meeting` SHALL write `X-PIMDIR-ONLINE-MEETING:TRUE` on the VEVENT (pimdir STORAGE Annex B.1), replacing any instance it carried. On pimdir the write SHALL be refused before it is queued when no source declares `calendar.online-meeting` (see the backends capability); on any other backend `event create` and `event update` SHALL refuse the flag by name, before reaching the backend. `event build` reaches no backend and SHALL simply write the property.
+`--online-meeting` SHALL write `X-PIMDIR-ONLINE-MEETING:TRUE` on the VEVENT (pimdir STORAGE Annex B.1), replacing any instance it carried. On pimdir, which declares `online-meeting` `partial`, the write SHALL be refused before it is queued when no source declares `calendar.online-meeting` (see the backends capability); every other backend declares it `none`, so `event create` and `event update` SHALL refuse the flag there with `capability-missing`, before reaching the backend. `event build` reaches no backend and SHALL simply write the property.
 
 ### Requirement: A gcal write chooses who is mailed
 `event create`, `event update` and `event delete` SHALL take `--send-updates all|external-only|none`, which the gcal backend SHALL pass as the API's `sendUpdates` on the request it makes. Absent, update and delete SHALL omit `sendUpdates` and create SHALL choose as the Google Calendar backend requirement says, so nothing changes for a caller that does not give it.
 
-On `event create` the flag SHALL override that choice wherever the event is inserted. An event that is imported instead mails nobody: `none` SHALL pass, and `all` or `external-only` SHALL be refused, naming the event's `ORGANIZER`. On any other backend the three commands SHALL refuse the flag by name, before reaching the backend. `event build` SHALL NOT take it.
+On `event create` the flag SHALL override that choice wherever the event is inserted. An event that is imported instead mails nobody: `none` SHALL pass, and `all` or `external-only` SHALL be refused, naming the event's `ORGANIZER`, which gcal's `partial` `scheduling.send-updates` says. Every other backend declares `scheduling.send-updates` `none`, so the three commands SHALL refuse the flag there with `capability-missing`, before reaching the backend. `event build` SHALL NOT take it.
 
 #### Scenario: A quiet fix
 - GIVEN a gcal event with an attendee
@@ -422,7 +446,7 @@ On `event create` the flag SHALL override that choice wherever the event is inse
 #### Scenario: Another backend
 - GIVEN a CalDAV account
 - WHEN `calendula event delete --send-updates none ID` runs
-- THEN the command is refused naming `--send-updates`, and nothing is deleted
+- THEN the command is refused with `capability-missing` naming `scheduling.send-updates` and `--send-updates`, and nothing is deleted
 
 ### Requirement: A minted item carries an identity, and its family names its kind
 An item minted from nothing SHALL be a VCALENDAR carrying a PRODID and one VEVENT, carrying a UID minted as a fresh UUID, a DTSTAMP of now and a DTSTART of now, so the seed passes the check it will be held to the moment the composer hands it back. The values are placeholders, and an event with no time is not an event. An editor handed an empty file mints no identity, and the CalDAV resource name and the pimdir link id both derive from the UID.

@@ -49,6 +49,10 @@ pub fn registry() -> JsonSchemaRegistry {
         "calendula-account-check",
         crate::account::check::AccountCheckOutput
     );
+    insert!(
+        "calendula-account-capability",
+        crate::account::capability::AccountCapabilityOutput
+    );
 
     insert!(
         "calendula-calendar-list",

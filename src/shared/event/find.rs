@@ -7,16 +7,19 @@ use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::Printer;
 
-use crate::shared::{
-    arg::CalendarIdArg,
-    client::CalendarClient,
-    event::{
-        Event,
-        list::{EVENT_NOUNS, EventListOutput, local_zone},
+use crate::{
+    capability::Capability,
+    shared::{
+        arg::CalendarIdArg,
+        client::CalendarClient,
+        event::{
+            Event,
+            list::{EVENT_NOUNS, EventListOutput, local_zone},
+        },
+        ical::IcalFamily,
+        item::CalendarItemQuery,
+        listing::Listing,
     },
-    ical::IcalFamily,
-    item::CalendarItemQuery,
-    listing::Listing,
 };
 
 /// Find the events carrying an iCalendar UID.
@@ -45,6 +48,8 @@ pub struct EventFindCommand {
 
 impl EventFindCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+        client.require(&[Capability::ItemList])?;
+
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
 
         let query = CalendarItemQuery {

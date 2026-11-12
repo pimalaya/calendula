@@ -2,7 +2,6 @@
 //!
 //! Clap arguments reused across the unified API commands.
 
-use anyhow::{Result, bail};
 use clap::{Parser, ValueEnum};
 
 /// The calendar a shared-API command operates on.
@@ -50,20 +49,6 @@ pub struct SendUpdatesArg {
     /// Served by the gcal backend alone; every other backend refuses it.
     #[arg(long, value_name = "WHO")]
     pub send_updates: Option<SendUpdates>,
-}
-
-impl SendUpdatesArg {
-    /// Refuses `--send-updates` off gcal, `backend` naming the one serving
-    /// the account, before anything reaches it.
-    pub fn check_backend(&self, backend: &str) -> Result<()> {
-        if self.send_updates.is_some() && backend != "gcal" {
-            bail!(
-                "--send-updates needs the gcal backend; the {backend} backend serves this account"
-            );
-        }
-
-        Ok(())
-    }
 }
 
 /// Who Google mails about a write.

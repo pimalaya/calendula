@@ -1,11 +1,12 @@
 //! # Unified API
 //!
-//! The cross-protocol surface: calendula's own least-common-denominator
-//! types, the dispatcher over the backends, and the command families built
-//! on them.
+//! The cross-protocol surface: calendula's own types, the dispatcher over
+//! the backends, and the command families built on them.
 //!
-//! An operation only reaches this surface when every compiled backend can
-//! serve it; what only one of them exposes lives in its protocol module.
+//! The surface is the union of what the backends serve, each command
+//! requiring the capabilities it reaches before anything connects; an
+//! operation a backend serves with another result stays in its protocol
+//! module.
 
 pub mod arg;
 pub mod build;

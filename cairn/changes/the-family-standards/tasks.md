@@ -18,7 +18,7 @@ change: the-family-standards
 - [x] account-check-reports-its-failure (cross-check: a failed backend exits 2 with the report, as cardamum and Himalaya)
 - [x] every-feature-set-builds-clean
 - [x] live-provider-tests (Microsoft credentialed failing on Graph 502/504 on 2026-11-12, see its log)
-- [ ] capability-shared-api
+- [x] capability-shared-api (`calendar.rename` for Annex B's `collection.rename`, `--send-updates` as `scheduling.send-updates`; `auto` skips no backend, as Himalaya's id-exchanging verbs)
 - [ ] the-shared-repl-and-mcp
 - [ ] release-polish
 - [ ] Log; land

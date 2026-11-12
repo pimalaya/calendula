@@ -26,12 +26,15 @@ use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Serialize, Serializer, ser::SerializeMap};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::shared::{
-    arg::CalendarIdArg,
-    client::CalendarClient,
-    event::Event,
-    ical::IcalFamily,
-    item::{CalendarItemQuery, CalendarTimeRange},
+use crate::{
+    capability::Capability,
+    shared::{
+        arg::CalendarIdArg,
+        client::CalendarClient,
+        event::Event,
+        ical::IcalFamily,
+        item::{CalendarItemQuery, CalendarTimeRange},
+    },
 };
 
 const DAYS_IN_WEEK: usize = 7;
@@ -137,6 +140,8 @@ pub struct EventAgendaCommand {
 
 impl EventAgendaCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+        client.require(&[Capability::ItemList])?;
+
         let now = Local::now();
 
         let mut ctl = CalControl {

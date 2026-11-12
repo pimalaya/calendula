@@ -13,12 +13,15 @@ use pimalaya_cli::{printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::shared::{
-    arg::{CalendarIdArg, IcalComposerArgs, SendUpdatesArg},
-    client::CalendarClient,
-    composer::IcalComposer,
-    event::fields::{EventFieldsArgs, revise},
-    ical::read_source,
+use crate::{
+    capability::Capability,
+    shared::{
+        arg::{CalendarIdArg, IcalComposerArgs, SendUpdatesArg},
+        client::CalendarClient,
+        composer::IcalComposer,
+        event::fields::{EventFieldsArgs, revise},
+        ical::read_source,
+    },
 };
 
 /// Overwrite an existing event from an iCalendar source.
@@ -94,12 +97,23 @@ impl EventUpdateCommand {
         mut client: CalendarClient,
         now: impl Fn() -> Timestamp,
     ) -> Result<()> {
+        let mut capabilities = vec![Capability::ItemUpdate];
+        if self.if_match.is_some() {
+            capabilities.push(Capability::ItemUpdateIfMatch);
+        }
+        if self.fields.online_meeting {
+            capabilities.push(Capability::OnlineMeeting);
+        }
+        if self.send_updates.send_updates.is_some() {
+            capabilities.push(Capability::SchedulingSendUpdates);
+        }
+        client.require(&capabilities)?;
+
         if self.ical.is_none() && self.fields.is_empty() && !self.composer.interactive {
             bail!("Nothing to update; give an iCalendar, a field flag, or -i to edit the event");
         }
 
         self.fields.check_backend(client.backend_name())?;
-        self.send_updates.check_backend(client.backend_name())?;
         self.fields.anchor_floating(client.backend_name());
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;

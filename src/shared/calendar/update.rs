@@ -7,11 +7,14 @@ use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::Printer;
 
-use crate::shared::{
-    arg::CalendarIdArg,
-    calendar::CalendarDiff,
-    client::CalendarClient,
-    receipt::{Write, WriteReceipt},
+use crate::{
+    capability::Capability,
+    shared::{
+        arg::CalendarIdArg,
+        calendar::CalendarDiff,
+        client::CalendarClient,
+        receipt::{Write, WriteReceipt},
+    },
 };
 
 /// Update a calendar's mutable properties.
@@ -40,6 +43,18 @@ pub struct CalendarUpdateCommand {
 
 impl CalendarUpdateCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+        let mut capabilities = Vec::new();
+        if self.name.is_some() {
+            capabilities.push(Capability::CalendarRename);
+        }
+        if self.description.is_some() {
+            capabilities.push(Capability::CalendarDescription);
+        }
+        if self.color.is_some() {
+            capabilities.push(Capability::CalendarColor);
+        }
+        client.require(&capabilities)?;
+
         let patch = CalendarDiff {
             name: self.name,
             description: self

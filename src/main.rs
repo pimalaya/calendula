@@ -28,14 +28,30 @@
 //! ## The cross-protocol layer calendula owns
 //!
 //! There is no aggregator crate between the CLI and the io-* libraries.
-//! calendula owns its own least-common-denominator types
+//! calendula owns its own cross-protocol types
 //! ([`shared::calendar::Calendar`], [`shared::item::CalendarItem`]) and its
 //! own dispatcher ([`shared::client::CalendarClient`]), an enum holding
 //! exactly one backend.
 //!
 //! Each protocol module carries a backend submodule adapting that library to
-//! the unified surface, so an operation only reaches the unified API when every
-//! backend can serve it.
+//! the unified surface.
+//!
+//! ### The capability union
+//!
+//! The unified API is the union of what the backends serve, not their
+//! least common denominator. [`capability`] declares, in one table per
+//! backend compiled into every build, each unified capability at `full`,
+//! `partial`, `server` or `none`, named after pimdir STORAGE Annex B
+//! without its domain word (`item.add`, `item.remove.if-match`,
+//! `online-meeting`).
+//!
+//! A unified command requires the capabilities its verb and its flags
+//! reach before anything connects, so one the backend does not serve fails
+//! with the `capability-missing` code; the same tables write each unified
+//! command's `Backends:` help footer and `account capability`. The
+//! guardrail is one meaning per verb: a backend declares a capability only
+//! when it gives the result every other declarer gives, and leaves another
+//! result to its protocol-specific API.
 //!
 //! ### The projected backend
 //!
@@ -52,12 +68,12 @@
 //!
 //! The command tree ([`cli`]) is split into three groups, in this order. The
 //! unified API (`calendar`, `event`, `item`) is the portable surface, where
-//! every operation works the same whichever backend serves the account.
+//! an operation means the same whichever backend serves the account.
 //!
 //! The protocol-specific APIs (`caldav`, `gcal`, `pimdir`, `vdir`) each expose
 //! what only one backend has, gated behind its own cargo feature. The meta
 //! commands (`account`, `completions`, `manuals`) inspect the configuration
-//! and generate the shell integration.
+//! and what its backends serve, and generate the shell integration.
 //!
 //! ### Events against item
 //!
@@ -84,12 +100,16 @@
 //! The unified commands target the backend the global `--backend` flag picks
 //! ([`backend::Backend`]). Its default, `auto`, takes the first
 //! configured-and-compiled backend in calendula's priority order: vdir,
-//! pimdir, CalDAV, gcal.
+//! pimdir, CalDAV, gcal, msgraph.
 //!
 //! That order prefers a local read to a network round-trip, and a
-//! protocol-standard server to a vendor API. A named value pins the command
-//! and bails when the account carries no matching block, while the
-//! protocol-specific commands ignore the flag and build their own client.
+//! protocol-standard server to a vendor API. It skips no backend for a
+//! capability it lacks: every unified verb exchanges calendar or item ids
+//! the others take, so all of them run on one backend, and a refusal names
+//! the backend of the account serving what was asked. A named value pins
+//! the command and bails when the account carries no matching block, while
+//! the protocol-specific commands ignore the flag and build their own
+//! client.
 //!
 //! ## Configuration
 //!
@@ -132,6 +152,7 @@ mod account;
 mod backend;
 #[cfg(feature = "caldav")]
 mod caldav;
+mod capability;
 mod cli;
 mod config;
 mod error;

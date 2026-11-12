@@ -12,12 +12,15 @@ use pimalaya_cli::{printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::shared::{
-    arg::{CalendarIdArg, IcalComposerArgs, SendUpdatesArg},
-    client::CalendarClient,
-    composer::IcalComposer,
-    event::fields::EventFieldsArgs,
-    ical::{IcalFamily, blank_item, ensure_valid, read_source},
+use crate::{
+    capability::Capability,
+    shared::{
+        arg::{CalendarIdArg, IcalComposerArgs, SendUpdatesArg},
+        client::CalendarClient,
+        composer::IcalComposer,
+        event::fields::EventFieldsArgs,
+        ical::{IcalFamily, blank_item, ensure_valid, read_source},
+    },
 };
 
 /// Create a new event from an iCalendar source.
@@ -61,12 +64,20 @@ pub struct EventCreateCommand {
 
 impl EventCreateCommand {
     pub fn execute(mut self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+        let mut capabilities = vec![Capability::ItemAdd];
+        if self.fields.online_meeting {
+            capabilities.push(Capability::OnlineMeeting);
+        }
+        if self.send_updates.send_updates.is_some() {
+            capabilities.push(Capability::SchedulingSendUpdates);
+        }
+        client.require(&capabilities)?;
+
         if self.ical.is_none() && self.fields.is_empty() && !self.composer.interactive {
             bail!("Nothing to create; give an iCalendar, a field flag, or -i to compose one");
         }
 
         self.fields.check_backend(client.backend_name())?;
-        self.send_updates.check_backend(client.backend_name())?;
         self.fields.anchor_floating(client.backend_name());
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;

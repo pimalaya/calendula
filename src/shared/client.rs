@@ -7,9 +7,10 @@
 //! dispatches to the active backend, whose glue lives in that protocol
 //! module's backend submodule.
 //!
-//! The surface is a strict least-common-denominator: an operation only
-//! appears here when every backend can serve it, and anything narrower
-//! belongs to a protocol-specific subcommand.
+//! The surface is the union of what the backends serve: a command checks
+//! the capabilities it reaches through [`CalendarClient::require`] before
+//! anything connects, and an operation a backend serves with another
+//! result stays in its protocol-specific subcommand.
 //!
 //! A build without any backend keeps the client, the unified command tree
 //! being the same in every build, with no arm to read its arguments.
@@ -43,6 +44,7 @@ use pimalaya_config::secret::SecretResolver;
 use crate::{
     account::context::Account,
     backend::Backend,
+    capability::{self, Capability},
     cli::resolve_account,
     config::{AccountConfig, Config},
     shared::{
@@ -67,6 +69,8 @@ pub struct CalendarClient {
     /// The account's credentials resolved so far, so a reopened backend
     /// runs no secret command twice.
     resolver: SecretResolver,
+    /// The backends the account configures, which a refusal names.
+    configured: Vec<&'static str>,
     /// The name of the account the command runs against.
     pub name: String,
     /// The account the command runs against, config already merged.
@@ -127,16 +131,20 @@ impl CalendarClient {
     /// Selects the backend from the account configuration.
     ///
     /// The first configured backend `backend` allows wins, in calendula's
-    /// priority order: vdir, pimdir, CalDAV, gcal. That order prefers a
-    /// local store to a network round-trip, and a protocol-standard server
-    /// to a vendor API. Nothing is connected here: the first call that
-    /// needs the network opens it.
+    /// priority order: vdir, pimdir, CalDAV, gcal, msgraph. That order
+    /// prefers a local store to a network round-trip, and a
+    /// protocol-standard server to a vendor API. It skips no backend for
+    /// a capability it lacks, every unified verb exchanging ids the
+    /// others take. Nothing is connected here: the first call that needs
+    /// the network opens it.
     pub fn new(
         config: Config,
         name: String,
         #[allow(unused_mut)] mut account_config: AccountConfig,
         backend: Backend,
     ) -> Result<Self> {
+        let configured = account_config.backends();
+
         #[allow(unused_mut)]
         let mut selected: Option<BackendConfig> = None;
 
@@ -190,6 +198,7 @@ impl CalendarClient {
             config: config_,
             inner: None,
             resolver: SecretResolver::new(),
+            configured,
             name,
             account,
         })
@@ -244,6 +253,12 @@ impl CalendarClient {
             #[cfg(feature = "msgraph")]
             BackendConfig::Msgraph(_) => "msgraph",
         }
+    }
+
+    /// Fails with `capability-missing` when the backend does not serve one
+    /// of `capabilities`, before anything connects.
+    pub fn require(&self, capabilities: &[Capability]) -> Result<()> {
+        capability::require(self.backend_name(), &self.configured, capabilities)
     }
 
     /// Whether the backend queues a write for a sync to push rather than

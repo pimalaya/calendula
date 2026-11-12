@@ -7,9 +7,12 @@ use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::Printer;
 
-use crate::shared::{
-    client::CalendarClient,
-    receipt::{Write, WriteReceipt},
+use crate::{
+    capability::Capability,
+    shared::{
+        client::CalendarClient,
+        receipt::{Write, WriteReceipt},
+    },
 };
 
 /// Delete the given calendar and every item it contains.
@@ -27,6 +30,7 @@ pub struct CalendarDeleteCommand {
 
 impl CalendarDeleteCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+        client.require(&[Capability::CalendarDelete])?;
         client.delete_calendar(&self.id)?;
 
         printer.out(WriteReceipt {
