@@ -6,13 +6,18 @@ use std::{fmt, path::PathBuf};
 
 use anyhow::{Result, bail};
 use clap::Parser;
-use pimalaya_cli::{fields::Fields, printer::Printer, sanitize};
+use pimalaya_cli::{
+    error::{PartialOutcome, code_of},
+    fields::Fields,
+    printer::Printer,
+    sanitize,
+};
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use pimalaya_config::secret::SecretResolver;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::{backend::Backend, cli::resolve_account, config::AccountConfig};
+use crate::{backend::Backend, cli::resolve_account, config::AccountConfig, error::ErrorCode};
 
 /// Validate the account configuration.
 ///
@@ -21,10 +26,13 @@ use crate::{backend::Backend, cli::resolve_account, config::AccountConfig};
 /// checked against the filesystem, CalDAV by opening the connection and
 /// resolving the calendar home-set, gcal by listing the calendars.
 ///
-/// A backend that fails fails the command, with one error naming each
-/// failed backend and why.
+/// The report is printed whole, each backend with its outcome and, when
+/// it failed, why, its stable code under `--json`. A failed backend exits
+/// the command with status 2, the report being the output rather than a
+/// failure object.
 ///
-/// JSON output: `{"account", "backends": [{"backend", "ok", "error"}]}`.
+/// JSON output: `{"account", "backends": [{"backend", "ok", "code",
+/// "error"}]}`.
 #[derive(Debug, Parser)]
 pub struct AccountCheckCommand;
 
@@ -44,22 +52,18 @@ impl AccountCheckCommand {
             bail!("No backend matching `{backend}` is configured for this account");
         }
 
-        let failed: Vec<String> = backends
-            .iter()
-            .filter_map(|check| {
-                let err = check.error.as_ref()?;
-                Some(format!("{}: {err}", check.backend))
-            })
-            .collect();
-
-        if !failed.is_empty() {
-            bail!("Account `{name}` failed its check: {}", failed.join("; "));
-        }
+        let failed = backends.iter().any(|check| !check.ok);
 
         printer.out(AccountCheckOutput {
             account: name,
             backends,
-        })
+        })?;
+
+        if failed {
+            return Err(PartialOutcome::default().into());
+        }
+
+        Ok(())
     }
 }
 
@@ -208,6 +212,9 @@ pub struct BackendCheck {
     pub backend: &'static str,
     /// Whether the backend answered.
     pub ok: bool,
+    /// The stable code of the failure, `null` when it answered or the
+    /// failure carries none.
+    pub code: Option<ErrorCode>,
     /// Why it did not, when it did not.
     pub error: Option<String>,
 }
@@ -218,11 +225,13 @@ impl BackendCheck {
             Ok(()) => Self {
                 backend,
                 ok: true,
+                code: None,
                 error: None,
             },
             Err(err) => Self {
                 backend,
                 ok: false,
+                code: code_of(&err),
                 error: Some(format!("{err:#}")),
             },
         }
@@ -250,7 +259,7 @@ mod tests {
     use core::fmt;
 
     use anyhow::Result;
-    use pimalaya_cli::printer::Printer;
+    use pimalaya_cli::{error::PartialOutcome, printer::Printer};
     use serde::Serialize;
 
     use crate::{account::check::AccountCheckCommand, backend::Backend};
@@ -278,10 +287,10 @@ mod tests {
         }
     }
 
-    /// A script reads the verdict from the exit code, so a backend that
-    /// fails fails the command, naming it and why.
+    /// A failed backend still prints the report, naming it and why, and
+    /// ends the command with the partial-outcome status.
     #[test]
-    fn a_failed_backend_fails_the_check() {
+    fn a_failed_backend_prints_the_report_and_fails_the_check() {
         let dir = tempfile::tempdir().unwrap();
         let config = dir.path().join("config.toml");
         let check = |home: &std::path::Path| {
@@ -307,10 +316,11 @@ mod tests {
         result.unwrap();
         assert_eq!(out, "Account:  test\nvdir:     OK\n");
 
-        let (result, _) = check(&dir.path().join("missing"));
-        let err = format!("{:#}", result.unwrap_err());
-        assert!(err.contains("vdir"), "{err}");
-        assert!(err.contains("does not exist"), "{err}");
+        let (result, out) = check(&dir.path().join("missing"));
+        let err = result.unwrap_err();
+        assert!(err.is::<PartialOutcome>(), "{err:#}");
+        assert!(out.starts_with("Account:  test\nvdir:     FAIL ("), "{out}");
+        assert!(out.contains("does not exist"), "{out}");
     }
 }
 
