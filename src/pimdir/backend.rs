@@ -48,11 +48,10 @@ use io_pimdir::{
 };
 use log::warn;
 use pimalaya_cli::error::CodedError;
-use pimalaya_config::toml::TomlConfig;
 
 use crate::{
     account::context::Account,
-    cli::load_config,
+    cli::resolve_account,
     config::PimdirConfig,
     error::ErrorCode,
     pimdir::{
@@ -99,10 +98,7 @@ impl PimdirBackend {
     ///
     /// Bails when the account carries no `[pimdir]` block.
     pub fn build(config_paths: &[PathBuf], account_name: Option<&str>) -> Result<Self> {
-        let mut config = load_config(config_paths)?;
-        let (name, mut account_config) = config
-            .take_account(account_name)?
-            .ok_or_else(|| anyhow!("Cannot find account"))?;
+        let (config, name, mut account_config) = resolve_account(config_paths, account_name)?;
 
         let pimdir_config = account_config
             .pimdir
@@ -184,8 +180,8 @@ impl PimdirBackend {
     /// undownloaded items from a window would answer another question.
     ///
     /// The collection streams through in keyset batches, one body held
-    /// at a time: what the listing keeps is the page, and the scan stops
-    /// once the page is full. A body is read only to answer the filters
+    /// at a time: what the listing keeps is the window, and the scan stops
+    /// once the window is full. A body is read only to answer the filters
     /// or to be returned, never for an item the stored summary already
     /// rules out (see [`ruled_out`]).
     pub fn list_items(
@@ -195,13 +191,13 @@ impl PimdirBackend {
     ) -> Result<Vec<CalendarItem>> {
         self.known_collection(calendar_id)?;
 
-        let mut page = Window::new(query.page, query.page_size);
+        let mut page = Window::new(query.skip, query.take);
         if page.is_closed() {
             return Ok(Vec::new());
         }
 
-        // NOTE: a hint leaving items out would shift a page.
-        let uid = query.uid.filter(|_| query.page_size.is_none());
+        // NOTE: a hint leaving items out would shift a window.
+        let uid = query.uid.filter(|_| query.take.is_none());
         let filtered = query.kind.is_some() || query.range.is_some();
         let restaged = match query.kind.is_some() || uid.is_some() {
             true => self.restaged()?,
@@ -1030,27 +1026,19 @@ fn ruled_out(
     }
 }
 
-/// The page a streamed listing keeps: 1-indexed, a `None` size keeping
-/// every match, as the shared `paginate` cuts a whole list.
-struct Window<T> {
-    /// Matches still to pass over before the page starts.
+/// The window a streamed listing keeps: `skip` matches passed over, then
+/// at most `take` kept, a `None` take keeping every match, as the shared
+/// `window` cuts a whole list.
+struct Window {
+    /// Matches still to pass over before the window starts.
     skip: usize,
-    /// The page size, `None` for no cap.
+    /// The window size, `None` for no cap.
     take: Option<usize>,
-    items: Vec<T>,
+    items: Vec<CalendarItem>,
 }
 
-impl<T> Window<T> {
-    fn new(page: Option<u32>, page_size: Option<u32>) -> Self {
-        let (skip, take) = match page_size {
-            None => (0, None),
-            Some(size) => {
-                let page = page.unwrap_or(1).max(1);
-                let skip = ((page - 1) as usize).saturating_mul(size as usize);
-                (skip, Some(size as usize))
-            }
-        };
-
+impl Window {
+    fn new(skip: usize, take: Option<usize>) -> Self {
         Self {
             skip,
             take,
@@ -1058,12 +1046,12 @@ impl<T> Window<T> {
         }
     }
 
-    /// Whether the page holds nothing whatever the collection holds.
+    /// Whether the window holds nothing whatever the collection holds.
     fn is_closed(&self) -> bool {
         self.take == Some(0)
     }
 
-    /// Passes over one match when the page has not started yet.
+    /// Passes over one match when the window has not started yet.
     fn skips(&mut self) -> bool {
         match self.skip {
             0 => false,
@@ -1074,8 +1062,8 @@ impl<T> Window<T> {
         }
     }
 
-    /// Keeps one match, breaking once the page is full.
-    fn keep(&mut self, item: T) -> ControlFlow<()> {
+    /// Keeps one match, breaking once the window is full.
+    fn keep(&mut self, item: CalendarItem) -> ControlFlow<()> {
         self.items.push(item);
 
         match self.take {
@@ -1084,7 +1072,7 @@ impl<T> Window<T> {
         }
     }
 
-    fn into_items(self) -> Vec<T> {
+    fn into_items(self) -> Vec<CalendarItem> {
         self.items
     }
 }
@@ -1333,7 +1321,10 @@ mod tests {
         );
 
         let text = status.to_string();
-        assert!(text.contains(&format!("ROW {}", parked.row)), "{text}");
+        assert!(text.contains("\nROW  ACTION  CALENDAR"), "{text}");
+        let row = parked.row.to_string();
+        let words = |line: &str| line.split_whitespace().take(2).eq([row.as_str(), "add"]);
+        assert!(text.lines().any(words), "{text}");
         assert!(text.contains(&parked.error), "{text}");
     }
 
@@ -2664,7 +2655,7 @@ mod tests {
                 }),
                 ..Default::default()
             };
-            CalendarClient::new(Config::default(), account, Backend::Auto).unwrap()
+            CalendarClient::new(Config::default(), "a".into(), account, Backend::Auto).unwrap()
         };
         let mut out = Capture::default();
 
@@ -2896,11 +2887,7 @@ mod tests {
             items.push(item);
         }
 
-        Ok(crate::shared::client::paginate(
-            items,
-            query.page,
-            query.page_size,
-        ))
+        Ok(crate::shared::client::window(items, query.skip, query.take))
     }
 
     /// What `event find` prints for `uid` out of `items`.
@@ -2941,24 +2928,24 @@ mod tests {
             Some(IcalComponentKind::VTodo),
             Some(IcalComponentKind::VJournal),
         ];
-        let pages = [
-            (None, None),
-            (None, Some(3)),
-            (Some(2), Some(3)),
-            (Some(4), Some(5)),
-            (Some(7), Some(7)),
-            (Some(100), Some(5)),
-            (Some(1), Some(0)),
-            (Some(3), None),
+        let windows = [
+            (0, None),
+            (0, Some(3)),
+            (3, Some(4)),
+            (15, Some(6)),
+            (42, Some(8)),
+            (495, Some(6)),
+            (0, Some(0)),
+            (1, None),
         ];
         let mut listed = 0;
 
         for kind in kinds {
             for range in ranges() {
-                for (page, page_size) in pages {
+                for (skip, take) in windows {
                     let query = CalendarItemQuery {
-                        page,
-                        page_size,
+                        skip,
+                        take,
                         range: range.as_ref(),
                         kind,
                         uid: None,
@@ -2993,10 +2980,10 @@ mod tests {
             let expected = eager(backend, "cal", query).unwrap();
             assert_eq!(found(&streamed, uid), found(&expected, uid), "{uid}");
 
-            // NOTE: a page ignores the hint rather than shift.
+            // NOTE: a window ignores the hint rather than shift.
             let paged = CalendarItemQuery {
-                page_size: Some(4),
-                page: Some(2),
+                skip: 4,
+                take: Some(4),
                 ..query
             };
             assert_eq!(
@@ -3167,9 +3154,9 @@ mod tests {
         let uids: Vec<_> = order.iter().map(uid_of).collect();
 
         // Past a full page, and before a page nothing filters.
-        let page = |page, page_size| CalendarItemQuery {
-            page: Some(page),
-            page_size: Some(page_size),
+        let page = |page: usize, page_size: usize| CalendarItemQuery {
+            skip: (page - 1) * page_size,
+            take: Some(page_size),
             ..all()
         };
         let first: Vec<String> = backend

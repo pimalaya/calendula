@@ -7,10 +7,7 @@ use std::fmt;
 
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::{
-    printer::Printer,
-    table::{Cell, Row, Table, TableStyle},
-};
+use pimalaya_cli::{columns::Columns, printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -29,7 +26,6 @@ pub struct GcalColorsCommand;
 
 impl GcalColorsCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: GcalClient) -> Result<()> {
-        let style = client.account.table_style();
         let palettes = client.colors_get()?.response;
 
         let rows = palettes
@@ -45,18 +41,15 @@ impl GcalColorsCommand {
             })
             .collect();
 
-        printer.out(GcalColorsOutput { style, rows })
+        printer.out(GcalColorsOutput { rows })
     }
 }
 
-/// The rendered palettes.
+/// The palettes.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GcalColorsOutput {
-    /// The table style the account configured.
-    #[serde(skip)]
-    pub style: TableStyle,
-    /// Both palettes flattened, one row per entry.
+    /// Both palettes flattened, one entry each.
     #[serde(rename = "colors")]
     pub rows: Vec<ColorRow>,
 }
@@ -77,27 +70,20 @@ pub struct ColorRow {
 
 impl fmt::Display for GcalColorsOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut table = Table::new();
+        let mut columns = Columns::new(["PALETTE", "ID", "BACKGROUND", "FOREGROUND"]);
 
-        table
-            .load_style(self.style)
-            .set_header(Row::from([
-                Cell::new("PALETTE"),
-                Cell::new("ID"),
-                Cell::new("BACKGROUND"),
-                Cell::new("FOREGROUND"),
-            ]))
-            .add_rows(self.rows.iter().map(|color| {
-                let mut row = Row::new();
-                row.max_height(1)
-                    .add_cell(Cell::new(color.palette))
-                    .add_cell(Cell::new(&color.id))
-                    .add_cell(Cell::new(color.background.as_deref().unwrap_or("")))
-                    .add_cell(Cell::new(color.foreground.as_deref().unwrap_or("")));
-                row
-            }));
+        for color in &self.rows {
+            let background = color.background.as_deref().unwrap_or_default();
+            let foreground = color.foreground.as_deref().unwrap_or_default();
 
-        writeln!(f)?;
-        writeln!(f, "{table}")
+            columns.push([
+                String::from(color.palette),
+                sanitize::text(&color.id).into_owned(),
+                sanitize::text(background).into_owned(),
+                sanitize::text(foreground).into_owned(),
+            ]);
+        }
+
+        write!(f, "{columns}")
     }
 }

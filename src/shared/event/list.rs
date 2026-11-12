@@ -1,7 +1,7 @@
 //! # Event list
 //!
-//! The `calendula event list` command, rendering the VEVENTs of a
-//! calendar as a table.
+//! The `calendula event list` command, printing the VEVENTs of a calendar
+//! one line each.
 
 use std::fmt;
 
@@ -9,10 +9,7 @@ use anyhow::Result;
 use chrono::NaiveDate;
 use clap::Parser;
 use jiff::{Timestamp, civil::Date, tz::TimeZone};
-use pimalaya_cli::{
-    printer::Printer,
-    table::{Cell, Color, ColumnConstraint, ContentArrangement, Row, Table, TableStyle},
-};
+use pimalaya_cli::{columns::Columns, printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -22,13 +19,14 @@ use crate::shared::{
     event::Event,
     ical::IcalFamily,
     item::{CalendarItemQuery, CalendarTimeRange},
+    listing::Listing,
 };
 
 /// List the events of a calendar.
 ///
-/// Only VEVENT components are rendered; the other kinds a calendar
-/// holds (VTODO, VJOURNAL) are dropped, so use `item list` for the
-/// unfiltered raw view.
+/// Only VEVENT components are listed; the other kinds a calendar holds
+/// (VTODO, VJOURNAL) are dropped, so use `item list` for the unfiltered
+/// raw view.
 ///
 /// Pass `--from` and `--to` (YYYY-MM-DD, both inclusive) to narrow the
 /// listing to a window: CalDAV runs it server-side, the local backends
@@ -47,15 +45,19 @@ use crate::shared::{
 ///
 /// Times resolve through their `TZID`, the calendar's `VTIMEZONE` or
 /// the time-zone database; a floating time is read in the local zone
-/// (`TZ`, then the system's). The table shows them in that local zone
-/// (`2026-10-30 09:00`), a whole-day event by its days, the end being
-/// the last one (`2026-05-19`).
+/// (`TZ`, then the system's). Each line shows the id, the start and the
+/// end in that local zone (`2026-10-30 09:00`), a whole-day event by its
+/// days, the end being the last one (`2026-05-19`), then the summary,
+/// between a header naming the account and the calendar and a footer
+/// saying where the page stands.
 ///
 /// JSON output: `{"events": [{"id", "uid", "recurrenceId", "summary",
 /// "description", "location", "start", "end", "allDay", "startsAt",
 /// "endsAt", "timeZone", "recurring", "status", "transparency",
 /// "busyStatus", "organizer": {"email", "name"}, "attendees": [{"email",
-/// "name", "partstat", "role", "rsvp", "cutype"}], "onlineMeetingUrl"}]}`.
+/// "name", "partstat", "role", "rsvp", "cutype"}], "onlineMeetingUrl"}],
+/// "nextPage"}`, `nextPage` being the page number following this one, or
+/// `null` once the listing is complete.
 #[derive(Debug, Parser)]
 pub struct EventListCommand {
     #[command(flatten)]
@@ -65,7 +67,7 @@ pub struct EventListCommand {
     #[arg(short, long, value_name = "N")]
     pub page: Option<u32>,
 
-    /// Number of items per page.
+    /// Number of items per page, zero listing every one.
     #[arg(short = 's', long, value_name = "N")]
     pub page_size: Option<u32>,
 
@@ -76,10 +78,6 @@ pub struct EventListCommand {
     /// Only list events on or before this day (inclusive, YYYY-MM-DD).
     #[arg(long, value_name = "DATE")]
     pub to: Option<NaiveDate>,
-
-    /// Maximum width of the rendered table, in terminal columns.
-    #[arg(long = "max-width", short = 'w', value_name = "COLUMNS")]
-    pub max_width: Option<u16>,
 }
 
 impl EventListCommand {
@@ -95,127 +93,97 @@ impl EventListCommand {
                 .page_size
                 .or(Some(client.account.events_list_page_size())),
         };
+        let page_size = page_size.filter(|size| *size > 0);
+        let page = page_size.map(|_| self.page.unwrap_or(1).max(1));
 
-        let items = client.list_items(
-            &calendar_id,
-            CalendarItemQuery {
-                page: self.page,
-                page_size,
-                range: range.as_ref(),
-                kind: IcalFamily::Event.kind(),
-                ..Default::default()
-            },
-        )?;
+        let query = CalendarItemQuery {
+            range: range.as_ref(),
+            kind: IcalFamily::Event.kind(),
+            ..Default::default()
+        };
+        let listed = client.list_items(&calendar_id, page, page_size, query)?;
         let events = match &range {
             Some(range) => {
-                let mut events: Vec<Event> = items
+                let mut events: Vec<Event> = listed
+                    .items
                     .iter()
                     .flat_map(|item| Event::occurrences(item, Some(range)))
                     .collect();
                 events.sort_by_key(|event| event.start_secs);
                 events
             }
-            None => items.iter().flat_map(Event::project).collect(),
+            None => listed.items.iter().flat_map(Event::project).collect(),
         };
 
-        printer.out(EventListOutput::new(&client, self.max_width, events))
+        let mut listing = Listing::new(&client.name, client.backend_name(), EVENT_NOUNS);
+        listing.push("Calendar", &calendar_id);
+        listing.page = page;
+        listing.page_size = page_size;
+        listing.count = listed.items.len();
+
+        let next_page = match page {
+            Some(page) if listed.more => Some(page + 1),
+            _ => None,
+        };
+
+        printer.out(EventListOutput {
+            listing,
+            zone: local_zone(),
+            events,
+            next_page,
+        })
     }
 }
 
-/// The per-column colors an event listing renders with.
-#[derive(Clone, Copy, Debug)]
-struct EventColors {
-    id: Color,
-    summary: Color,
-    start: Color,
-    end: Color,
-}
+/// What the footer of an event listing calls one event, then several.
+pub(crate) const EVENT_NOUNS: [&str; 2] = ["event", "events"];
 
-/// The rendered event listing.
+/// The events of one page and the number of the next.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EventListOutput {
-    /// The table preset the account configures.
+    /// The header and footer the events print between.
     #[serde(skip)]
-    pub style: TableStyle,
-    /// How the table spreads its columns over the terminal.
+    pub listing: Listing,
+    /// The zone a timed event's start and end print in.
     #[serde(skip)]
-    pub arrangement: ContentArrangement,
-    /// The `--max-width` cap, when one was given.
-    #[serde(skip)]
-    pub max_width: Option<u16>,
-    #[serde(skip)]
-    colors: EventColors,
+    pub zone: TimeZone,
     /// The listed events, in the order the backend returned them.
     pub events: Vec<Event>,
-}
-
-impl EventListOutput {
-    /// A listing of `events`, rendered as the account configures.
-    pub fn new(client: &CalendarClient, max_width: Option<u16>, events: Vec<Event>) -> Self {
-        Self {
-            style: client.account.table_style(),
-            arrangement: client.account.table_arrangement(),
-            max_width,
-            colors: EventColors {
-                id: client.account.events_list_table_id_color(),
-                summary: client.account.events_list_table_summary_color(),
-                start: client.account.events_list_table_start_color(),
-                end: client.account.events_list_table_end_color(),
-            },
-            events,
-        }
-    }
+    /// The page following this one, `null` once the listing is complete.
+    pub next_page: Option<u32>,
 }
 
 impl fmt::Display for EventListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let zone = TimeZone::try_system().unwrap_or(TimeZone::UTC);
-        let mut table = Table::new();
+        let mut columns = Columns::default();
 
-        table
-            .load_style(self.style)
-            .set_content_arrangement(self.arrangement.clone())
-            .set_header(Row::from(vec![
-                Cell::new("ID"),
-                Cell::new("SUMMARY"),
-                Cell::new("START"),
-                Cell::new("END"),
-            ]))
-            .add_rows(self.events.iter().map(|event| {
-                let mut row = Row::new();
-                row.max_height(1);
-                row.add_cell(Cell::new(&event.id).fg(self.colors.id));
-                row.add_cell(Cell::new(&event.summary).fg(self.colors.summary));
-                let (start, end) = table_times(event, &zone);
-                row.add_cell(Cell::new(start).fg(self.colors.start));
-                row.add_cell(Cell::new(end).fg(self.colors.end));
-                row
-            }));
+        for event in &self.events {
+            let (start, end) = row_times(event, &self.zone);
 
-        // NOTE: a time cut short (`2026-10-1…`) no longer says when, so
-        // squeezing the table into the terminal truncates the id and the
-        // summary but not these two.
-        for index in [2, 3] {
-            if let Some(column) = table.column_mut(index) {
-                column.set_constraint(ColumnConstraint::ContentWidth);
-            }
+            columns.push([
+                sanitize::text(&event.id).into_owned(),
+                sanitize::text(&start).into_owned(),
+                sanitize::text(&end).into_owned(),
+                sanitize::text(&event.summary).into_owned(),
+            ]);
         }
 
-        if let Some(width) = self.max_width {
-            table.set_width(width);
-        }
-
-        writeln!(f)?;
-        writeln!(f, "{table}")
+        self.listing.write(f, &columns.to_string(), self.next_page)
     }
+}
+
+/// The local zone a floating time is read in and a timed event prints
+/// in: `TZ`, then the system's, UTC when neither resolves.
+pub(crate) fn local_zone() -> TimeZone {
+    TimeZone::try_system().unwrap_or(TimeZone::UTC)
 }
 
 /// The start and end an event's row shows, for a person to read: a
 /// timed event at its instants in `zone`, a whole-day one by its days,
 /// the end inclusive. An event whose times did not resolve shows them
 /// as iCalendar spells them.
-pub(crate) fn table_times(event: &Event, zone: &TimeZone) -> (String, String) {
+pub(crate) fn row_times(event: &Event, zone: &TimeZone) -> (String, String) {
     if event.all_day {
         let start = event
             .starts_at
@@ -223,7 +191,7 @@ pub(crate) fn table_times(event: &Event, zone: &TimeZone) -> (String, String) {
             .unwrap_or_else(|| event.start.clone());
         let first = start.parse::<Date>().ok();
         let end = match event.ends_at.as_deref().map(str::parse::<Date>) {
-            // NOTE: the JSON end is exclusive, the table's the last day,
+            // NOTE: the JSON end is exclusive, the line's the last day,
             // never before the first: a zero-length whole day (DTEND equal
             // to DTSTART) ends on its start.
             Some(Ok(end)) => {
@@ -253,7 +221,15 @@ pub(crate) fn table_times(event: &Event, zone: &TimeZone) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use jiff::tz::TimeZone;
+
+    use crate::shared::{
+        event::{
+            Event,
+            list::{EVENT_NOUNS, EventListOutput, row_times},
+        },
+        listing::Listing,
+    };
 
     fn event(all_day: bool, start: &str, end: &str) -> Event {
         Event {
@@ -264,6 +240,108 @@ mod tests {
         }
     }
 
+    /// A page of `count` events of the vdir account `perso`, paged by two
+    /// unless `page` is `None`.
+    fn listing(page: Option<u32>, count: usize) -> Listing {
+        let mut listing = Listing::new("perso", "vdir", EVENT_NOUNS);
+        listing.push("Calendar", "personal");
+        listing.page = page;
+        listing.page_size = page.map(|_| 2);
+        listing.count = count;
+        listing
+    }
+
+    /// One aligned line per event: the id, the start and the end, then the
+    /// summary, `-` standing for an empty one, between the account and
+    /// calendar above and the page under.
+    #[test]
+    fn events_print_one_line_each_between_a_header_and_a_footer() {
+        let mut standup = event(false, "20261030T080000Z", "20261030T083000Z");
+        standup.id = "standup.ics".into();
+        standup.summary = "Standup\x1b[2J".into();
+        standup.start_secs = Some(1_793_347_200);
+        standup.end_secs = Some(1_793_349_000);
+
+        let mut holiday = event(true, "20260519", "20260521");
+        holiday.id = "holiday.ics".into();
+        holiday.starts_at = Some("2026-05-19".into());
+        holiday.ends_at = Some("2026-05-21".into());
+
+        let mut output = EventListOutput {
+            listing: listing(Some(1), 2),
+            zone: TimeZone::UTC,
+            events: vec![standup, holiday],
+            next_page: Some(2),
+        };
+
+        let expected = "\
+Account:    perso (vdir)
+Calendar:   personal
+
+standup.ics  2026-10-30 08:00  2026-10-30 08:30  Standup\u{fffd}[2J
+holiday.ics  2026-05-19        2026-05-20        -
+
+Page:       1, events 1 to 2
+Next page:  --page 2
+";
+        assert_eq!(output.to_string(), expected);
+
+        output.listing = listing(Some(2), 1);
+        output.events.truncate(1);
+        output.next_page = None;
+
+        let expected = "\
+Account:    perso (vdir)
+Calendar:   personal
+
+standup.ics  2026-10-30 08:00  2026-10-30 08:30  Standup\u{fffd}[2J
+
+Page:       2, event 3, the last
+";
+        assert_eq!(output.to_string(), expected);
+
+        output.listing = listing(Some(3), 0);
+        output.events.clear();
+
+        let expected = "\
+Account:    perso (vdir)
+Calendar:   personal
+
+Page:       3, empty
+";
+        assert_eq!(output.to_string(), expected);
+    }
+
+    /// A window lists every match unpaged, and `event find` names the UID
+    /// it looked for.
+    #[test]
+    fn an_unpaged_listing_holds_all_its_events() {
+        let mut found = event(true, "20260519", "20260520");
+        found.id = "a.ics".into();
+        found.summary = "Review".into();
+
+        let mut listing = listing(None, 1);
+        listing.push("UID", "1@example.org");
+
+        let output = EventListOutput {
+            listing,
+            zone: TimeZone::UTC,
+            events: vec![found],
+            next_page: None,
+        };
+
+        let expected = "\
+Account:    perso (vdir)
+Calendar:   personal
+UID:        1@example.org
+
+a.ics  20260519  20260520  Review
+
+Page:       all, event 1
+";
+        assert_eq!(output.to_string(), expected);
+    }
+
     #[test]
     fn a_timed_event_shows_in_the_local_zone() {
         let mut event = event(false, "20261030T080000Z", "20261030T093000Z");
@@ -272,7 +350,7 @@ mod tests {
         let zone = TimeZone::get("Europe/Madrid").unwrap();
 
         assert_eq!(
-            table_times(&event, &zone),
+            row_times(&event, &zone),
             ("2026-10-30 09:00".into(), "2026-10-30 10:30".into())
         );
     }
@@ -284,7 +362,7 @@ mod tests {
         event.ends_at = Some("2026-05-21".into());
 
         assert_eq!(
-            table_times(&event, &TimeZone::UTC),
+            row_times(&event, &TimeZone::UTC),
             ("2026-05-19".into(), "2026-05-20".into())
         );
     }
@@ -296,7 +374,7 @@ mod tests {
         event.ends_at = Some("2026-05-20".into());
 
         assert_eq!(
-            table_times(&event, &TimeZone::UTC),
+            row_times(&event, &TimeZone::UTC),
             ("2026-05-19".into(), "2026-05-19".into())
         );
     }
@@ -308,7 +386,7 @@ mod tests {
         event.ends_at = Some("2026-05-19".into());
 
         assert_eq!(
-            table_times(&event, &TimeZone::UTC),
+            row_times(&event, &TimeZone::UTC),
             ("2026-05-19".into(), "2026-05-19".into())
         );
     }
@@ -318,7 +396,7 @@ mod tests {
         let event = event(false, "20261030T090000", "20261030T100000");
 
         assert_eq!(
-            table_times(&event, &TimeZone::UTC),
+            row_times(&event, &TimeZone::UTC),
             ("20261030T090000".into(), "20261030T100000".into())
         );
     }

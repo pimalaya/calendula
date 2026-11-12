@@ -7,7 +7,7 @@ use std::fmt;
 
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::printer::Printer;
+use pimalaya_cli::{fields::Fields, printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -47,8 +47,9 @@ pub struct CaldavDiscoverOutput {
 
 impl fmt::Display for CaldavDiscoverOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Principal: {}", self.principal)?;
-        writeln!(f, "Calendar home-set: {}", self.calendar_home_set)?;
-        Ok(())
+        let mut fields = Fields::default();
+        fields.push("Principal", sanitize::text(&self.principal));
+        fields.push("Calendar home-set", sanitize::text(&self.calendar_home_set));
+        write!(f, "{fields}")
     }
 }

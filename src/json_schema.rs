@@ -13,9 +13,9 @@
 //! their command modules, so the registry stays coherent under any
 //! feature combination, none included.
 //!
-//! [`JsonSchemaCommand`]: pimalaya_cli::clap::commands::JsonSchemaCommand
+//! [`JsonSchemaCommand`]: pimalaya_cli::clap::commands::json_schema::JsonSchemaCommand
 
-use pimalaya_cli::{clap::commands::JsonSchemaRegistry, error::ErrorReport};
+use pimalaya_cli::{clap::commands::json_schema::JsonSchemaRegistry, error::ErrorReport};
 use schemars::JsonSchema;
 
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "vdir"))]
@@ -218,7 +218,7 @@ enum OneOf<A, B> {
 mod tests {
     use clap::CommandFactory;
 
-    use crate::{cli::CalendulaCli, json_schema::registry};
+    use crate::{cli::Cli, json_schema::registry};
 
     /// The commands printing nothing a schema could describe.
     const SILENT: &[&str] = &["calendula"];
@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn every_command_is_described() {
-        let problems = registry().check(&CalendulaCli::command(), SILENT);
+        let problems = registry().check(&Cli::command(), SILENT);
         assert!(problems.is_empty(), "{}", problems.join("\n"));
     }
 }

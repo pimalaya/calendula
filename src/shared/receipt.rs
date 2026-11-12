@@ -11,6 +11,7 @@
 
 use std::fmt;
 
+use pimalaya_cli::sanitize;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -35,6 +36,8 @@ impl fmt::Display for WriteReceipt {
         let Self {
             id, what, write, ..
         } = self;
+        let id = sanitize::text(id);
+
         match self.queued {
             true => writeln!(f, "{what} `{id}` {} queued for the next sync", write.noun()),
             false => writeln!(f, "{what} `{id}` successfully {}", write.past()),
@@ -87,7 +90,7 @@ pub struct IdReceipt {
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "vdir"))]
 impl fmt::Display for IdReceipt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "{}: {}", self.done, self.id)
+        writeln!(f, "{}: {}", self.done, sanitize::text(&self.id))
     }
 }
 

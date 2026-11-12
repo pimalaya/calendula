@@ -23,7 +23,7 @@ use crate::{
     config::VdirConfig,
     shared::{
         calendar::{Calendar, CalendarDiff},
-        client::paginate,
+        client::window,
         ical::holds_kind,
         item::{CalendarItem, CalendarItemQuery},
     },
@@ -127,7 +127,7 @@ impl VdirBackend {
             .filter(|item| item.starts_within(query.range))
             .collect();
 
-        Ok(paginate(items, query.page, query.page_size))
+        Ok(window(items, query.skip, query.take))
     }
 
     /// Reads one item's bytes off disk.

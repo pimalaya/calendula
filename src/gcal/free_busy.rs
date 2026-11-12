@@ -10,8 +10,10 @@ use chrono::NaiveDate;
 use clap::Parser;
 use io_gcal::v3::rest::freebusy::{GcalFreeBusyRequest, GcalFreeBusyRequestItem};
 use pimalaya_cli::{
+    fields::Fields,
     printer::Printer,
-    table::{Cell, Row, Table, TableStyle},
+    records::{Record, Records},
+    sanitize,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -47,8 +49,6 @@ pub struct GcalFreeBusyCommand {
 
 impl GcalFreeBusyCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: GcalClient) -> Result<()> {
-        let style = client.account.table_style();
-
         let calendar_ids = match self.calendar_ids.is_empty() {
             false => self.calendar_ids,
             true => vec![client.account.calendar_id(None)?],
@@ -88,18 +88,15 @@ impl GcalFreeBusyCommand {
             })
             .collect();
 
-        printer.out(GcalFreeBusyOutput { style, rows })
+        printer.out(GcalFreeBusyOutput { rows })
     }
 }
 
-/// The rendered free/busy answer.
+/// The free/busy answer.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GcalFreeBusyOutput {
-    /// The table style the account configured.
-    #[serde(skip)]
-    pub style: TableStyle,
-    /// The queried calendars, one row each.
+    /// The queried calendars, one entry each.
     #[serde(rename = "calendars")]
     pub rows: Vec<CalendarBusy>,
 }
@@ -128,41 +125,39 @@ pub struct BusyPeriod {
 
 impl fmt::Display for GcalFreeBusyOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut table = Table::new();
-
-        table.load_style(self.style).set_header(Row::from([
-            Cell::new("CALENDAR"),
-            Cell::new("BUSY FROM"),
-            Cell::new("BUSY UNTIL"),
-        ]));
+        let mut records = Records::default();
 
         for calendar in &self.rows {
-            if calendar.busy.is_empty() {
-                let note = match calendar.errors.is_empty() {
-                    true => String::from("free"),
-                    false => calendar.errors.join(", "),
-                };
+            let mut fields = Fields::default();
 
-                let mut row = Row::new();
-                row.max_height(1)
-                    .add_cell(Cell::new(&calendar.id))
-                    .add_cell(Cell::new(note))
-                    .add_cell(Cell::new(""));
-                table.add_row(row);
-                continue;
+            let periods = calendar.busy.iter().map(|period| {
+                let (start, end) = (&period.start, &period.end);
+                sanitize::text(&format!("{start} to {end}")).into_owned()
+            });
+            let periods: Vec<String> = periods.collect();
+
+            if !periods.is_empty() {
+                fields.push("Busy", periods.join("\n"));
             }
 
-            for period in &calendar.busy {
-                let mut row = Row::new();
-                row.max_height(1)
-                    .add_cell(Cell::new(&calendar.id))
-                    .add_cell(Cell::new(&period.start))
-                    .add_cell(Cell::new(&period.end));
-                table.add_row(row);
+            if !calendar.errors.is_empty() {
+                fields.push("Errors", sanitize::text(&calendar.errors.join(", ")));
             }
+
+            let state = match (periods.is_empty(), calendar.errors.is_empty()) {
+                (false, _) => vec![String::from("busy")],
+                (true, true) => vec![String::from("free")],
+                (true, false) => Vec::new(),
+            };
+
+            records.push(Record {
+                title: sanitize::text(&calendar.id).into_owned(),
+                state,
+                fields,
+                body: String::new(),
+            });
         }
 
-        writeln!(f)?;
-        writeln!(f, "{table}")
+        write!(f, "{records}")
     }
 }

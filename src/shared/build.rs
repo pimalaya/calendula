@@ -193,7 +193,7 @@ fn item_composer(
         return Ok(CommandConfig::Shell(line));
     }
 
-    let (config, account_config) = resolve_account(config_paths, account_name)?;
+    let (config, _, account_config) = resolve_account(config_paths, account_name)?;
     let account = Account::from(config).merge(Account::from(account_config));
 
     account.item_composer(None)

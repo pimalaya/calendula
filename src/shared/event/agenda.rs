@@ -21,7 +21,7 @@ use std::{
 use anyhow::{Result, anyhow, bail};
 use chrono::{Datelike, Local, Locale, Months, NaiveDate, NaiveDateTime};
 use clap::Parser;
-use pimalaya_cli::printer::Printer;
+use pimalaya_cli::{printer::Printer, sanitize};
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Serialize, Serializer, ser::SerializeMap};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -48,9 +48,9 @@ const DEFAULT_REFORM_YEAR: i32 = 1752;
 
 /// Display a calendar grid and the events it holds.
 ///
-/// The grid follows cal(1): the current month by default, with the days
-/// carrying an event highlighted. Every collected event is then listed
-/// by start time under the grid.
+/// The grid follows cal(1) printing to a pipe: the current month by
+/// default, in plain text with no day highlighted. Every event the drawn
+/// days hold is then listed under the grid by its start date and time.
 ///
 /// JSON output: an object mapping each start datetime to the labels of
 /// every event starting at it.
@@ -286,15 +286,14 @@ impl EventAgendaCommand {
             Some((first, last)) => CalendarTimeRange::from_days(Some(first), Some(last))?,
             None => None,
         };
-        let items = client.list_items(
-            &calendar_id,
-            CalendarItemQuery {
-                range: range.as_ref(),
-                kind: IcalFamily::Event.kind(),
-                ..Default::default()
-            },
-        )?;
-        ctl.all_events = items
+        let query = CalendarItemQuery {
+            range: range.as_ref(),
+            kind: IcalFamily::Event.kind(),
+            ..Default::default()
+        };
+        let listed = client.list_items(&calendar_id, None, None, query)?;
+        ctl.all_events = listed
+            .items
             .iter()
             .flat_map(|item| Event::occurrences(item, range.as_ref()))
             .collect();
@@ -714,19 +713,8 @@ fn cal_output_header(grid: &mut String, months: &[CalMonth], ctl: &CalControl) -
 }
 
 fn cal_output_months(grid: &mut String, months: &[CalMonth], ctl: &mut CalControl) -> fmt::Result {
-    let today = Local::now();
-
     for week_line in 0..(MAXDAYS / DAYS_IN_WEEK) {
         for (mi, m) in months.iter().enumerate() {
-            let mut reqday = 0;
-            if m.month == ctl.req.month && m.year == ctl.req.year {
-                reqday = if ctl.julian {
-                    ctl.req.day
-                } else {
-                    ctl.req.day + 1 - day_in_year(ctl, 1, m.month, m.year)
-                };
-            }
-
             if ctl.weektype != 0 {
                 if m.weeks[week_line] > 0 {
                     write!(grid, "{:2}", m.weeks[week_line])?;
@@ -747,10 +735,6 @@ fn cal_output_months(grid: &mut String, months: &[CalMonth], ctl: &mut CalContro
                 let day = m.days[idx];
 
                 if day > 0 {
-                    let is_today = m.month == today.month() as usize
-                        && m.year == today.year()
-                        && day == today.day() as i32;
-
                     let (y, mm, dd) = if ctl.julian {
                         // NOTE: --julian fills the grid with ordinal
                         // days, so the calendar date has to be
@@ -768,27 +752,8 @@ fn cal_output_months(grid: &mut String, months: &[CalMonth], ctl: &mut CalContro
                         (m.year, m.month as u32, day as u32)
                     };
 
-                    let has_event = collect_events(ctl, y, mm, dd);
-
-                    if reqday == day || is_today {
-                        write!(
-                            grid,
-                            "{}\x1b[7m{:width$}\x1b[0m",
-                            " ".repeat(skip - if ctl.julian { 3 } else { 2 }),
-                            day,
-                            width = if ctl.julian { 3 } else { 2 },
-                        )?;
-                    } else if has_event {
-                        write!(
-                            grid,
-                            "{}\x1b[44m{:width$}\x1b[0m",
-                            " ".repeat(skip - if ctl.julian { 3 } else { 2 }),
-                            day,
-                            width = if ctl.julian { 3 } else { 2 }
-                        )?;
-                    } else {
-                        write!(grid, "{:width$}", day, width = skip)?;
-                    }
+                    collect_events(ctl, y, mm, dd);
+                    write!(grid, "{:width$}", day, width = skip)?;
                 } else {
                     write!(grid, "{}", " ".repeat(skip))?;
                 }
@@ -845,32 +810,17 @@ fn cal_vert_output_months(
     months: &[CalMonth],
     ctl: &mut CalControl,
 ) -> fmt::Result {
-    let today = Local::now();
-
     for i in 0..DAYS_IN_WEEK {
         let wd = (i + ctl.weekstart) % DAYS_IN_WEEK;
         pad_right(grid, &ctl.names.weekdays[wd], ctl.day_width - 1)?;
 
         for (mi, m) in months.iter().enumerate() {
-            let mut reqday = 0;
-            if m.month == ctl.req.month && m.year == ctl.req.year {
-                reqday = if ctl.julian {
-                    ctl.req.day
-                } else {
-                    ctl.req.day + 1 - day_in_year(ctl, 1, m.month, m.year)
-                };
-            }
-
             let mut skip = ctl.day_width;
             for week in 0..(MAXDAYS / DAYS_IN_WEEK) {
                 let d = i + DAYS_IN_WEEK * week;
                 let day = m.days[d];
 
                 if day > 0 {
-                    let is_today = m.month == today.month() as usize
-                        && m.year == today.year()
-                        && day == today.day() as i32;
-
                     let (y, mm, dd) = if ctl.julian {
                         // NOTE: --julian fills the grid with ordinal
                         // days, so the calendar date has to be
@@ -888,27 +838,8 @@ fn cal_vert_output_months(
                         (m.year, m.month as u32, day as u32)
                     };
 
-                    let has_event = collect_events(ctl, y, mm, dd);
-
-                    if reqday == day || is_today {
-                        write!(
-                            grid,
-                            "{}\x1b[7m{:width$}\x1b[0m",
-                            " ".repeat(skip - if ctl.julian { 3 } else { 2 }),
-                            day,
-                            width = if ctl.julian { 3 } else { 2 },
-                        )?;
-                    } else if has_event {
-                        write!(
-                            grid,
-                            "{}\x1b[44m{:width$}\x1b[0m",
-                            " ".repeat(skip - if ctl.julian { 3 } else { 2 }),
-                            day,
-                            width = if ctl.julian { 3 } else { 2 },
-                        )?;
-                    } else {
-                        write!(grid, "{:width$}", day, width = skip)?;
-                    }
+                    collect_events(ctl, y, mm, dd);
+                    write!(grid, "{:width$}", day, width = skip)?;
                 } else {
                     write!(grid, "{}", " ".repeat(skip))?;
                 }
@@ -948,13 +879,13 @@ fn cal_vert_output_months(
     Ok(())
 }
 
-/// Whether an event starts on the day `(y, m, d)`, collecting all of
-/// them into `ctl.events`.
+/// Collects every event starting on the day `(y, m, d)` into
+/// `ctl.events`.
 ///
 /// An instant keeps every event starting at it rather than the last one
 /// seen: two unrelated meetings at 09:00 are two meetings, and so are
 /// two resources a collection holds under one `UID`.
-fn collect_events(ctl: &mut CalControl, y: i32, m: u32, d: u32) -> bool {
+fn collect_events(ctl: &mut CalControl, y: i32, m: u32, d: u32) {
     let starting: Vec<(NaiveDateTime, AgendaEvent)> = ctl
         .all_events
         .iter()
@@ -972,13 +903,9 @@ fn collect_events(ctl: &mut CalControl, y: i32, m: u32, d: u32) -> bool {
         })
         .collect();
 
-    let has_event = !starting.is_empty();
-
     for (start, event) in starting {
         ctl.events.entry(start).or_default().push(event);
     }
-
-    has_event
 }
 
 /// The first month the grid draws, as `(year, month)`: the requested
@@ -1140,9 +1067,11 @@ impl fmt::Display for EventAgendaOutput {
             let padding = " ".repeat(text_width(&stamp) + 2);
 
             for (nth, event) in events.iter().enumerate() {
+                let label = sanitize::text(&event.label);
+
                 match nth {
-                    0 => writeln!(f, "{stamp}: {}", event.label)?,
-                    _ => writeln!(f, "{padding}{}", event.label)?,
+                    0 => writeln!(f, "{stamp}: {label}")?,
+                    _ => writeln!(f, "{padding}{label}")?,
                 }
             }
         }

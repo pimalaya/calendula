@@ -6,29 +6,50 @@ status: current
 
 # Configuration
 
-Configuration is a TOML file loaded by pimalaya-config, holding a top-level block of rendering options plus one `[accounts.<name>]` block per account, each carrying an optional sub-block per backend.
+Configuration is a TOML file loaded by pimalaya-config, holding a top-level block of options plus one `[accounts.<name>]` block per account, each carrying an optional sub-block per backend.
 
 ### Requirement: Loading and merging
-A configuration SHALL be read from the first existing path among the canonical platform locations, or from `-c` / `CALENDULA_CONFIG` when given.
+Without `-c`, a configuration SHALL be read from every existing canonical path, each a layer deep-merged on top of the ones before: `$XDG_CONFIG_HOME/calendula/config.toml`, `$HOME/.config/calendula/config.toml`, then `$HOME/.calendularc`, a path naming a file already loaded skipped. `-c` SHALL replace them (The configuration path comes from `-c` only).
 
-Several paths MAY be passed at once, separated by `:`: the first is the base and the rest are deep-merged on top, which is how a public configuration and a private one stay separate files.
+### Requirement: The configuration path comes from `-c` only
+`-c/--config` SHALL take one path per occurrence, never split on a delimiter, and MAY be repeated: the first path is the base and the next ones are deep-merged on top, in order, which is how a public configuration and a private one stay separate files. No environment variable SHALL be read for it: a path kept in one goes through the flag, `-c "$CALENDULA_CONFIG"`.
 
-### Requirement: A missing configuration is an error
-When no configuration is found, a command needing one SHALL fail naming the path it looked at (the first `-c` or `CALENDULA_CONFIG` path, else the default location) and pointing at the documented sample, and a bare `calendula` SHALL print the help. calendula SHALL NOT prompt to create a configuration.
+#### Scenario: A path holding a colon
+- GIVEN `-c 'one.toml:two.toml;three.toml'`
+- WHEN calendula reads its flags
+- THEN it reads one path, spelled as given
 
-#### Scenario: A mistyped path
-- GIVEN no file at `~/.config/calendula/confg.toml`
+### Requirement: A missing configuration meets a person with the welcome
+When no configuration exists at the first `-c` path or the default location, and stderr is a terminal with `--json` off, a bare `calendula` and every command loading the configuration SHALL print pimalaya-cli's welcome on stderr and exit 1, printing nothing on stdout. The welcome SHALL frame Calendula in one sentence, name the missing path, give the commands creating it from config.sample.toml (copied from share/doc/calendula next to the binary when one ships, downloaded with `curl` otherwise), invite the reader to edit it, and give the `event list` command carrying the `-c` paths.
+
+Otherwise the command SHALL fail naming the path it looked at and the sample, as the failure object under `--json`. calendula SHALL NOT prompt to create a configuration.
+
+#### Scenario: A mistyped path in a script
+- GIVEN no file at `~/.config/calendula/confg.toml`, and stderr a pipe
 - WHEN `calendula -c ~/.config/calendula/confg.toml calendar list` runs
-- THEN it fails with `No configuration found at <that path>, write one by hand from the sample: https://github.com/pimalaya/calendula/blob/master/config.sample.toml`
+- THEN it fails with `No configuration found at <that path>, start from the sample: https://github.com/pimalaya/calendula/blob/master/config.sample.toml`, and prints no welcome
+
+#### Scenario: A first run at a terminal
+- GIVEN an empty home and a terminal
+- WHEN `calendula` runs
+- THEN stderr says `Welcome to Calendula, the CLI to manage calendars.`, names `~/.config/calendula/config.toml`, gives the `curl` command creating it and then `calendula event list`, and the command exits 1
+
+### Requirement: Account resolution failures name what is missing
+The account SHALL be resolved through pimalaya-config's `TomlConfig::load` and `take_account`: the account `-a` names, else the one marked `default = true`. Several accounts marked default, layers and `-c` files merged, SHALL be refused, naming them sorted, never one taken at random; an unknown `-a` name SHALL be refused, listing the accounts the configuration holds; no default and no `-a` SHALL be refused, naming both ways of picking one. An account named with `-a` SHALL resolve whatever the defaults.
+
+#### Scenario: Two defaults
+- GIVEN a configuration marking `work` and `perso` with `default = true`
+- WHEN `calendula event list` runs
+- THEN it fails with `Several accounts are marked default (perso, work)`, and `calendula -a work event list` runs on `work`
 
 ### Requirement: The configuration is never written
 calendula SHALL NOT write a configuration file: the user writes it, from the documented sample.
 
 ### Requirement: The global block folds under the account
-The top-level rendering options SHALL be folded under the selected account, the account's own values overriding them field by field. A value set once at the top therefore applies everywhere it is not overridden.
+The top-level options SHALL be folded under the selected account, the account's own values overriding them field by field. A value set once at the top therefore applies everywhere it is not overridden.
 
 ### Requirement: Unknown fields
-`deny_unknown_fields` SHALL be set on the leaf blocks, so a typo in an option is reported rather than ignored, and SHALL NOT be set on the top-level and account blocks, so a future TUI reading the same file can add its own sections without breaking this one.
+`deny_unknown_fields` SHALL be set on the leaf blocks, so a typo in an option is reported rather than ignored, and SHALL NOT be set on the top-level and account blocks, whose backend blocks exist only in the builds carrying their feature: a build without a backend still loads a file naming it. A table calendula no longer reads SHALL be refused there by name instead: `todo`, `journal`, `table` and the top-level `account`.
 
 ### Requirement: A leftover todo or journal table is refused by name
 A `todo` or `journal` table left in a configuration, at the top level or under an account, SHALL fail the load, naming the CLI that took the domain over (unfog, the Pimalaya CLI for tasks, for `todo`; journal, the Pimalaya CLI for journal entries, for `journal`) and saying to remove the table. The top-level and account blocks still deny no unknown key: these two tables are refused by name, as the family refuses its removed keys, rather than read or ignored.
@@ -43,12 +64,20 @@ A `todo` or `journal` table left in a configuration, at the top level or under a
 - WHEN any calendula command loads it
 - THEN the command fails, the error naming journal
 
+### Requirement: No colour or table is configured
+The configuration SHALL hold no colour and no table shape. A `table` table (`table.preset`, `table.arrangement`), at the top level or under an account, and a top-level `account` table (`account.list.table`) SHALL fail the load by name, saying the output is plain text and to remove it. A `*-color` key under `event.list.table` or `item.list.table`, or a `calendar.list` block, SHALL fail the load as an unknown field of the block that holds it. `event.list.page-size` and `item.list.page-size` stay.
+
+#### Scenario: A colour key
+- GIVEN a configuration written for 0.2 with `event.list.table.id-color = "red"`
+- WHEN any calendula command loads it
+- THEN it fails naming the line and the unknown field `table`, where `page-size` was expected
+
 ### Requirement: Backend blocks
-An account SHALL carry an optional block per compiled backend: `vdir` with a `home-dir`, `pimdir` with a `root` and an optional `account`, `caldav` with its endpoint, TLS and authentication, `gcal` with TLS and authentication.
+An account SHALL carry an optional block per compiled backend: `vdir` with a `home-dir`, `pimdir` with a `root` and an optional `account`, `caldav` with its endpoint, TLS, ALPN and authentication, `gcal` and `msgraph` with TLS, ALPN and authentication.
 
 An account MAY carry several; which one a unified command uses is the backend capability's business.
 
-Every listing family SHALL additionally carry a rendering block naming its default page size and its column colours: `calendar.list`, `event.list` and `item.list`.
+Every paged listing family SHALL additionally carry a block naming its default page size: `event.list` and `item.list`.
 
 ### Requirement: Credentials nest under `auth`
 Every backend that authenticates SHALL carry its credentials under an `auth` sub-block, so the same concept is spelled the same way across the Pimalaya CLIs: `caldav.auth.basic.password`, `gcal.auth.token`, as cardamum spells `people.auth.token` and `msgraph.auth.token`.
@@ -80,17 +109,14 @@ Every secret an account resolves in one run SHALL go through a single resolver, 
 
 Distinctness is the configured command's own shape, and never crosses the two of them: a shell line and the argv spelling that runs it through the platform shell are two commands.
 
-The resolver holds plaintext for as long as it lives, so it SHALL be built where the backends of one account are assembled and dropped with them, never held for the life of the process and never stored on a client.
+The resolver holds plaintext for as long as it lives, so it SHALL be built where the backends of one account are assembled, the unified client of the account or `account check`, and dropped with them, never held for the life of the process. The unified client SHALL keep it across the reconnection that follows a composer, so a reopened backend runs no secret command again.
 
 A caller opening a single backend SHALL keep resolving through a resolver of its own, so the shape stays the same everywhere and nothing outlives its account.
-
-### Requirement: Table rendering keeps its preset string
-The `table.preset` option SHALL keep accepting the comfy-table v7 positional preset string, mapped onto the v8 typed style, so a configuration written against an earlier calendula stays valid. A character left out of a short string, or written as a space, SHALL leave its component undrawn.
 
 ### Requirement: A backend names the ALPN it offers
 A backend whose protocol pins an HTTP version SHALL expose an `alpn` key, a list of identifiers offered during the TLS handshake. Unset offers the protocol default, an explicit empty list skips ALPN negotiation and a non-empty list replaces the default.
 
-`gcal.alpn` defaults to `http/1.1`, the only version io-http speaks. The `caldav` block exposes none: its client pins HTTP/1.1 itself, as every DAV backend of the family does.
+`caldav.alpn`, `gcal.alpn` and `msgraph.alpn` default to `http/1.1`, the only version io-http speaks.
 
 The runtime TLS profile SHALL be built through `TlsConfig::into_tls(alpn)`, never through a conversion assuming a list, so no caller can negotiate a protocol it did not name.
 

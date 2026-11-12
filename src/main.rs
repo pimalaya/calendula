@@ -93,23 +93,36 @@
 //!
 //! ## Configuration
 //!
-//! Configuration is loaded by pimalaya-config from the first existing
-//! canonical path, or from `-c` / `CALENDULA_CONFIG`, with later paths
-//! deep-merged on top of the first.
+//! Configuration is loaded by pimalaya-config from every existing canonical
+//! path (the rc file last), or from the `-c` paths, one per flag, later
+//! paths deep-merged on top of the first. pimalaya-config also takes the
+//! account `-a` names or the default one, its typed errors naming what is
+//! missing.
 //!
 //! The schema is multi-account: a top-level block plus named account blocks,
 //! each carrying an optional sub-block per backend, and the global block is
 //! folded under the selected account.
 //!
 //! calendula never writes a configuration: a person writes it from the
-//! documented sample, and a command finding none fails naming the path it
-//! looked at and pointing at the sample. A bare `calendula` prints the help.
+//! documented sample. A person running calendula without one meets the
+//! welcome ([`cli::welcome`], pimalaya-cli's in calendula's words), which
+//! creates it from the sample shipped beside the binary or downloads it; a
+//! script or a JSON caller gets the error instead. A bare `calendula` prints
+//! the help when a configuration exists.
 //!
 //! ## Output
 //!
 //! All data and errors go to stdout through the printer, with `--json`
-//! switching every command to JSON; stderr carries logs and prompts only. A
-//! command returns a `Serialize + Display` value rather than printing inline.
+//! switching every command to JSON; stderr carries the logs, the prompts and
+//! the welcome. A command returns a `Serialize + Display` value rather than
+//! printing inline.
+//!
+//! Text output is plain text, with no border, no colour and nothing sized
+//! to the terminal: a list of short rows prints as aligned columns, a wide
+//! one as records the way `git log` prints commits, and a record as aligned
+//! `Label: value` lines, every string a server or a file gave defused first.
+//! `event list` prints its events one line each between a header naming the
+//! account and the calendar and a footer saying where the page stands.
 //!
 //! Each command's doc comment is its help text, which makes `calendula
 //! <command> --help` the usage reference for both humans and agents, and is
@@ -133,30 +146,69 @@ mod shared;
 #[cfg(feature = "vdir")]
 mod vdir;
 
-use anyhow::Result;
-use clap::{CommandFactory, Parser};
-use pimalaya_cli::{error::ErrorReport, log::Logger, printer::StdoutPrinter};
+use std::{path::PathBuf, process};
 
-use crate::{cli::CalendulaCli, error::ErrorCode};
+use anyhow::Result;
+use clap::Parser;
+use pimalaya_cli::{
+    clap::args::LogFlags,
+    error::{EXIT_FAILURE, ErrorReport},
+    log::Logger,
+    printer::StdoutPrinter,
+    welcome::{is_wanted, shipped_sample},
+};
+use pimalaya_config::toml::ConfigMissingError;
+
+use crate::{
+    backend::Backend,
+    cli::{Cli, Command},
+    error::ErrorCode,
+};
 
 fn main() {
-    let cli = CalendulaCli::parse();
+    let cli = Cli::parse();
     let mut printer = StdoutPrinter::new(&cli.json);
-    let result = run(cli, &mut printer);
+
+    let config_paths = cli.config.paths;
+    let account = cli.account.name.as_deref();
+    let result = execute(
+        cli.cmd,
+        &cli.log,
+        &config_paths,
+        account,
+        cli.backend,
+        &mut printer,
+    );
+
+    // NOTE: a person missing a configuration meets the welcome, a script
+    // or a JSON caller the error.
+    if let Err(err) = &result
+        && let Some(missing) = err.downcast_ref::<ConfigMissingError>()
+        && is_wanted(&printer)
+    {
+        let sample = shipped_sample("calendula");
+        let welcome = cli::welcome(&missing.path, &config_paths, sample.as_deref());
+        eprint!("{welcome}");
+        process::exit(EXIT_FAILURE);
+    }
+
     ErrorReport::<ErrorCode>::eval_coded(&mut printer, result);
 }
 
-fn run(cli: CalendulaCli, printer: &mut StdoutPrinter) -> Result<()> {
-    Logger::try_init(&cli.log)?;
+/// Runs the subcommand, or meets a bare `calendula`.
+fn execute(
+    cmd: Option<Command>,
+    log: &LogFlags,
+    config_paths: &[PathBuf],
+    account: Option<&str>,
+    backend: Backend,
+    printer: &mut StdoutPrinter,
+) -> Result<()> {
+    Logger::try_init(log)?;
 
-    let config_paths = cli.config_paths.as_ref();
-    let account = cli.account.name.as_deref();
-    let backend = cli.backend;
-
-    let Some(command) = cli.command else {
-        CalendulaCli::command().print_help()?;
-        return Ok(());
+    let Some(cmd) = cmd else {
+        return cli::meet_bare_invocation(config_paths);
     };
 
-    command.execute(printer, config_paths, account, backend)
+    cmd.execute(printer, config_paths, account, backend)
 }

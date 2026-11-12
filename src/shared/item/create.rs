@@ -7,7 +7,7 @@ use core::fmt;
 
 use anyhow::{Result, bail};
 use clap::Parser;
-use pimalaya_cli::printer::Printer;
+use pimalaya_cli::{printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -123,9 +123,11 @@ pub struct ItemCreatedOutput {
 
 impl fmt::Display for ItemCreatedOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let id = sanitize::text(&self.id);
+
         match self.queued {
-            true => writeln!(f, "Item `{}` queued for the next sync", self.id),
-            false => writeln!(f, "Item `{}` successfully created", self.id),
+            true => writeln!(f, "Item `{id}` queued for the next sync"),
+            false => writeln!(f, "Item `{id}` successfully created"),
         }
     }
 }

@@ -4,16 +4,15 @@
 
 use std::{fmt, path::PathBuf};
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, bail};
 use clap::Parser;
-use pimalaya_cli::printer::Printer;
+use pimalaya_cli::{fields::Fields, printer::Printer, sanitize};
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use pimalaya_config::secret::SecretResolver;
-use pimalaya_config::toml::TomlConfig;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::{backend::Backend, cli::load_config, config::AccountConfig};
+use crate::{backend::Backend, cli::resolve_account, config::AccountConfig};
 
 /// Validate the account configuration.
 ///
@@ -37,11 +36,7 @@ impl AccountCheckCommand {
         account_name: Option<&str>,
         backend: Backend,
     ) -> Result<()> {
-        let mut config = load_config(config_paths)?;
-
-        let (name, account_config) = config
-            .take_account(account_name)?
-            .ok_or_else(|| anyhow!("Cannot find account"))?;
+        let (_, name, account_config) = resolve_account(config_paths, account_name)?;
 
         let backends = check_account(&account_config, backend);
 
@@ -236,16 +231,17 @@ impl BackendCheck {
 
 impl fmt::Display for AccountCheckOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Account: {}", self.account)?;
+        let mut fields = Fields::default();
+        fields.push("Account", sanitize::text(&self.account));
 
         for check in &self.backends {
             match &check.error {
-                None => writeln!(f, "  {}: OK", check.backend)?,
-                Some(err) => writeln!(f, "  {}: FAIL ({err})", check.backend)?,
+                None => fields.push(check.backend, "OK"),
+                Some(err) => fields.push(check.backend, format!("FAIL ({})", sanitize::text(err))),
             }
         }
 
-        Ok(())
+        write!(f, "{fields}")
     }
 }
 
@@ -309,7 +305,7 @@ mod tests {
 
         let (result, out) = check(dir.path());
         result.unwrap();
-        assert!(out.contains("vdir: OK"), "{out}");
+        assert_eq!(out, "Account:  test\nvdir:     OK\n");
 
         let (result, _) = check(&dir.path().join("missing"));
         let err = format!("{:#}", result.unwrap_err());

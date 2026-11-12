@@ -8,10 +8,7 @@ use std::fmt;
 use anyhow::Result;
 use clap::Parser;
 use io_gcal::v3::rest::settings::list::GcalSettingsListParams;
-use pimalaya_cli::{
-    printer::Printer,
-    table::{Cell, Row, Table, TableStyle},
-};
+use pimalaya_cli::{fields::Fields, printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -29,8 +26,6 @@ pub struct GcalSettingsCommand;
 
 impl GcalSettingsCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: GcalClient) -> Result<()> {
-        let style = client.account.table_style();
-
         let mut rows = Vec::new();
         let mut page_token: Option<String> = None;
 
@@ -52,18 +47,15 @@ impl GcalSettingsCommand {
             }
         }
 
-        printer.out(GcalSettingsOutput { style, rows })
+        printer.out(GcalSettingsOutput { rows })
     }
 }
 
-/// The rendered settings listing.
+/// The account settings, a record of one field each.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GcalSettingsOutput {
-    /// The table style the account configured.
-    #[serde(skip)]
-    pub style: TableStyle,
-    /// The account settings, one row each.
+    /// The account settings, one entry each.
     #[serde(rename = "settings")]
     pub rows: Vec<SettingRow>,
 }
@@ -80,20 +72,18 @@ pub struct SettingRow {
 
 impl fmt::Display for GcalSettingsOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut table = Table::new();
+        let ids: Vec<String> = self
+            .rows
+            .iter()
+            .map(|setting| sanitize::text(&setting.id).into_owned())
+            .collect();
 
-        table
-            .load_style(self.style)
-            .set_header(Row::from([Cell::new("SETTING"), Cell::new("VALUE")]))
-            .add_rows(self.rows.iter().map(|setting| {
-                let mut row = Row::new();
-                row.max_height(1)
-                    .add_cell(Cell::new(&setting.id))
-                    .add_cell(Cell::new(&setting.value));
-                row
-            }));
+        let mut fields = Fields::default();
 
-        writeln!(f)?;
-        writeln!(f, "{table}")
+        for (id, setting) in ids.iter().zip(&self.rows) {
+            fields.push(id, sanitize::text(&setting.value));
+        }
+
+        write!(f, "{fields}")
     }
 }

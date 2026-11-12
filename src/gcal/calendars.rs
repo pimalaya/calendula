@@ -9,13 +9,18 @@ use anyhow::Result;
 use clap::Parser;
 use io_gcal::v3::rest::calendar_list::list::GcalCalendarListListParams;
 use pimalaya_cli::{
+    fields::Fields,
     printer::Printer,
-    table::{Cell, Color, Row, Table, TableStyle},
+    records::{Record, Records},
+    sanitize,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::gcal::{client::GcalClient, render};
+use crate::{
+    gcal::{client::GcalClient, render},
+    shared::calendar::list::body,
+};
 
 /// List the calendars of the user's calendar list.
 ///
@@ -36,9 +41,6 @@ pub struct GcalCalendarListCommand {
 
 impl GcalCalendarListCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: GcalClient) -> Result<()> {
-        let style = client.account.table_style();
-        let name_color = client.account.calendars_list_table_name_color();
-
         let mut rows = Vec::new();
         let mut page_token: Option<String> = None;
 
@@ -74,25 +76,15 @@ impl GcalCalendarListCommand {
             }
         }
 
-        printer.out(GcalCalendarListOutput {
-            style,
-            name_color,
-            rows,
-        })
+        printer.out(GcalCalendarListOutput { rows })
     }
 }
 
-/// The rendered Google calendar listing.
+/// The Google calendar listing.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GcalCalendarListOutput {
-    /// The table style the account configured.
-    #[serde(skip)]
-    pub style: TableStyle,
-    /// The colour calendar names are printed in.
-    #[serde(skip)]
-    pub name_color: Color,
-    /// The calendars of the list, one row each.
+    /// The calendars of the list, one entry each.
     #[serde(rename = "calendars")]
     pub rows: Vec<CalendarRow>,
 }
@@ -124,31 +116,46 @@ pub struct CalendarRow {
 
 impl fmt::Display for GcalCalendarListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut table = Table::new();
+        let mut records = Records::default();
 
-        table
-            .load_style(self.style)
-            .set_header(Row::from([
-                Cell::new("ID"),
-                Cell::new("NAME"),
-                Cell::new("ROLE"),
-                Cell::new("TIMEZONE"),
-                Cell::new("PRIMARY"),
-                Cell::new("REMINDERS"),
-            ]))
-            .add_rows(self.rows.iter().map(|calendar| {
-                let mut row = Row::new();
-                row.max_height(1)
-                    .add_cell(Cell::new(&calendar.id))
-                    .add_cell(Cell::new(&calendar.summary).fg(self.name_color))
-                    .add_cell(Cell::new(calendar.access_role.unwrap_or("")))
-                    .add_cell(Cell::new(calendar.time_zone.as_deref().unwrap_or("")))
-                    .add_cell(Cell::new(if calendar.primary { "yes" } else { "" }))
-                    .add_cell(Cell::new(calendar.default_reminders.join(", ")));
-                row
-            }));
+        for calendar in &self.rows {
+            let mut fields = Fields::default();
+            fields.push("Name", sanitize::text(&calendar.summary));
 
-        writeln!(f)?;
-        writeln!(f, "{table}")
+            if let Some(role) = calendar.access_role {
+                fields.push("Role", role);
+            }
+
+            let optional = [
+                ("Time zone", calendar.time_zone.as_deref()),
+                ("Color", calendar.color.as_deref()),
+            ];
+
+            for (label, value) in optional {
+                if let Some(value) = value {
+                    fields.push(label, sanitize::text(value));
+                }
+            }
+
+            if !calendar.default_reminders.is_empty() {
+                fields.push("Reminders", calendar.default_reminders.join(", "));
+            }
+
+            let state = match calendar.primary {
+                true => vec![String::from("primary")],
+                false => Vec::new(),
+            };
+
+            let description = calendar.description.as_deref().unwrap_or_default();
+
+            records.push(Record {
+                title: sanitize::text(&calendar.id).into_owned(),
+                state,
+                fields,
+                body: body(description),
+            });
+        }
+
+        write!(f, "{records}")
     }
 }

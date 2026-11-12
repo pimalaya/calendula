@@ -10,9 +10,13 @@ use pimalaya_cli::printer::Printer;
 use crate::shared::{
     arg::CalendarIdArg,
     client::CalendarClient,
-    event::{Event, list::EventListOutput},
+    event::{
+        Event,
+        list::{EVENT_NOUNS, EventListOutput, local_zone},
+    },
     ical::IcalFamily,
     item::CalendarItemQuery,
+    listing::Listing,
 };
 
 /// Find the events carrying an iCalendar UID.
@@ -27,7 +31,8 @@ use crate::shared::{
 /// summary names each resource's `UID`, only the bodies that may carry
 /// this one are read.
 ///
-/// JSON output: `{"events": [...]}`, shaped as `event list` prints them.
+/// JSON output: `{"events": [...], "nextPage": null}`, shaped as `event
+/// list` prints them.
 #[derive(Debug, Parser)]
 pub struct EventFindCommand {
     #[command(flatten)]
@@ -36,31 +41,39 @@ pub struct EventFindCommand {
     /// The iCalendar UID to look for, compared exactly.
     #[arg(value_name = "UID")]
     pub uid: String,
-
-    /// Maximum width of the rendered table, in terminal columns.
-    #[arg(long = "max-width", short = 'w', value_name = "COLUMNS")]
-    pub max_width: Option<u16>,
 }
 
 impl EventFindCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
 
-        let items = client.list_items(
-            &calendar_id,
-            CalendarItemQuery {
-                kind: IcalFamily::Event.kind(),
-                uid: Some(&self.uid),
-                ..Default::default()
-            },
-        )?;
+        let query = CalendarItemQuery {
+            kind: IcalFamily::Event.kind(),
+            uid: Some(&self.uid),
+            ..Default::default()
+        };
+        let listed = client.list_items(&calendar_id, None, None, query)?;
 
-        let events = items
+        let events: Vec<Event> = listed
+            .items
             .iter()
             .flat_map(Event::project)
             .filter(|event| event.uid == self.uid)
             .collect();
 
-        printer.out(EventListOutput::new(&client, self.max_width, events))
+        let mut ids: Vec<&str> = events.iter().map(|event| event.id.as_str()).collect();
+        ids.dedup();
+
+        let mut listing = Listing::new(&client.name, client.backend_name(), EVENT_NOUNS);
+        listing.push("Calendar", &calendar_id);
+        listing.push("UID", &self.uid);
+        listing.count = ids.len();
+
+        printer.out(EventListOutput {
+            listing,
+            zone: local_zone(),
+            events,
+            next_page: None,
+        })
     }
 }

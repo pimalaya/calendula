@@ -8,13 +8,15 @@ use std::fmt;
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::{
+    fields::Fields,
     printer::Printer,
-    table::{Cell, Color, Row, Table, TableStyle},
+    records::{Record, Records},
+    sanitize,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::caldav::client::CaldavClient;
+use crate::{caldav::client::CaldavClient, shared::calendar::list::body};
 
 /// List the CalDAV calendars under the resolved home-set.
 ///
@@ -29,9 +31,6 @@ pub struct CaldavCalendarListCommand;
 
 impl CaldavCalendarListCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CaldavClient) -> Result<()> {
-        let style = client.account.table_style();
-        let name_color = client.account.calendars_list_table_name_color();
-
         let rows = client
             .list_calendars()?
             .into_iter()
@@ -46,25 +45,15 @@ impl CaldavCalendarListCommand {
             })
             .collect();
 
-        printer.out(CaldavCalendarListOutput {
-            style,
-            name_color,
-            rows,
-        })
+        printer.out(CaldavCalendarListOutput { rows })
     }
 }
 
-/// The rendered CalDAV calendar listing.
+/// The CalDAV calendar listing.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CaldavCalendarListOutput {
-    /// The table style the account renders with.
-    #[serde(skip)]
-    pub style: TableStyle,
-    /// The color the name column is drawn in.
-    #[serde(skip)]
-    pub name_color: Color,
-    /// One row per calendar collection.
+    /// One entry per calendar collection.
     #[serde(rename = "calendars")]
     pub rows: Vec<CalendarRow>,
 }
@@ -93,32 +82,40 @@ pub struct CalendarRow {
 
 impl fmt::Display for CaldavCalendarListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut table = Table::new();
+        let mut records = Records::default();
 
-        table
-            .load_style(self.style)
-            .set_header(Row::from([
-                Cell::new("ID"),
-                Cell::new("NAME"),
-                Cell::new("DESCRIPTION"),
-                Cell::new("COLOR"),
-                Cell::new("COMPONENTS"),
-            ]))
-            .add_rows(self.rows.iter().map(|calendar| {
-                let mut row = Row::new();
-                row.max_height(1)
-                    .add_cell(Cell::new(&calendar.id))
-                    .add_cell(
-                        Cell::new(calendar.display_name.as_deref().unwrap_or(""))
-                            .fg(self.name_color),
-                    )
-                    .add_cell(Cell::new(calendar.description.as_deref().unwrap_or("")))
-                    .add_cell(Cell::new(calendar.color.as_deref().unwrap_or("")))
-                    .add_cell(Cell::new(calendar.components.join(", ")));
-                row
-            }));
+        for calendar in &self.rows {
+            let mut fields = Fields::default();
+            let name = calendar.display_name.as_deref().unwrap_or_default();
+            fields.push("Name", sanitize::text(name));
 
-        writeln!(f)?;
-        writeln!(f, "{table}")
+            let optional = [
+                ("Color", calendar.color.as_deref()),
+                ("Ctag", calendar.ctag.as_deref()),
+                ("Sync token", calendar.sync_token.as_deref()),
+            ];
+
+            for (label, value) in optional {
+                if let Some(value) = value {
+                    fields.push(label, sanitize::text(value));
+                }
+            }
+
+            if !calendar.components.is_empty() {
+                let components = calendar.components.join(", ");
+                fields.push("Components", sanitize::text(&components));
+            }
+
+            let description = calendar.description.as_deref().unwrap_or_default();
+
+            records.push(Record {
+                title: sanitize::text(&calendar.id).into_owned(),
+                state: Vec::new(),
+                fields,
+                body: body(description),
+            });
+        }
+
+        write!(f, "{records}")
     }
 }

@@ -54,14 +54,14 @@ calendula SHALL be the events CLI: the unified API SHALL offer one projected fam
 - THEN the event listing shows the VEVENT alone, and the item listing shows both
 
 ### Requirement: Columns follow the kind
-An event listing SHALL render its summary and its start and end.
+An event listing SHALL show each event's summary and its start and end.
 
-The event table SHALL show the start and end for a person to read, `startsAt` and `endsAt` in the local zone (`TZ`, then the system's), the one a floating time is read in: `2026-10-30 09:00` for a timed event, the days for a whole-day one with the end as its last day (`2026-05-19`), never before its first, so a zero-length one (`DTEND` equal to `DTSTART`) ends on its start. A time that did not resolve SHALL show as iCalendar spells it. Squeezed into the terminal or `--max-width`, the table SHALL truncate the id and the summary but keep the start and end whole. The `--json` payload SHALL stay as it is, `start` and `end` iCalendar-spelled and a whole day's `endsAt` exclusive.
+The start and end SHALL show for a person to read, `startsAt` and `endsAt` in the local zone (`TZ`, then the system's), the one a floating time is read in: `2026-10-30 09:00` for a timed event, the days for a whole-day one with the end as its last day (`2026-05-19`), never before its first, so a zero-length one (`DTEND` equal to `DTSTART`) ends on its start. A time that did not resolve SHALL show as iCalendar spells it. Nothing is truncated. The `--json` payload SHALL stay as it is, `start` and `end` iCalendar-spelled and a whole day's `endsAt` exclusive.
 
-A property the event omits SHALL render empty rather than absent, so the columns line up down the table.
+A property the event omits SHALL print as `-` rather than nothing, so the columns line up down the list.
 
 ### Requirement: Only events draw an agenda
-`agenda` SHALL stay a VEVENT command. The grid marks the days that carry an event because an event occupies time.
+`agenda` SHALL stay a VEVENT command: the events listed under its grid, by the day and time they start, are VEVENTs, an event being what occupies time.
 
 ### Requirement: An agenda shows every event at an instant
 The agenda SHALL render every event whose start falls at a given instant, never one of them, and SHALL order two events at one instant totally and stably, by label then by item id, so the same calendar renders the same way twice.
@@ -77,14 +77,14 @@ The `--json` payload SHALL carry the same multiplicity, so a consumer reading it
 No second shape SHALL be kept beside it, since one that still dropped an event would leave the defect reachable.
 
 ### Requirement: An agenda expands recurring series
-The agenda SHALL read the events over the days its grid draws and SHALL expand a recurring series over them, as a windowed `event list` does: each occurrence marks its own day and lists at its own time, overrides applied and excluded dates dropped.
+The agenda SHALL read the events over the days its grid draws and SHALL expand a recurring series over them, as a windowed `event list` does: each occurrence lists under the grid at its own day and time, overrides applied and excluded dates dropped.
 
 A series placed once at its first start leaves a yearly event out of every year but its first, so the agenda and a listing of the same days would disagree.
 
 #### Scenario: A yearly event created years ago
 - GIVEN a calendar holding a yearly event whose first start is in 2019
 - WHEN `calendula event agenda 2027` draws that year
-- THEN the day it falls on in 2027 is marked and the event lists under the grid at that day
+- THEN the event lists under the grid at the day it falls on in 2027
 
 ### Requirement: An agenda names months and weekdays in the time locale
 The agenda SHALL draw month and weekday names, and stamp the events under its grid, in the locale `LC_ALL`, then `LC_TIME`, then `LANG` resolves to, as cal does. A locale that is unset, `C`, `POSIX` or unknown SHALL fall back to the English names of the POSIX locale. A month argument SHALL be read in English or in the language of that locale.
@@ -114,7 +114,7 @@ The grid is a port of cal, and a typo silently drawing another month reads as an
 #### Scenario: A lone month name
 - GIVEN `LANG=es_ES.UTF-8` in 2026
 - WHEN `calendula event agenda noviembre` runs
-- THEN it draws November 2026 alone, today highlighted when it falls in November, as `cal noviembre` does
+- THEN it draws November 2026 alone, as `cal noviembre` does
 
 #### Scenario: An unknown month name
 - GIVEN `LANG=es_ES.UTF-8`
@@ -227,10 +227,51 @@ A unified command operating inside a calendar SHALL take it through the flattene
 ### Requirement: Nested execute
 Each subcommand SHALL be a clap-derived struct carrying its own arguments, with an `execute(self, printer, client)` method.
 
-`CalendulaCommand::execute` SHALL be the single dispatch point: it loads the configuration, selects the account, builds the appropriate client and hands it over.
+`Command::execute` SHALL be the single dispatch point: it loads the configuration, selects the account, builds the appropriate client and hands it over.
 
 ### Requirement: Output goes to stdout
-All data and errors SHALL go to stdout through the printer, with `--json` switching every command to JSON; stderr SHALL carry logs and prompts only. A command SHALL return a `Serialize + Display` value to the printer rather than printing inline.
+All data and errors SHALL go to stdout through the printer, with `--json` switching every command to JSON; stderr SHALL carry the logs, the prompts and the welcome only. A command SHALL return a `Serialize + Display` value to the printer rather than printing inline.
+
+### Requirement: Text output is plain text
+A text output SHALL be plain text: no border, no colour, no terminal escape, nothing sized to or truncated for the terminal, and it SHALL end with one newline; no command takes a width. The raw iCalendar a command is asked for (`event read`, `item read`, a `build` printing the item) SHALL print as it is stored. Every string a server, a store or a file gave (an id, a name, a summary, a description, an error) SHALL have its control and bidi characters replaced before it prints as text (pimalaya-cli `sanitize::text`); the JSON output SHALL carry it unchanged.
+
+`event list` and `event find` SHALL print as Himalaya's `envelope list` does. Above the events, `Account:` (the account name, then the backend it resolved to in parentheses), `Calendar:` and, for `event find`, `UID:`, then a blank line. Then one line per event through pimalaya-cli's `Columns` with no header row: its item id, its start and its end (Columns follow the kind), then its summary, last, `-` for an empty cell. Under them, after a blank line when any printed, `Page:` (the page number, `all` for an unpaged listing, then the events the page holds, `event N` or `events N to M` followed by `, the last` when no page follows, or `empty`) and, while a page follows, `Next page:` and the `--page` reaching it, these values starting in one column, two spaces after `Next page:`. The events a footer counts are the calendar's events, the resources a page holds: a series counts once, however many lines its overrides or its occurrences in a window print. `, the last` and `Next page:` SHALL be exact on every backend: the unified client asks for one item past the page. `-s 0` lists every item, unpaged.
+
+`item list` SHALL print the same header and footer around one line per item: its entity tag, its size, then its id. `gcal instances` SHALL print them around one line per instance: its id, its status, its start and end as the server spells them, then its summary, `Event:` naming the series in the header, the footer unpaged.
+
+A list whose items carry more than one value of unbounded length SHALL print through pimalaya-cli's `Records`, the way `git log` prints commits: per item, its id alone on a line, followed by its state words in parentheses, comma-separated, when it has any; its properties as `Fields` prints them; its free text after a blank line, each line indented by four spaces; one blank line between items. A field every item carries SHALL print even when empty, its label alone; a field only some items carry SHALL be left out where it is empty. These lists print as records:
+
+- `calendar list`: the calendar id; `default` for the one the server names so; `Name` and, when set, `Color`; the description.
+- `caldav list`: the collection id; `Name` and, when set, `Color`, `Ctag`, `Sync token` and `Components`; the description.
+- `gcal calendars`: the calendar id; `primary`; `Name` and, when set, `Role`, `Time zone`, `Color` and `Reminders`; the description.
+- `gcal free-busy`: the calendar id; `busy` or `free`, neither when the answer failed; `Busy`, one `<start> to <end>` line per period, and `Errors`.
+- `pimdir search`: the item id; `Start`, `End`, `Calendar` and, when a text term matched, `Matched`; the summary, then the snippet after a blank line. What the answer could not see prints after a blank line.
+
+Every other list SHALL print through pimalaya-cli's `Columns`: a header of uppercase labels, then one item per line, the cells two spaces apart and padded to the widest of their column, an empty cell as `-`, the free-text column last, several values in one cell joined with `,`: `account list` (NAME, BACKENDS, DEFAULT), `vdir list` (ID, PATH, NAME), `gcal acl list` (ID, SCOPE, ROLE, VALUE), `gcal colors` (PALETTE, ID, BACKGROUND, FOREGROUND), and the calendars (ID, DOWNLOADED, QUEUED, NAME) and parked actions (ROW, ACTION, CALENDAR, ERROR) of `pimdir status`.
+
+A record SHALL print through pimalaya-cli's `Fields`: one `Label: value` line per field, the values aligned past the longest label: `account check` (`Account:`, then one `<backend>:` line, `OK` or `FAIL (<why>)`), `caldav discover`, `gcal settings` (one field per setting) and the head of `pimdir status` (`Reading account:`, `Grouped accounts:`).
+
+The `event agenda` grid SHALL stay cal's drawing, with no attribute: no day is highlighted, the events under it naming their days.
+
+#### Scenario: An event list
+- GIVEN the vdir account `perso` whose calendar `personal` holds the timed events `a`, `b` and `c`, read in UTC
+- WHEN `calendula event list -s 2` prints them
+- THEN it prints `Account:    perso (vdir)`, `Calendar:   personal` and a blank line, then `a  2026-11-12 09:00  2026-11-12 09:30  Standup` and the line of `b`, aligned, then a blank line, `Page:       1, events 1 to 2` and `Next page:  --page 2`, with no border and no colour
+- AND `calendula event list -s 2 -p 2` prints the line of `c` and `Page:       2, event 3, the last`
+
+#### Scenario: A calendar list
+- GIVEN an account holding the calendars `personal`, described, and `work`
+- WHEN `calendula calendar list` prints them
+- THEN it prints `personal`, its `Name:` and `Color:` lines and its description indented by four spaces, a blank line, then `work` and its `Name:` line
+
+### Requirement: Help is plain text
+`--help` and `-h` SHALL print without colour, each paragraph on one line, never wrapped to the terminal width, the top-level help ending with the Pimalaya footer (where to report bugs, how to sponsor).
+
+### Requirement: A query error is drawn without colour
+The report `pimdir search` and `pimdir count` draw over a query they refuse SHALL carry no colour escape, on a terminal as in the `--json` error string.
+
+### Requirement: A bare invocation shows the help
+A bare `calendula` SHALL print the help when a configuration exists, a broken one included, its error left to the first command reading it. Without one it SHALL fail as a command loading the configuration does: the welcome, or the error. Nothing prompts.
 
 ### Requirement: account check fails when a backend fails
 `account check` SHALL exercise every backend of the account `--backend` allows and print one verdict per backend when all of them pass. When any fails, it SHALL exit non-zero with one error naming each failed backend and why, so a script reads the outcome from the exit code alone.
@@ -386,9 +427,9 @@ A source that holds nothing but whitespace SHALL be refused, naming where it was
 ### Requirement: pimdir searches calendar items through the store's index
 `calendula pimdir search <query>...`, gated on the `pimdir` feature, SHALL answer the pimdir SEARCH query language (§8) from the store's search index, scoped to the account's events: the query is read as its conjuncts plus `kind:event`, `account:<account>` when the store groups the account under a name, and `collection:<id>` when `-k/--calendar` names a calendar, each a top-level conjunct. Without `-k` it SHALL search every calendar of the account, `calendar.default` not applied; a `-k` naming no calendar of the account SHALL be refused, naming those it holds. The words of the query are joined by spaces into one query. Calendula SHALL open the index read-only (io-pimdir `PimdirIndex::open_query`) and SHALL NOT create, rebuild nor refresh it: the store's owner, its sync engine, does. The answer SHALL be the store as of the owner's last refresh: a queued write is not listed nor folded in.
 
-A `date:` term SHALL compare the occurrences the index expanded (SEARCH §7), its days, `today` and `yesterday` read in the zone the tables read times in (`TZ`, then the system's), stated to the index as an IANA name (SEARCH §8.1); a zone with no IANA name SHALL read them in UTC, with a warning.
+A `date:` term SHALL compare the occurrences the index expanded (SEARCH §7), its days, `today` and `yesterday` read in the zone `event list` reads times in (`TZ`, then the system's), stated to the index as an IANA name (SEARCH §8.1); a zone with no IANA name SHALL read them in UTC, with a warning.
 
-Each hit SHALL render with the `event list` columns (Columns follow the kind), from its summary when its body is not local, then its calendar, what a text term matched (`body`, `summary`, or `null` when only field terms did) and a `snippet`; its `id` is the public `seq`, which `event read` takes. `--sort date|name|relevance` orders the hits, `date` (latest first) by default, a series by its first occurrence, and `--page` and `--page-size` page them, the page size defaulting to `event list`'s. Under `--json` the page carries `hits`, `more` (whether hits follow it) and `coverage`, each hit the event projection plus `calendarId`, `matched` and `snippet`.
+Each hit SHALL print as a record (Text output is plain text): its id, the public `seq`, which `event read` takes; its start and end as `event list` shows them (Columns follow the kind), from its summary when its body is not local; its calendar; what a text term matched (`body` or `summary`) when one did; then its summary and its snippet. `--sort date|name|relevance` orders the hits, `date` (latest first) by default, a series by its first occurrence, and `--page` and `--page-size` page them, the page size defaulting to `event list`'s. Under `--json` the page carries `hits`, `more` (whether hits follow it) and `coverage`, each hit the event projection plus `calendarId`, `matched` (`null` when only field terms matched) and `snippet`.
 
 #### Scenario: A series found by a later occurrence
 - GIVEN an indexed pimdir calendar holding a weekly event begun on 2019-01-07, a Monday
@@ -419,7 +460,7 @@ Each hit SHALL render with the `event list` columns (Columns follow the kind), f
 `calendula pimdir count <query>...` SHALL answer how many items the scoped query matches, with its coverage, under the same scope as `pimdir search`.
 
 ### Requirement: A pimdir calendar search says what it did not cover
-The output of `pimdir search` and `pimdir count` SHALL carry the coverage of the answer (SEARCH §8.2): `bodiless`, the items in scope whose body is not local, matched on their summary alone; `unindexed`, those whose last change the index has not folded in; `behind`, how many changes the store drew above the index, store-wide; `since` and `until`, the range below or above which the store is not known to hold every item; `filling`, whether a first round is still listing a calendar in scope; `horizonLeft`, whether the date range reaches outside the occurrences the index holds; `cut`, how many series stop their occurrences before the range's end; and `complete`, true only when none of these holds. The plain output SHALL print one line under its table naming what did not hold, and nothing when the answer is complete.
+The output of `pimdir search` and `pimdir count` SHALL carry the coverage of the answer (SEARCH §8.2): `bodiless`, the items in scope whose body is not local, matched on their summary alone; `unindexed`, those whose last change the index has not folded in; `behind`, how many changes the store drew above the index, store-wide; `since` and `until`, the range below or above which the store is not known to hold every item; `filling`, whether a first round is still listing a calendar in scope; `horizonLeft`, whether the date range reaches outside the occurrences the index holds; `cut`, how many series stop their occurrences before the range's end; and `complete`, true only when none of these holds. The plain output SHALL print one line after its hits, a blank line apart, naming what did not hold, and nothing when the answer is complete.
 
 #### Scenario: A range past the horizon
 - GIVEN an index holding occurrences two years forward
@@ -427,7 +468,7 @@ The output of `pimdir search` and `pimdir count` SHALL carry the coverage of the
 - THEN the coverage reports `horizonLeft` true and `complete` false
 
 ### Requirement: A pimdir search names an index read in another zone
-When the index reads floating times and dates in another zone than the one `pimdir search` and `pimdir count` read days in (SEARCH §7, `floating_zone`), their plain output SHALL say so under the table or the count, naming both zones; the JSON output SHALL stay unchanged.
+When the index reads floating times and dates in another zone than the one `pimdir search` and `pimdir count` read days in (SEARCH §7, `floating_zone`), their plain output SHALL say so after the hits or the count, naming both zones; the JSON output SHALL stay unchanged.
 
 #### Scenario: An index read in another zone
 - GIVEN `TZ=Europe/Paris` and an index reading floating times in `UTC`

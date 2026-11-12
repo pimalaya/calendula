@@ -20,7 +20,7 @@ Each backend SHALL sit behind its own cargo feature (`caldav`, `gcal`, `msgraph`
 `rustls-ring` (the default), `rustls-aws` and `native-tls` SHALL each select a pimalaya-stream provider and forward it to every network dependency, weakly where that dependency is optional. `vendored` SHALL forward the same way.
 
 ### Requirement: Released dependencies, patched only while unreleased
-Dependencies SHALL name released versions. A `[patch.crates-io]` entry is allowed only while a needed change rides unreleased upstream, SHALL carry a note saying what it waits on, and SHALL be dropped as that crate publishes.
+Dependencies SHALL name released versions. A `[patch.crates-io]` entry is allowed only while a needed change rides unreleased upstream, the cairn change adding it SHALL say what it waits on (Cargo.toml carrying no comment in its dependency or patch sections), and it SHALL be dropped as that crate publishes.
 
 ### Requirement: No aggregator dependency
 calendula SHALL depend on the protocol crates directly and own the abstraction over them. The retired per-domain aggregators (io-calendar and its siblings) SHALL NOT be reintroduced.

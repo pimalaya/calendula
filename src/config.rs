@@ -8,16 +8,16 @@
 //! so a value set once at the top applies everywhere it is not
 //! overridden.
 //!
-//! `deny_unknown_fields` is set on the leaf blocks but deliberately not
-//! on [`Config`] and [`AccountConfig`], so a future TUI reading the same
-//! file can add its own sections without breaking this one. The `todo`
-//! and `journal` tables are refused by name instead, their domains having
-//! moved to unfog and journal.
+//! `deny_unknown_fields` is set on the leaf blocks but not on [`Config`]
+//! and [`AccountConfig`], whose backend blocks exist only in the builds
+//! carrying their feature: a build without one still loads a file naming
+//! it. The tables calendula no longer reads are refused by name instead:
+//! `todo` and `journal`, their domains having moved to unfog and journal,
+//! and the `table` and `account` rendering tables, the output being plain
+//! text.
 
 use std::{collections::HashMap, path::PathBuf};
 
-use crossterm::style::Color;
-use pimalaya_cli::table::ContentArrangement;
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use pimalaya_config::secret::Secret;
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
@@ -33,17 +33,14 @@ use serde::{Deserialize, Deserializer, de::Error};
 #[cfg(feature = "caldav")]
 use url::Url;
 
-/// How to get a configuration, for the errors meeting none.
-pub const NO_CONFIG_HINT: &str = "write one by hand from the sample: \
-     https://github.com/pimalaya/calendula/blob/master/config.sample.toml";
-
 /// The whole configuration file: global options and every account.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Config {
-    /// Table rendering options shared by every list command.
+    /// Refused: the output is plain text, drawn in no table.
     #[serde(default)]
-    pub table: TableConfig,
+    #[allow(dead_code)]
+    pub table: Option<TableRemovedConfig>,
     /// `calendar` command options.
     #[serde(default)]
     pub calendar: CalendarConfig,
@@ -61,9 +58,10 @@ pub struct Config {
     #[serde(default)]
     #[allow(dead_code)]
     pub journal: Option<JournalMovedConfig>,
-    /// `account list` rendering options, read from this block only.
+    /// Refused: `account list` prints plain text, in no colour.
     #[serde(default)]
-    pub account: AccountListingConfig,
+    #[allow(dead_code)]
+    pub account: Option<AccountRemovedConfig>,
     /// One `[accounts.<name>]` block per account.
     pub accounts: HashMap<String, AccountConfig>,
 }
@@ -75,31 +73,32 @@ impl TomlConfig for Config {
         env!("CARGO_PKG_NAME")
     }
 
-    fn take_named_account(&mut self, name: &str) -> Option<(String, Self::Account)> {
-        self.accounts.remove_entry(name)
+    fn sample_url() -> &'static str {
+        "https://github.com/pimalaya/calendula/blob/master/config.sample.toml"
     }
 
-    fn take_default_account(&mut self) -> Option<(String, Self::Account)> {
-        let name = self
-            .accounts
-            .iter()
-            .find_map(|(name, account)| account.default.then(|| name.clone()))?;
+    fn accounts(&self) -> impl Iterator<Item = (&str, bool)> {
+        let accounts = self.accounts.iter();
+        accounts.map(|(name, account)| (name.as_str(), account.default))
+    }
 
-        self.take_named_account(&name)
+    fn take_named_account(&mut self, name: &str) -> Option<(String, Self::Account)> {
+        self.accounts.remove_entry(name)
     }
 }
 
 /// One account: the backends it reads calendars from, plus whatever it
-/// overrides of the global rendering options.
+/// overrides of the global options.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct AccountConfig {
     /// Whether a command given no `-a/--account` picks this account.
     #[serde(default)]
     pub default: bool,
-    /// Table rendering options shared by every list command.
+    /// Refused: the output is plain text, drawn in no table.
     #[serde(default)]
-    pub table: TableConfig,
+    #[allow(dead_code)]
+    pub table: Option<TableRemovedConfig>,
     /// `calendar` command options.
     #[serde(default)]
     pub calendar: CalendarConfig,
@@ -141,35 +140,9 @@ pub struct CalendarConfig {
     /// Calendar id used by `event` and `item` commands when their
     /// `-k/--calendar` flag is omitted.
     pub default: Option<String>,
-    /// `calendar list` options.
-    #[serde(default)]
-    pub list: CalendarListConfig,
 }
 
-/// `calendar list` options.
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct CalendarListConfig {
-    /// Per-column colors of the rendered table.
-    #[serde(default)]
-    pub table: CalendarListTableConfig,
-}
-
-/// Per-column colors of the `calendar list` table.
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct CalendarListTableConfig {
-    /// Color of the ID column, red by default.
-    pub id_color: Option<Color>,
-    /// Color of the NAME column, green by default.
-    pub name_color: Option<Color>,
-    /// Color of the DESCRIPTION column, uncolored by default.
-    pub description_color: Option<Color>,
-    /// Color of the COLOR column, uncolored by default.
-    pub color_color: Option<Color>,
-}
-
-/// Event-level rendering options.
+/// Event-level options.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct EventConfig {
@@ -184,23 +157,6 @@ pub struct EventConfig {
 pub struct EventListConfig {
     /// Default `-s/--page-size` value for `event list`, 25 when unset.
     pub page_size: Option<u32>,
-    /// Per-column colors of the rendered table.
-    #[serde(default)]
-    pub table: EventListTableConfig,
-}
-
-/// Per-column colors of the `event list` table.
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct EventListTableConfig {
-    /// Color of the ID column, red by default.
-    pub id_color: Option<Color>,
-    /// Color of the SUMMARY column, green by default.
-    pub summary_color: Option<Color>,
-    /// Color of the START column, dark yellow by default.
-    pub start_color: Option<Color>,
-    /// Color of the END column, dark yellow by default.
-    pub end_color: Option<Color>,
 }
 
 /// The `todo` table, which no configuration holds any more.
@@ -225,6 +181,32 @@ impl<'de> Deserialize<'de> for JournalMovedConfig {
         Err(D::Error::custom(
             "The `journal` table moved to `journal`, the Pimalaya CLI for \
              journal entries; remove it from the calendula configuration",
+        ))
+    }
+}
+
+/// The `table` table, which no configuration holds any more.
+#[derive(Clone, Debug)]
+pub enum TableRemovedConfig {}
+
+impl<'de> Deserialize<'de> for TableRemovedConfig {
+    fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+        Err(D::Error::custom(
+            "The `table` table is gone, calendula printing plain text with \
+             no border or colour; remove it from the calendula configuration",
+        ))
+    }
+}
+
+/// The top-level `account` table, which no configuration holds any more.
+#[derive(Clone, Debug)]
+pub enum AccountRemovedConfig {}
+
+impl<'de> Deserialize<'de> for AccountRemovedConfig {
+    fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+        Err(D::Error::custom(
+            "The `account` table is gone, `account list` printing plain text \
+             with no colour; remove it from the calendula configuration",
         ))
     }
 }
@@ -254,85 +236,6 @@ pub struct ItemConfig {
 pub struct ItemListConfig {
     /// Default `-s/--page-size` value for `item list`, 25 when unset.
     pub page_size: Option<u32>,
-    /// Per-column colors of the rendered table.
-    #[serde(default)]
-    pub table: ItemListTableConfig,
-}
-
-/// Per-column colors of the `item list` table.
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct ItemListTableConfig {
-    /// Color of the ID column, red by default.
-    pub id_color: Option<Color>,
-    /// Color of the ETAG column, uncolored by default.
-    pub etag_color: Option<Color>,
-    /// Color of the SIZE column, uncolored by default.
-    pub size_color: Option<Color>,
-}
-
-/// `account list` rendering options. Top-level only.
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct AccountListingConfig {
-    /// `account list` options.
-    #[serde(default)]
-    pub list: AccountListingListConfig,
-}
-
-/// `account list` options.
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct AccountListingListConfig {
-    /// Per-column colors of the rendered table.
-    #[serde(default)]
-    pub table: AccountListingTableConfig,
-}
-
-/// Per-column colors of the `account list` table.
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct AccountListingTableConfig {
-    /// Color of the NAME column, green by default.
-    pub name_color: Option<Color>,
-    /// Color of the BACKENDS column, blue by default.
-    pub backends_color: Option<Color>,
-    /// Color of the DEFAULT column, uncolored by default.
-    pub default_color: Option<Color>,
-}
-
-/// Global / per-account table rendering quirks shared across every list
-/// command.
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct TableConfig {
-    /// `comfy_table` preset string. Defaults to `UTF8_FULL_CONDENSED`.
-    pub preset: Option<String>,
-    /// Column-arrangement strategy. Defaults to `Dynamic`.
-    pub arrangement: Option<TableArrangementConfig>,
-}
-
-/// How a table spreads its columns over the terminal width.
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub enum TableArrangementConfig {
-    /// Fit the content to the terminal width. The default.
-    #[default]
-    Dynamic,
-    /// Fit the content to the terminal width, always filling it.
-    DynamicFullWidth,
-    /// Leave every column at its natural width.
-    Disabled,
-}
-
-impl From<TableArrangementConfig> for ContentArrangement {
-    fn from(arrangement: TableArrangementConfig) -> Self {
-        match arrangement {
-            TableArrangementConfig::Dynamic => ContentArrangement::Dynamic,
-            TableArrangementConfig::DynamicFullWidth => ContentArrangement::DynamicFullWidth,
-            TableArrangementConfig::Disabled => ContentArrangement::Disabled,
-        }
-    }
 }
 
 /// vdir backend configuration.
@@ -397,8 +300,18 @@ pub struct CaldavConfig {
     /// TLS configuration.
     #[serde(default)]
     pub tls: TlsConfig,
+    /// ALPN identifiers offered during the TLS handshake, unset offering
+    /// [`default_caldav_alpn`].
+    pub alpn: Option<Vec<String>>,
     /// Authentication configuration.
     pub auth: CaldavAuthConfig,
+}
+
+/// ALPN identifiers CalDAV offers when `caldav.alpn` names none, pinning
+/// the HTTP/1.1 io-http speaks.
+#[cfg(feature = "caldav")]
+pub fn default_caldav_alpn() -> Vec<String> {
+    vec![String::from("http/1.1")]
 }
 
 /// CalDAV authentication configuration.
@@ -667,5 +580,61 @@ mod tests {
 
         assert!(err.contains("`journal` table moved to `journal`"), "{err}");
         assert!(err.contains("line 1"), "{err}");
+    }
+
+    /// A list keeps its page size, and a colour key of the former tables
+    /// fails the load naming the block that held it.
+    #[test]
+    fn a_colour_key_is_refused() {
+        let document = "[event.list]\npage-size = 10\n[accounts.a.item.list]\npage-size = 5\n";
+        toml::from_str::<Config>(document).unwrap();
+
+        for (document, unknown) in [
+            (
+                "[event.list.table]\nid-color = \"red\"\n[accounts]\n",
+                "table",
+            ),
+            (
+                "[accounts.a.item.list.table]\nid-color = \"red\"\n",
+                "table",
+            ),
+            (
+                "[calendar.list.table]\nname-color = \"red\"\n[accounts]\n",
+                "list",
+            ),
+        ] {
+            let err = toml::from_str::<Config>(document).unwrap_err().to_string();
+            assert!(err.contains(&format!("unknown field `{unknown}`")), "{err}");
+        }
+    }
+
+    /// The rendering tables of an earlier calendula are refused by name,
+    /// at the top level and under an account.
+    #[test]
+    fn a_leftover_table_or_account_table_is_refused() {
+        for document in [
+            "[table]\npreset = \"ASCII_FULL\"\n[accounts]\n",
+            "[accounts.a.table]\narrangement = \"disabled\"\n",
+        ] {
+            let err = toml::from_str::<Config>(document).unwrap_err().to_string();
+            assert!(err.contains("The `table` table is gone"), "{err}");
+        }
+
+        let document = "[account.list.table]\nname-color = \"red\"\n[accounts]\n";
+        let err = toml::from_str::<Config>(document).unwrap_err().to_string();
+        assert!(err.contains("The `account` table is gone"), "{err}");
+    }
+
+    #[cfg(feature = "caldav")]
+    #[test]
+    fn a_caldav_alpn_is_read_and_defaults_to_http_1_1() {
+        let document = "home = \"https://dav.example.org/\"\nauth = \"none\"\n";
+        let config: CaldavConfig = toml::from_str(document).unwrap();
+        assert_eq!(config.alpn, None);
+        assert_eq!(default_caldav_alpn(), ["http/1.1"]);
+
+        let document = format!("{document}alpn = []\n");
+        let config: CaldavConfig = toml::from_str(&document).unwrap();
+        assert_eq!(config.alpn, Some(Vec::new()));
     }
 }

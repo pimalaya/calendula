@@ -14,7 +14,19 @@ A `todo` or `journal` table left in the configuration, at the top level or under
 
 The configuration wizard is gone: `calendula configure` (alias `wizard`), the offer a bare `calendula` and a command without a configuration made, the `wizard` cargo feature and the `calendula-configure` JSON Schema. Write the configuration by hand from [config.sample.toml](./config.sample.toml), copied to `~/.config/calendula/config.toml`: keep the blocks of the backends your account uses and fill them in. A configuration the wizard wrote keeps working as it is.
 
-A command finding no configuration fails naming the path it looked at and the sample, and a bare `calendula` prints the help. A build naming the `wizard` feature (`--features wizard`) must drop it.
+Run without a configuration at a terminal, calendula prints the commands creating it from the sample, then the first command to run; a script or a `--json` caller gets the error naming the path looked at and the sample. A bare `calendula` prints the help when a configuration exists. A build naming the `wizard` feature (`--features wizard`) must drop it.
+
+### Configuration path
+
+`-c` takes one path per flag and never splits it: `-c public.toml:private.toml` is one path now. Repeat the flag instead, `-c public.toml -c private.toml`, the first one the base. `CALENDULA_CONFIG` is no longer read: pass a path kept in a variable through the flag, `-c "$CALENDULA_CONFIG"`.
+
+Several accounts marked `default = true`, across every file loaded, are refused, naming them: keep the mark on one, or name the account with `-a <NAME>`.
+
+### Plain text output
+
+Text output is plain text: no border, no colour, nothing sized to the terminal, and `-w/--max-width` is gone from every list. A script reading the text should read `--json` instead, whose keys are unchanged; `event list`, `event find` and `item list` add `nextPage`. In text, `event list` prints one line per event (id, start, end, summary) between a header (`Account:`, `Calendar:`) and a footer (`Page:`, `Next page:`); `calendar list` prints one record per calendar.
+
+The table and colour options are gone and refused: remove `table.preset`, `table.arrangement`, the `*-color` keys under `calendar.list.table`, `event.list.table`, `item.list.table` and `account.list.table`, and the `table` and top-level `account` tables holding them. `event.list.page-size` and `item.list.page-size` stay.
 
 ### pimdir store
 

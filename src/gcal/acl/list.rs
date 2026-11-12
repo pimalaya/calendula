@@ -8,10 +8,7 @@ use std::fmt;
 use anyhow::Result;
 use clap::Parser;
 use io_gcal::v3::rest::acl::list::GcalAclListParams;
-use pimalaya_cli::{
-    printer::Printer,
-    table::{Cell, Row, Table, TableStyle},
-};
+use pimalaya_cli::{columns::Columns, printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -34,7 +31,6 @@ pub struct GcalAclListCommand {
 impl GcalAclListCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: GcalClient) -> Result<()> {
         let calendar_id = client.account.calendar_id(self.calendar_id)?;
-        let style = client.account.table_style();
 
         let mut rows = Vec::new();
         let mut page_token: Option<String> = None;
@@ -65,18 +61,15 @@ impl GcalAclListCommand {
             }
         }
 
-        printer.out(GcalAclListOutput { style, rows })
+        printer.out(GcalAclListOutput { rows })
     }
 }
 
-/// The rendered ACL listing.
+/// The ACL listing.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GcalAclListOutput {
-    /// The table style the account configured.
-    #[serde(skip)]
-    pub style: TableStyle,
-    /// The rules of the calendar, one row each.
+    /// The rules of the calendar, one entry each.
     #[serde(rename = "rules")]
     pub rows: Vec<RuleRow>,
 }
@@ -97,27 +90,19 @@ pub struct RuleRow {
 
 impl fmt::Display for GcalAclListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut table = Table::new();
+        let mut columns = Columns::new(["ID", "SCOPE", "ROLE", "VALUE"]);
 
-        table
-            .load_style(self.style)
-            .set_header(Row::from([
-                Cell::new("ID"),
-                Cell::new("SCOPE"),
-                Cell::new("VALUE"),
-                Cell::new("ROLE"),
-            ]))
-            .add_rows(self.rows.iter().map(|rule| {
-                let mut row = Row::new();
-                row.max_height(1)
-                    .add_cell(Cell::new(&rule.id))
-                    .add_cell(Cell::new(rule.scope.unwrap_or("")))
-                    .add_cell(Cell::new(rule.value.as_deref().unwrap_or("")))
-                    .add_cell(Cell::new(rule.role.unwrap_or("")));
-                row
-            }));
+        for rule in &self.rows {
+            let value = rule.value.as_deref().unwrap_or_default();
 
-        writeln!(f)?;
-        writeln!(f, "{table}")
+            columns.push([
+                sanitize::text(&rule.id).into_owned(),
+                String::from(rule.scope.unwrap_or_default()),
+                String::from(rule.role.unwrap_or_default()),
+                sanitize::text(value).into_owned(),
+            ]);
+        }
+
+        write!(f, "{columns}")
     }
 }

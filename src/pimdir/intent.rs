@@ -12,7 +12,7 @@ use std::fmt;
 
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
-use pimalaya_cli::printer::Printer;
+use pimalaya_cli::{printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -207,9 +207,11 @@ impl PimdirIntentOutput {
 
 impl fmt::Display for PimdirIntentOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let id = sanitize::text(&self.event_id);
+
         match &self.partstat {
-            Some(partstat) => write!(f, "Reply {partstat} to event `{}`", self.event_id)?,
-            None => write!(f, "Cancellation of event `{}`", self.event_id)?,
+            Some(partstat) => write!(f, "Reply {partstat} to event `{id}`")?,
+            None => write!(f, "Cancellation of event `{id}`")?,
         }
         writeln!(f, " queued; the next sync sends it")
     }

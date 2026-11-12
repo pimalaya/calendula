@@ -8,7 +8,7 @@ use core::fmt;
 
 use anyhow::{Result, bail};
 use clap::Parser;
-use pimalaya_cli::printer::Printer;
+use pimalaya_cli::{printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -156,9 +156,11 @@ pub struct EventCreatedOutput {
 
 impl fmt::Display for EventCreatedOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let id = sanitize::text(&self.id);
+
         match self.queued {
-            true => writeln!(f, "Event `{}` queued for the next sync", self.id),
-            false => writeln!(f, "Event `{}` successfully created", self.id),
+            true => writeln!(f, "Event `{id}` queued for the next sync"),
+            false => writeln!(f, "Event `{id}` successfully created"),
         }
     }
 }
@@ -211,7 +213,7 @@ mod tests {
                 }),
                 ..Default::default()
             };
-            CalendarClient::new(Config::default(), account, Backend::Auto).unwrap()
+            CalendarClient::new(Config::default(), "a".into(), account, Backend::Auto).unwrap()
         };
 
         let command = EventCreateCommand::try_parse_from([
@@ -231,9 +233,9 @@ mod tests {
         assert!(err.contains("--online-meeting"), "{err}");
         assert!(err.contains("vdir backend"), "{err}");
 
-        let items = client()
-            .list_items("cal", CalendarItemQuery::default())
+        let listed = client()
+            .list_items("cal", None, None, CalendarItemQuery::default())
             .unwrap();
-        assert!(items.is_empty());
+        assert!(listed.items.is_empty());
     }
 }

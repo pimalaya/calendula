@@ -8,8 +8,7 @@ use std::fmt;
 use anyhow::Result;
 use clap::Parser;
 use io_vdir::collection::VdirCollection;
-use pimalaya_cli::printer::Printer;
-use pimalaya_cli::table::{Cell, Color, Row, Table, TableStyle};
+use pimalaya_cli::{columns::Columns, printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -17,8 +16,8 @@ use crate::vdir::client::VdirClient;
 
 /// List on-disk vdir collections.
 ///
-/// One row per directory directly under the configured home, with the
-/// display name its metadata marker files carry.
+/// One line per directory directly under the configured home: its id,
+/// its path, then the display name its metadata marker files carry.
 ///
 /// JSON output: `{"collections": [{"id", "displayName", "path"}]}`.
 #[derive(Debug, Parser)]
@@ -27,62 +26,39 @@ pub struct VdirCollectionListCommand;
 impl VdirCollectionListCommand {
     pub fn execute(self, printer: &mut impl Printer, client: VdirClient) -> Result<()> {
         let collections = client.list_collections()?;
-
-        let table = VdirCollectionListOutput {
-            style: client.account.table_style(),
-            name_color: client.account.calendars_list_table_name_color(),
-            rows: collections.into_iter().map(CollectionRow::from).collect(),
-        };
-
-        printer.out(table)
+        let rows = collections.into_iter().map(CollectionRow::from).collect();
+        printer.out(VdirCollectionListOutput { rows })
     }
 }
 
-/// The rendered vdir collection listing.
+/// The vdir collection listing.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VdirCollectionListOutput {
-    /// The table style the account renders with.
-    #[serde(skip)]
-    pub style: TableStyle,
-    /// The color the name column is drawn in.
-    #[serde(skip)]
-    pub name_color: Color,
-    /// One row per collection directory.
+    /// One entry per collection directory.
     #[serde(rename = "collections")]
     pub rows: Vec<CollectionRow>,
 }
 
 impl fmt::Display for VdirCollectionListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut table = Table::new();
+        let mut columns = Columns::new(["ID", "PATH", "NAME"]);
 
-        table
-            .load_style(self.style)
-            .set_header(Row::from([
-                Cell::new("ID"),
-                Cell::new("NAME"),
-                Cell::new("PATH"),
-            ]))
-            .add_rows(self.rows.iter().map(|c| {
-                let mut row = Row::new();
-                row.max_height(1)
-                    .add_cell(Cell::new(&c.id))
-                    .add_cell(
-                        Cell::new(c.display_name.as_deref().unwrap_or("")).fg(self.name_color),
-                    )
-                    .add_cell(Cell::new(&c.path));
-                row
-            }));
+        for collection in &self.rows {
+            let name = collection.display_name.as_deref().unwrap_or_default();
 
-        writeln!(f)?;
-        write!(f, "{table}")?;
-        writeln!(f)?;
-        Ok(())
+            columns.push([
+                sanitize::text(&collection.id).into_owned(),
+                sanitize::text(&collection.path).into_owned(),
+                sanitize::text(name).into_owned(),
+            ]);
+        }
+
+        write!(f, "{columns}")
     }
 }
 
-/// One collection directory, as the listing renders it.
+/// One collection directory, as the listing prints it.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CollectionRow {

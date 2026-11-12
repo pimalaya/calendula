@@ -128,15 +128,19 @@ nix run
 
 ## Configuration
 
-calendula reads a TOML configuration you write: copy [config.sample.toml](./config.sample.toml) to `~/.config/calendula/config.toml`, keep the blocks of the backends your account uses and fill them in. calendula never writes a configuration, and a command run without one fails, naming the path it looked at.
+calendula reads a TOML configuration you write: copy [config.sample.toml](./config.sample.toml) to `~/.config/calendula/config.toml`, keep the blocks of the backends your account uses and fill them in. calendula never writes a configuration.
 
-The configuration is loaded from the first existing path among:
+Run without a configuration at a terminal, calendula welcomes you with the commands copying the shipped sample in place, or downloading it when none ships, then the first command to run. Under `--json` or in a script, it fails naming the path it looked at and the sample.
+
+A configuration is loaded from every existing path among the following, each one deep-merged on top of the ones before, so `$HOME/.calendularc` overrides the others:
 
 - `$XDG_CONFIG_HOME/calendula/config.toml`
 - `$HOME/.config/calendula/config.toml`
 - `$HOME/.calendularc`
 
-Override the path with `calendula -c <PATH>` or `CALENDULA_CONFIG=<PATH>`; multiple paths can be passed at once, separated by `:`. The first is the base and the rest are deep-merged on top. The full field reference lives in [config.sample.toml](./config.sample.toml).
+At most one account may be marked `default = true` across them: several are refused, naming them, and so is an unknown `-a <NAME>`, naming the accounts the configuration holds.
+
+Override those paths with `-c <PATH>`. Repeat it to merge several files, such as `-c public.toml -c private.toml`: the first one is the base and the next ones are deep-merged on top. Each `-c` takes one path, never split, and no environment variable is read: a path kept in a shell variable goes through the flag, as `-c "$CALENDULA_CONFIG"`. The full field reference lives in [config.sample.toml](./config.sample.toml).
 
 To add an account, add an `[accounts.<name>]` table to your configuration. `calendula account list` and `calendula account check` inspect and validate the accounts declared.
 
@@ -260,7 +264,7 @@ pimdir.root = "~/.local/state/neverest/example"
 
 Run `calendula pimdir status` to see which account you are reading, how much of each calendar is downloaded, and how many creations are still queued. An item that is listed but not downloaded reads as "body not fetched" until a sync hydrates it.
 
-Run `calendula pimdir search <query>` to search the account's events through the search index the sync engine keeps, in the [pimdir SEARCH](https://github.com/pimalaya/pimdir) query language: `budget location:lisbon`, `attendee:carol@example.org date:2026-11`, `organizer:alice@example.org category:work`. Days, `today` and `yesterday` are read in the local zone (`TZ`, then the system's); a line under the table names the index's zone when the sync engine reads floating times and dates in another. A write still queued shows once a sync indexed it. `calendula pimdir count <query>` counts the same.
+Run `calendula pimdir search <query>` to search the account's events through the search index the sync engine keeps, in the [pimdir SEARCH](https://github.com/pimalaya/pimdir) query language: `budget location:lisbon`, `attendee:carol@example.org date:2026-11`, `organizer:alice@example.org category:work`. Days, `today` and `yesterday` are read in the local zone (`TZ`, then the system's); a line under the hits names the index's zone when the sync engine reads floating times and dates in another. A write still queued shows once a sync indexed it. `calendula pimdir count <query>` counts the same.
 
 ## Usage
 

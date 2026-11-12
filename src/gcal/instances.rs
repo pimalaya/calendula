@@ -9,16 +9,13 @@ use anyhow::Result;
 use chrono::NaiveDate;
 use clap::Parser;
 use io_gcal::v3::rest::events::instances::GcalEventInstancesParams;
-use pimalaya_cli::{
-    printer::Printer,
-    table::{Cell, Row, Table, TableStyle},
-};
+use pimalaya_cli::{columns::Columns, printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::{
     gcal::{client::GcalClient, render},
-    shared::item::CalendarTimeRange,
+    shared::{item::CalendarTimeRange, listing::Listing},
 };
 
 /// Expand a recurring event into its occurrences.
@@ -27,6 +24,10 @@ use crate::{
 /// the series is what round-trips through the projection. This asks the
 /// server to expand it, the only way to see the moved and cancelled
 /// occurrences a rule alone does not describe.
+///
+/// Each line shows the instance id, its status, its start and end as the
+/// server spells them, then its summary, between a header naming the
+/// account, the calendar and the series and a footer counting them.
 ///
 /// JSON output: `{"instances": [{"id", "summary", "start", "end",
 /// "status", "originalStart"}]}`.
@@ -57,7 +58,6 @@ pub struct GcalInstancesCommand {
 impl GcalInstancesCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: GcalClient) -> Result<()> {
         let calendar_id = client.account.calendar_id(self.calendar_id)?;
-        let style = client.account.table_style();
 
         let range = CalendarTimeRange::from_days(self.from, self.to)?.unwrap_or_default();
         let time_min = range.start.as_deref().map(render::rfc3339);
@@ -93,18 +93,23 @@ impl GcalInstancesCommand {
             }
         }
 
-        printer.out(GcalInstancesOutput { style, rows })
+        let mut listing = Listing::new(&client.name, "gcal", ["instance", "instances"]);
+        listing.push("Calendar", &calendar_id);
+        listing.push("Event", &self.event_id);
+        listing.count = rows.len();
+
+        printer.out(GcalInstancesOutput { listing, rows })
     }
 }
 
-/// The rendered instance listing.
+/// The instance listing.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GcalInstancesOutput {
-    /// The table style the account configured.
+    /// The header and footer the instances print between.
     #[serde(skip)]
-    pub style: TableStyle,
-    /// The occurrences of the series, one row each.
+    pub listing: Listing,
+    /// The occurrences of the series, one entry each.
     #[serde(rename = "instances")]
     pub rows: Vec<InstanceRow>,
 }
@@ -129,29 +134,18 @@ pub struct InstanceRow {
 
 impl fmt::Display for GcalInstancesOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut table = Table::new();
+        let mut columns = Columns::default();
 
-        table
-            .load_style(self.style)
-            .set_header(Row::from([
-                Cell::new("ID"),
-                Cell::new("SUMMARY"),
-                Cell::new("START"),
-                Cell::new("END"),
-                Cell::new("STATUS"),
-            ]))
-            .add_rows(self.rows.iter().map(|instance| {
-                let mut row = Row::new();
-                row.max_height(1)
-                    .add_cell(Cell::new(&instance.id))
-                    .add_cell(Cell::new(&instance.summary))
-                    .add_cell(Cell::new(&instance.start))
-                    .add_cell(Cell::new(&instance.end))
-                    .add_cell(Cell::new(instance.status));
-                row
-            }));
+        for instance in &self.rows {
+            columns.push([
+                sanitize::text(&instance.id).into_owned(),
+                String::from(instance.status),
+                sanitize::text(&instance.start).into_owned(),
+                sanitize::text(&instance.end).into_owned(),
+                sanitize::text(&instance.summary).into_owned(),
+            ]);
+        }
 
-        writeln!(f)?;
-        writeln!(f, "{table}")
+        self.listing.write(f, &columns.to_string(), None)
     }
 }

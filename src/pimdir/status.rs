@@ -6,7 +6,7 @@ use std::fmt;
 
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::printer::Printer;
+use pimalaya_cli::{columns::Columns, fields::Fields, printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -86,48 +86,53 @@ pub struct PimdirParkedStatus {
 
 impl fmt::Display for PimdirStatusOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f)?;
+        let mut fields = Fields::default();
 
         match &self.account {
-            Some(account) => writeln!(f, "Reading account: {account}")?,
-            None => writeln!(f, "Reading account: none, the store groups no account")?,
+            Some(account) => fields.push("Reading account", sanitize::text(account)),
+            None => fields.push("Reading account", "none, the store groups no account"),
         }
 
         match self.accounts.as_slice() {
-            [] => writeln!(f, "Grouped accounts: none")?,
-            accounts => writeln!(f, "Grouped accounts: {}", accounts.join(", "))?,
+            [] => fields.push("Grouped accounts", "none"),
+            accounts => fields.push("Grouped accounts", sanitize::text(&accounts.join(", "))),
         }
 
-        writeln!(f)?;
+        write!(f, "{fields}")?;
 
-        for calendar in &self.calendars {
-            write!(
-                f,
-                "  {} ({}): {}/{} items downloaded",
-                calendar.name, calendar.id, calendar.hydrated, calendar.total
-            )?;
+        if !self.calendars.is_empty() {
+            let mut columns = Columns::new(["ID", "DOWNLOADED", "QUEUED", "NAME"]);
 
-            match calendar.queued {
-                0 => writeln!(f)?,
-                queued => writeln!(f, ", {queued} queued for the next sync")?,
+            for calendar in &self.calendars {
+                columns.push([
+                    sanitize::text(&calendar.id).into_owned(),
+                    format!("{}/{}", calendar.hydrated, calendar.total),
+                    calendar.queued.to_string(),
+                    sanitize::text(&calendar.name).into_owned(),
+                ]);
             }
+
+            writeln!(f)?;
+            write!(f, "{columns}")?;
         }
 
         if self.parked.is_empty() {
             return Ok(());
         }
 
-        writeln!(f)?;
-        writeln!(f, "Parked, never applied:")?;
+        let mut columns = Columns::new(["ROW", "ACTION", "CALENDAR", "ERROR"]);
 
         for parked in &self.parked {
-            writeln!(
-                f,
-                "  ROW {} {} in {}: {}",
-                parked.row, parked.action, parked.calendar_id, parked.error
-            )?;
+            columns.push([
+                parked.row.to_string(),
+                sanitize::text(&parked.action).into_owned(),
+                sanitize::text(&parked.calendar_id).into_owned(),
+                sanitize::text(&parked.error).into_owned(),
+            ]);
         }
 
-        Ok(())
+        writeln!(f)?;
+        write!(f, "{columns}")?;
+        writeln!(f, "Parked by the store's owner, never applied")
     }
 }

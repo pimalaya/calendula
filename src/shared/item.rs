@@ -67,18 +67,27 @@ impl CalendarItem {
     }
 }
 
+/// One page of an item listing, and whether an item follows it.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CalendarItemPage {
+    /// The items of the page, in the order the backend lists them.
+    pub items: Vec<CalendarItem>,
+    /// Whether the listing holds an item past the page.
+    pub more: bool,
+}
+
 /// What narrows an item listing, and in which order.
 ///
-/// The kind is applied before the page, so a page of `event list` is a
+/// The kind is applied before the window, so a page of `event list` is a
 /// page of events: filtering after paginating would make it show the
 /// VEVENTs among the first 25 items of any kind, which is nothing at all
 /// on a calendar of to-dos.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CalendarItemQuery<'a> {
-    /// 1-indexed page, `None` being the first.
-    pub page: Option<u32>,
-    /// Items per page, `None` returning the whole window.
-    pub page_size: Option<u32>,
+    /// Matching items to pass over before the window starts.
+    pub skip: usize,
+    /// Matching items the window holds at most, `None` for every one.
+    pub take: Option<usize>,
     /// Day window the item's own dates are read against.
     pub range: Option<&'a CalendarTimeRange>,
     /// Component kind to keep, `None` keeping every kind, which is what
@@ -87,8 +96,8 @@ pub struct CalendarItemQuery<'a> {
     /// A `UID` the caller filters the projected events by, a hint only:
     /// a backend MAY leave out an item it can tell carries another one
     /// without reading it, and the caller still compares every event it
-    /// gets. Leaving items out would shift a page, so a backend honours
-    /// it only on a listing naming no page size.
+    /// gets. Leaving items out would shift a window, so a backend honours
+    /// it only on a listing taking every item.
     #[cfg_attr(not(feature = "pimdir"), allow(dead_code))]
     pub uid: Option<&'a str>,
 }

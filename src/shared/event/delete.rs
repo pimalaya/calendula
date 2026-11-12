@@ -82,15 +82,13 @@ fn resolve(client: &mut CalendarClient, calendar_id: &str, event_id: &str) -> Re
         return Ok(event_id.to_owned());
     }
 
-    let items = client.list_items(
-        calendar_id,
-        CalendarItemQuery {
-            kind: IcalFamily::Event.kind(),
-            ..Default::default()
-        },
-    )?;
+    let query = CalendarItemQuery {
+        kind: IcalFamily::Event.kind(),
+        ..Default::default()
+    };
+    let listed = client.list_items(calendar_id, None, None, query)?;
 
-    pick(&items, calendar_id, event_id)
+    pick(&listed.items, calendar_id, event_id)
 }
 
 /// The item among `items` whose id is `event_id`, else the one item

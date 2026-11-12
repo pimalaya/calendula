@@ -19,32 +19,28 @@ use io_webdav::{
     client::{WebdavClientStd, WebdavClientStdConnectOptions},
     rfc4918::WebdavAuth,
 };
-use pimalaya_config::{secret::SecretResolver, toml::TomlConfig};
+use pimalaya_config::secret::SecretResolver;
 use pimalaya_stream::{proxy::Proxy, tls::Tls};
 use secrecy::ExposeSecret;
 use url::Url;
 
 use crate::{
-    account::context::Account,
-    cli::load_config,
-    config::{CaldavAuthConfig, CaldavConfig},
+    cli::resolve_account,
+    config::{CaldavAuthConfig, CaldavConfig, default_caldav_alpn},
 };
 
 /// The DNS-over-TCP resolver used when the host exposes none.
 const DEFAULT_RESOLVER: &str = "tcp://1.1.1.1:53";
 
-/// A connected CalDAV client bundled with the merged runtime
-/// [`Account`], for the protocol-specific subcommands.
+/// A connected CalDAV client, for the protocol-specific subcommands.
 pub struct CaldavClient {
     inner: WebdavClientStd,
-    /// The merged account the commands read their rendering from.
-    pub account: Account,
 }
 
 impl CaldavClient {
     /// Wraps an already-connected client.
-    pub fn new(inner: WebdavClientStd, account: Account) -> Self {
-        Self { inner, account }
+    pub fn new(inner: WebdavClientStd) -> Self {
+        Self { inner }
     }
 }
 
@@ -136,10 +132,11 @@ fn resolve_server(domain: &str, tls: &Tls) -> Result<Url> {
 
 /// The TLS profile CalDAV connects with.
 ///
-/// WebDAV speaks HTTP/1.1 only, so the ALPN list pins it rather than
-/// letting a server negotiate HTTP/2.
+/// The account's `caldav.alpn` wins, else [`default_caldav_alpn`] pins the
+/// HTTP/1.1 io-http is the only client for.
 fn build_tls(config: &CaldavConfig) -> Tls {
-    config.tls.clone().into_tls(vec!["http/1.1".into()])
+    let alpn = config.alpn.clone().unwrap_or_else(default_caldav_alpn);
+    config.tls.clone().into_tls(alpn)
 }
 
 /// Resolves the configured credentials into the auth io-webdav sends.
@@ -167,20 +164,16 @@ pub fn build_caldav_client(
     config_paths: &[PathBuf],
     account_name: Option<&str>,
 ) -> Result<CaldavClient> {
-    let mut config = load_config(config_paths)?;
-    let (name, mut account_config) = config
-        .take_account(account_name)?
-        .ok_or_else(|| anyhow!("Cannot find account"))?;
+    let (_, name, mut account_config) = resolve_account(config_paths, account_name)?;
 
     let caldav_config = account_config
         .caldav
         .take()
         .ok_or_else(|| anyhow!("CalDAV configuration is missing for account `{name}`"))?;
 
-    let account = Account::from(config).merge(Account::from(account_config));
     let inner = connect(&caldav_config, &mut SecretResolver::new())?;
 
-    Ok(CaldavClient::new(inner, account))
+    Ok(CaldavClient::new(inner))
 }
 
 #[cfg(test)]

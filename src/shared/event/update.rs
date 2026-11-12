@@ -9,7 +9,7 @@ use core::fmt;
 use anyhow::{Result, bail};
 use clap::Parser;
 use jiff::Timestamp;
-use pimalaya_cli::printer::Printer;
+use pimalaya_cli::{printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -208,9 +208,11 @@ pub struct EventUpdatedOutput {
 
 impl fmt::Display for EventUpdatedOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let id = sanitize::text(&self.id);
+
         match self.queued {
-            true => writeln!(f, "Event `{}` update queued for the next sync", self.id),
-            false => writeln!(f, "Event `{}` successfully updated", self.id),
+            true => writeln!(f, "Event `{id}` update queued for the next sync"),
+            false => writeln!(f, "Event `{id}` successfully updated"),
         }
     }
 }
@@ -300,7 +302,7 @@ mod tests {
                 }),
                 ..Default::default()
             };
-            CalendarClient::new(Config::default(), account, Backend::Auto).unwrap()
+            CalendarClient::new(Config::default(), "a".into(), account, Backend::Auto).unwrap()
         }
 
         fn stored(dir: &tempfile::TempDir, id: &str) -> String {
@@ -408,8 +410,8 @@ mod tests {
             .unwrap();
             refused(create.execute(&mut Quiet, client(&dir)).unwrap_err());
 
-            let listed = client(&dir).list_items("cal", Default::default()).unwrap();
-            assert_eq!(listed.len(), 1);
+            let listed = client(&dir).list_items("cal", None, None, Default::default());
+            assert_eq!(listed.unwrap().items.len(), 1);
         }
     }
 
@@ -439,8 +441,9 @@ mod tests {
             drop(owner);
 
             let id = client(&dir)
-                .list_items("cal", Default::default())
+                .list_items("cal", None, None, Default::default())
                 .unwrap()
+                .items
                 .remove(0)
                 .id;
             (dir, id)
@@ -454,7 +457,7 @@ mod tests {
                 }),
                 ..Default::default()
             };
-            CalendarClient::new(Config::default(), account, Backend::Auto).unwrap()
+            CalendarClient::new(Config::default(), "a".into(), account, Backend::Auto).unwrap()
         }
 
         /// Declares every calendar capability for `caldav`, at `support`.

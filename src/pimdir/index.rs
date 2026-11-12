@@ -3,13 +3,10 @@
 //! The read-only query client of the store's search index (pimdir
 //! SEARCH), behind `pimdir search` and `pimdir count`.
 
-use std::{
-    fmt,
-    io::{IsTerminal, stdout},
-};
+use std::fmt;
 
 use anyhow::Result;
-use ariadne::{Color, Config, Label, Report, ReportKind, Source};
+use ariadne::{Config, Label, Report, ReportKind, Source};
 use io_pimdir::{
     client::{
         reader::PimdirItem,
@@ -201,10 +198,10 @@ fn refusal_line(err: &PimdirQueryError) -> String {
     line
 }
 
-/// A refusal drawn over the query with ariadne.
+/// A refusal drawn over the query with ariadne, without colour.
 fn refusal_report(query: &str, err: &PimdirQueryError) -> String {
     let name = "query";
-    let config = Config::default().with_color(stdout().is_terminal());
+    let config = Config::default().with_color(false);
     // NOTE: an empty span past the end is drawn on the last character.
     let end = err.end.max(err.start + 1);
 
@@ -212,11 +209,7 @@ fn refusal_report(query: &str, err: &PimdirQueryError) -> String {
         .with_config(config)
         .with_code(err.code.as_str())
         .with_message("Query refused")
-        .with_label(
-            Label::new((name, err.start..end))
-                .with_message(&err.message)
-                .with_color(Color::Red),
-        );
+        .with_label(Label::new((name, err.start..end)).with_message(&err.message));
     if !err.expected.is_empty() {
         report = report.with_note(format!("expected {}", err.expected.join(", ")));
     }

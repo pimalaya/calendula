@@ -49,7 +49,7 @@ use crate::{
     config::{MsgraphConfig, default_msgraph_alpn},
     shared::{
         calendar::{Calendar, CalendarDiff},
-        client::paginate,
+        client::window,
         item::{CalendarItem, CalendarItemQuery},
     },
 };
@@ -217,7 +217,7 @@ impl MsgraphBackend {
             }
         }
 
-        Ok(paginate(items, query.page, query.page_size))
+        Ok(window(items, query.skip, query.take))
     }
 
     /// Reads one event, with the exceptions of a series folded into it.

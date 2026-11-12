@@ -24,7 +24,7 @@ use crate::{
     config::CaldavConfig,
     shared::{
         calendar::{Calendar, CalendarDiff},
-        client::paginate,
+        client::window,
         item::{CalendarItem, CalendarItemQuery},
     },
 };
@@ -36,9 +36,13 @@ pub struct CaldavBackend {
 
 impl CaldavBackend {
     /// Connects and walks the discovery chain, caching the home-set.
-    pub fn new(config: CaldavConfig) -> Result<Self> {
+    ///
+    /// The credential is resolved through `resolver`, so an account
+    /// naming one credential command from several of its backends, or
+    /// reopening this one, spawns it once.
+    pub fn new(config: CaldavConfig, resolver: &mut SecretResolver) -> Result<Self> {
         Ok(Self {
-            client: connect(&config, &mut SecretResolver::new())?,
+            client: connect(&config, resolver)?,
         })
     }
 
@@ -117,7 +121,7 @@ impl CaldavBackend {
             .map(|entry| item_from(calendar_id, entry))
             .collect();
 
-        Ok(paginate(items, query.page, query.page_size))
+        Ok(window(items, query.skip, query.take))
     }
 
     /// Reads one item's raw iCalendar bytes plus its entity tag.

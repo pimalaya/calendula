@@ -1,17 +1,14 @@
 //! # Item list
 //!
 //! The `item list` command, printing every iCalendar object of a calendar
-//! as a table, whatever its component kind.
+//! one line each, whatever its component kind.
 
 use std::fmt;
 
 use anyhow::Result;
 use clap::Parser;
 use humansize::{BINARY, format_size};
-use pimalaya_cli::{
-    printer::Printer,
-    table::{Cell, Color, ContentArrangement, Row, Table, TableStyle},
-};
+use pimalaya_cli::{columns::Columns, printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -19,6 +16,7 @@ use crate::shared::{
     arg::CalendarIdArg,
     client::CalendarClient,
     item::{CalendarItem, CalendarItemQuery},
+    listing::Listing,
 };
 
 /// List the raw iCalendar items of a calendar.
@@ -26,7 +24,13 @@ use crate::shared::{
 /// Every component kind is listed, VEVENT included; use `event list` for the
 /// events-only view with its summary and time columns.
 ///
-/// JSON output: `{"items": [{"id", "calendarId", "etag", "contents"}]}`.
+/// Each line shows the entity tag, the size and the id of an item, between
+/// a header naming the account and the calendar and a footer saying where
+/// the page stands.
+///
+/// JSON output: `{"items": [{"id", "calendarId", "etag", "contents"}],
+/// "nextPage"}`, `nextPage` being the page number following this one, or
+/// `null` once the listing is complete.
 #[derive(Debug, Parser)]
 pub struct ItemListCommand {
     #[command(flatten)]
@@ -36,13 +40,9 @@ pub struct ItemListCommand {
     #[arg(short, long, value_name = "N")]
     pub page: Option<u32>,
 
-    /// Number of items per page.
+    /// Number of items per page, zero listing every one.
     #[arg(short = 's', long, value_name = "N")]
     pub page_size: Option<u32>,
-
-    /// Maximum width of the rendered table, in terminal columns.
-    #[arg(long = "max-width", short = 'w', value_name = "COLUMNS")]
-    pub max_width: Option<u16>,
 }
 
 impl ItemListCommand {
@@ -50,90 +50,116 @@ impl ItemListCommand {
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         let page_size = self
             .page_size
-            .or(Some(client.account.items_list_page_size()));
-        let items = client.list_items(
-            &calendar_id,
-            CalendarItemQuery {
-                page: self.page,
-                page_size,
-                ..Default::default()
-            },
-        )?;
+            .or(Some(client.account.items_list_page_size()))
+            .filter(|size| *size > 0);
+        let page = page_size.map(|_| self.page.unwrap_or(1).max(1));
+
+        let query = CalendarItemQuery::default();
+        let listed = client.list_items(&calendar_id, page, page_size, query)?;
+
+        let nouns = ["item", "items"];
+        let mut listing = Listing::new(&client.name, client.backend_name(), nouns);
+        listing.push("Calendar", &calendar_id);
+        listing.page = page;
+        listing.page_size = page_size;
+        listing.count = listed.items.len();
+
+        let next_page = match page {
+            Some(page) if listed.more => Some(page + 1),
+            _ => None,
+        };
 
         printer.out(ItemListOutput {
-            style: client.account.table_style(),
-            arrangement: client.account.table_arrangement(),
-            max_width: self.max_width,
-            colors: ItemColors {
-                id: client.account.items_list_table_id_color(),
-                etag: client.account.items_list_table_etag_color(),
-                size: client.account.items_list_table_size_color(),
-            },
-            items,
+            listing,
+            items: listed.items,
+            next_page,
         })
     }
 }
 
-/// The per-column colors an item listing renders with.
-#[derive(Clone, Copy, Debug)]
-struct ItemColors {
-    id: Color,
-    etag: Color,
-    size: Color,
-}
-
-/// The rendered item listing.
+/// The items of one page and the number of the next.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemListOutput {
+    /// The header and footer the items print between.
     #[serde(skip)]
-    pub style: TableStyle,
-    #[serde(skip)]
-    pub arrangement: ContentArrangement,
-    #[serde(skip)]
-    pub max_width: Option<u16>,
-    #[serde(skip)]
-    colors: ItemColors,
+    pub listing: Listing,
+    /// The items of the page, in the order the backend listed them.
     pub items: Vec<CalendarItem>,
+    /// The page following this one, `null` once the listing is complete.
+    pub next_page: Option<u32>,
 }
 
 impl fmt::Display for ItemListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut table = Table::new();
+        let mut columns = Columns::default();
 
-        table
-            .load_style(self.style)
-            .set_content_arrangement(self.arrangement.clone())
-            .set_header(Row::from(vec![
-                Cell::new("ID"),
-                Cell::new("ETAG"),
-                Cell::new("SIZE"),
-            ]))
-            .add_rows(self.items.iter().map(|item| {
-                let mut row = Row::new();
-                row.max_height(1);
-                row.add_cell(Cell::new(&item.id).fg(self.colors.id));
-                row.add_cell(Cell::new(item.etag.as_deref().unwrap_or("")).fg(self.colors.etag));
-                row.add_cell(Cell::new(size_of(item)).fg(self.colors.size));
-                row
-            }));
+        for item in &self.items {
+            let etag = item.etag.as_deref().unwrap_or_default();
 
-        if let Some(width) = self.max_width {
-            table.set_width(width);
+            columns.push([
+                sanitize::text(etag).into_owned(),
+                size_of(item),
+                sanitize::text(&item.id).into_owned(),
+            ]);
         }
 
-        writeln!(f)?;
-        writeln!(f, "{table}")
+        self.listing.write(f, &columns.to_string(), self.next_page)
     }
 }
 
-/// The size column: the item's octets, or a dash when it has no body.
+/// The size of an item's octets, empty when it has no body.
 ///
 /// A backend may list an item whose body it does not hold yet.
 fn size_of(item: &CalendarItem) -> String {
     if item.contents.is_empty() {
-        return String::from("-");
+        return String::new();
     }
 
     format_size(item.contents.len() as u64, BINARY)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::shared::{
+        item::{CalendarItem, list::ItemListOutput},
+        listing::Listing,
+    };
+
+    #[test]
+    fn items_print_one_line_each_the_id_last() {
+        let mut listing = Listing::new("perso", "caldav", ["item", "items"]);
+        listing.push("Calendar", "personal");
+        listing.page = Some(1);
+        listing.page_size = Some(25);
+        listing.count = 2;
+
+        let output = ItemListOutput {
+            listing,
+            items: vec![
+                CalendarItem {
+                    id: "standup.ics".into(),
+                    etag: Some("\"1a2b\"".into()),
+                    contents: vec![b'x'; 2048],
+                    ..Default::default()
+                },
+                CalendarItem {
+                    id: "pending.ics".into(),
+                    ..Default::default()
+                },
+            ],
+            next_page: None,
+        };
+
+        let expected = "\
+Account:    perso (caldav)
+Calendar:   personal
+
+\"1a2b\"  2 KiB  standup.ics
+-       -      pending.ics
+
+Page:       1, items 1 to 2, the last
+";
+        assert_eq!(output.to_string(), expected);
+    }
 }

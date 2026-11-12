@@ -1,14 +1,15 @@
 # ================================================================================
 # `calendula` configuration file.
 #
-# Loaded from the first valid path among:
+# Loaded from every existing path among the following, each one deep-merged on
+# top of the ones before, so the rc file overrides the others:
 #   - $XDG_CONFIG_HOME/calendula/config.toml
 #   - $HOME/.config/calendula/config.toml
 #   - $HOME/.calendularc
 #
-# Override with `calendula -c <PATH>` or `CALENDULA_CONFIG=<PATH>`. Multiple paths
-# can be passed at once, separated by `:`; the first one is the base and the
-# rest are deep-merged on top of it.
+# Override with `calendula -c <PATH>`, one path per flag. Repeat it to merge
+# several files, `-c public.toml -c private.toml`: the first one is the base and
+# the next ones are deep-merged on top of it. No environment variable is read.
 #
 # calendula never writes this file: copy it to one of the paths above, keep the
 # blocks of the backends your account uses, and fill them in. A secret is best
@@ -19,24 +20,16 @@
 # Global config
 # --------------------------------------------------------------------------------
 
-# https://docs.rs/comfy-table/latest/comfy_table/presets/index.html
-#table.preset = "││──╞═╪╡┆    ┬┴┌┐└┘"
-
-# https://docs.rs/comfy-table/latest/comfy_table/enum.ContentArrangement.html
-#table.arrangement = "dynamic"
-#table.arrangement = "dynamic-full-width"
-#table.arrangement = "disabled"
-
 # Calendar id used by `event` and `item` commands (and `calendar update`)
 # when their `-k/--calendar` flag is omitted.
 #calendar.default = "personal"
 
-# Default page size for `events list`. The `-s/--page-size` CLI flag wins
+# Default page size for `event list`. The `-s/--page-size` CLI flag wins
 # when passed; otherwise the merged account/global value wins; otherwise
 # the hard fallback is 25.
 #event.list.page-size = 50
 
-# Default page size for `items list`, resolved the same way.
+# Default page size for `item list`, resolved the same way.
 #item.list.page-size = 50
 
 # Command an item is edited through, spawned on the path of a temporary
@@ -47,40 +40,6 @@
 # `composer = "tcal edit"` runs `tcal edit <PATH>`.
 #item.composer = "vim"
 #item.composer = ["tcal", "edit"]
-
-# --------------------------------------------------------------------------------
-# Table rendering: calendars list
-# --------------------------------------------------------------------------------
-
-#calendar.list.table.id-color = "red"
-#calendar.list.table.name-color = "green"
-#calendar.list.table.description-color = "reset"
-#calendar.list.table.color-color = "reset"
-
-# --------------------------------------------------------------------------------
-# Table rendering: events list
-# --------------------------------------------------------------------------------
-
-#event.list.table.id-color = "red"
-#event.list.table.summary-color = "green"
-#event.list.table.start-color = "dark-yellow"
-#event.list.table.end-color = "dark-yellow"
-
-# --------------------------------------------------------------------------------
-# Table rendering: items list
-# --------------------------------------------------------------------------------
-
-#item.list.table.id-color = "red"
-#item.list.table.etag-color = "reset"
-#item.list.table.size-color = "reset"
-
-# --------------------------------------------------------------------------------
-# Table rendering: account list
-# --------------------------------------------------------------------------------
-
-#account.list.table.name-color = "green"
-#account.list.table.backends-color = "blue"
-#account.list.table.default-color = "reset"
 
 # --------------------------------------------------------------------------------
 # Accounts
@@ -170,6 +129,10 @@ caldav.auth.basic.password.command = "pass show example"
 # Bearer authentication (RFC 6750), mainly for OAuth 2.0.
 #caldav.auth.bearer.token.command = "ortie token show"
 #caldav.auth.bearer.token.raw = "oauth2-token"
+
+# ALPN identifiers offered during the TLS handshake. Unset offers `http/1.1`,
+# the only version io-http speaks; an empty list skips ALPN negotiation.
+#caldav.alpn = ["http/1.1"]
 
 # TLS configuration. The certificate path is shell-expanded, so `~` and
 # environment variables both work.

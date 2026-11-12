@@ -24,7 +24,6 @@ use std::convert::Infallible;
 
 use anyhow::{Result, bail};
 use log::debug;
-#[cfg(any(feature = "gcal", feature = "msgraph"))]
 use pimalaya_config::secret::SecretResolver;
 
 use crate::{
@@ -35,7 +34,7 @@ use crate::{
     shared::{
         arg::SendUpdates,
         calendar::{Calendar, CalendarDiff},
-        item::{CalendarItem, CalendarItemQuery},
+        item::{CalendarItem, CalendarItemPage, CalendarItemQuery},
     },
 };
 
@@ -51,6 +50,11 @@ pub struct CalendarClient {
     config: BackendConfig,
     /// The open backend, `None` until something needs it.
     inner: Option<BackendClient>,
+    /// The account's credentials resolved so far, so a reopened backend
+    /// runs no secret command twice.
+    resolver: SecretResolver,
+    /// The name of the account the command runs against.
+    pub name: String,
     /// The account the command runs against, config already merged.
     pub account: Account,
 }
@@ -113,6 +117,7 @@ impl CalendarClient {
     /// needs the network opens it.
     pub fn new(
         config: Config,
+        name: String,
         #[allow(unused_mut)] mut account_config: AccountConfig,
         backend: Backend,
     ) -> Result<Self> {
@@ -168,6 +173,8 @@ impl CalendarClient {
         Ok(Self {
             config: config_,
             inner: None,
+            resolver: SecretResolver::new(),
+            name,
             account,
         })
     }
@@ -182,9 +189,9 @@ impl CalendarClient {
         account_name: Option<&str>,
         backend: Backend,
     ) -> Result<Self> {
-        let (config, account_config) = resolve_account(config_paths, account_name)?;
+        let (config, name, account_config) = resolve_account(config_paths, account_name)?;
 
-        Self::new(config, account_config, backend)
+        Self::new(config, name, account_config, backend)
     }
 
     /// Drops the connection, so the next call opens a fresh one.
@@ -252,7 +259,7 @@ impl CalendarClient {
     fn open(&mut self) -> Result<&mut BackendClient> {
         if self.inner.is_none() {
             debug!("opening the backend connection");
-            self.inner = Some(self.config.open()?);
+            self.inner = Some(self.config.open(&mut self.resolver)?);
         }
 
         Ok(self.inner.as_mut().expect("just opened"))
@@ -364,13 +371,44 @@ impl CalendarClient {
         }
     }
 
-    /// Lists the items of `calendar_id`, narrowed by `query`.
+    /// Lists one page of the items of `calendar_id` narrowed by `query`,
+    /// saying whether an item follows it.
     ///
-    /// A backend SHALL narrow by kind and by range before it paginates, so
-    /// a page of a component family holds that family. A server-backed
+    /// The page is the 1-indexed `page`, the first by default, of
+    /// `page_size` items, every item when the size is `None` or zero.
+    pub fn list_items(
+        &mut self,
+        calendar_id: &str,
+        page: Option<u32>,
+        page_size: Option<u32>,
+        mut query: CalendarItemQuery<'_>,
+    ) -> Result<CalendarItemPage> {
+        let page_size = page_size.filter(|size| *size > 0).map(|size| size as usize);
+
+        if let Some(size) = page_size {
+            let page = page.unwrap_or(1).max(1) as usize;
+            query.skip = (page - 1).saturating_mul(size);
+            // NOTE: one item past the page tells whether another follows.
+            query.take = Some(size.saturating_add(1));
+        }
+
+        let mut items = self.list_window(calendar_id, query)?;
+        let more = page_size.is_some_and(|size| items.len() > size);
+
+        if let Some(size) = page_size {
+            items.truncate(size);
+        }
+
+        Ok(CalendarItemPage { items, more })
+    }
+
+    /// Lists the items of `calendar_id` narrowed by `query`.
+    ///
+    /// A backend SHALL narrow by kind and by range before it windows, so a
+    /// page of a component family holds that family. A server-backed
     /// backend pushes both down where its protocol defines such a filter;
     /// the others parse and filter after the fact.
-    pub fn list_items(
+    fn list_window(
         &mut self,
         calendar_id: &str,
         query: CalendarItemQuery<'_>,
@@ -550,8 +588,13 @@ impl CalendarClient {
 }
 
 impl BackendConfig {
-    /// Opens the backend this configuration describes.
-    fn open(&self) -> Result<BackendClient> {
+    /// Opens the backend this configuration describes, its credentials
+    /// resolved through `resolver`.
+    #[cfg_attr(
+        not(any(feature = "caldav", feature = "gcal", feature = "msgraph")),
+        allow(unused_variables)
+    )]
+    fn open(&self, resolver: &mut SecretResolver) -> Result<BackendClient> {
         match self {
             #[cfg(not(any(
                 feature = "vdir",
@@ -575,72 +618,117 @@ impl BackendConfig {
             #[cfg(feature = "caldav")]
             Self::Caldav(config) => {
                 use crate::caldav::backend::CaldavBackend;
-                let client = CaldavBackend::new(config.as_ref().clone())?;
+                let client = CaldavBackend::new(config.as_ref().clone(), resolver)?;
                 Ok(BackendClient::Caldav(Box::new(client)))
             }
             #[cfg(feature = "gcal")]
             Self::Gcal(config) => {
                 use crate::gcal::backend::GcalBackend;
-                let client = GcalBackend::new(config.as_ref().clone(), &mut SecretResolver::new())?;
+                let client = GcalBackend::new(config.as_ref().clone(), resolver)?;
                 Ok(BackendClient::Gcal(Box::new(client)))
             }
             #[cfg(feature = "msgraph")]
             Self::Msgraph(config) => {
                 use crate::msgraph::backend::MsgraphBackend;
-                let client =
-                    MsgraphBackend::new(config.as_ref().clone(), &mut SecretResolver::new())?;
+                let client = MsgraphBackend::new(config.as_ref().clone(), resolver)?;
                 Ok(BackendClient::Msgraph(Box::new(client)))
             }
         }
     }
 }
 
-/// 1-indexed pagination over an in-memory list.
-///
-/// `page_size = None` returns the whole slice, while a size of zero or a page
-/// past the end returns nothing.
+/// Cuts the window `skip` and `take` name out of a whole list.
 #[cfg(any(
     feature = "vdir",
     feature = "caldav",
     feature = "gcal",
     feature = "msgraph",
-    test
+    all(test, feature = "pimdir")
 ))]
-pub fn paginate<T>(items: Vec<T>, page: Option<u32>, page_size: Option<u32>) -> Vec<T> {
-    let Some(size) = page_size else {
-        return items;
-    };
-
-    if size == 0 {
-        return Vec::new();
-    }
-
-    let page = page.unwrap_or(1).max(1);
-    let skip = ((page - 1) as usize).saturating_mul(size as usize);
-
-    if skip >= items.len() {
-        return Vec::new();
-    }
-
-    items.into_iter().skip(skip).take(size as usize).collect()
+pub fn window<T>(items: Vec<T>, skip: usize, take: Option<usize>) -> Vec<T> {
+    let items = items.into_iter().skip(skip);
+    items.take(take.unwrap_or(usize::MAX)).collect()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "vdir"))]
 mod tests {
-    use super::*;
+    use std::fs;
+
+    use crate::{
+        backend::Backend,
+        config::{AccountConfig, Config, VdirConfig},
+        shared::{client::CalendarClient, item::CalendarItemQuery},
+    };
+
+    /// The ids page `page` of `size` holds among five items, comma-joined,
+    /// and whether an item follows it.
+    fn page(page: Option<u32>, size: Option<u32>) -> (String, bool) {
+        let dir = tempfile::tempdir().unwrap();
+        let cal = dir.path().join("cal");
+        fs::create_dir(&cal).unwrap();
+
+        for id in ["1", "2", "3", "4", "5"] {
+            fs::write(cal.join(format!("{id}.ics")), "BEGIN:VCALENDAR\r\n").unwrap();
+        }
+
+        let account = AccountConfig {
+            vdir: Some(VdirConfig {
+                home_dir: dir.path().to_path_buf(),
+            }),
+            ..Default::default()
+        };
+        let mut client =
+            CalendarClient::new(Config::default(), "a".into(), account, Backend::Auto).unwrap();
+
+        let query = CalendarItemQuery::default();
+        let page = client.list_items("cal", page, size, query).unwrap();
+        let ids: Vec<String> = page.items.into_iter().map(|item| item.id).collect();
+        (ids.join(","), page.more)
+    }
 
     #[test]
-    fn pagination_windows_the_list_and_clamps_past_the_end() {
-        let items = || vec![1, 2, 3, 4, 5];
-
-        assert_eq!(paginate(items(), None, None), vec![1, 2, 3, 4, 5]);
-        assert_eq!(paginate(items(), Some(1), Some(2)), vec![1, 2]);
-        assert_eq!(paginate(items(), Some(3), Some(2)), vec![5]);
-        assert!(paginate(items(), Some(9), Some(2)).is_empty());
-        assert!(paginate(items(), None, Some(0)).is_empty());
+    fn a_page_says_whether_an_item_follows_it() {
+        assert_eq!(page(None, None), ("1,2,3,4,5".into(), false));
+        assert_eq!(page(Some(1), Some(2)), ("1,2".into(), true));
+        assert_eq!(page(Some(2), Some(2)), ("3,4".into(), true));
+        assert_eq!(page(Some(3), Some(2)), ("5".into(), false));
+        assert_eq!(page(Some(1), Some(5)), ("1,2,3,4,5".into(), false));
+        assert_eq!(page(Some(9), Some(2)), ("".into(), false));
+        assert_eq!(page(None, Some(0)), ("1,2,3,4,5".into(), false));
 
         // NOTE: a page of zero is clamped to the first page rather than
         // underflowing the skip.
-        assert_eq!(paginate(items(), Some(0), Some(2)), vec![1, 2]);
+        assert_eq!(page(Some(0), Some(2)), ("1,2".into(), true));
+    }
+}
+
+#[cfg(all(test, unix, feature = "caldav"))]
+mod caldav_tests {
+    use std::fs;
+
+    use crate::{backend::Backend, config::Config, shared::client::CalendarClient};
+
+    /// A backend opened twice, the first open failing past its credential,
+    /// resolves that credential once: a reopened backend runs no secret
+    /// command again.
+    #[test]
+    fn a_reopened_backend_runs_its_secret_command_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let runs = dir.path().join("runs");
+        let command = format!("echo run >> '{}'; echo secret", runs.display());
+
+        // NOTE: port 1 on the loopback refuses the connection at once.
+        let toml = format!(
+            "[accounts.a]\ncaldav.home = \"http://127.0.0.1:1/\"\n\
+             caldav.auth.basic.username = \"a\"\n\
+             caldav.auth.basic.password.command = {command:?}\n"
+        );
+        let mut config: Config = toml::from_str(&toml).unwrap();
+        let account = config.accounts.remove("a").unwrap();
+        let mut client = CalendarClient::new(config, "a".into(), account, Backend::Auto).unwrap();
+
+        assert!(client.list_calendars().is_err());
+        assert!(client.list_calendars().is_err());
+        assert_eq!(fs::read_to_string(&runs).unwrap(), "run\n");
     }
 }

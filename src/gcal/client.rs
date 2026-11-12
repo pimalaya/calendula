@@ -14,27 +14,33 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use io_gcal::v3::client::{GcalClientStd, GcalClientStdConnectOptions};
-use pimalaya_config::{secret::SecretResolver, toml::TomlConfig};
+use pimalaya_config::secret::SecretResolver;
 use pimalaya_stream::tls::Tls;
 use secrecy::ExposeSecret;
 
 use crate::{
     account::context::Account,
-    cli::load_config,
+    cli::resolve_account,
     config::{GcalConfig, default_gcal_alpn},
 };
 
 /// A connected client bundled with the merged runtime [`Account`].
 pub struct GcalClient {
     inner: GcalClientStd,
+    /// The name of the account the client runs for.
+    pub name: String,
     /// The account the protocol-specific subcommands take defaults from.
     pub account: Account,
 }
 
 impl GcalClient {
     /// Wraps an already-connected client.
-    pub fn new(inner: GcalClientStd, account: Account) -> Self {
-        Self { inner, account }
+    pub fn new(inner: GcalClientStd, name: String, account: Account) -> Self {
+        Self {
+            inner,
+            name,
+            account,
+        }
     }
 }
 
@@ -59,10 +65,7 @@ pub fn build_gcal_client(
     config_paths: &[PathBuf],
     account_name: Option<&str>,
 ) -> Result<GcalClient> {
-    let mut config = load_config(config_paths)?;
-    let (name, mut account_config) = config
-        .take_account(account_name)?
-        .ok_or_else(|| anyhow!("Cannot find account"))?;
+    let (config, name, mut account_config) = resolve_account(config_paths, account_name)?;
 
     let gcal_config = account_config
         .gcal
@@ -72,7 +75,7 @@ pub fn build_gcal_client(
     let account = Account::from(config).merge(Account::from(account_config));
     let inner = connect(&gcal_config, &mut SecretResolver::new())?;
 
-    Ok(GcalClient::new(inner, account))
+    Ok(GcalClient::new(inner, name, account))
 }
 
 /// Opens a connected Google Calendar client, resolving the bearer token

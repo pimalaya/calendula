@@ -39,7 +39,7 @@ use crate::{
     shared::{
         arg::SendUpdates,
         calendar::{Calendar, CalendarDiff},
-        client::paginate,
+        client::window,
         item::{CalendarItem, CalendarItemQuery},
     },
 };
@@ -156,8 +156,9 @@ impl GcalBackend {
     /// Lists the events of a calendar, projected onto iCalendar documents.
     ///
     /// A range narrows the query server-side, and the pagination stops as
-    /// soon as the requested window is covered, so a page the caller never
-    /// reaches is never fetched.
+    /// soon as the requested window is covered, counted in the resources
+    /// the events fold into, so a page the caller never reaches is never
+    /// fetched.
     pub fn list_items(
         &mut self,
         calendar_id: &str,
@@ -176,7 +177,7 @@ impl GcalBackend {
         let range = query.range;
         let time_min = range.and_then(|range| range.start.as_deref()).map(rfc3339);
         let time_max = range.and_then(|range| range.end.as_deref()).map(rfc3339);
-        let wanted = window(query.page, query.page_size);
+        let wanted = query.take.map(|take| query.skip.saturating_add(take));
 
         let mut events = Vec::new();
         let mut page_token: Option<String> = None;
@@ -193,7 +194,7 @@ impl GcalBackend {
 
             events.extend(current.items);
 
-            if wanted.is_some_and(|wanted| events.len() >= wanted) {
+            if wanted.is_some_and(|wanted| item_count(&events) >= wanted) {
                 break;
             }
 
@@ -203,11 +204,8 @@ impl GcalBackend {
             }
         }
 
-        Ok(paginate(
-            resources(calendar_id, &events),
-            query.page,
-            query.page_size,
-        ))
+        let items = resources(calendar_id, &events);
+        Ok(window(items, query.skip, query.take))
     }
 
     /// Reads one event, with the exceptions of a series folded into it.
@@ -454,15 +452,6 @@ fn invites(event: &GcalEvent, calendar_id: &str) -> bool {
     }
 }
 
-/// How many items a listing has to hold before the requested window can be
-/// cut out of it, or `None` when the caller asked for everything.
-fn window(page: Option<u32>, page_size: Option<u32>) -> Option<usize> {
-    let size = page_size?;
-    let page = page.unwrap_or(1).max(1);
-
-    Some((page as usize).saturating_mul(size as usize))
-}
-
 /// Projects a calendar list entry onto the shared [`Calendar`], preferring
 /// the title this user gave the calendar over its own.
 fn calendar_from(entry: GcalCalendarListEntry) -> Calendar {
@@ -486,22 +475,11 @@ fn calendar_from(entry: GcalCalendarListEntry) -> Calendar {
 /// sharing a UID in one resource. One whose master this batch did not
 /// return still files alone, since dropping it would lose a listed item.
 fn resources(calendar_id: &str, events: &[GcalEvent]) -> Vec<CalendarItem> {
-    let masters: Vec<&str> = events
-        .iter()
-        .filter(|event| event.recurring_event_id.is_none())
-        .filter_map(|event| event.id.as_deref())
-        .collect();
-
-    let folded = |event: &GcalEvent| {
-        event
-            .recurring_event_id
-            .as_deref()
-            .is_some_and(|master| masters.contains(&master))
-    };
+    let masters = masters(events);
 
     events
         .iter()
-        .filter(|event| !folded(event))
+        .filter(|event| !folds(event, &masters))
         .map(|event| {
             let exceptions: Vec<&GcalEvent> = events
                 .iter()
@@ -514,6 +492,32 @@ fn resources(calendar_id: &str, events: &[GcalEvent]) -> Vec<CalendarItem> {
             item_from(calendar_id, event, &exceptions)
         })
         .collect()
+}
+
+/// How many resources a batch of Google events folds into, counted
+/// without projecting them as [`resources`] does.
+fn item_count(events: &[GcalEvent]) -> usize {
+    let masters = masters(events);
+    let items = events.iter().filter(|event| !folds(event, &masters));
+    items.count()
+}
+
+/// The ids of the series masters a batch of Google events holds.
+fn masters(events: &[GcalEvent]) -> Vec<&str> {
+    events
+        .iter()
+        .filter(|event| event.recurring_event_id.is_none())
+        .filter_map(|event| event.id.as_deref())
+        .collect()
+}
+
+/// Whether `event` is an exception of one of `masters`, folded into that
+/// series' resource rather than filed alone.
+fn folds(event: &GcalEvent, masters: &[&str]) -> bool {
+    event
+        .recurring_event_id
+        .as_deref()
+        .is_some_and(|master| masters.contains(&master))
 }
 
 /// Projects an event and the exceptions of its series onto the shared
@@ -583,15 +587,24 @@ mod tests {
         assert_eq!(events[0].end, "20260814T100000Z");
     }
 
+    /// An exception whose master the batch holds folds into it, one whose
+    /// master it lacks counts alone.
     #[test]
-    fn the_window_covers_every_page_up_to_the_requested_one() {
-        assert_eq!(window(None, None), None);
-        assert_eq!(window(None, Some(25)), Some(25));
-        assert_eq!(window(Some(3), Some(25)), Some(75));
+    fn exceptions_count_with_their_master() {
+        let event = |id: &str, master: Option<&str>| GcalEvent {
+            id: Some(id.to_owned()),
+            recurring_event_id: master.map(str::to_owned),
+            ..Default::default()
+        };
+        let events = [
+            event("a", None),
+            event("a_1", Some("a")),
+            event("a_2", Some("a")),
+            event("b_1", Some("b")),
+        ];
 
-        // NOTE: a page of zero clamps to the first page, as the shared
-        // pagination clamps it.
-        assert_eq!(window(Some(0), Some(25)), Some(25));
+        assert_eq!(item_count(&events), 2);
+        assert_eq!(resources("cal", &events).len(), 2);
     }
 
     /// An event organized by `organizer`, inviting `attendees`, carrying
