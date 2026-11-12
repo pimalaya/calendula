@@ -17,7 +17,7 @@ change: the-family-standards
 - [x] the-next-page-is-a-token (cross-check: `nextPage` a string resumed through `--page-token`, as cardamum and Himalaya)
 - [x] account-check-reports-its-failure (cross-check: a failed backend exits 2 with the report, as cardamum and Himalaya)
 - [x] every-feature-set-builds-clean
-- [ ] live-provider-tests
+- [x] live-provider-tests (Microsoft credentialed failing on Graph 502/504 on 2026-11-12, see its log)
 - [ ] capability-shared-api
 - [ ] the-shared-repl-and-mcp
 - [ ] release-polish
