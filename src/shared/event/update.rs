@@ -81,7 +81,7 @@ pub struct EventUpdateCommand {
 }
 
 impl EventUpdateCommand {
-    pub fn execute(self, printer: &mut impl Printer, client: CalendarClient) -> Result<()> {
+    pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
         self.execute_at(printer, client, Timestamp::now)
     }
 
@@ -94,7 +94,7 @@ impl EventUpdateCommand {
     pub fn execute_at(
         mut self,
         printer: &mut impl Printer,
-        mut client: CalendarClient,
+        client: &mut CalendarClient,
         now: impl Fn() -> Timestamp,
     ) -> Result<()> {
         let mut capabilities = vec![Capability::ItemUpdate];
@@ -289,9 +289,9 @@ mod tests {
         "END:VCALENDAR\r\n",
     );
 
-    fn update(client: CalendarClient, args: &[&str]) -> Result<()> {
+    fn update(mut client: CalendarClient, args: &[&str]) -> Result<()> {
         let command = EventUpdateCommand::try_parse_from([&["update"], args].concat())?;
-        command.execute_at(&mut Quiet, client, at)
+        command.execute_at(&mut Quiet, &mut client, at)
     }
 
     #[cfg(feature = "vdir")]
@@ -408,7 +408,7 @@ mod tests {
                 &id,
             ])
             .unwrap();
-            refused(delete.execute(&mut Quiet, client(&dir)).unwrap_err());
+            refused(delete.execute(&mut Quiet, &mut client(&dir)).unwrap_err());
 
             assert_eq!(stored(&dir, &id), EVENT);
 
@@ -422,7 +422,7 @@ mod tests {
                 "all",
             ])
             .unwrap();
-            refused(create.execute(&mut Quiet, client(&dir)).unwrap_err());
+            refused(create.execute(&mut Quiet, &mut client(&dir)).unwrap_err());
 
             let listed = client(&dir).list_items("cal", None, None, Default::default());
             assert_eq!(listed.unwrap().items.len(), 1);
@@ -550,11 +550,11 @@ mod tests {
                 &id,
             ])
             .unwrap();
-            refused(delete.execute(&mut Quiet, client(&dir)).unwrap_err());
+            refused(delete.execute(&mut Quiet, &mut client(&dir)).unwrap_err());
 
             let create =
                 EventCreateCommand::try_parse_from([&["create"][..], &args[..]].concat()).unwrap();
-            refused(create.execute(&mut Quiet, client(&dir)).unwrap_err());
+            refused(create.execute(&mut Quiet, &mut client(&dir)).unwrap_err());
 
             let producer = io_pimdir::client::producer::PimdirProducer::open(dir.path(), "t");
             assert!(producer.unwrap().pending_actions("cal").unwrap().is_empty());

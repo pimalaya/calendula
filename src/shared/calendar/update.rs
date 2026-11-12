@@ -42,7 +42,7 @@ pub struct CalendarUpdateCommand {
 }
 
 impl CalendarUpdateCommand {
-    pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+    pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
         let mut capabilities = Vec::new();
         if self.name.is_some() {
             capabilities.push(Capability::CalendarRename);

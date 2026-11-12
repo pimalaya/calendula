@@ -47,7 +47,7 @@ pub struct ItemCreateCommand {
 }
 
 impl ItemCreateCommand {
-    pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+    pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
         client.require(&[Capability::ItemAdd])?;
 
         if self.ical.is_none() && !self.composer.interactive {

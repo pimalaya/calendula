@@ -53,7 +53,7 @@ pub struct ItemListCommand {
 }
 
 impl ItemListCommand {
-    pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+    pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
         client.require(&[Capability::ItemList])?;
 
         let page = match &self.page_token.token {

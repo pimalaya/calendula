@@ -24,8 +24,9 @@ use ical::{
     value::{IcalValue, datetime::IcalDateTime, text::IcalText},
     version::IcalVersion,
 };
+use pimalaya_cli::session::check_stdin;
 
-use crate::shared::uuid::uuid_v4;
+use crate::{error::ErrorCode, mcp::paths_closed, shared::uuid::uuid_v4};
 
 /// `PRODID` a minted item is stamped with (RFC 5545 3.7.3).
 const PRODID: &str = "-//Pimalaya//calendula//EN";
@@ -64,7 +65,8 @@ impl IcalFamily {
 /// Resolves an iCalendar source into raw bytes.
 ///
 /// `-` reads stdin and an existing path is read from disk, otherwise the
-/// value is taken as literal iCalendar contents.
+/// value is taken as literal iCalendar contents. Inside a session stdin is
+/// refused, and inside an MCP server a path is no way in.
 ///
 /// A source carrying nothing but whitespace is refused rather than passed
 /// on: handing a backend an empty body is never what was meant, and an
@@ -72,6 +74,8 @@ impl IcalFamily {
 /// here.
 pub fn read_source(source: &str) -> Result<Vec<u8>> {
     if source == "-" {
+        check_stdin(ErrorCode::StdinTaken)?;
+
         let mut buf = Vec::new();
         stdin()
             .read_to_end(&mut buf)
@@ -82,7 +86,7 @@ pub fn read_source(source: &str) -> Result<Vec<u8>> {
 
     let path = PathBuf::from(source);
 
-    if path.is_file() {
+    if path.is_file() && !paths_closed() {
         let contents = fs::read(&path)
             .with_context(|| format!("Read iCalendar from `{}` error", path.display()))?;
 
@@ -201,6 +205,26 @@ pub fn holds_kind(contents: &[u8], kind: IcalComponentKind) -> bool {
         .any(|component| component.name.eq_ignore_ascii_case(&kind))
 }
 
+/// Whether an item names an attendee (`ATTENDEE`) in any component, an
+/// alarm's included; bytes that do not parse answer yes.
+pub fn invites(contents: &[u8]) -> bool {
+    let Ok(cst) = IcalCst::parse(contents) else {
+        return true;
+    };
+
+    cst.decode().components.iter().any(names_attendee)
+}
+
+/// Whether `component`, or a component it nests, names an attendee.
+fn names_attendee(component: &IcalComponent<'_>) -> bool {
+    let named = component
+        .props
+        .iter()
+        .any(|prop| prop.name.eq_ignore_ascii_case("ATTENDEE"));
+
+    named || component.components.iter().any(names_attendee)
+}
+
 /// Mints an item carrying nothing but its identity and what it owes.
 ///
 /// This is what a create starts from when it is given no source, and it
@@ -282,8 +306,8 @@ mod tests {
     use ical::component::IcalComponentKind;
 
     #[cfg(any(feature = "vdir", feature = "pimdir"))]
-    use super::holds_kind;
-    use super::{IcalFamily, blank_item, check, read_source};
+    use crate::shared::ical::holds_kind;
+    use crate::shared::ical::{IcalFamily, blank_item, check, invites, read_source};
 
     #[test]
     fn a_minted_item_passes_the_check_it_will_be_held_to() {
@@ -414,5 +438,29 @@ mod tests {
             violations.iter().any(|v| v.contains("P1H")),
             "{violations:?}"
         );
+    }
+
+    /// Whom a write may notify: an attendee of the event or of one of its
+    /// alarms, and anyone in bytes that cannot be read to tell.
+    #[test]
+    fn an_item_invites_whoever_it_names_as_an_attendee() {
+        let item = |lines: &str| {
+            format!(
+                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//x//y//EN\r\n\
+                 BEGIN:VEVENT\r\nUID:a\r\nDTSTAMP:20260101T000000Z\r\n\
+                 DTSTART:20261019T090000Z\r\n{lines}END:VEVENT\r\nEND:VCALENDAR\r\n"
+            )
+        };
+        let alarm = "BEGIN:VALARM\r\nACTION:EMAIL\r\nTRIGGER:-PT15M\r\n\
+                     ATTENDEE:mailto:bob@example.org\r\nEND:VALARM\r\n";
+
+        assert!(!invites(
+            item("ORGANIZER:mailto:jane@example.org\r\n").as_bytes()
+        ));
+        assert!(invites(
+            item("attendee:mailto:bob@example.org\r\n").as_bytes()
+        ));
+        assert!(invites(item(alarm).as_bytes()));
+        assert!(invites(b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\n"));
     }
 }

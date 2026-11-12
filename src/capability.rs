@@ -246,6 +246,18 @@ const LEAVES: &[(&str, &str, &[Capability])] = &[
     ("item", "delete", &[C::ItemRemove, C::ItemRemoveIfMatch]),
 ];
 
+/// Whether `backend` serves the leaf `group leaf` at all, its first
+/// capability being the verb itself. A leaf the tables do not list
+/// reaches no backend, so it is served.
+pub fn serves(backend: &str, group: &str, leaf: &str) -> bool {
+    let leaf = LEAVES
+        .iter()
+        .find(|(known_group, known_leaf, _)| *known_group == group && *known_leaf == leaf);
+
+    leaf.and_then(|(_, _, capabilities)| capabilities.first())
+        .is_none_or(|capability| !matches!(support(backend, *capability), Not(_)))
+}
+
 /// The `--help` footer of `group leaf`: for each capability it reaches,
 /// the backends declaring it by level, then what each detail says.
 ///

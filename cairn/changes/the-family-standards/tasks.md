@@ -19,6 +19,6 @@ change: the-family-standards
 - [x] every-feature-set-builds-clean
 - [x] live-provider-tests (Microsoft credentialed failing on Graph 502/504 on 2026-11-12, see its log)
 - [x] capability-shared-api (`calendar.rename` for Annex B's `collection.rename`, `--send-updates` as `scheduling.send-updates`; `auto` skips no backend, as Himalaya's id-exchanging verbs)
-- [ ] the-shared-repl-and-mcp
+- [x] the-shared-repl-and-mcp (the sending gate: no write touches an item naming an ATTENDEE without `--allow-send`, given or stored)
 - [ ] release-polish
 - [ ] Log; land

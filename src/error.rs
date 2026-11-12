@@ -13,9 +13,9 @@ use serde::Serialize;
 
 /// The stable codes, each serialised in kebab-case.
 ///
-/// Every code but `capability-missing` is the pimdir backend's, so a
-/// build without it raises none of them, yet keeps the whole vocabulary
-/// in its schema.
+/// Every code but `capability-missing` and `stdin-taken` is the pimdir
+/// backend's, so a build without it raises none of them, yet keeps the
+/// whole vocabulary in its schema.
 #[cfg_attr(not(feature = "pimdir"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -24,6 +24,9 @@ pub enum ErrorCode {
     /// the command reaches, refused before connecting: the caller picks
     /// another backend or leaves the option out.
     CapabilityMissing,
+    /// A command would read its input off stdin inside a session, which
+    /// reads its commands there: the caller passes the input as text.
+    StdinTaken,
     /// The item is listed but its body is not local yet: a sync will
     /// bring it, so the caller waits rather than reports a loss.
     BodyPending,

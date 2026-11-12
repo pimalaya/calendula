@@ -72,8 +72,9 @@
 //!
 //! The protocol-specific APIs (`caldav`, `gcal`, `pimdir`, `vdir`) each expose
 //! what only one backend has, gated behind its own cargo feature. The meta
-//! commands (`account`, `completions`, `manuals`) inspect the configuration
-//! and what its backends serve, and generate the shell integration.
+//! commands (`account`, `repl`, `mcp`, `completion`, `manual`,
+//! `json-schema`) inspect the configuration and what its backends serve,
+//! run the sessions, and generate the shell integration and the schemas.
 //!
 //! ### Events against item
 //!
@@ -111,6 +112,24 @@
 //! the protocol-specific commands ignore the flag and build their own
 //! client.
 //!
+//! ## Sessions
+//!
+//! Every command runs over a [`session`] `Session`, which builds the
+//! unified client on first use and keeps it, dropping it when a command
+//! fails on it; the protocol-specific commands build theirs each time. A
+//! one-shot run uses a fresh session for its single command; the [`repl`]
+//! keeps one across the lines of its stdin, so the client connects once
+//! for the whole session. The [`mcp`] server keeps one the same way, each
+//! tool call parsed back into a unified API command. Both run on
+//! pimalaya-cli's shared core (its `repl` loop, its `mcp` protocol answers
+//! and tool grammar), which claims stdin, so a command reading its input
+//! there is refused under `stdin-taken`.
+//!
+//! The server lists writes under `--allow-write` alone, and leaves what
+//! reaches people beyond the account behind `--allow-send` as well: the
+//! scheduling arguments, and any write or delete of an item naming an
+//! attendee, which the server or a sync may notify.
+//!
 //! ## Configuration
 //!
 //! Configuration is loaded by pimalaya-config from every existing canonical
@@ -133,9 +152,10 @@
 //! ## Output
 //!
 //! All data and errors go to stdout through the printer, with `--json`
-//! switching every command to JSON; stderr carries the logs, the prompts and
-//! the welcome. A command returns a `Serialize + Display` value rather than
-//! printing inline.
+//! switching every command to JSON; stderr carries the logs, the prompts,
+//! the welcome, the REPL's help in a JSON session, and the failures of the
+//! MCP server, whose stdout is the protocol's. A command returns a
+//! `Serialize + Display` value rather than printing inline.
 //!
 //! Text output is plain text, with no border, no colour and nothing sized
 //! to the terminal: a list of short rows prints as aligned columns, a wide
@@ -159,20 +179,22 @@ mod error;
 #[cfg(feature = "gcal")]
 mod gcal;
 mod json_schema;
+mod mcp;
 #[cfg(feature = "msgraph")]
 mod msgraph;
 #[cfg(feature = "pimdir")]
 mod pimdir;
+mod repl;
+mod session;
 mod shared;
 #[cfg(feature = "vdir")]
 mod vdir;
 
-use std::{path::PathBuf, process};
+use std::process;
 
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::{
-    clap::args::LogFlags,
     error::{EXIT_FAILURE, ErrorReport},
     log::Logger,
     printer::StdoutPrinter,
@@ -182,9 +204,9 @@ use pimalaya_config::toml::ConfigMissingError;
 use simd_cpu::SimdCpu;
 
 use crate::{
-    backend::Backend,
-    cli::{Cli, Command},
+    cli::Cli,
     error::ErrorCode,
+    session::{Session, SessionAccount},
 };
 
 fn main() {
@@ -194,17 +216,8 @@ fn main() {
 
     let cli = Cli::parse();
     let mut printer = StdoutPrinter::new(&cli.json);
-
-    let config_paths = cli.config.paths;
-    let account = cli.account.name.as_deref();
-    let result = execute(
-        cli.cmd,
-        &cli.log,
-        &config_paths,
-        account,
-        cli.backend,
-        &mut printer,
-    );
+    let config_paths = cli.config.paths.clone();
+    let result = execute(cli, &mut printer);
 
     // NOTE: a person missing a configuration meets the welcome, a script
     // or a JSON caller the error.
@@ -221,20 +234,24 @@ fn main() {
     ErrorReport::<ErrorCode>::eval_coded(&mut printer, result);
 }
 
-/// Runs the subcommand, or meets a bare `calendula`.
-fn execute(
-    cmd: Option<Command>,
-    log: &LogFlags,
-    config_paths: &[PathBuf],
-    account: Option<&str>,
-    backend: Backend,
-    printer: &mut StdoutPrinter,
-) -> Result<()> {
-    Logger::try_init(log)?;
+/// Runs the subcommand over a fresh session, or meets a bare `calendula`.
+fn execute(cli: Cli, printer: &mut StdoutPrinter) -> Result<()> {
+    Logger::try_init(&cli.log)?;
 
-    let Some(cmd) = cmd else {
-        return cli::meet_bare_invocation(config_paths);
+    let account = SessionAccount {
+        config_paths: &cli.config.paths,
+        name: cli.account.name.as_deref(),
+        backend: cli.backend,
     };
 
-    cmd.execute(printer, config_paths, account, backend)
+    let Some(cmd) = cli.cmd else {
+        return cli::meet_bare_invocation(account.config_paths);
+    };
+
+    let mut session = Session {
+        account,
+        ..Default::default()
+    };
+
+    cmd.execute(printer, &mut session)
 }

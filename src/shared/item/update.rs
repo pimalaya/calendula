@@ -58,7 +58,7 @@ pub struct ItemUpdateCommand {
 }
 
 impl ItemUpdateCommand {
-    pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+    pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
         let mut capabilities = vec![Capability::ItemUpdate];
         if self.if_match.is_some() {
             capabilities.push(Capability::ItemUpdateIfMatch);

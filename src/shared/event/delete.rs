@@ -54,7 +54,7 @@ pub struct EventDeleteCommand {
 }
 
 impl EventDeleteCommand {
-    pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+    pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
         let mut capabilities = vec![Capability::ItemRemove];
         if self.if_match.is_some() {
             capabilities.push(Capability::ItemRemoveIfMatch);
@@ -65,7 +65,7 @@ impl EventDeleteCommand {
         client.require(&capabilities)?;
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
-        let item_id = resolve(&mut client, &calendar_id, &self.event_id)?;
+        let item_id = resolve(client, &calendar_id, &self.event_id)?;
         client.delete_item(
             &calendar_id,
             &item_id,

@@ -44,7 +44,7 @@ pub struct EventReadCommand {
 }
 
 impl EventReadCommand {
-    pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+    pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
         client.require(&[Capability::ItemRead])?;
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;

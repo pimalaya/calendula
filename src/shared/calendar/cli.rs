@@ -32,7 +32,7 @@ pub enum CalendarCommand {
 }
 
 impl CalendarCommand {
-    pub fn execute(self, printer: &mut impl Printer, client: CalendarClient) -> Result<()> {
+    pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
         match self {
             Self::List(cmd) => cmd.execute(printer, client),
             Self::Create(cmd) => cmd.execute(printer, client),

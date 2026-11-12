@@ -203,6 +203,7 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 | Code | Raised when |
 |---|---|
 | `capability-missing` | the backend the account resolves to does not serve a capability the command reaches; nothing was read, opened or connected |
+| `stdin-taken` | a command run inside a session (`repl`, `mcp`) would read its iCalendar from stdin, which carries the session's commands; nothing was read |
 | `body-pending` | a listed item's body is not local yet (pimdir); a sync brings it |
 | `precondition-failed` | a write's `--if-match` names a version the item no longer has (pimdir) |
 | `occurrence-unsupported` | `pimdir reply` or `pimdir cancel` names an occurrence its performer cannot act on alone |
@@ -238,12 +239,12 @@ A unified command operating inside a calendar SHALL take it through the flattene
 `calendar delete` is the one exception and SHALL inline a mandatory `-k/--calendar`, never falling back to a default.
 
 ### Requirement: Nested execute
-Each subcommand SHALL be a clap-derived struct carrying its own arguments, with an `execute(self, printer, client)` method.
+Each subcommand SHALL be a clap-derived struct carrying its own arguments, with an `execute(self, printer, client)` method, a unified command borrowing the client (`&mut CalendarClient`).
 
-`Command::execute` SHALL be the single dispatch point: it loads the configuration, selects the account, builds the appropriate client and hands it over.
+`Command::execute(printer, session)` SHALL be the single dispatch point: a unified command runs over the session's unified client, built on first use from the configuration and the account the session names (cairn/spec/repl.md), and a protocol-specific command builds its own client and hands it over.
 
 ### Requirement: Output goes to stdout
-All data and errors SHALL go to stdout through the printer, with `--json` switching every command to JSON; stderr SHALL carry the logs, the prompts and the welcome only. A command SHALL return a `Serialize + Display` value to the printer rather than printing inline.
+All data and errors SHALL go to stdout through the printer, with `--json` switching every command to JSON; stderr SHALL carry the logs, the prompts and the welcome only, plus the REPL's help in a JSON session and the failures of the MCP server, whose stdout carries protocol messages only. A command SHALL return a `Serialize + Display` value to the printer rather than printing inline.
 
 ### Requirement: Text output is plain text
 A text output SHALL be plain text: no border, no colour, no terminal escape, nothing sized to or truncated for the terminal, and it SHALL end with one newline; no command takes a width. Every string a server, a store or a file gave (an id, a name, a summary, a description, an error a record carries, the zone and the days the lines under `pimdir search` and `pimdir count` name) SHALL have its control and bidi characters replaced before it prints as text (pimalaya-cli `sanitize::text`); the JSON output SHALL carry it unchanged. The iCalendar `event read` and `item read` print SHALL keep its layout, CRLF read as LF, and have every other control character but tab and line feed (C0, DEL, C1) and every bidi embedding, override and isolate replaced with U+FFFD; their JSON `contents` SHALL carry the stored text unchanged. The iCalendar a `build` prints, or writes to the file `-o` names, SHALL be the bytes it built.

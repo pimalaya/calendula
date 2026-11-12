@@ -2661,15 +2661,15 @@ mod tests {
 
         EventCreateCommand::try_parse_from(["create", "-k", "cal", "--summary", "Sync"])
             .unwrap()
-            .execute(&mut out, client())
+            .execute(&mut out, &mut client())
             .unwrap();
         EventUpdateCommand::try_parse_from(["update", "-k", "cal", &ids[0], "--summary", "Sync"])
             .unwrap()
-            .execute(&mut out, client())
+            .execute(&mut out, &mut client())
             .unwrap();
         EventDeleteCommand::try_parse_from(["delete", "-k", "cal", &ids[0]])
             .unwrap()
-            .execute(&mut out, client())
+            .execute(&mut out, &mut client())
             .unwrap();
 
         let lines: Vec<&str> = out.0.lines().collect();

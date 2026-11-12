@@ -47,9 +47,11 @@ use crate::{
     capability::{self, Capability},
     cli::resolve_account,
     config::{AccountConfig, Config},
+    mcp::sending_closed,
     shared::{
         arg::SendUpdates,
         calendar::{Calendar, CalendarDiff},
+        ical::invites,
         item::{CalendarItem, CalendarItemPage, CalendarItemQuery},
     },
 };
@@ -207,8 +209,8 @@ impl CalendarClient {
     /// Resolves the account a unified command runs against, and selects
     /// the backend serving it.
     ///
-    /// The four component families call this per subcommand rather than
-    /// once for the whole family, so a `build` reaches neither.
+    /// A session calls this when a unified command first needs the client,
+    /// so a `build` reaches neither.
     pub fn resolve(
         config_paths: &[PathBuf],
         account_name: Option<&str>,
@@ -294,6 +296,39 @@ impl CalendarClient {
         }
 
         Ok(self.inner.as_mut().expect("just opened"))
+    }
+
+    /// Refuses, inside an MCP server without `--allow-send`, to `verb` an
+    /// item whose `contents` or stored copy `item_id` names an attendee,
+    /// whom the server or a sync may notify.
+    ///
+    /// The contents are checked first, so a refused document costs no
+    /// read; the stored copy costs one.
+    fn refuse_invitations(
+        &mut self,
+        verb: &str,
+        calendar_id: &str,
+        item_id: Option<&str>,
+        contents: Option<&[u8]>,
+    ) -> Result<()> {
+        if !sending_closed() {
+            return Ok(());
+        }
+
+        let mut invited = contents.is_some_and(invites);
+
+        if !invited && let Some(item_id) = item_id {
+            invited = invites(&self.get_item(calendar_id, item_id)?.contents);
+        }
+
+        if invited {
+            bail!(
+                "Cannot {verb} an item naming an attendee (ATTENDEE) without --allow-send: the \
+                 server or a sync may notify them"
+            );
+        }
+
+        Ok(())
     }
 
     /// Lists every calendar available to the active account.
@@ -504,6 +539,8 @@ impl CalendarClient {
         #[cfg(not(feature = "gcal"))]
         let _ = send_updates;
 
+        self.refuse_invitations("create", calendar_id, None, Some(&contents))?;
+
         match self.open()? {
             #[cfg(not(any(
                 feature = "vdir",
@@ -543,6 +580,8 @@ impl CalendarClient {
         // NOTE: read by gcal alone, the commands refusing it elsewhere.
         #[cfg(not(feature = "gcal"))]
         let _ = send_updates;
+
+        self.refuse_invitations("update", calendar_id, Some(item_id), Some(&contents))?;
 
         match self.open()? {
             #[cfg(not(any(
@@ -592,6 +631,8 @@ impl CalendarClient {
         // NOTE: read by gcal alone, the commands refusing it elsewhere.
         #[cfg(not(feature = "gcal"))]
         let _ = send_updates;
+
+        self.refuse_invitations("delete", calendar_id, Some(item_id), None)?;
 
         match self.open()? {
             #[cfg(not(any(

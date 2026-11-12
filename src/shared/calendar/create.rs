@@ -41,7 +41,7 @@ pub struct CalendarCreateCommand {
 }
 
 impl CalendarCreateCommand {
-    pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+    pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
         let mut capabilities = vec![Capability::CalendarCreate];
         if self.description.is_some() {
             capabilities.push(Capability::CalendarDescription);

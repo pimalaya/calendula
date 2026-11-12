@@ -225,7 +225,7 @@ mod tests {
     use crate::{cli::Cli, json_schema::registry};
 
     /// The commands printing nothing a schema could describe.
-    const SILENT: &[&str] = &["calendula"];
+    const SILENT: &[&str] = &["calendula", "calendula-repl", "calendula-mcp"];
 
     #[test]
     fn every_payload_is_an_object() {

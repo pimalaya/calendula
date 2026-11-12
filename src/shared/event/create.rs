@@ -63,7 +63,11 @@ pub struct EventCreateCommand {
 }
 
 impl EventCreateCommand {
-    pub fn execute(mut self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+    pub fn execute(
+        mut self,
+        printer: &mut impl Printer,
+        client: &mut CalendarClient,
+    ) -> Result<()> {
         let mut capabilities = vec![Capability::ItemAdd];
         if self.fields.online_meeting {
             capabilities.push(Capability::OnlineMeeting);
@@ -237,7 +241,7 @@ mod tests {
         ])
         .unwrap();
         let err = command
-            .execute(&mut Quiet, client())
+            .execute(&mut Quiet, &mut client())
             .unwrap_err()
             .to_string();
 

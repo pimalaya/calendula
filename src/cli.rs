@@ -16,8 +16,9 @@ use pimalaya_cli::{
         },
     },
     footer, long_version,
+    mcp::exit_on_failure,
     printer::Printer,
-    welcome::Welcome,
+    welcome::{Welcome, is_wanted},
 };
 use pimalaya_config::toml::{ConfigMissingError, TomlConfig};
 
@@ -33,11 +34,12 @@ use crate::{
     account::cli::AccountCommand,
     backend::Backend,
     config::{AccountConfig, Config},
+    error::ErrorCode,
     json_schema,
-    shared::{
-        calendar::cli::CalendarCommand, client::CalendarClient, event::cli::EventCommand,
-        item::cli::ItemCommand,
-    },
+    mcp::McpCommand,
+    repl::ReplCommand,
+    session::Session,
+    shared::{calendar::cli::CalendarCommand, event::cli::EventCommand, item::cli::ItemCommand},
 };
 
 /// The sample configuration as a raw file, for `curl` to fetch.
@@ -62,8 +64,9 @@ pub struct Cli {
     /// Force a specific backend for the cross-protocol commands.
     ///
     /// The unified commands (`calendar`, `event`, `item`), `account
-    /// check` and `account capability` read it: the protocol-specific
-    /// subcommands each already name their backend.
+    /// check` and `account capability` read it, and so do `repl` and
+    /// `mcp` for the session they run: the protocol-specific subcommands
+    /// each already name their backend.
     ///
     /// With `auto`, the first configured backend wins, in calendula's
     /// priority order (vdir, pimdir, caldav, gcal, msgraph), whatever
@@ -100,6 +103,8 @@ pub enum Command {
     #[cfg(feature = "vdir")]
     #[command(subcommand)]
     Vdir(VdirCommand),
+    Repl(ReplCommand),
+    Mcp(McpCommand),
     #[command(subcommand)]
     Account(AccountCommand),
     #[command(alias = "completions")]
@@ -161,25 +166,16 @@ pub fn welcome<'a>(
 }
 
 impl Command {
-    /// Runs the subcommand against the account `-a` names, or the
-    /// default one.
-    pub fn execute(
-        self,
-        printer: &mut impl Printer,
-        config_paths: &[PathBuf],
-        account_name: Option<&str>,
-        backend: Backend,
-    ) -> Result<()> {
-        match self {
-            Self::Calendar(cmd) => {
-                let client = CalendarClient::resolve(config_paths, account_name, backend)?;
-                cmd.execute(printer, client)
-            }
+    /// Runs the command over `session`, whose account the protocol
+    /// commands resolve and whose unified client the unified ones keep.
+    pub fn execute(self, printer: &mut impl Printer, session: &mut Session) -> Result<()> {
+        let account = session.account;
+        let (config_paths, account_name) = (account.config_paths, account.name);
 
-            // NOTE: `event` and `item` resolve per subcommand, `build`
-            // reaching no backend and so needing no account.
-            Self::Event(cmd) => cmd.execute(printer, config_paths, account_name, backend),
-            Self::Item(cmd) => cmd.execute(printer, config_paths, account_name, backend),
+        match self {
+            Self::Calendar(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
+            Self::Event(cmd) => cmd.execute(printer, session),
+            Self::Item(cmd) => cmd.execute(printer, session),
 
             #[cfg(feature = "caldav")]
             Self::Caldav(cmd) => {
@@ -202,7 +198,19 @@ impl Command {
                 cmd.execute(printer, client)
             }
 
-            Self::Account(cmd) => cmd.execute(printer, config_paths, account_name, backend),
+            Self::Repl(cmd) => cmd.execute(&*printer, session),
+            Self::Mcp(cmd) => {
+                // NOTE: stdout carries protocol messages only, so a failure
+                // goes to stderr, a person missing a configuration aside.
+                match cmd.execute(session) {
+                    Err(err) if err.is::<ConfigMissingError>() && is_wanted(&*printer) => Err(err),
+                    result => {
+                        exit_on_failure::<ErrorCode, _>(result);
+                        Ok(())
+                    }
+                }
+            }
+            Self::Account(cmd) => cmd.execute(printer, config_paths, account_name, account.backend),
             Self::Completion(cmd) => cmd.execute(printer, Cli::command()),
             Self::Manual(cmd) => cmd.execute(printer, Cli::command()),
             Self::JsonSchema(cmd) => cmd.execute(printer, json_schema::registry()),

@@ -31,6 +31,7 @@ CLI to manage calendars.
 - **pimdir**: read and stage writes against a local [pimdir](https://github.com/pimalaya/pimdir) store, the offline cache a sync engine fills.
 - **Agenda view**: `event agenda` draws a cal(1)-style grid marking the days that carry an event.
 - **Composer**: `-i/--interactive` on `build`, `create` and `update` opens the item in the command `item.composer` names, your editor included, and what it leaves in the file is the decision.
+- **REPL and MCP**: `calendula repl` runs commands over one account in a session, and `calendula mcp` serves the unified API to an AI agent over the Model Context Protocol, reads only unless `--allow-write`, never inviting anyone unless `--allow-send`.
 - **Build without an account**: `<family> build` applies a source and the composer and prints the iCalendar rather than sending it, on a machine holding no configuration at all.
 - **Discovery**: `caldav.discover` resolves a bare domain to its CalDAV server on each run, through SRV records and `.well-known`.
 - **Multi-account**: one TOML file, one block per account, several files deep-merged when you want secrets apart.
@@ -286,6 +287,30 @@ calendula pimdir status
 calendula pimdir search budget date:2026-11
 calendula gcal free-busy --from 2026-08-10 --to 2026-08-14
 calendula gcal quick-add "Lunch with Ada tomorrow at noon"
+```
+
+### REPL
+
+`calendula repl` keeps one account open and runs the CLI's own commands, one per line, until `exit` or EOF, the backend connecting once for the whole session. A line takes `--json` for itself, a `#` starts a comment, and what cannot finish inside a session is refused by name: another session, the composer (`-i`), an iCalendar read from stdin (`stdin-taken`), and the flags the session fixes (`-a`, `-c`, `-b`, `--log-level`). A program can spawn `calendula repl --json` and read one JSON value per line, failures included.
+
+```
+$ calendula repl
+calendula> calendar list
+calendula> event list --from 2026-11-16 --to 2026-11-22
+calendula> event read standup
+calendula> exit
+```
+
+### MCP
+
+`calendula mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio for one account, exposing the unified API as tools (`calendar_list`, `event_list`, `event_read`, `event_find`, `item_read`, and so on), each taking the arguments of its command as spelled on the command line and answering the same JSON as `--json`. Only the tools that read are listed by default. `--allow-write` adds the calendar, event and item writes, without the arguments inviting anyone; `--allow-send` adds those (`attendee`, `organizer`, `send-updates`) and lets a write or a delete touch an event naming attendees, which the server or a sync may notify. Without it such a write is refused, since an invitation an agent reads can tell it to cancel or move a meeting. Tools never read a local file: an iCalendar is given as text.
+
+```json
+{
+  "mcpServers": {
+    "calendula": { "command": "calendula", "args": ["mcp", "--account", "work", "--allow-write"] }
+  }
+}
 ```
 
 ## License

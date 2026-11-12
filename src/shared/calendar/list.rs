@@ -32,7 +32,7 @@ use crate::{
 pub struct CalendarListCommand;
 
 impl CalendarListCommand {
-    pub fn execute(self, printer: &mut impl Printer, mut client: CalendarClient) -> Result<()> {
+    pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
         client.require(&[Capability::CalendarList])?;
 
         let calendars = client.list_calendars()?;
