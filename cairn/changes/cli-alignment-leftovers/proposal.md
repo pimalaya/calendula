@@ -1,11 +1,13 @@
 ---
 cairn: change
 id: cli-alignment-leftovers
-status: active
+status: abandoned
 created: 2026-10-18
 ---
 
 # What calendula still owes the family alignment
+
+> Abandoned on 2026-11-12 for the-family-standards: C3 and C4 landed on 2026-10-30, A2 with published-dependencies, F1, F7, B3 and G2 move to the-shared-kit, and H1 and H2 lapse with the wizard and pimalaya-config 0.4's `take_account`.
 
 ## Why
 
