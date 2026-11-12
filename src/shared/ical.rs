@@ -1,6 +1,6 @@
 //! # iCalendar source
 //!
-//! Where the shared commands get raw iCalendar bytes: a file, the
+//! Where the unified commands get raw iCalendar bytes: a file, the
 //! standard input, the argument itself, or nothing at all.
 //!
 //! It also holds the two halves of the strict reading calendula keeps for
@@ -30,7 +30,7 @@ use crate::shared::uuid::uuid_v4;
 /// `PRODID` a minted item is stamped with (RFC 5545 3.7.3).
 const PRODID: &str = "-//Pimalaya//calendula//EN";
 
-/// One of the two shared command families writing items, and the
+/// One of the two unified command families writing items, and the
 /// component kind it names.
 ///
 /// The families are views over the same items, so a pipeline they share

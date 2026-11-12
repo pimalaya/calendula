@@ -37,31 +37,31 @@ pub enum Backend {
 }
 
 impl Backend {
-    /// Whether the CalDAV arm of a shared command may run.
+    /// Whether the CalDAV arm of a unified command may run.
     #[cfg(feature = "caldav")]
     pub fn allows_caldav(self) -> bool {
         matches!(self, Self::Auto | Self::Caldav)
     }
 
-    /// Whether the gcal arm of a shared command may run.
+    /// Whether the gcal arm of a unified command may run.
     #[cfg(feature = "gcal")]
     pub fn allows_gcal(self) -> bool {
         matches!(self, Self::Auto | Self::Gcal)
     }
 
-    /// Whether the msgraph arm of a shared command may run.
+    /// Whether the msgraph arm of a unified command may run.
     #[cfg(feature = "msgraph")]
     pub fn allows_msgraph(self) -> bool {
         matches!(self, Self::Auto | Self::Msgraph)
     }
 
-    /// Whether the pimdir arm of a shared command may run.
+    /// Whether the pimdir arm of a unified command may run.
     #[cfg(feature = "pimdir")]
     pub fn allows_pimdir(self) -> bool {
         matches!(self, Self::Auto | Self::Pimdir)
     }
 
-    /// Whether the vdir arm of a shared command may run.
+    /// Whether the vdir arm of a unified command may run.
     #[cfg(feature = "vdir")]
     pub fn allows_vdir(self) -> bool {
         matches!(self, Self::Auto | Self::Vdir)

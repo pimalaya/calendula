@@ -6,23 +6,23 @@ status: current
 
 # Commands
 
-The command tree is split into three groups, in this order: the shared cross-protocol API, the protocol-specific escape hatches, and the meta commands. This is the standard Pimalaya CLI split, a portable surface plus per-protocol hatches.
+The command tree is split into three groups, in this order: the unified API, the protocol-specific escape hatches, and the meta commands. This is the standard Pimalaya CLI split, a portable surface plus per-protocol hatches.
 
-### Requirement: The shared API is a strict least common denominator
+### Requirement: The unified API is a strict least common denominator
 The `calendar`, `event` and `item` families SHALL expose only operations every compiled backend can serve identically. A concept one backend has and another does not SHALL NOT appear here; it belongs to that backend's own family.
 
-Adding a backend that cannot serve a shared operation SHALL move the operation out rather than have it emulated.
+Adding a backend that cannot serve a unified operation SHALL move the operation out rather than have it emulated.
 
 ### Requirement: Protocol-specific families
 `configure` (alias `wizard`) SHALL run the account wizard.
 
 `caldav`, `gcal`, `pimdir` and `vdir` SHALL each expose what only that backend has, gated behind its own cargo feature. CalDAV covers `discover`, its own calendar listing (carrying the ctag, the sync token and the accepted component kinds), `create` and `delete`.
 
-gcal covers the half of the Calendar API iCalendar cannot express: sharing, availability, recurrence expansion, server-side parsing and the palettes. vdir covers its collection verbs including `rename`, which the shared API has no home for.
+gcal covers the half of the Calendar API iCalendar cannot express: sharing, availability, recurrence expansion, server-side parsing and the palettes. vdir covers its collection verbs including `rename`, which the unified API has no home for.
 
 pimdir covers `status`, reporting the account being read, every account the store groups collections under, how much of each calendar is downloaded, how many creations are queued for the next sync, and every action the store's owner parked in those calendars, by its queue row (ROW), its calendar, its kind and the error that parked it; `reply` and `cancel`, the scheduling intents only its sync engine can perform; and `search` and `count`, the store's search index queried in the pimdir SEARCH language.
 
-A backend MAY exist without a family where its protocol adds nothing the shared surface lacks; a family SHALL NOT push protocol-specific concepts into the shared API instead.
+A backend MAY exist without a family where its protocol adds nothing the unified surface lacks; a family SHALL NOT push protocol-specific concepts into the unified API instead.
 
 ### Requirement: gcal family
 `gcal` SHALL cover: `calendars`, the richer listing carrying the access role, the primary flag, the time zone and the default reminders a shared `Calendar` has no room for; `acl` with `list`, `create`, `update` and `delete` over the sharing rules; `free-busy`, the availability query over a window.
@@ -39,14 +39,14 @@ An ACL rule id is `<scope type>:<scope value>`, which the API mints, so `create`
 `calendars.clear` SHALL NOT be exposed: it empties the primary calendar with no undo, and `calendar delete` covers the secondary case. These are declined on purpose, and recorded as such rather than left as gaps.
 
 ### Requirement: The component families against item
-The shared API SHALL offer two kinds of view over the same resources. `item` is the raw, unfiltered one: it lists, reads, writes and deletes any iCalendar object by id, leaving the bytes untouched, a to-do or a journal entry included.
+The unified API SHALL offer two kinds of view over the same resources. `item` is the raw, unfiltered one: it lists, reads, writes and deletes any iCalendar object by id, leaving the bytes untouched, a to-do or a journal entry included.
 
 `event` is the projected one: it keeps VEVENT, renders the columns an event is read by, and draws a cal(1)-style agenda.
 
 Both SHALL share the `-k/--calendar` selector and the same item API; only the rendering and the filter differ.
 
 ### Requirement: One family per stored component kind
-calendula SHALL be the events CLI: the shared API SHALL offer one projected family, `event`, for VEVENT. VTODO belongs to unfog and VJOURNAL to journal, one CLI per iCalendar domain, since CalDAV holds one component type per calendar object resource (RFC 4791 4.1) and the providers run events, tasks and notes as separate services.
+calendula SHALL be the events CLI: the unified API SHALL offer one projected family, `event`, for VEVENT. VTODO belongs to unfog and VJOURNAL to journal, one CLI per iCalendar domain, since CalDAV holds one component type per calendar object resource (RFC 4791 4.1) and the providers run events, tasks and notes as separate services.
 
 `event` SHALL cover `list`, `read`, `create`, `update` and `delete` over the item API. An item whose bytes do not parse SHALL project nothing rather than fail the listing.
 
@@ -222,7 +222,7 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 `json-schema` SHALL describe the failure object under the key `calendula-error`, its `code` typed by the code vocabulary. Every generated schema SHALL carry an `$id` naming the contract version: the major version of calendula, or `0.<minor>` before 1.0. Every registered payload SHALL be a JSON object, checked by a test. Piped `--json` output SHALL print one value per line.
 
 ### Requirement: Calendar selection
-A shared command operating inside a calendar SHALL take it through the flattened `-k/--calendar` flag, resolved by the account: the flag wins, otherwise `calendar.default`, otherwise the command bails.
+A unified command operating inside a calendar SHALL take it through the flattened `-k/--calendar` flag, resolved by the account: the flag wins, otherwise `calendar.default`, otherwise the command bails.
 
 `calendar delete` is the one exception and SHALL inline a mandatory `-k/--calendar`, never falling back to a default.
 
@@ -243,7 +243,7 @@ Each command's doc comment SHALL be its help text: the first paragraph is what `
 `calendula <command> --help` is therefore the canonical usage reference for both humans and agents, which is why the README documents no per-command usage.
 
 ### Requirement: Every data command returns a named output type
-A command answering with data SHALL hand the printer a `*Output` type deriving `Display`, `Serialize` and `JsonSchema`, named after its command path. A write with no payload of its own SHALL print a receipt rather than a sentence: a shared write `{id, queued}` (`WriteReceipt`), the id of the item acted on and whether a sync engine applies the write later, and a write in a protocol namespace `{id}` (`IdReceipt`), the id as it is after the write (a renamed collection's new one). The sentence is the text form only.
+A command answering with data SHALL hand the printer a `*Output` type deriving `Display`, `Serialize` and `JsonSchema`, named after its command path. A write with no payload of its own SHALL print a receipt rather than a sentence: a unified write `{id, queued}` (`WriteReceipt`), the id of the item acted on and whether a sync engine applies the write later, and a write in a protocol namespace `{id}` (`IdReceipt`), the id as it is after the write (a renamed collection's new one). The sentence is the text form only.
 
 A `create`, an `update` and a `build` answer data too: an abandoned edit is an outcome they have to report, so each SHALL return an untagged enum whose write arm serializes exactly as it would on its own, and whose abandoned arm carries nothing, as an empty object. A `build` writing to `-o` answers `{path, size}`, the file written and its size in bytes, having handed the data to it.
 

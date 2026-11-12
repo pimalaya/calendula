@@ -1,6 +1,6 @@
 //! # Shared arguments
 //!
-//! Clap arguments reused across the shared API commands.
+//! Clap arguments reused across the unified API commands.
 
 use anyhow::{Result, bail};
 use clap::{Parser, ValueEnum};

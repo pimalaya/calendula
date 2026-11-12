@@ -66,7 +66,7 @@ impl GcalBackend {
     /// Lists every calendar of the user's calendar list.
     ///
     /// Walks the pagination to the end: a calendar list is small and the
-    /// shared API returns it whole.
+    /// unified API returns it whole.
     pub fn list_calendars(&mut self) -> Result<Vec<Calendar>> {
         let mut calendars = Vec::new();
         let mut page_token: Option<String> = None;

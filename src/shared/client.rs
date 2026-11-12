@@ -1,6 +1,6 @@
 //! # Calendar client
 //!
-//! The cross-protocol dispatcher the shared commands run on.
+//! The cross-protocol dispatcher the unified commands run on.
 //!
 //! One variant per compiled-in backend, a value always holding exactly one,
 //! picked from the account configuration by the `--backend` flag. Each method
@@ -173,7 +173,7 @@ impl CalendarClient {
         })
     }
 
-    /// Resolves the account a shared command runs against, and selects
+    /// Resolves the account a unified command runs against, and selects
     /// the backend serving it.
     ///
     /// The four component families call this per subcommand rather than

@@ -21,7 +21,7 @@ use crate::gcal::client::GcalClient;
 ///
 /// These are what a Google client renders with: the account's time zone,
 /// which day its weeks start on, its date format. None belongs to a
-/// calendar, so no shared command can carry them.
+/// calendar, so no unified command can carry them.
 ///
 /// JSON output: `{"settings": [{"id", "value"}]}`.
 #[derive(Debug, Parser)]

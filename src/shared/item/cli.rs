@@ -23,7 +23,7 @@ use crate::{
     },
 };
 
-/// Shared API to manage raw iCalendar items (VEVENT, VTODO, VJOURNAL).
+/// Manage raw iCalendar items (any component) using the unified API.
 #[derive(Debug, Subcommand)]
 pub enum ItemCommand {
     Build(ItemBuildCommand),

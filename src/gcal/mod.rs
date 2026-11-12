@@ -8,7 +8,7 @@
 //! synthesizes the document of record on read and re-projects it on write,
 //! per cardamum's projection policy.
 //!
-//! The [`cli`] family covers what the shared surface cannot: sharing rules,
+//! The [`cli`] family covers what the unified surface cannot: sharing rules,
 //! availability, recurrence expansion, server-side parsing, the colour
 //! palettes and the account settings.
 //!

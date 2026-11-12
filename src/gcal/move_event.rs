@@ -11,7 +11,7 @@ use crate::{gcal::client::GcalClient, shared::receipt::IdReceipt};
 
 /// Move an event to another calendar.
 ///
-/// The shared API would have to emulate this as a create plus a delete,
+/// The unified API would have to emulate this as a create plus a delete,
 /// which mints a new id and drops whatever the projection does not model.
 /// Google relocates the event itself, so it keeps both.
 ///

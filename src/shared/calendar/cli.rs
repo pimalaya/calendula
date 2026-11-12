@@ -15,7 +15,7 @@ use crate::shared::{
     client::CalendarClient,
 };
 
-/// Shared API to manage calendars for the active account.
+/// Manage calendars using the unified API.
 #[derive(Debug, Subcommand)]
 pub enum CalendarCommand {
     #[command(visible_alias = "ls")]

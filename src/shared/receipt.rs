@@ -1,7 +1,7 @@
 //! # Receipts
 //!
 //! What a write prints when it has no payload of its own to show: the
-//! item it acted on, by id, and for a shared write whether a sync engine
+//! item it acted on, by id, and for a unified write whether a sync engine
 //! applies it later.
 //!
 //! The keys keep the meanings the machine output contract gives them:
@@ -14,7 +14,7 @@ use std::fmt;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-/// The receipt of a shared write acting on one item.
+/// The receipt of a unified write acting on one item.
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WriteReceipt {

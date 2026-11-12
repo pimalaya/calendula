@@ -18,7 +18,7 @@ use crate::gcal::{
 /// Direct access to the half of the Calendar API iCalendar cannot express:
 /// sharing, availability, recurrence expansion, server-side parsing and the
 /// palettes. Everything a calendar and its items have in common with the
-/// other backends stays in the shared API.
+/// other backends stays in the unified API.
 ///
 /// Push channels are not exposed: a channel delivers to an HTTPS endpoint
 /// the caller must host, which a CLI has not. Neither are `calendars.clear`

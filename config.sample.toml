@@ -97,7 +97,7 @@ default = true
 # --------------------------------------------------------------------------------
 # Backend selection
 #
-# An account may carry several backend blocks. The shared commands (`calendar`,
+# An account may carry several backend blocks. The unified commands (`calendar`,
 # `event`, `item`) use the first configured one in calendula's priority order:
 # vdir, pimdir, caldav, gcal, msgraph, which prefers a local read to a network round-trip
 # and a protocol-standard server to a vendor API.

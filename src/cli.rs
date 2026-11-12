@@ -73,7 +73,7 @@ pub struct CalendulaCli {
     pub account: AccountFlag,
     /// Force a specific backend for the cross-protocol commands.
     ///
-    /// Only the shared commands (`calendar`, `event`, `item`) read it:
+    /// Only the unified commands (`calendar`, `event`, `item`) read it:
     /// the protocol-specific subcommands each already name their
     /// backend.
     ///
@@ -89,7 +89,7 @@ pub struct CalendulaCli {
     pub log: LogFlags,
 }
 
-/// Every command calendula serves: the shared cross-protocol API, the
+/// Every command calendula serves: the unified API, the
 /// protocol-specific escape hatches, then the meta commands.
 #[derive(Debug, Subcommand)]
 pub enum CalendulaCommand {
@@ -128,7 +128,7 @@ pub enum CalendulaCommand {
     JsonSchema(JsonSchemaCommand),
 }
 
-/// The global config and the active account's, for a shared command.
+/// The global config and the active account's, for a unified command.
 ///
 /// A free function rather than a closure, so the printer it needs for
 /// the offer is borrowed for the length of the call rather than of the

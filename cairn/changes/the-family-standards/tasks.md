@@ -8,6 +8,7 @@ change: the-family-standards
 - [x] Cairn housekeeping: cli-alignment-leftovers abandoned (F1, F7, B3 and G2 to the-shared-kit; A2 done by published-dependencies; C3 and C4 done on 2026-10-30; H1 and H2 lapse with the wizard and config 0.4's `take_account`)
 - [x] published-dependencies
 - [x] events-only
+- [x] the-api-is-unified (owner, 2026-11-12, interleaved)
 - [ ] the-wizard-leaves
 - [ ] the-shared-kit
 - [ ] the-sample-is-tested-and-shipped

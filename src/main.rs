@@ -34,7 +34,7 @@
 //! exactly one backend.
 //!
 //! Each protocol module carries a backend submodule adapting that library to
-//! the shared surface, so an operation only reaches the shared API when every
+//! the unified surface, so an operation only reaches the unified API when every
 //! backend can serve it.
 //!
 //! ### The projected backend
@@ -51,7 +51,7 @@
 //! ## Three command families
 //!
 //! The command tree ([`cli`]) is split into three groups, in this order. The
-//! shared API (`calendar`, `event`, `item`) is the portable surface, where
+//! unified API (`calendar`, `event`, `item`) is the portable surface, where
 //! every operation works the same whichever backend serves the account.
 //!
 //! The protocol-specific APIs (`caldav`, `gcal`, `pimdir`, `vdir`) each expose
@@ -63,7 +63,7 @@
 //!
 //! calendula is the Pimalaya CLI for events: VTODO belongs to unfog and
 //! VJOURNAL to journal, one CLI per iCalendar domain. A calendar collection
-//! may still mix component kinds, so the shared API offers two kinds of view
+//! may still mix component kinds, so the unified API offers two kinds of view
 //! over the same resources. `item` is the raw, unfiltered one: it lists,
 //! reads, writes and deletes any iCalendar object by id, a to-do or a journal
 //! entry included, leaving the bytes untouched.
@@ -81,7 +81,7 @@
 //!
 //! ## Backend selection
 //!
-//! The shared commands target the backend the global `--backend` flag picks
+//! The unified commands target the backend the global `--backend` flag picks
 //! ([`backend::Backend`]). Its default, `auto`, takes the first
 //! configured-and-compiled backend in calendula's priority order: vdir,
 //! pimdir, CalDAV, gcal.

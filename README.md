@@ -21,7 +21,7 @@ CLI to manage calendars.
 
 ## Features
 
-- **Shared API**: `calendar`, `event` and `item` work the same whichever backend serves the account.
+- **Unified API**: `calendar`, `event` and `item` work the same whichever backend serves the account.
 - **Events, and the raw view**: `event` renders the columns an event is read by; `item` keeps the raw, unfiltered view over any component. To-dos belong to [unfog](https://github.com/pimalaya/unfog) and journal entries to [journal](https://github.com/pimalaya/journal), the Pimalaya CLIs for tasks and journal entries.
 - **Microsoft Graph**: Outlook and Microsoft 365 calendars through the Graph API, the iCalendar document synthesized both ways, Windows time zones read as their IANA names.
 - **Protocol-specific APIs**: `caldav`, `gcal`, `pimdir` and `vdir` each expose what only that backend has.

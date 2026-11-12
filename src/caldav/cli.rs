@@ -15,7 +15,7 @@ use crate::caldav::{
 /// CalDAV CLI.
 ///
 /// Direct access to the CalDAV backend: discover endpoints, list,
-/// create, delete calendars without going through the shared API.
+/// create, delete calendars without going through the unified API.
 #[derive(Debug, Subcommand)]
 #[command(rename_all = "kebab-case")]
 pub enum CaldavCommand {

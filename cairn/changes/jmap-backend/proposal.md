@@ -15,7 +15,7 @@ The pieces below exist. io-jmap covers JMAP for Calendars (draft-ietf-jmap-calen
 
 ## What
 
-A `jmap` cargo feature and backend serving the whole shared API, in the default set, with the same `[jmap]` configuration block as cardamum.
+A `jmap` cargo feature and backend serving the whole unified API, in the default set, with the same `[jmap]` configuration block as cardamum.
 
 ### Decisions
 

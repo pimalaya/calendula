@@ -23,7 +23,7 @@ use crate::{
     },
 };
 
-/// Shared API to manage VEVENT items.
+/// Manage events (VEVENT) using the unified API.
 #[derive(Debug, Subcommand)]
 pub enum EventCommand {
     Agenda(EventAgendaCommand),

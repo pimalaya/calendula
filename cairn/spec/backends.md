@@ -6,17 +6,17 @@ status: current
 
 # Backends
 
-Each backend is a `<Proto>Backend` adapter in `src/<proto>/backend.rs`, implementing the shared operations over one io-* crate's high-level client and converting its results into calendula's own shared types (`Calendar`, `CalendarDiff`, `CalendarItem`, `CalendarTimeRange`).
+Each backend is a `<Proto>Backend` adapter in `src/<proto>/backend.rs`, implementing the unified operations over one io-* crate's high-level client and converting its results into calendula's own shared types (`Calendar`, `CalendarDiff`, `CalendarItem`, `CalendarTimeRange`).
 
 calendula owns those types; no aggregator library sits between it and the io-* crates.
 
-### Requirement: Shared operation set
+### Requirement: Unified operation set
 The shared adapters SHALL cover, per backend: `list_calendars`, `create_calendar`, `update_calendar`, `delete_calendar`, `list_items`, `get_item`, `create_item`, `update_item` and `delete_item`.
 
 A backend that cannot model an operation SHALL refuse it with a message naming what to do instead, rather than emulating it.
 
-### Requirement: Shared outputs carry no backend details
-The output of a shared command SHALL NOT carry a field that only one backend fills. A backend detail worth showing SHALL be logged by that backend's adapter or shown by its own namespace.
+### Requirement: Unified outputs carry no backend details
+The output of a unified command SHALL NOT carry a field that only one backend fills. A backend detail worth showing SHALL be logged by that backend's adapter or shown by its own namespace.
 
 ### Requirement: A create reports the identifier it was given
 `create_calendar` and `create_item` SHALL return the identifier the backend actually assigned, and the command SHALL report that one.
@@ -29,7 +29,7 @@ A backend whose writes are queued for a sync to push, rather than made on the se
 pimdir is the only backend that queues its writes.
 
 ### Requirement: Backend selection order
-The shared commands SHALL target the backend the global `--backend` flag selects. Its default, `auto`, SHALL take the first configured-and-compiled backend in the order vdir, pimdir, CalDAV, gcal, msgraph, preferring a local read to a network round-trip and a protocol-standard server to a vendor API.
+The unified commands SHALL target the backend the global `--backend` flag selects. Its default, `auto`, SHALL take the first configured-and-compiled backend in the order vdir, pimdir, CalDAV, gcal, msgraph, preferring a local read to a network round-trip and a protocol-standard server to a vendor API.
 
 A named value SHALL pin the command to that backend and bail when the account carries no matching configuration block. The protocol-specific commands SHALL ignore the flag.
 

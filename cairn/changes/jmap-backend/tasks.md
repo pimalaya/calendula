@@ -23,7 +23,7 @@ change: jmap-backend
 - [ ] Config: `JmapConfig` (`server`, `tls`, `alpn`, `proxy`, `auth`) identical to cardamum's, `AccountConfig.jmap`, config.sample.toml.
 - [ ] `Backend::Jmap`, `allows_jmap`, auto order vdir, pimdir, CalDAV, JMAP, gcal, msgraph.
 - [ ] `src/jmap/project.rs`: `to_item` (envelope stripped, `from_jscalendar`), `to_event` (`to_jscalendar`, one Group entry or refusal), `to_patch`, `etag`; unit tests on round trip, envelope, refusals, patch nulls.
-- [ ] `src/jmap/backend.rs`: session open with the capability check, the nine shared operations per the proposal, VEVENT-only refusals, `--if-match` against the fetched hash.
+- [ ] `src/jmap/backend.rs`: session open with the capability check, the nine unified operations per the proposal, VEVENT-only refusals, `--if-match` against the fetched hash.
 - [ ] `CalendarClient` arm, account check and account list.
 - [ ] Feature matrix: `jmap` alone, default, `--all-features`; clippy, fmt.
 

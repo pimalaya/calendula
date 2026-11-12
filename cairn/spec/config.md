@@ -35,7 +35,7 @@ A `todo` or `journal` table left in a configuration, at the top level or under a
 ### Requirement: Backend blocks
 An account SHALL carry an optional block per compiled backend: `vdir` with a `home-dir`, `pimdir` with a `root` and an optional `account`, `caldav` with its endpoint, TLS and authentication, `gcal` with TLS and authentication.
 
-An account MAY carry several; which one a shared command uses is the backend capability's business.
+An account MAY carry several; which one a unified command uses is the backend capability's business.
 
 Every listing family SHALL additionally carry a rendering block naming its default page size and its column colours: `calendar.list`, `event.list` and `item.list`.
 

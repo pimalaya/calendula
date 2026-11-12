@@ -1,4 +1,4 @@
-//! # Shared API
+//! # Unified API
 //!
 //! The cross-protocol surface: calendula's own least-common-denominator
 //! types, the dispatcher over the backends, and the command families built
