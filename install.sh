@@ -54,4 +54,12 @@ tar -xzf "$tmpdir/calendula.tgz" -C "$tmpdir"
 mkdir -p "$PREFIX/bin"
 cp -f -- "$tmpdir/$binary" "$PREFIX/bin/$binary"
 
+sample=share/doc/calendula/config.sample.toml
+
+if [ -f "$tmpdir/$sample" ]; then
+    echo "Installing sample configuration…"
+    mkdir -p "$PREFIX/share/doc/calendula"
+    cp -f -- "$tmpdir/$sample" "$PREFIX/$sample"
+fi
+
 die "$("$PREFIX/bin/$binary" --version) installed!" 0

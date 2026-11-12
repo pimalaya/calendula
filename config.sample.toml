@@ -1,196 +1,72 @@
-# ================================================================================
-# `calendula` configuration file.
-#
-# Loaded from every existing path among the following, each one deep-merged on
-# top of the ones before, so the rc file overrides the others:
-#   - $XDG_CONFIG_HOME/calendula/config.toml
-#   - $HOME/.config/calendula/config.toml
-#   - $HOME/.calendularc
-#
-# Override with `calendula -c <PATH>`, one path per flag. Repeat it to merge
-# several files, `-c public.toml -c private.toml`: the first one is the base and
-# the next ones are deep-merged on top of it. No environment variable is read.
-#
-# calendula never writes this file: copy it to one of the paths above, keep the
-# blocks of the backends your account uses, and fill them in. A secret is best
-# read through `*.command`, from a keyring CLI or a password manager.
-# ================================================================================
-
-# --------------------------------------------------------------------------------
-# Global config
-# --------------------------------------------------------------------------------
-
-# Calendar id used by `event` and `item` commands (and `calendar update`)
-# when their `-k/--calendar` flag is omitted.
-#calendar.default = "personal"
-
-# Default page size for `event list`. The `-s/--page-size` CLI flag wins
-# when passed; otherwise the merged account/global value wins; otherwise
-# the hard fallback is 25.
-#event.list.page-size = 50
-
-# Default page size for `item list`, resolved the same way.
-#item.list.page-size = 50
-
-# Command an item is edited through, spawned on the path of a temporary
-# iCalendar file it edits in place. `-i/--interactive` on `build`, `create`
-# and `update` opens it; `--composer <COMMAND>` overrides it for one run.
-#
-# A shell line, or an argv list, the path appended as the last argument:
-# `composer = "tcal edit"` runs `tcal edit <PATH>`.
-#item.composer = "vim"
-#item.composer = ["tcal", "edit"]
-
-# --------------------------------------------------------------------------------
-# Accounts
-# --------------------------------------------------------------------------------
-
 [accounts.example]
+default = true				# the account commands run on without -a
+#calendar.default = "personal"		# the calendar event and item use without -k
 
-# When `--account` is missing, use this account as the default one.
-default = true
+event.list.page-size = 25		# events per page without -s, --from or --to
+#event.list.page-size = 0		# every event on one page
+item.list.page-size = 25		# items per page without -s
+#item.list.page-size = 0		# every item on one page
 
-# --------------------------------------------------------------------------------
-# Backend selection
+#item.composer = "$EDITOR"		# the shell line -i edits an item in, its path appended
+#item.composer = ["tcal", "edit"]	# a program and its arguments, the path appended
+
+# CalDAV
 #
-# An account may carry several backend blocks. The unified commands (`calendar`,
-# `event`, `item`) use the first configured one in calendula's priority order:
-# vdir, pimdir, caldav, gcal, msgraph, which prefers a local read to a network round-trip
-# and a protocol-standard server to a vendor API.
+#caldav.server = "https://caldav.example.org"		# the context root the principal walk starts from
+##caldav.server = "caldav.example.org:8443"		# a bare authority, over https
+##caldav.discover = "example.org"			# in place of server, resolved through RFC 6764 on every run
+##caldav.home = "https://caldav.example.org/alice/"	# the calendar home set, over server, skipping discovery
+#caldav.auth.basic.username = "alice@example.org"	# HTTP Basic; or bearer.token, or auth = "none"
+#caldav.auth.basic.password.command = "exit 127"	# prints the password
+##caldav.auth.basic.password.raw = "secret"		# the password itself
+#caldav.alpn = ["http/1.1"]				# the ALPN id rustls offers
+##caldav.alpn = []					# none
+##caldav.tls.provider = "rustls"			# rustls, the build's first TLS otherwise
+##caldav.tls.provider = "native-tls"			# the platform's TLS
+##caldav.tls.rustls.crypto = "ring"			# rustls on ring, the build's first otherwise
+##caldav.tls.rustls.crypto = "aws"			# rustls on aws-lc-rs
+##caldav.tls.cert = "/path/to/cert.pem"			# a PEM certificate to trust
+
+# Google Calendar
 #
-# Pass `-b/--backend <name>` to pin one instead; the protocol-specific commands
-# (`caldav`, `pimdir`, `vdir`) always use their own.
-# --------------------------------------------------------------------------------
-
-# --------------------------------------------------------------------------------
-# vdir backend
+#gcal.auth.token.command = ["ortie", "token", "show", "-a", "example"]	# an access token, from Ortie's Google section
+##gcal.auth.token.raw = "secret"					# the token itself, short-lived
 #
-# Local calendar collections stored on disk; see
-# <https://vdirsyncer.pimutils.org/en/stable/vdir.html>. Each immediate
-# subdirectory of `home-dir` is one calendar. Paths are shell-expanded, so `~`
-# and environment variables both work.
-# --------------------------------------------------------------------------------
+#gcal.alpn = ["http/1.1"]		# the ALPN id rustls offers
+##gcal.alpn = []			# none
+##gcal.tls.provider = "native-tls"	# as caldav.tls
+##gcal.tls.rustls.crypto = "aws"	# as caldav.tls.rustls
+##gcal.tls.cert = "/path/to/cert.pem"	# as caldav.tls
 
-vdir.home-dir = "~/.local/share/vdirsyncer/calendars"
-
-# --------------------------------------------------------------------------------
-# pimdir backend
+# Google CalDAV
 #
-# A local pimdir store: an offline cache (a SQLite index plus content-addressed
-# blobs) that a sync engine fills; see <https://github.com/pimalaya/pimdir>.
+#caldav.server = "https://apidata.googleusercontent.com/caldav/v2/"		# the principal, no .well-known leading there
+#caldav.auth.bearer.token.command = ["ortie", "token", "show", "-a", "example"]	# Ortie's Google token, no password taken
+
+# Microsoft Graph
 #
-# It is a cache, not a server: calendars come from whatever the sync mirrors, so
-# the collection verbs (`calendar create/update/delete`) refuse here, and an
-# item the sync listed but has not downloaded reads as "body not fetched" rather
-# than failing. `calendula pimdir status` shows how much is downloaded.
+#msgraph.auth.token.command = ["ortie", "token", "show", "-a", "example"]	# an access token, from Ortie's Graph section
+##msgraph.auth.token.raw = "secret"						# the token itself, short-lived
 #
-# Writes are staged as one queue action for the next sync to apply and push, and
-# a listing runs beside a sync rather than locking it out.
+#msgraph.user-id = "me"				# the signed-in user's calendars
+##msgraph.user-id = "bob@example.org"		# another user's, by id or principal name
+#msgraph.alpn = ["http/1.1"]			# the ALPN id rustls offers
+##msgraph.alpn = []				# none
+##msgraph.tls.provider = "native-tls"		# as caldav.tls
+##msgraph.tls.rustls.crypto = "aws"		# as caldav.tls.rustls
+##msgraph.tls.cert = "/path/to/cert.pem"	# as caldav.tls
+
+# Fastmail
 #
-# `account` names the account the sync groups these collections under. Leave it
-# unset: a store synced by one account is read as that one. A store several
-# accounts share is refused until it names one.
-# --------------------------------------------------------------------------------
+#caldav.server = "https://caldav.fastmail.com/dav/"	# Fastmail's CalDAV root
+#caldav.auth.basic.username = "alice@fastmail.com"	# the account's address
+#caldav.auth.basic.password.command = "exit 127"	# prints an app password, no bearer token taken
 
-#pimdir.root = "~/.local/state/neverest/example"
-#pimdir.account = "personal"
-
-# --------------------------------------------------------------------------------
-# CalDAV backend
+# vdir
 #
-# The calendar home set is resolved from the first of these that is set, in
-# order of precedence:
+#vdir.home-dir = "~/.local/share/vdirsyncer/calendars"	# a directory per calendar, an .ics file per item
+
+# pimdir
 #
-# 1. `caldav.home`: pre-resolved calendar home set URL; every discovery step is
-#    skipped. Fastest, least safe.
-# 2. `caldav.server`: principal + home-set discovery start from the given
-#    context root. Skips domain resolution. Takes a full URL, a bare domain or
-#    `domain:port`, a bare authority defaulting to `https`.
-# 3. `caldav.discover`: a bare domain resolved to a server URL at runtime
-#    through RFC 6764 SRV records and `.well-known`, then principal + home-set
-#    discovery. Convenient but adds DNS + HTTP round-trips on every run.
-#
-# Once `discover` has found the server, pinning it in `server` spares every
-# later run those round-trips.
-# --------------------------------------------------------------------------------
-
-#caldav.discover = "example.org"
-caldav.server = "https://caldav.example.org/dav/calendars"
-#caldav.home = "https://caldav.example.org/dav/calendars/user/me/default"
-
-# Basic authentication (RFC 7617). A `command` secret is a shell command line
-# (string, run through the platform shell) or a program + args list; a `raw`
-# secret is stored in plaintext.
-caldav.auth.basic.username = "username"
-caldav.auth.basic.password.command = "pass show example"
-#caldav.auth.basic.password.command = ["pass", "show", "example"]
-#caldav.auth.basic.password.raw = "password"
-
-# Bearer authentication (RFC 6750), mainly for OAuth 2.0.
-#caldav.auth.bearer.token.command = "ortie token show"
-#caldav.auth.bearer.token.raw = "oauth2-token"
-
-# ALPN identifiers offered during the TLS handshake. Unset offers `http/1.1`,
-# the only version io-http speaks; an empty list skips ALPN negotiation.
-#caldav.alpn = ["http/1.1"]
-
-# TLS configuration. The certificate path is shell-expanded, so `~` and
-# environment variables both work.
-#caldav.tls.provider = "rustls"
-#caldav.tls.rustls.crypto = "ring"
-#caldav.tls.cert = "~/.local/share/ca-certificates/dav.crt"
-
-# --------------------------------------------------------------------------------
-# Google Calendar backend
-#
-# The Calendar API v3, which Google offers in full where its CalDAV bridge is
-# crippled: calendars can be created, updated and deleted, and a date range is
-# narrowed server-side. There is nothing to discover, so the block is a token
-# and a TLS profile.
-#
-# Google stores events as JSON and exposes no iCalendar representation of one,
-# so calendula synthesizes it: what has a well-defined iCalendar slot is managed
-# both ways, Google-only fields survive an update untouched, and every remaining
-# property is stashed verbatim server-side so it round-trips.
-#
-# Only events project; a VTODO or VJOURNAL is refused, Google modelling neither.
-#
-# Calendar ids are the ones `calendula calendar list` shows: your email address
-# for the primary calendar, a `...@group.calendar.google.com` value for a
-# secondary one. Google mints the id of a calendar it creates, so the id passed
-# to `calendar create` is reported back rather than honoured.
-#
-# An access token expires within the hour, so a token written here is useless by
-# the second run: point `command` at a broker such as Ortie.
-# --------------------------------------------------------------------------------
-
-# Bearer authentication (RFC 6750), the only kind the Calendar API takes.
-#gcal.auth.token.command = "ortie token show"
-#gcal.auth.token.command = ["ortie", "token", "show"]
-#gcal.auth.token.raw = "oauth2-token"
-
-# ALPN identifiers offered during the TLS handshake. Unset offers `http/1.1`,
-# the only version io-http speaks; an empty list skips ALPN negotiation.
-#gcal.alpn = ["http/1.1"]
-
-# TLS configuration. The certificate path is shell-expanded, so `~` and
-# environment variables both work.
-#gcal.tls.provider = "rustls"
-#gcal.tls.rustls.crypto = "ring"
-#gcal.tls.cert = "~/.local/share/ca-certificates/google.crt"
-
-# --------------------------------------------------------------------------------
-# Microsoft Graph backend (Outlook, Microsoft 365)
-#
-# Calendar ids are the ones `calendula calendar list` shows. Graph mints the id
-# of a calendar it creates, and keeps no description nor RGB colour. Only the
-# series master of a recurring event is written back. The token needs the
-# `Calendars.ReadWrite` scope, from a broker such as Ortie.
-# --------------------------------------------------------------------------------
-
-# The calendar owner, `me` by default.
-#msgraph.user-id = "me"
-
-# Bearer authentication (RFC 6750), the only kind Graph takes.
-#msgraph.auth.token.command = ["ortie", "token", "show"]
-#msgraph.auth.token.raw = "oauth2-token"
+#pimdir.root = "~/.local/state/neverest"	# the store neverest syncs, on Linux
+##pimdir.account = "example"			# the account to read, for a store holding several

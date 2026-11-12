@@ -33,6 +33,7 @@ panic = "abort"
 pimalaya-cli = { version = "0.4", default-features = false, features = ["build"] }
 
 [dev-dependencies]
+pimalaya-config = { version = "0.4", default-features = false, features = ["sample"] }
 tempfile = "3"
 toml = "1.1"
 

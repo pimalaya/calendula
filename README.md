@@ -128,9 +128,13 @@ nix run
 
 ## Configuration
 
-calendula reads a TOML configuration you write: copy [config.sample.toml](./config.sample.toml) to `~/.config/calendula/config.toml`, keep the blocks of the backends your account uses and fill them in. calendula never writes a configuration.
+calendula reads a TOML configuration you write, and never writes one. [config.sample.toml](./config.sample.toml) holds one account: the options every account shares with their values, then one commented section per backend or provider, yours to uncomment: CalDAV, Google Calendar, Google CalDAV, Microsoft Graph, Fastmail, vdir and pimdir. The OAuth 2.0 sections read their token from [Ortie](https://github.com/pimalaya/ortie), whose sample has the matching Google and Microsoft Graph sections. Releases and packages ship it as share/doc/calendula/config.sample.toml.
 
 Run without a configuration at a terminal, calendula welcomes you with the commands copying the shipped sample in place, or downloading it when none ships, then the first command to run. Under `--json` or in a script, it fails naming the path it looked at and the sample.
+
+The `caldav` block takes one authentication: `basic` with a `username` and a `password`, `bearer` with a `token`, or `caldav.auth = "none"` for a server asking for none. `gcal.auth` and `msgraph.auth` take a `token`. A secret is given as `raw` or as `command`, a shell string or an argument list printing it.
+
+`calendar.default`, `event.list.page-size`, `item.list.page-size` and `item.composer` may also sit at the top level, before any table, as the fallback of every account not setting them: drop the sample's default lines from an account for the top level to apply.
 
 A configuration is loaded from every existing path among the following, each one deep-merged on top of the ones before, so `$HOME/.calendularc` overrides the others:
 
@@ -140,7 +144,7 @@ A configuration is loaded from every existing path among the following, each one
 
 At most one account may be marked `default = true` across them: several are refused, naming them, and so is an unknown `-a <NAME>`, naming the accounts the configuration holds.
 
-Override those paths with `-c <PATH>`. Repeat it to merge several files, such as `-c public.toml -c private.toml`: the first one is the base and the next ones are deep-merged on top. Each `-c` takes one path, never split, and no environment variable is read: a path kept in a shell variable goes through the flag, as `-c "$CALENDULA_CONFIG"`. The full field reference lives in [config.sample.toml](./config.sample.toml).
+Override those paths with `-c <PATH>`. Repeat it to merge several files, such as `-c public.toml -c private.toml`: the first one is the base and the next ones are deep-merged on top. Each `-c` takes one path, never split, and no environment variable is read: a path kept in a shell variable goes through the flag, as `-c "$CALENDULA_CONFIG"`.
 
 To add an account, add an `[accounts.<name>]` table to your configuration. `calendula account list` and `calendula account check` inspect and validate the accounts declared.
 
@@ -167,7 +171,7 @@ Use the `gcal` backend, which speaks the [Calendar API v3](https://developers.go
 
 ```toml
 [accounts.example]
-gcal.auth.token.command = ["ortie", "token", "show"]
+gcal.auth.token.command = ["ortie", "token", "show", "-a", "example"]
 
 # Your email address for the primary calendar, or a
 # "...@group.calendar.google.com" value for a secondary one. Run
@@ -183,17 +187,15 @@ Google-only fields (the event colour, the guest permissions, working-location an
 
 Only events project: a VTODO or VJOURNAL is refused by name, since Google models neither.
 
-Google is also reachable over CalDAV, but only in a crippled form: bearer tokens are the sole authentication, `MKCALENDAR` is refused outright, and the discovery entry point is off-spec, so each calendar has to be addressed by hand and none can be created.
-
-If you want it anyway, set `caldav.home` to the base URL and make the calendar id the `<CALENDAR-ID>/events` segment:
+Google is also reachable over CalDAV, but only in a crippled form: bearer tokens are the sole authentication, `MKCALENDAR` is refused outright, and no `.well-known` path leads to the server, so `caldav.discover` finds nothing and `caldav.server` names the principal:
 
 ```toml
 [accounts.example]
-caldav.home = "https://apidata.googleusercontent.com/caldav/v2"
-caldav.auth.bearer.token.command = ["ortie", "token", "show"]
+caldav.server = "https://apidata.googleusercontent.com/caldav/v2/"
+caldav.auth.bearer.token.command = ["ortie", "token", "show", "-a", "example"]
 
-# Primary calendar: "<your-email>/events".
-calendar.default = "example@gmail.com/events"
+# The primary calendar; `calendula calendar list` names the others.
+calendar.default = "events"
 ```
 
 ### Microsoft
@@ -202,7 +204,7 @@ Use the `msgraph` backend, which speaks the [Graph API](https://learn.microsoft.
 
 ```toml
 [accounts.example]
-msgraph.auth.token.command = ["ortie", "token", "show", "-a", "calendula-example"]
+msgraph.auth.token.command = ["ortie", "token", "show", "-a", "example"]
 ```
 
 ### Proton
@@ -211,13 +213,13 @@ Not supported: Proton exposes no calendar API, neither CalDAV nor through [Proto
 
 ### Fastmail
 
-Standard CalDAV with the mailbox address and its [app password](https://www.fastmail.help/hc/en-us/articles/360058752854-App-passwords). If `caldav.discover` / `caldav.server` return a 404, point `caldav.home` straight at the calendar home-set to skip the discovery walk:
+Standard CalDAV with the mailbox address and an [app password](https://www.fastmail.help/hc/en-us/articles/360058752854-App-passwords), Fastmail's CalDAV taking no bearer token:
 
 ```toml
 [accounts.example]
-caldav.home = "https://caldav.fastmail.com/dav/calendars/user/example@fastmail.com/"
+caldav.server = "https://caldav.fastmail.com/dav/"
 caldav.auth.basic.username = "example@fastmail.com"
-caldav.auth.basic.password.raw = "***"
+caldav.auth.basic.password.command = "pass show fastmail"
 ```
 
 Run `calendula calendar list` once connected to read the calendar ids (the ID column), then set `calendar.default` to the one you want.
@@ -257,9 +259,9 @@ It is a cache, not a server, so calendars come from the sync and the collection 
 
 ```toml
 [accounts.cached]
-pimdir.root = "~/.local/state/neverest/example"
+pimdir.root = "~/.local/state/neverest"
 # Usually left unset: a store synced by one account is read as that one.
-#pimdir.account = "personal"
+#pimdir.account = "example"
 ```
 
 Run `calendula pimdir status` to see which account you are reading, how much of each calendar is downloaded, and how many creations are still queued. An item that is listed but not downloaded reads as "body not fetched" until a sync hydrates it.

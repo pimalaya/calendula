@@ -509,9 +509,24 @@ impl TlsConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::env::var;
+    use std::{env::var, fs};
 
-    use super::*;
+    use pimalaya_config::sample::{Variant, variants};
+    use tempfile::NamedTempFile;
+
+    use crate::config::*;
+
+    /// The sections of config.sample.toml, one of which a user uncomments,
+    /// each with whether this build compiles its backend.
+    const SECTIONS: [(&str, bool); 7] = [
+        ("# CalDAV", cfg!(feature = "caldav")),
+        ("# Google Calendar", cfg!(feature = "gcal")),
+        ("# Google CalDAV", cfg!(feature = "caldav")),
+        ("# Microsoft Graph", cfg!(feature = "msgraph")),
+        ("# Fastmail", cfg!(feature = "caldav")),
+        ("# vdir", cfg!(feature = "vdir")),
+        ("# pimdir", cfg!(feature = "pimdir")),
+    ];
 
     /// The home directory the tilde in a test path stands for.
     fn home() -> PathBuf {
@@ -636,5 +651,54 @@ mod tests {
         let document = format!("{document}alpn = []\n");
         let config: CaldavConfig = toml::from_str(&document).unwrap();
         assert_eq!(config.alpn, Some(Vec::new()));
+    }
+
+    /// Checks config.sample.toml: one `[accounts.example]` table and no
+    /// other, the sections of the compiled backends each parsed through the
+    /// loader `-c` uses with every variant on top, `example` resolving as
+    /// the default account and declaring a backend.
+    #[test]
+    fn the_sample_configuration_parses_with_each_variant() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("config.sample.toml");
+        let sample = fs::read_to_string(&path).unwrap();
+        let headers: Vec<_> = sample.lines().filter(|l| l.starts_with('[')).collect();
+        assert_eq!(headers, ["[accounts.example]"]);
+
+        let headings = SECTIONS.map(|(heading, _)| heading);
+
+        for Variant { name, text } in variants(&sample, &headings) {
+            // NOTE: a build without a backend ignores its block.
+            let heading = name.split(", ").next().unwrap_or_default();
+            if SECTIONS.contains(&(heading, false)) {
+                continue;
+            }
+
+            let context = format!("config.sample.toml with {name} uncommented");
+
+            let file = NamedTempFile::new().unwrap();
+            fs::write(file.path(), &text).unwrap();
+
+            let mut config = Config::load(&[file.path().to_path_buf()])
+                .unwrap_or_else(|err| panic!("{context}: {err:?}"));
+            let (account, account_config) = config
+                .take_account(None)
+                .unwrap_or_else(|err| panic!("{context}: {err:?}"));
+
+            let blocks: &[bool] = &[
+                #[cfg(feature = "caldav")]
+                account_config.caldav.is_some(),
+                #[cfg(feature = "gcal")]
+                account_config.gcal.is_some(),
+                #[cfg(feature = "msgraph")]
+                account_config.msgraph.is_some(),
+                #[cfg(feature = "vdir")]
+                account_config.vdir.is_some(),
+                #[cfg(feature = "pimdir")]
+                account_config.pimdir.is_some(),
+            ];
+
+            assert_eq!(account, "example", "{context}");
+            assert!(blocks.contains(&true), "{context}: no backend declared");
+        }
     }
 }
