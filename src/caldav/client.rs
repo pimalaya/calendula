@@ -22,7 +22,7 @@ use io_webdav::{
 use pimalaya_config::secret::SecretResolver;
 use pimalaya_stream::{proxy::Proxy, tls::Tls};
 use secrecy::ExposeSecret;
-use url::Url;
+use url::{ParseError, Url};
 
 use crate::{
     cli::resolve_account,
@@ -105,14 +105,16 @@ pub fn connect(config: &CaldavConfig, resolver: &mut SecretResolver) -> Result<W
 /// Accepts a full URL, a bare domain, or `domain:port`; anything
 /// without an explicit `http` or `https` scheme defaults to `https://`,
 /// since `url` would otherwise read the leading label of `domain:port`
-/// as the scheme.
+/// as the scheme. A URL that fails to parse, a non-ASCII host among
+/// them, is refused rather than prefixed.
 pub fn parse_server(server: &str) -> Result<Url> {
-    let url = match Url::parse(server) {
-        Ok(url) if matches!(url.scheme(), "http" | "https") => url,
-        _ => Url::parse(&format!("https://{server}"))?,
-    };
-
-    Ok(url)
+    match Url::parse(server) {
+        Ok(url) if matches!(url.scheme(), "http" | "https") => Ok(url),
+        Ok(_) | Err(ParseError::RelativeUrlWithoutBase) => {
+            Ok(Url::parse(&format!("https://{server}"))?)
+        }
+        Err(err) => Err(err.into()),
+    }
 }
 
 /// Resolves a bare domain to a CalDAV context root through RFC 6764.
@@ -179,6 +181,49 @@ pub fn build_caldav_client(
 #[cfg(test)]
 mod tests {
     use super::parse_server;
+    use crate::config::CaldavConfig;
+
+    /// A host outside ASCII is refused by `server` and `home` alike,
+    /// rather than sent elsewhere, its Punycode form working: no Unicode
+    /// IDNA back end is linked.
+    #[test]
+    fn a_non_ascii_host_is_refused() {
+        for server in ["https://bücher.example/dav/", "bücher.example"] {
+            let parsed = parse_server(server);
+            assert!(parsed.is_err(), "{server}: {parsed:?}");
+        }
+
+        assert_eq!(
+            parse_server("https://xn--bcher-kva.example/dav/")
+                .unwrap()
+                .as_str(),
+            "https://xn--bcher-kva.example/dav/"
+        );
+
+        let home = |url: &str| {
+            let document = format!("home = \"{url}\"\nauth = \"none\"");
+            toml::from_str::<CaldavConfig>(&document).map(|config| config.home)
+        };
+
+        assert!(home("https://bücher.example/dav/").is_err());
+        assert_eq!(
+            home("https://xn--bcher-kva.example/dav/")
+                .unwrap()
+                .map(String::from),
+            Some(String::from("https://xn--bcher-kva.example/dav/"))
+        );
+    }
+
+    /// A URL that fails to parse is refused, rather than prefixed with
+    /// `https://` as a bare authority would be and so sent to host
+    /// `https`.
+    #[test]
+    fn a_malformed_url_is_refused_rather_than_prefixed() {
+        for server in ["https://dav.example.org:99999/", "http://dav example.org/"] {
+            let parsed = parse_server(server);
+            assert!(parsed.is_err(), "{server}: {parsed:?}");
+        }
+    }
 
     /// Every spelling a user writes a context root in resolves, and a
     /// bare authority takes `https` rather than reading its first label

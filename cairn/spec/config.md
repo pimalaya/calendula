@@ -95,7 +95,7 @@ Every configured filesystem path SHALL be shell-expanded by the deserializer tha
 ### Requirement: CalDAV locates its home-set three ways
 The `caldav` block SHALL offer exactly three mutually exclusive routes, from most to least discovery. `discover` resolves a bare domain through RFC 6764 SRV records and the `.well-known` path.
 
-`server` names the context root the principal and home-set walk starts from, taking a full URL, a bare domain or `domain:port` with `https` assumed for a bare authority, and is parsed when it is used rather than when it is read. `home` pins the home-set outright.
+`server` names the context root the principal and home-set walk starts from, taking a full URL, a bare domain or `domain:port` with `https` assumed for a bare authority, and is parsed when it is used rather than when it is read. A string that fails to parse as a URL for any reason other than lacking a scheme SHALL be refused rather than read as a bare authority. `home` pins the home-set outright.
 
 A block carrying none of the three SHALL be rejected by name.
 

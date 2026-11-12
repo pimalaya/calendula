@@ -27,3 +27,17 @@ calendula SHALL depend on the protocol crates directly and own the abstraction o
 
 ### Requirement: The sample ships beside the binary
 The Nix package SHALL install config.sample.toml as share/doc/calendula/config.sample.toml, the release archives SHALL carry it with the share/ of the build they come from, and install.sh SHALL copy it to the same path under its prefix when the downloaded archive holds it, so the first-run welcome copies it rather than downloading it.
+
+### Requirement: Dependencies name their features
+Every dependency, build and dev ones included, SHALL be declared with `default-features = false` and the features calendula uses, each checked against the item it gates, so a default turned on upstream never reaches the binary. A feature only one backend needs SHALL be turned on by that backend's cargo feature: url's `serde`, which only `caldav.home` deserializes through, by `caldav`. A dependency nothing uses SHALL be removed, and a crate the tests alone use SHALL be a dev-dependency.
+
+### Requirement: Hosts are ASCII
+calendula SHALL build url's IDNA without a Unicode back end, `idna_adapter` being pinned to 1.0.0 in Cargo.toml. A host SHALL be written in ASCII, an internationalised one in its Punycode form (`xn--…`), and a CalDAV `server` or `home` with a non-ASCII host SHALL be refused when parsed: `home` when the configuration loads, `server` when the account connects. The Google Calendar and Microsoft Graph hosts are fixed ASCII names.
+
+#### Scenario: An internationalised CalDAV server
+- GIVEN `caldav.server = "https://bücher.example/dav/"`
+- WHEN the account connects
+- THEN the server is refused before any connection, and the same account connects with `caldav.server = "https://xn--bcher-kva.example/dav/"`
+
+### Requirement: Dependency checks pass clean
+`cargo deny check` SHALL pass its advisories, bans, licences and sources checks over the targets deny.toml lists, which are the release targets and the ones people build from source, allowing only the licences the tree carries. A duplicate the tree cannot avoid stays a visible warning rather than a skip: today getrandom 0.2 (ring 0.17) and syn 2 (derive_more-impl under inquire's crossterm, domain-macros under io-pim-discovery, windows-core under chrono on Windows).

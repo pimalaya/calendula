@@ -12,7 +12,7 @@ change: the-family-standards
 - [x] the-wizard-leaves
 - [x] the-shared-kit
 - [x] the-sample-is-tested-and-shipped
-- [ ] dependencies-trimmed
+- [x] dependencies-trimmed
 - [ ] every-feature-set-builds-clean
 - [ ] live-provider-tests
 - [ ] capability-shared-api

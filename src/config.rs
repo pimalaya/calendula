@@ -292,10 +292,11 @@ pub struct CaldavConfig {
     /// start here, skipping the `.well-known` step.
     ///
     /// Accepts a full URL, a bare domain or `domain:port`, a bare
-    /// authority defaulting to `https`.
+    /// authority defaulting to `https`. The host is ASCII, an
+    /// internationalised one written in Punycode.
     pub server: Option<String>,
     /// Pre-resolved calendar home-set URL, skipping every discovery
-    /// step.
+    /// step. The host is ASCII, as for `server`.
     pub home: Option<Url>,
     /// TLS configuration.
     #[serde(default)]
