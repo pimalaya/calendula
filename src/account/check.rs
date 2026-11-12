@@ -1,7 +1,6 @@
 //! # Account check
 //!
-//! The `account check` command, and the per-backend test the wizard
-//! reuses on the account it has just built.
+//! The `account check` command, testing each backend of an account.
 
 use std::{fmt, path::PathBuf};
 
@@ -14,10 +13,7 @@ use pimalaya_config::toml::TomlConfig;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::{
-    backend::Backend,
-    config::{AccountConfig, Config, NO_CONFIG_HINT},
-};
+use crate::{backend::Backend, cli::load_config, config::AccountConfig};
 
 /// Validate the account configuration.
 ///
@@ -41,10 +37,7 @@ impl AccountCheckCommand {
         account_name: Option<&str>,
         backend: Backend,
     ) -> Result<()> {
-        let mut config = match Config::from_paths_or_default(config_paths)? {
-            Some(config) => config,
-            None => bail!("No configuration found, {NO_CONFIG_HINT}"),
-        };
+        let mut config = load_config(config_paths)?;
 
         let (name, account_config) = config
             .take_account(account_name)?
@@ -78,14 +71,11 @@ impl AccountCheckCommand {
 /// Exercises every backend of `account_config` that `backend` allows,
 /// one report row each.
 ///
-/// Shared with the wizard, which tests the account it just built before
-/// printing it.
-///
 /// The credentials go through one resolver for the whole account, so an
 /// account whose CalDAV and gcal blocks name the same command unlocks a
 /// `pass` or `gpg` entry once rather than once per backend. It is
 /// dropped with the check, holding plaintext while it lives.
-pub fn check_account(
+fn check_account(
     #[allow(unused_variables)] account_config: &AccountConfig,
     #[allow(unused_variables)] backend: Backend,
 ) -> Vec<BackendCheck> {
@@ -139,18 +129,6 @@ pub fn check_account(
     }
 
     checks
-}
-
-/// Whether every checked backend answered.
-///
-/// Only the wizard asks, so it compiles with the backends the wizard
-/// configures.
-#[cfg(all(
-    feature = "wizard",
-    any(feature = "caldav", feature = "vdir", feature = "pimdir")
-))]
-pub fn all_ok(checks: &[BackendCheck]) -> bool {
-    !checks.is_empty() && checks.iter().all(|check| check.ok)
 }
 
 /// The vdir home has to be a directory that exists: everything else is

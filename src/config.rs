@@ -16,11 +16,6 @@
 
 use std::{collections::HashMap, path::PathBuf};
 
-#[cfg(all(
-    feature = "wizard",
-    any(feature = "caldav", feature = "vdir", feature = "pimdir")
-))]
-use anyhow::Result;
 use crossterm::style::Color;
 use pimalaya_cli::table::ContentArrangement;
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
@@ -31,26 +26,19 @@ use pimalaya_config::toml::opt_shell_expanded_path;
 use pimalaya_config::toml::shell_expanded_path;
 #[cfg(feature = "caldav")]
 use pimalaya_config::toml::shell_expanded_string;
-#[cfg(all(
-    feature = "wizard",
-    any(feature = "caldav", feature = "vdir", feature = "pimdir")
-))]
-use pimalaya_config::toml::to_string;
 use pimalaya_config::{command::CommandConfig, toml::TomlConfig};
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider};
-use serde::{Deserialize, Deserializer, Serialize, de::Error};
+use serde::{Deserialize, Deserializer, de::Error};
 #[cfg(feature = "caldav")]
 use url::Url;
 
-/// Skips a field equal to its type's default, so a wizard-generated
-/// account omits a defaulted scalar rather than spelling it out.
-fn is_default<T: Default + PartialEq>(value: &T) -> bool {
-    *value == T::default()
-}
+/// How to get a configuration, for the errors meeting none.
+pub const NO_CONFIG_HINT: &str = "write one by hand from the sample: \
+     https://github.com/pimalaya/calendula/blob/master/config.sample.toml";
 
 /// The whole configuration file: global options and every account.
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Config {
     /// Table rendering options shared by every list command.
@@ -66,11 +54,11 @@ pub struct Config {
     #[serde(default)]
     pub item: ItemConfig,
     /// Refused: the to-dos moved to unfog.
-    #[serde(default, skip_serializing)]
+    #[serde(default)]
     #[allow(dead_code)]
     pub todo: Option<TodoMovedConfig>,
     /// Refused: the journal entries moved to journal.
-    #[serde(default, skip_serializing)]
+    #[serde(default)]
     #[allow(dead_code)]
     pub journal: Option<JournalMovedConfig>,
     /// `account list` rendering options, read from this block only.
@@ -101,136 +89,13 @@ impl TomlConfig for Config {
     }
 }
 
-#[cfg(all(
-    feature = "wizard",
-    any(feature = "caldav", feature = "vdir", feature = "pimdir")
-))]
-/// Reading order of a generated account's groups.
-///
-/// What the account is, then the backend it reads calendars from, then
-/// the rendering options. An unlisted key still renders, after these,
-/// so a new [`AccountConfig`] field can never go missing from one.
-const RENDER_ORDER: [&str; 9] = [
-    "default", "vdir", "pimdir", "caldav", "gcal", "msgraph", "calendar", "event", "item",
-];
-
-#[cfg(all(
-    feature = "wizard",
-    any(feature = "caldav", feature = "vdir", feature = "pimdir")
-))]
-/// Keys naming what a backend group points at, lifted to its top.
-///
-/// Serialized alphabetically, `caldav.server` would otherwise read
-/// under the `caldav.auth` credential authenticating against it.
-const ENDPOINT_KEYS: [&str; 5] = ["discover", "server", "home", "home-dir", "root"];
-
-#[cfg(all(
-    feature = "wizard",
-    any(feature = "caldav", feature = "vdir", feature = "pimdir")
-))]
-impl AccountConfig {
-    /// Renders this account as an `[accounts.<name>]` block.
-    ///
-    /// The serializer decides what is written; this restores the
-    /// reading order alphabetical dotted keys lose: groups reordered
-    /// per [`RENDER_ORDER`], endpoint first per [`ENDPOINT_KEYS`].
-    pub fn render(&self, name: &str) -> Result<String> {
-        // NOTE: borrowed rather than built into a `Config`, which would
-        // mean cloning the account. The emitter only wants an
-        // `accounts` table, so any shape carrying one will do.
-        #[derive(Serialize)]
-        struct AccountDocument<'a> {
-            accounts: HashMap<&'a str, &'a AccountConfig>,
-        }
-
-        let document = AccountDocument {
-            accounts: HashMap::from([(name, self)]),
-        };
-        let rendered = to_string(&document)?;
-
-        let (header, body) = match rendered.split_once('\n') {
-            Some((header, body)) => (header, body),
-            None => return Ok(rendered),
-        };
-
-        let mut groups: Vec<(String, Vec<&str>)> = Vec::new();
-
-        for line in body.lines().filter(|line| !line.trim().is_empty()) {
-            let key = line.split(['.', ' ']).next().unwrap_or(line).to_string();
-
-            match groups.iter_mut().find(|(name, _)| *name == key) {
-                Some((_, lines)) => lines.push(line),
-                None => groups.push((key, vec![line])),
-            }
-        }
-
-        groups.sort_by_key(|(key, _)| {
-            RENDER_ORDER
-                .iter()
-                .position(|known| known == key)
-                .unwrap_or(RENDER_ORDER.len())
-        });
-
-        let mut document = format!("{header}\n");
-
-        for (index, (_, mut lines)) in groups.into_iter().enumerate() {
-            if index > 0 {
-                document.push('\n');
-            }
-
-            // NOTE: the endpoint is what the group is about, so it reads
-            // first; the credentials and the quirks qualify it.
-            lines.sort_by_key(|line| {
-                let field = line.split(['.', ' ']).nth(1).unwrap_or_default();
-
-                ENDPOINT_KEYS
-                    .iter()
-                    .position(|known| *known == field)
-                    .unwrap_or(ENDPOINT_KEYS.len())
-            });
-
-            for line in lines {
-                document.push_str(line);
-                document.push('\n');
-            }
-        }
-
-        Ok(document)
-    }
-}
-
-/// The documented sample configuration, named wherever this crate
-/// reports a missing or an incomplete one.
-#[cfg(all(
-    feature = "wizard",
-    any(feature = "caldav", feature = "vdir", feature = "pimdir")
-))]
-pub const CONFIG_SAMPLE_URL: &str =
-    "https://github.com/pimalaya/calendula/blob/master/config.sample.toml";
-
-/// How to get a configuration, for the errors meeting none.
-#[cfg(all(
-    feature = "wizard",
-    any(feature = "caldav", feature = "vdir", feature = "pimdir")
-))]
-pub const NO_CONFIG_HINT: &str = "run `calendula configure` to generate one, or write it by hand: \
-     https://github.com/pimalaya/calendula/blob/master/config.sample.toml";
-
-/// How to get a configuration, for the errors meeting none.
-#[cfg(not(all(
-    feature = "wizard",
-    any(feature = "caldav", feature = "vdir", feature = "pimdir")
-)))]
-pub const NO_CONFIG_HINT: &str = "write one by hand: \
-     https://github.com/pimalaya/calendula/blob/master/config.sample.toml";
-
 /// One account: the backends it reads calendars from, plus whatever it
 /// overrides of the global rendering options.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct AccountConfig {
     /// Whether a command given no `-a/--account` picks this account.
-    #[serde(default, skip_serializing_if = "is_default")]
+    #[serde(default)]
     pub default: bool,
     /// Table rendering options shared by every list command.
     #[serde(default)]
@@ -245,11 +110,11 @@ pub struct AccountConfig {
     #[serde(default)]
     pub item: ItemConfig,
     /// Refused: the to-dos moved to unfog.
-    #[serde(default, skip_serializing)]
+    #[serde(default)]
     #[allow(dead_code)]
     pub todo: Option<TodoMovedConfig>,
     /// Refused: the journal entries moved to journal.
-    #[serde(default, skip_serializing)]
+    #[serde(default)]
     #[allow(dead_code)]
     pub journal: Option<JournalMovedConfig>,
     /// vdir backend: one local directory per calendar.
@@ -270,7 +135,7 @@ pub struct AccountConfig {
 }
 
 /// Calendar-level options.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CalendarConfig {
     /// Calendar id used by `event` and `item` commands when their
@@ -282,7 +147,7 @@ pub struct CalendarConfig {
 }
 
 /// `calendar list` options.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CalendarListConfig {
     /// Per-column colors of the rendered table.
@@ -291,7 +156,7 @@ pub struct CalendarListConfig {
 }
 
 /// Per-column colors of the `calendar list` table.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CalendarListTableConfig {
     /// Color of the ID column, red by default.
@@ -305,7 +170,7 @@ pub struct CalendarListTableConfig {
 }
 
 /// Event-level rendering options.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct EventConfig {
     /// `event list` options.
@@ -314,7 +179,7 @@ pub struct EventConfig {
 }
 
 /// `event list` options.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct EventListConfig {
     /// Default `-s/--page-size` value for `event list`, 25 when unset.
@@ -325,7 +190,7 @@ pub struct EventListConfig {
 }
 
 /// Per-column colors of the `event list` table.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct EventListTableConfig {
     /// Color of the ID column, red by default.
@@ -369,7 +234,7 @@ impl<'de> Deserialize<'de> for JournalMovedConfig {
 /// The composer lives here rather than under `event`: `event` and `item`
 /// are views over the same items, and what is edited is an iCalendar
 /// object, which is what `item` names.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ItemConfig {
     /// Command an item is edited through, spawned on the path of a
@@ -384,7 +249,7 @@ pub struct ItemConfig {
 }
 
 /// `item list` options.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ItemListConfig {
     /// Default `-s/--page-size` value for `item list`, 25 when unset.
@@ -395,7 +260,7 @@ pub struct ItemListConfig {
 }
 
 /// Per-column colors of the `item list` table.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ItemListTableConfig {
     /// Color of the ID column, red by default.
@@ -407,7 +272,7 @@ pub struct ItemListTableConfig {
 }
 
 /// `account list` rendering options. Top-level only.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct AccountListingConfig {
     /// `account list` options.
@@ -416,7 +281,7 @@ pub struct AccountListingConfig {
 }
 
 /// `account list` options.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct AccountListingListConfig {
     /// Per-column colors of the rendered table.
@@ -425,7 +290,7 @@ pub struct AccountListingListConfig {
 }
 
 /// Per-column colors of the `account list` table.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct AccountListingTableConfig {
     /// Color of the NAME column, green by default.
@@ -438,7 +303,7 @@ pub struct AccountListingTableConfig {
 
 /// Global / per-account table rendering quirks shared across every list
 /// command.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TableConfig {
     /// `comfy_table` preset string. Defaults to `UTF8_FULL_CONDENSED`.
@@ -448,7 +313,7 @@ pub struct TableConfig {
 }
 
 /// How a table spreads its columns over the terminal width.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum TableArrangementConfig {
     /// Fit the content to the terminal width. The default.
@@ -472,7 +337,7 @@ impl From<TableArrangementConfig> for ContentArrangement {
 
 /// vdir backend configuration.
 #[cfg(feature = "vdir")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct VdirConfig {
     /// Filesystem path of the vdir home: the directory holding one
@@ -488,7 +353,7 @@ pub struct VdirConfig {
 /// server: calendula reads what the store holds and stages its writes
 /// for the next sync to push.
 #[cfg(feature = "pimdir")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct PimdirConfig {
     /// The store directory, holding the SQLite index and the blob
@@ -511,7 +376,7 @@ pub struct PimdirConfig {
 /// to least discovery: `discover` resolves a bare domain, `server`
 /// names the context root to walk from, `home` pins the home-set.
 #[cfg(feature = "caldav")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CaldavConfig {
     /// Bare domain resolved to a context root through RFC 6764 SRV
@@ -538,7 +403,7 @@ pub struct CaldavConfig {
 
 /// CalDAV authentication configuration.
 #[cfg(feature = "caldav")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum CaldavAuthConfig {
     /// No credentials, for a server that asks for none.
@@ -567,7 +432,7 @@ pub enum CaldavAuthConfig {
 /// The API endpoint is fixed, so there is nothing to discover and no
 /// server to name: a token and a TLS profile are the whole block.
 #[cfg(feature = "gcal")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct GcalConfig {
     /// TLS configuration.
@@ -598,7 +463,7 @@ pub fn default_gcal_alpn() -> Vec<String> {
 /// an OAuth 2.0 bearer token and nothing else. It still nests under
 /// `auth`, so every Pimalaya backend spells its credentials alike.
 #[cfg(feature = "gcal")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct GcalAuthConfig {
     /// The token, read from the configuration or from the standard
@@ -613,14 +478,11 @@ pub struct GcalAuthConfig {
 /// The API endpoint is fixed: the calendar owner, a token and a TLS
 /// profile are the whole block.
 #[cfg(feature = "msgraph")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct MsgraphConfig {
     /// Graph user id, `me` by default: the authenticated user.
-    #[serde(
-        default = "default_msgraph_user_id",
-        skip_serializing_if = "is_default_msgraph_user_id"
-    )]
+    #[serde(default = "default_msgraph_user_id")]
     pub user_id: String,
     /// TLS configuration.
     #[serde(default)]
@@ -638,12 +500,6 @@ fn default_msgraph_user_id() -> String {
     String::from("me")
 }
 
-/// Whether `user_id` is the default one, which a generated block leaves out.
-#[cfg(feature = "msgraph")]
-fn is_default_msgraph_user_id(user_id: &str) -> bool {
-    user_id == "me"
-}
-
 /// ALPN identifiers msgraph offers when `msgraph.alpn` names none, pinning
 /// the HTTP/1.1 io-http speaks.
 #[cfg(feature = "msgraph")]
@@ -654,7 +510,7 @@ pub fn default_msgraph_alpn() -> Vec<String> {
 /// Microsoft Graph authentication configuration: an OAuth 2.0 bearer token
 /// and nothing else, calendula running no OAuth flow itself.
 #[cfg(feature = "msgraph")]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct MsgraphAuthConfig {
     /// The token, read from the configuration or from the standard output
@@ -664,7 +520,7 @@ pub struct MsgraphAuthConfig {
 
 /// SSL/TLS configuration.
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TlsConfig {
     /// TLS implementation. Unset takes the first compiled in, rustls
@@ -683,7 +539,7 @@ pub struct TlsConfig {
 
 /// Which TLS implementation carries the connection.
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum TlsProviderConfig {
     /// The pure-Rust rustls stack.
@@ -694,7 +550,7 @@ pub enum TlsProviderConfig {
 
 /// rustls-specific options.
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct RustlsConfig {
     /// Crypto provider. Unset prefers ring, else aws-lc-rs.
@@ -703,7 +559,7 @@ pub struct RustlsConfig {
 
 /// Which cryptographic provider backs rustls.
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum RustlsCryptoConfig {
     /// The aws-lc-rs provider.
@@ -811,25 +667,5 @@ mod tests {
 
         assert!(err.contains("`journal` table moved to `journal`"), "{err}");
         assert!(err.contains("line 1"), "{err}");
-    }
-
-    /// The wizard writes no `default = false` line, the rest of the
-    /// family omitting it too.
-    #[cfg(all(
-        feature = "wizard",
-        any(feature = "caldav", feature = "vdir", feature = "pimdir")
-    ))]
-    #[test]
-    fn a_rendered_account_spells_the_default_flag_only_when_it_is_set() {
-        let mut account = AccountConfig::default();
-        assert!(!account.render("personal").unwrap().contains("default ="));
-
-        account.default = true;
-        assert!(
-            account
-                .render("personal")
-                .unwrap()
-                .contains("default = true")
-        );
     }
 }

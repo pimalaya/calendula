@@ -1,11 +1,13 @@
 ---
 cairn: change
 id: first-run-wizard-frame
-status: active
+status: abandoned
 created: 2026-08-14
 ---
 
 # Adopt Comodoro's first-run wizard frame
+
+> Abandoned on 2026-11-12 for the-wizard-leaves: the owner decided on 2026-11-08 that the wizards leave the family, and the shared first-run welcome comes with the-shared-kit.
 
 ## Why
 

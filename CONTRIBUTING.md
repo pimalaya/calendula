@@ -17,7 +17,7 @@ Each backend sits behind its own cargo feature, and exactly one TLS provider mus
 
 | Feature       | What it pulls in                                                    |
 |---------------|---------------------------------------------------------------------|
-| `caldav`      | io-webdav and io-http: the CalDAV backend and its discovery          |
+| `caldav`      | io-webdav, io-http and io-pim-discovery: the CalDAV backend         |
 | `vdir`        | io-vdir: the local vdir home                                        |
 | `pimdir`      | io-pimdir: the local pimdir store                                   |
 | `rustls-ring` | the default TLS provider                                            |

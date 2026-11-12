@@ -12,17 +12,16 @@ homepage = "https://pimalaya.org"
 repository = "https://github.com/pimalaya/calendula"
 
 [features]
-default = ["rustls-ring", "caldav", "gcal", "msgraph", "vdir", "pimdir", "vendored", "wizard"]
-native-tls = ["pimalaya-stream/native-tls", "io-pim-discovery/native-tls", "io-webdav?/native-tls", "io-gcal?/native-tls", "io-msgraph?/native-tls"]
-rustls-aws = ["pimalaya-stream/rustls-aws", "io-pim-discovery/rustls-aws", "io-webdav?/rustls-aws", "io-gcal?/rustls-aws", "io-msgraph?/rustls-aws"]
-rustls-ring = ["pimalaya-stream/rustls-ring", "io-pim-discovery/rustls-ring", "io-webdav?/rustls-ring", "io-gcal?/rustls-ring", "io-msgraph?/rustls-ring"]
-caldav = ["dep:io-webdav", "dep:io-http", "dep:secrecy"]
+default = ["rustls-ring", "caldav", "gcal", "msgraph", "vdir", "pimdir", "vendored"]
+native-tls = ["pimalaya-stream/native-tls", "io-pim-discovery?/native-tls", "io-webdav?/native-tls", "io-gcal?/native-tls", "io-msgraph?/native-tls"]
+rustls-aws = ["pimalaya-stream/rustls-aws", "io-pim-discovery?/rustls-aws", "io-webdav?/rustls-aws", "io-gcal?/rustls-aws", "io-msgraph?/rustls-aws"]
+rustls-ring = ["pimalaya-stream/rustls-ring", "io-pim-discovery?/rustls-ring", "io-webdav?/rustls-ring", "io-gcal?/rustls-ring", "io-msgraph?/rustls-ring"]
+caldav = ["dep:io-webdav", "dep:io-http", "dep:io-pim-discovery", "dep:secrecy"]
 gcal = ["dep:io-gcal", "dep:secrecy", "io-gcal/ical"]
 msgraph = ["dep:io-msgraph", "dep:secrecy", "io-msgraph/client", "io-msgraph/ical"]
 vdir = ["dep:io-vdir"]
 pimdir = ["dep:ariadne", "dep:io-pimdir", "io-pimdir/search"]
 vendored = ["pimalaya-stream/vendored", "io-webdav?/vendored", "io-gcal?/vendored", "io-msgraph?/vendored", "io-pimdir?/vendored"]
-wizard = ["pimalaya-cli/wizard", "pimalaya-cli/caldav", "pimalaya-cli/spinner"]
 
 [profile.release]
 lto = "fat"
@@ -49,7 +48,7 @@ ical-rs = { version = "0.7", default-features = false, features = ["parser", "tz
 io-gcal = { version = "0.3.1", default-features = false, features = ["client"], optional = true }
 io-msgraph = { version = "0.7.1", default-features = false, optional = true }
 io-http = { version = "0.6", default-features = false, optional = true }
-io-pim-discovery = { version = "0.11", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "stream"] }
+io-pim-discovery = { version = "0.11", default-features = false, features = ["rfc6764", "stream"], optional = true }
 io-pimdir = { version = "0.10", default-features = false, features = ["client"], optional = true }
 io-vdir = { version = "0.2", default-features = false, features = ["client", "serde"], optional = true }
 io-webdav = { version = "0.7", default-features = false, features = ["client"], optional = true }
@@ -62,6 +61,5 @@ schemars = "1"
 secrecy = { version = "0.10", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-shellexpand = "3.1"
 unicode-width = "0.2"
 url = { version = "2.5", features = ["serde"] }

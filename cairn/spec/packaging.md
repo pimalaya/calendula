@@ -10,7 +10,9 @@ status: current
 The crate SHALL ship a binary only, with no library target. Its architecture document is the src/main.rs header, not a separate file, and the manifest carries no `documentation` field and no docs.rs metadata.
 
 ### Requirement: One cargo feature per backend
-Each backend SHALL sit behind its own cargo feature (`caldav`, `gcal`, `vdir`, `pimdir`), pulling its io-* crates through `dep:`. A build SHALL compile at least one of them; a build with none is not a supported configuration, since the product would have nothing to talk to.
+Each backend SHALL sit behind its own cargo feature (`caldav`, `gcal`, `msgraph`, `vdir`, `pimdir`), pulling its io-* crates through `dep:`. A build SHALL compile at least one of them; a build with none is not a supported configuration, since the product would have nothing to talk to.
+
+`caldav` SHALL pull io-pim-discovery, with its RFC 6764 resolution alone, for the `discover` route, so a build without that backend links no discovery code.
 
 `gcal` SHALL additionally pull the time zone database its projection mints definitions from, so a build without that backend pays neither the dependency nor its embedded data.
 

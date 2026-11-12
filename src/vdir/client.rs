@@ -11,7 +11,6 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use io_vdir::{client::VdirClient as Inner, path::VdirPath};
-use pimalaya_cli::printer::Printer;
 use pimalaya_config::toml::TomlConfig;
 
 use crate::{account::context::Account, cli::load_config, config::VdirConfig};
@@ -56,11 +55,10 @@ impl DerefMut for VdirClient {
 ///
 /// Bails when the account carries no `[vdir]` block.
 pub fn build_vdir_client(
-    printer: &mut impl Printer,
     config_paths: &[PathBuf],
     account_name: Option<&str>,
 ) -> Result<VdirClient> {
-    let mut config = load_config(printer, config_paths)?;
+    let mut config = load_config(config_paths)?;
     let (name, mut account_config) = config
         .take_account(account_name)?
         .ok_or_else(|| anyhow!("Cannot find account"))?;

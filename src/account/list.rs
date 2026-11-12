@@ -33,7 +33,7 @@ pub struct AccountListCommand;
 
 impl AccountListCommand {
     pub fn execute(self, printer: &mut impl Printer, config_paths: &[PathBuf]) -> Result<()> {
-        let config = load_config(printer, config_paths)?;
+        let config = load_config(config_paths)?;
 
         let style = style_from_preset(config.table.preset.as_deref().unwrap_or(DEFAULT_PRESET));
         let arrangement = config

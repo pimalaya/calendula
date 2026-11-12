@@ -130,7 +130,7 @@ impl IcalBuildArgs {
         }
 
         let composer = IcalComposer {
-            command: item_composer(printer, config_paths, account_name, composer.composer)?,
+            command: item_composer(config_paths, account_name, composer.composer)?,
         };
 
         let Some(draft) = composer.edit(printer, &seed)? else {
@@ -185,7 +185,6 @@ impl fmt::Display for SavedOutput {
 /// the command looking for a configuration: building an item is otherwise
 /// something a machine holding none can do.
 fn item_composer(
-    printer: &mut impl Printer,
     config_paths: &[PathBuf],
     account_name: Option<&str>,
     flag: Option<String>,
@@ -194,7 +193,7 @@ fn item_composer(
         return Ok(CommandConfig::Shell(line));
     }
 
-    let (config, account_config) = resolve_account(printer, config_paths, account_name)?;
+    let (config, account_config) = resolve_account(config_paths, account_name)?;
     let account = Account::from(config).merge(Account::from(account_config));
 
     account.item_composer(None)

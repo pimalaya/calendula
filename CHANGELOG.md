@@ -19,7 +19,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Added the projection to `event build --json`: `{contents, method, events}`, the calendar's `METHOD` and its events as `event read` prints them, so a loose iCalendar (an invitation attached to a mail) is read with no account and no backend.
 - Added `sequence` and `zoneAssumed` to the event JSON: the `SEQUENCE` (0 when absent), and whether a `TZID` nothing defines was read in the local zone.
 - Added `default` to every calendar in `calendar list --json` (pimdir STORAGE §14): `true` on the one the server names the default, read on the pimdir backend from the role the sync engine recorded (`collections.role`), `false` on the other backends for now.
-- Added the `wizard` cargo feature, on by default, gating the interactive configuration: the `configure` command and the offer a first run makes. A build without it drops the prompts and the dependencies only they use, and a missing configuration points at the documented sample instead.
 - Added recurrence expansion to `event list --from/--to`: every occurrence overlapping the window lists on its own, overrides applied and excluded dates dropped, with a `recurrenceId` addressing it and its `startsAt` and `endsAt` resolved to instants with their UTC offset.
 - Added the attendees, the organizer, the description, the location, the status, the transparency and the online meeting link to the event JSON.
 - Added `event read --recurrence-id`, projecting one occurrence, and `event find <UID>`.
@@ -29,25 +28,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Added `pimdir reply --recurrence-id` and `pimdir cancel --recurrence-id`, limiting the intent to one occurrence (`recurrence_id`, pimdir STORAGE Annex B.2); a performer unable to act on one occurrence is refused with `occurrence-unsupported`. Their JSON adds `recurrenceId`.
 - Added a stable `code` to the `--json` error output for failures a caller acts on: `body-pending`, `precondition-failed`, `occurrence-unsupported`, `item-duplicate`, and the pimdir store states io-pimdir names `store-uncreated`, `store-version`, `store-foreign`, `store-corrupt`, `store-hash-algo`, `store-busy`, `store-exposed`, `flag-invalid` and `action-malformed`.
 - Added the parked actions to `pimdir status`: every write the sync engine could not apply in the calendars shown, by its queue row (ROW), its calendar, its action and the error that parked it. Its JSON adds `parked`.
-- Added the Google Calendar API and Microsoft Graph calendars to the wizard.
-
-  Where a provider rule matches the address, by its domain or its MX hosts, the gcal or msgraph backend is picked before CalDAV and signed in through Ortie, its block written as config.sample.toml documents it.
 
 ### Changed
 
-- Changed the wizard to pick the best way to the calendars itself and show it in a review, instead of listing every server then asking the authentication scheme, the username and how the secret is read.
-
-  The review reads in plain words (`CalDAV at dav.example.org, with your password`), and `Change calendar` lists every other way found and a custom server URL.
-- Changed the wizard to ask a password or an API token once, after naming the server it goes to and flagging one off the address's domain, then test it and offer to store it in an installed keyring, read back to check, at `calendula-<account>-caldav`.
-
-  The login is the address, asked only when none was typed. A refused sign-in offers to try again, to change the login or to go back to the review.
-- Changed the wizard to hand an OAuth sign-in off to Ortie (`ortie configure` then `ortie auth get`, under the Ortie account `calendula-<account>`), offering the token brokers when Ortie is not installed.
-- Changed the wizard to ask `Server URL:` when nothing is discovered instead of stopping, an empty answer still stopping it.
-- Changed the wizard to accept encrypted servers only: a typed `http://` URL is refused unless it names this machine, a discovered one is dropped, and `caldav://` now reads as `https` like `caldavs://`.
-- Changed io-pim-discovery to 0.11, and the wizard to look up the Google Calendar API and Microsoft Graph calendars beside CalDAV.
-
-  A CalDAV root is resolved through its well-known URI (RFC 6764), a provider is recognized through the domain's MX hosts, and OAuth grants are read from protected resource metadata (RFC 9728); a DNS resolver that does not answer fails the lookup, naming it.
-
+- Changed io-pim-discovery to 0.11: a DNS resolver that does not answer fails `caldav.discover`, naming it.
 - Changed the pimdir backend to read one account of the store: with `pimdir.account` unset, the account every collection is grouped under, and a store several accounts share is refused, naming them, rather than read with their calendars merged. **Breaking.**
 - Changed the pimdir write confirmations to say the write is queued for the next sync (`Event <id> queued for the next sync`, `... update queued ...`, `... deletion queued ...`) rather than created, updated or deleted. The JSON output is unchanged; a queued create's `id` is the link id it staged, which no command addresses before a sync applies it.
 - Changed every write printing a confirmation to print a receipt instead of `{"message": ...}` under `--json`: `calendar create|update|delete` and `event|item delete` print `{id, queued}`, the item acted on and whether the write waits for a sync; `caldav create|delete`, `vdir create|rename|delete` and `gcal acl create|update|delete`, `gcal move` and `gcal quick-add` print `{id}`, a renamed collection's new id; `event|item build -o` prints `{path, size}`. The text form keeps its sentence, a queued delete now naming the item (`Event <id> deletion queued for the next sync`). Every command now has a schema under `json-schema` (pimalaya-cli 0.3). **Breaking.**
@@ -79,6 +63,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Removed
 
+- Removed the configuration wizard: the `configure` command (alias `wizard`), the offer a bare `calendula` and a command without a configuration made, the `wizard` cargo feature and the `calendula-configure` JSON Schema. Write the configuration from config.sample.toml; a command finding none fails naming the path it looked at and the sample, and a bare `calendula` prints the help. io-pim-discovery now comes with the `caldav` feature alone, for `caldav.discover`. **Breaking.**
 - Removed the `todo` and `journal` commands (`list`, `read`, `build`, `create`, `update`, `delete`) and their `todo.list` and `journal.list` options: calendula is the events CLI, to-dos moving to [unfog](https://github.com/pimalaya/unfog) and journal entries to [journal](https://github.com/pimalaya/journal). `item` still reads and writes any component raw. A `todo` or `journal` table left in a configuration, at the top level or under an account, is refused by name, pointing at the CLI that took it over. `item build -i` and `item create -i` given no source now name `calendula event`, `unfog` and `journal` as what composes an item. **Breaking.**
 
 ### Fixed
@@ -91,7 +76,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Fixed a pimdir create or update the store refused (a duplicate `UID`, a to-do into a calendar taking none, a scheduled event no source notifies for) leaving its body in the store's blob tree until a collection: the body is now written only with the queued action that pins it.
 - Fixed a pimdir update made over the version it read (`event` or `item update` reading the stored item, or given `--if-match`) overwriting a change a sync landed while it waited in the queue: the queued action names that version, and the sync engine parks the update, shown by `pimdir status`, rather than applying it over the other change.
 - Fixed `pimdir reply` and `pimdir cancel` queueing their intent unchecked when the event's body blob is missing from the store: they now fail, as `event read` does.
-- Fixed the wizard taking a folder holding only a blob tree (`objects/`) for a pimdir store, which then failed on its first command: a store is detected by its `pimdir.db`.
 - Fixed `account check` exiting 0 when a backend failed: it now fails, naming each failed backend and why.
 - Fixed `event agenda` reading a lone month name as a year: `event agenda noviembre` drew the whole current year, where cal draws that month. It now draws that month of the current year, a lone number still being a year. A day that is not a number or not in the month, a month matching no name, a month number outside 1-12 or an unreadable year is refused, naming the value, instead of drawing the 1st, January or the current year.
 - Fixed `event agenda` placing a recurring series once, at its first start: a yearly event created years ago marked none of the days on screen. The agenda now reads the days its grid draws and expands each series over them, as `event list --from/--to` does.

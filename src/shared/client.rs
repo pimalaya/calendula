@@ -24,7 +24,6 @@ use std::convert::Infallible;
 
 use anyhow::{Result, bail};
 use log::debug;
-use pimalaya_cli::printer::Printer;
 #[cfg(any(feature = "gcal", feature = "msgraph"))]
 use pimalaya_config::secret::SecretResolver;
 
@@ -179,12 +178,11 @@ impl CalendarClient {
     /// The four component families call this per subcommand rather than
     /// once for the whole family, so a `build` reaches neither.
     pub fn resolve(
-        printer: &mut impl Printer,
         config_paths: &[PathBuf],
         account_name: Option<&str>,
         backend: Backend,
     ) -> Result<Self> {
-        let (config, account_config) = resolve_account(printer, config_paths, account_name)?;
+        let (config, account_config) = resolve_account(config_paths, account_name)?;
 
         Self::new(config, account_config, backend)
     }

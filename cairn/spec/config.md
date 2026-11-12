@@ -13,6 +13,17 @@ A configuration SHALL be read from the first existing path among the canonical p
 
 Several paths MAY be passed at once, separated by `:`: the first is the base and the rest are deep-merged on top, which is how a public configuration and a private one stay separate files.
 
+### Requirement: A missing configuration is an error
+When no configuration is found, a command needing one SHALL fail naming the path it looked at (the first `-c` or `CALENDULA_CONFIG` path, else the default location) and pointing at the documented sample, and a bare `calendula` SHALL print the help. calendula SHALL NOT prompt to create a configuration.
+
+#### Scenario: A mistyped path
+- GIVEN no file at `~/.config/calendula/confg.toml`
+- WHEN `calendula -c ~/.config/calendula/confg.toml calendar list` runs
+- THEN it fails with `No configuration found at <that path>, write one by hand from the sample: https://github.com/pimalaya/calendula/blob/master/config.sample.toml`
+
+### Requirement: The configuration is never written
+calendula SHALL NOT write a configuration file: the user writes it, from the documented sample.
+
 ### Requirement: The global block folds under the account
 The top-level rendering options SHALL be folded under the selected account, the account's own values overriding them field by field. A value set once at the top therefore applies everywhere it is not overridden.
 
@@ -82,9 +93,6 @@ A backend whose protocol pins an HTTP version SHALL expose an `alpn` key, a list
 `gcal.alpn` defaults to `http/1.1`, the only version io-http speaks. The `caldav` block exposes none: its client pins HTTP/1.1 itself, as every DAV backend of the family does.
 
 The runtime TLS profile SHALL be built through `TlsConfig::into_tls(alpn)`, never through a conversion assuming a list, so no caller can negotiate a protocol it did not name.
-
-### Requirement: A defaulted scalar is not written back
-A generated account SHALL omit a scalar equal to its type's default, `default = false` first among them, so what the wizard writes is what the user chose rather than the whole schema.
 
 ### Requirement: The composer is a command, not a library
 `item.composer` SHALL hold the command an item is edited through, at the top level and per account, as a shell line or an argv list. calendula SHALL spawn it rather than embed an editor: what edits an iCalendar is the user's choice, and a terminal editor, a graphical one and a purpose-built one are all one configuration line apart.

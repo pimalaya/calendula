@@ -3,18 +3,10 @@
 //! The command tree calendula serves and its single dispatch point,
 //! plus the configuration loading every command starts from.
 
-use std::{
-    io::{IsTerminal, stdin},
-    path::{Path, PathBuf},
-};
+use std::path::PathBuf;
 
 use anyhow::{Result, bail};
 use clap::{CommandFactory, Parser, Subcommand};
-#[cfg(all(
-    feature = "wizard",
-    any(feature = "caldav", feature = "vdir", feature = "pimdir")
-))]
-use pimalaya_cli::prompt;
 use pimalaya_cli::{
     clap::{
         args::{AccountFlag, JsonFlag, LogFlags},
@@ -34,11 +26,6 @@ use crate::gcal::{cli::GcalCommand, client::build_gcal_client};
 use crate::pimdir::{backend::PimdirBackend, cli::PimdirCommand};
 #[cfg(feature = "vdir")]
 use crate::vdir::{cli::VdirCommand, client::build_vdir_client};
-#[cfg(all(
-    feature = "wizard",
-    any(feature = "caldav", feature = "vdir", feature = "pimdir")
-))]
-use crate::wizard::{self, configure::ConfigureCommand};
 use crate::{
     account::cli::AccountCommand,
     backend::Backend,
@@ -56,7 +43,7 @@ use crate::{
 #[command(long_version = long_version!())]
 #[command(propagate_version = true, infer_subcommands = true)]
 pub struct CalendulaCli {
-    /// The command to run. Without one, the configuration wizard runs.
+    /// The command to run, a bare `calendula` showing this help.
     #[command(subcommand)]
     pub command: Option<CalendulaCommand>,
 
@@ -111,13 +98,6 @@ pub enum CalendulaCommand {
     #[cfg(feature = "vdir")]
     #[command(subcommand)]
     Vdir(VdirCommand),
-    /// Configure an account interactively.
-    #[cfg(all(
-        feature = "wizard",
-        any(feature = "caldav", feature = "vdir", feature = "pimdir")
-    ))]
-    #[command(visible_alias = "wizard")]
-    Configure(ConfigureCommand),
     #[command(subcommand)]
     Account(AccountCommand),
     #[command(alias = "completions")]
@@ -130,16 +110,13 @@ pub enum CalendulaCommand {
 
 /// The global config and the active account's, for a unified command.
 ///
-/// A free function rather than a closure, so the printer it needs for
-/// the offer is borrowed for the length of the call rather than of the
-/// whole dispatch, and public so a family resolves its own account per
-/// subcommand: `build` resolves none at all.
+/// Public so a family resolves its own account per subcommand: `build`
+/// resolves none at all.
 pub fn resolve_account(
-    printer: &mut impl Printer,
     config_paths: &[PathBuf],
     account_name: Option<&str>,
 ) -> Result<(Config, AccountConfig)> {
-    let mut config = load_config(printer, config_paths)?;
+    let mut config = load_config(config_paths)?;
 
     let Some((_, account_config)) = config.take_account(account_name)? else {
         bail!("Cannot find default account; use --account or set `default = true`")
@@ -148,83 +125,18 @@ pub fn resolve_account(
     Ok((config, account_config))
 }
 
-/// Loads the configuration from the merged `config_paths`, or explains
-/// how to get one.
+/// Loads the configuration from the merged `config_paths`.
 ///
-/// A missing configuration raises the offer rather than an error. The
-/// wizard may print the account instead of writing it, so having run
-/// it proves nothing: the lookup is repeated before failing.
-pub fn load_config(printer: &mut impl Printer, config_paths: &[PathBuf]) -> Result<Config> {
-    if let Some(config) = Config::from_paths_or_default(config_paths)? {
-        return Ok(config);
-    }
-
-    let path = Config::target_path(config_paths)?;
-
-    // NOTE: a cron job cannot answer a prompt and a JSON consumer wants
-    // a failure it can read, so both skip the offer.
-    if !printer.is_json() && stdin().is_terminal() {
-        offer_configuration(printer, config_paths, &path)?;
-    }
-
+/// A missing configuration fails naming the path looked at, which is
+/// where `-c` pointed, so a mistyped path shows up as itself.
+pub fn load_config(config_paths: &[PathBuf]) -> Result<Config> {
     match Config::from_paths_or_default(config_paths)? {
         Some(config) => Ok(config),
         None => bail!(
             "No configuration found at {}, {NO_CONFIG_HINT}",
-            path.display()
+            Config::target_path(config_paths)?.display()
         ),
     }
-}
-
-/// Welcomes, then offers to generate a first configuration, returning
-/// whether the wizard ran.
-///
-/// Raised from the two places nothing can happen without a
-/// configuration: a bare invocation, and a command needing an account.
-/// A hook rather than a gate, so a declined offer is the caller's
-/// business.
-#[cfg(all(
-    feature = "wizard",
-    any(feature = "caldav", feature = "vdir", feature = "pimdir")
-))]
-pub fn offer_configuration(
-    printer: &mut impl Printer,
-    config_paths: &[PathBuf],
-    path: &Path,
-) -> Result<bool> {
-    wizard::configure::print_welcome(path);
-
-    if !prompt::bool("Create a configuration with a default account?", true)? {
-        return Ok(false);
-    }
-
-    ConfigureCommand.execute(printer, config_paths)?;
-
-    Ok(true)
-}
-
-/// Reports that this build carries no wizard.
-///
-/// Nothing to walk the user through, so it names the missing features
-/// rather than offering an empty flow.
-#[cfg(not(all(
-    feature = "wizard",
-    any(feature = "caldav", feature = "vdir", feature = "pimdir")
-)))]
-pub fn offer_configuration(
-    _printer: &mut impl Printer,
-    _config_paths: &[PathBuf],
-    _path: &Path,
-) -> Result<bool> {
-    eprintln!();
-    eprintln!(
-        "This build carries no wizard, which needs the `wizard` feature and one of \
-         caldav, vdir or pimdir; write a configuration by hand, starting from \
-         config.sample.toml"
-    );
-    eprintln!();
-
-    Ok(false)
 }
 
 impl CalendulaCommand {
@@ -239,7 +151,7 @@ impl CalendulaCommand {
     ) -> Result<()> {
         match self {
             Self::Calendar(cmd) => {
-                let client = CalendarClient::resolve(printer, config_paths, account_name, backend)?;
+                let client = CalendarClient::resolve(config_paths, account_name, backend)?;
                 cmd.execute(printer, client)
             }
 
@@ -250,30 +162,25 @@ impl CalendulaCommand {
 
             #[cfg(feature = "caldav")]
             Self::Caldav(cmd) => {
-                let client = build_caldav_client(printer, config_paths, account_name)?;
+                let client = build_caldav_client(config_paths, account_name)?;
                 cmd.execute(printer, client)
             }
             #[cfg(feature = "gcal")]
             Self::Gcal(cmd) => {
-                let client = build_gcal_client(printer, config_paths, account_name)?;
+                let client = build_gcal_client(config_paths, account_name)?;
                 cmd.execute(printer, client)
             }
             #[cfg(feature = "pimdir")]
             Self::Pimdir(cmd) => {
-                let backend = PimdirBackend::build(printer, config_paths, account_name)?;
+                let backend = PimdirBackend::build(config_paths, account_name)?;
                 cmd.execute(printer, backend)
             }
             #[cfg(feature = "vdir")]
             Self::Vdir(cmd) => {
-                let client = build_vdir_client(printer, config_paths, account_name)?;
+                let client = build_vdir_client(config_paths, account_name)?;
                 cmd.execute(printer, client)
             }
 
-            #[cfg(all(
-                feature = "wizard",
-                any(feature = "caldav", feature = "vdir", feature = "pimdir")
-            ))]
-            Self::Configure(cmd) => cmd.execute(printer, config_paths),
             Self::Account(cmd) => cmd.execute(printer, config_paths, account_name, backend),
             Self::Completion(cmd) => cmd.execute(printer, CalendulaCli::command()),
             Self::Manual(cmd) => cmd.execute(printer, CalendulaCli::command()),

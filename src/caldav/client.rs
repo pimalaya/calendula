@@ -19,7 +19,6 @@ use io_webdav::{
     client::{WebdavClientStd, WebdavClientStdConnectOptions},
     rfc4918::WebdavAuth,
 };
-use pimalaya_cli::printer::Printer;
 use pimalaya_config::{secret::SecretResolver, toml::TomlConfig};
 use pimalaya_stream::{proxy::Proxy, tls::Tls};
 use secrecy::ExposeSecret;
@@ -121,21 +120,18 @@ pub fn parse_server(server: &str) -> Result<Url> {
 }
 
 /// Resolves a bare domain to a CalDAV context root through RFC 6764.
-fn resolve_server(domain: &str, tls: &Tls) -> Result<Url> {
-    let mut client = DiscoveryWebdavClientStd::new(resolver()).with_tls(tls.clone());
-    Ok(client.resolve(domain, DiscoveryDavService::Caldav)?)
-}
-
-/// The resolver discovery queries.
 ///
-/// The system one, so the domain is not leaked to a third party,
-/// falling back to the Cloudflare default on hosts exposing none.
-pub fn resolver() -> Url {
-    system_resolver().unwrap_or_else(|| {
+/// Queries the system resolver, so the domain is not leaked to a third
+/// party, falling back to the Cloudflare default on hosts exposing none.
+fn resolve_server(domain: &str, tls: &Tls) -> Result<Url> {
+    let resolver = system_resolver().unwrap_or_else(|| {
         DEFAULT_RESOLVER
             .parse()
             .expect("DEFAULT_RESOLVER must be a valid URL")
-    })
+    });
+
+    let mut client = DiscoveryWebdavClientStd::new(resolver).with_tls(tls.clone());
+    Ok(client.resolve(domain, DiscoveryDavService::Caldav)?)
 }
 
 /// The TLS profile CalDAV connects with.
@@ -168,11 +164,10 @@ fn build_auth(config: &CaldavAuthConfig, resolver: &mut SecretResolver) -> Resul
 ///
 /// Bails when the account carries no `[caldav]` block.
 pub fn build_caldav_client(
-    printer: &mut impl Printer,
     config_paths: &[PathBuf],
     account_name: Option<&str>,
 ) -> Result<CaldavClient> {
-    let mut config = load_config(printer, config_paths)?;
+    let mut config = load_config(config_paths)?;
     let (name, mut account_config) = config
         .take_account(account_name)?
         .ok_or_else(|| anyhow!("Cannot find account"))?;

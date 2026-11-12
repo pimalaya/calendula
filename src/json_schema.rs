@@ -115,15 +115,6 @@ pub fn registry() -> JsonSchemaRegistry {
         insert!(key, WriteReceipt);
     }
 
-    #[cfg(all(
-        feature = "wizard",
-        any(feature = "caldav", feature = "vdir", feature = "pimdir")
-    ))]
-    insert!(
-        "calendula-configure",
-        crate::wizard::configure::ConfigureOutput
-    );
-
     #[cfg(feature = "caldav")]
     {
         insert!(

@@ -53,6 +53,5 @@ A `jmap` cargo feature and backend serving the whole unified API, in the default
 ## Not in scope
 
 - A protocol-specific `jmap` command family (msgraph has none either).
-- The wizard proposing JMAP; a follow-up change, aligned with himalaya's and cardamum's.
 - JMAP Tasks, push (`EventSource`), `CalendarEvent/changes`-based sync, participant scheduling (`sendSchedulingMessages`).
 - Moving cardamum's JSContact projection into io-jmap.

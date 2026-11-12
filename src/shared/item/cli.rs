@@ -49,23 +49,23 @@ impl ItemCommand {
             // configuration is what it is for.
             Self::Build(cmd) => cmd.execute(printer, config_paths, account_name),
             Self::List(cmd) => {
-                let client = CalendarClient::resolve(printer, config_paths, account_name, backend)?;
+                let client = CalendarClient::resolve(config_paths, account_name, backend)?;
                 cmd.execute(printer, client)
             }
             Self::Read(cmd) => {
-                let client = CalendarClient::resolve(printer, config_paths, account_name, backend)?;
+                let client = CalendarClient::resolve(config_paths, account_name, backend)?;
                 cmd.execute(printer, client)
             }
             Self::Create(cmd) => {
-                let client = CalendarClient::resolve(printer, config_paths, account_name, backend)?;
+                let client = CalendarClient::resolve(config_paths, account_name, backend)?;
                 cmd.execute(printer, client)
             }
             Self::Update(cmd) => {
-                let client = CalendarClient::resolve(printer, config_paths, account_name, backend)?;
+                let client = CalendarClient::resolve(config_paths, account_name, backend)?;
                 cmd.execute(printer, client)
             }
             Self::Delete(cmd) => {
-                let client = CalendarClient::resolve(printer, config_paths, account_name, backend)?;
+                let client = CalendarClient::resolve(config_paths, account_name, backend)?;
                 cmd.execute(printer, client)
             }
         }

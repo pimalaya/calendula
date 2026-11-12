@@ -17,8 +17,8 @@
 //! fills it.
 //!
 //! [`io_http`] is the request and response state machines WebDAV and the REST
-//! clients run on, `io_pim_discovery` the RFC 6764 CalDAV discovery and the
-//! wizard's lookup, and `ical` the iCalendar parser and editor.
+//! clients run on, `io_pim_discovery` the RFC 6764 CalDAV discovery, and
+//! `ical` the iCalendar parser and editor.
 //!
 //! The `pimalaya_cli`, `pimalaya_config` and `pimalaya_stream` toolkits supply
 //! the clap scaffolding, the TOML loading and secrets, and the blocking
@@ -91,7 +91,7 @@
 //! and bails when the account carries no matching block, while the
 //! protocol-specific commands ignore the flag and build their own client.
 //!
-//! ## Configuration and the wizard
+//! ## Configuration
 //!
 //! Configuration is loaded by pimalaya-config from the first existing
 //! canonical path, or from `-c` / `CALENDULA_CONFIG`, with later paths
@@ -101,18 +101,9 @@
 //! each carrying an optional sub-block per backend, and the global block is
 //! folded under the selected account.
 //!
-//! `calendula configure` runs the wizard ([`wizard::discover`] builds the
-//! account, [`wizard::configure`] places it). One prompt takes an address, a
-//! server URL or a folder path, and its shape orients the flow: discovery's
-//! best route is picked and reviewed, then signed in and tested as typed, a
-//! password stored by the wizard and OAuth handed off to Ortie.
-//!
-//! The account is saved to a configuration that does not exist, appended to
-//! one that does, or printed when stdout is redirected. The wizard is also
-//! offered where nothing can happen without a configuration: a bare
-//! `calendula` finding none, and a command needing an account finding none.
-//!
-//! A bare `calendula` finding a configuration prints the help instead.
+//! calendula never writes a configuration: a person writes it from the
+//! documented sample, and a command finding none fails naming the path it
+//! looked at and pointing at the sample. A bare `calendula` prints the help.
 //!
 //! ## Output
 //!
@@ -141,27 +132,12 @@ mod pimdir;
 mod shared;
 #[cfg(feature = "vdir")]
 mod vdir;
-#[cfg(all(
-    feature = "wizard",
-    any(feature = "caldav", feature = "vdir", feature = "pimdir")
-))]
-mod wizard;
-
-use std::{
-    io::{IsTerminal, stdin},
-    path::PathBuf,
-};
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser};
-use pimalaya_cli::{
-    error::ErrorReport,
-    log::Logger,
-    printer::{Printer, StdoutPrinter},
-};
-use pimalaya_config::toml::TomlConfig;
+use pimalaya_cli::{error::ErrorReport, log::Logger, printer::StdoutPrinter};
 
-use crate::{cli::CalendulaCli, config::Config, error::ErrorCode};
+use crate::{cli::CalendulaCli, error::ErrorCode};
 
 fn main() {
     let cli = CalendulaCli::parse();
@@ -178,39 +154,9 @@ fn run(cli: CalendulaCli, printer: &mut StdoutPrinter) -> Result<()> {
     let backend = cli.backend;
 
     let Some(command) = cli.command else {
-        return meet_bare_invocation(printer, config_paths, account.is_some());
+        CalendulaCli::command().print_help()?;
+        return Ok(());
     };
 
     command.execute(printer, config_paths, account, backend)
-}
-
-/// Meets a bare `calendula`, which is where a newcomer lands.
-///
-/// A missing configuration raises the offer and everything else gets the
-/// help: an existing configuration, a script, a JSON caller, and `--account`,
-/// which reads as a half-typed command. A file that exists but fails to parse
-/// counts as a configuration, so the offer never writes over a broken one.
-fn meet_bare_invocation(
-    printer: &mut StdoutPrinter,
-    config_paths: &[PathBuf],
-    named_account: bool,
-) -> Result<()> {
-    let configured = Config::from_paths_or_default(config_paths)
-        .ok()
-        .flatten()
-        .is_some();
-
-    if !configured && !named_account && !printer.is_json() && stdin().is_terminal() {
-        let path = Config::target_path(config_paths)?;
-
-        // NOTE: nothing runs after the offer, so a declined one falls back
-        // to the help; the wizard says what to run next when it ran.
-        if cli::offer_configuration(printer, config_paths, &path)? {
-            return Ok(());
-        }
-    }
-
-    CalendulaCli::command().print_help()?;
-
-    Ok(())
 }

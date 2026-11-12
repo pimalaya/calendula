@@ -14,8 +14,6 @@ The `calendar`, `event` and `item` families SHALL expose only operations every c
 Adding a backend that cannot serve a unified operation SHALL move the operation out rather than have it emulated.
 
 ### Requirement: Protocol-specific families
-`configure` (alias `wizard`) SHALL run the account wizard.
-
 `caldav`, `gcal`, `pimdir` and `vdir` SHALL each expose what only that backend has, gated behind its own cargo feature. CalDAV covers `discover`, its own calendar listing (carrying the ctag, the sync token and the accepted component kinds), `create` and `delete`.
 
 gcal covers the half of the Calendar API iCalendar cannot express: sharing, availability, recurrence expansion, server-side parsing and the palettes. vdir covers its collection verbs including `rename`, which the unified API has no home for.

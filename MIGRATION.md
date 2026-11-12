@@ -10,6 +10,12 @@ A `todo` or `journal` table left in the configuration, at the top level or under
 
 `item build -i` and `item create -i` given no source still mint nothing; their error now names `calendula event`, `unfog` and `journal` as what composes an event, a to-do and a journal entry.
 
+### No wizard
+
+The configuration wizard is gone: `calendula configure` (alias `wizard`), the offer a bare `calendula` and a command without a configuration made, the `wizard` cargo feature and the `calendula-configure` JSON Schema. Write the configuration by hand from [config.sample.toml](./config.sample.toml), copied to `~/.config/calendula/config.toml`: keep the blocks of the backends your account uses and fill them in. A configuration the wizard wrote keeps working as it is.
+
+A command finding no configuration fails naming the path it looked at and the sample, and a bare `calendula` prints the help. A build naming the `wizard` feature (`--features wizard`) must drop it.
+
 ### pimdir store
 
 The pimdir backend follows pimdir storage-draft-09, and a store is never migrated: one any earlier neverest wrote is refused with the code `store-version`. Reinstall it, in this order, so no queued write is lost:

@@ -47,7 +47,7 @@ use io_pimdir::{
     },
 };
 use log::warn;
-use pimalaya_cli::{error::CodedError, printer::Printer};
+use pimalaya_cli::error::CodedError;
 use pimalaya_config::toml::TomlConfig;
 
 use crate::{
@@ -98,12 +98,8 @@ impl PimdirBackend {
     /// the store.
     ///
     /// Bails when the account carries no `[pimdir]` block.
-    pub fn build(
-        printer: &mut impl Printer,
-        config_paths: &[PathBuf],
-        account_name: Option<&str>,
-    ) -> Result<Self> {
-        let mut config = load_config(printer, config_paths)?;
+    pub fn build(config_paths: &[PathBuf], account_name: Option<&str>) -> Result<Self> {
+        let mut config = load_config(config_paths)?;
         let (name, mut account_config) = config
             .take_account(account_name)?
             .ok_or_else(|| anyhow!("Cannot find account"))?;
@@ -2622,6 +2618,7 @@ mod tests {
     #[test]
     fn a_write_is_confirmed_as_queued() {
         use clap::Parser;
+        use pimalaya_cli::printer::Printer;
 
         use crate::{
             backend::Backend,
