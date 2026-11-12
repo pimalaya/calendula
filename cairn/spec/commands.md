@@ -233,7 +233,7 @@ Each subcommand SHALL be a clap-derived struct carrying its own arguments, with 
 All data and errors SHALL go to stdout through the printer, with `--json` switching every command to JSON; stderr SHALL carry the logs, the prompts and the welcome only. A command SHALL return a `Serialize + Display` value to the printer rather than printing inline.
 
 ### Requirement: Text output is plain text
-A text output SHALL be plain text: no border, no colour, no terminal escape, nothing sized to or truncated for the terminal, and it SHALL end with one newline; no command takes a width. The raw iCalendar a command is asked for (`event read`, `item read`, a `build` printing the item) SHALL print as it is stored. Every string a server, a store or a file gave (an id, a name, a summary, a description, an error) SHALL have its control and bidi characters replaced before it prints as text (pimalaya-cli `sanitize::text`); the JSON output SHALL carry it unchanged.
+A text output SHALL be plain text: no border, no colour, no terminal escape, nothing sized to or truncated for the terminal, and it SHALL end with one newline; no command takes a width. Every string a server, a store or a file gave (an id, a name, a summary, a description, an error a record carries, the zone and the days the lines under `pimdir search` and `pimdir count` name) SHALL have its control and bidi characters replaced before it prints as text (pimalaya-cli `sanitize::text`); the JSON output SHALL carry it unchanged. The iCalendar `event read` and `item read` print SHALL keep its layout, CRLF read as LF, and have every other control character but tab and line feed (C0, DEL, C1) and every bidi embedding, override and isolate replaced with U+FFFD; their JSON `contents` SHALL carry the stored text unchanged. The iCalendar a `build` prints, or writes to the file `-o` names, SHALL be the bytes it built.
 
 `event list` and `event find` SHALL print as Himalaya's `envelope list` does. Above the events, `Account:` (the account name, then the backend it resolved to in parentheses), `Calendar:` and, for `event find`, `UID:`, then a blank line. Then one line per event through pimalaya-cli's `Columns` with no header row: its item id, its start and its end (Columns follow the kind), then its summary, last, `-` for an empty cell. Under them, after a blank line when any printed, `Page:` (the page number, `all` for an unpaged listing, then the events the page holds, `event N` or `events N to M` followed by `, the last` when no page follows, or `empty`) and, while a page follows, `Next page:` and the `--page` reaching it, these values starting in one column, two spaces after `Next page:`. The events a footer counts are the calendar's events, the resources a page holds: a series counts once, however many lines its overrides or its occurrences in a window print. `, the last` and `Next page:` SHALL be exact on every backend: the unified client asks for one item past the page. `-s 0` lists every item, unpaged.
 
@@ -258,6 +258,12 @@ The `event agenda` grid SHALL stay cal's drawing, with no attribute: no day is h
 - WHEN `calendula event list -s 2` prints them
 - THEN it prints `Account:    perso (vdir)`, `Calendar:   personal` and a blank line, then `a  2026-11-12 09:00  2026-11-12 09:30  Standup` and the line of `b`, aligned, then a blank line, `Page:       1, events 1 to 2` and `Next page:  --page 2`, with no border and no colour
 - AND `calendula event list -s 2 -p 2` prints the line of `c` and `Page:       2, event 3, the last`
+
+#### Scenario: A read of a body carrying controls
+- GIVEN a vdir event stored with CRLF line ends, `ESC ]52;c;AAAA BEL` in its summary, U+202E in its location and a description folded on a tab
+- WHEN `calendula event read` or `calendula item read` prints it
+- THEN its lines end in LF, the ESC, the BEL and the U+202E print as U+FFFD, and the folded line keeps its tab
+- AND under `--json` its `contents` is the stored text, CRLF and controls included
 
 #### Scenario: A calendar list
 - GIVEN an account holding the calendars `personal`, described, and `work`

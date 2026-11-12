@@ -11,17 +11,22 @@ use pimalaya_cli::printer::Printer;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::shared::{arg::CalendarIdArg, client::CalendarClient, event::Event};
+use crate::shared::{
+    arg::CalendarIdArg, client::CalendarClient, event::Event, item::read::printable,
+};
 
-/// Read a single event (raw iCalendar bytes).
+/// Read a single event (its iCalendar).
 ///
-/// The bytes print as the calendar stores them, a series with every
-/// override it carries. With `--recurrence-id`, the one occurrence it
-/// names is projected as well, at its own times, an override applied.
+/// The iCalendar prints as the calendar stores it, a series with every
+/// override it carries, CRLF read as LF and any character that could
+/// drive the terminal replaced. With `--recurrence-id`, the one
+/// occurrence it names is projected as well, at its own times, an
+/// override applied.
 ///
-/// JSON output: `{"contents", "events": [...]}`, the raw iCalendar and
-/// its events shaped as `event list` prints them: every VEVENT the item
-/// carries, or the one occurrence `--recurrence-id` names.
+/// JSON output: `{"contents", "events": [...]}`, the raw iCalendar, its
+/// bytes kept, and its events shaped as `event list` prints them: every
+/// VEVENT the item carries, or the one occurrence `--recurrence-id`
+/// names.
 #[derive(Debug, Parser)]
 pub struct EventReadCommand {
     #[command(flatten)]
@@ -72,6 +77,6 @@ pub struct EventReadOutput {
 
 impl fmt::Display for EventReadOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "{}", self.contents.trim_end())
+        writeln!(f, "{}", printable(&self.contents).trim_end())
     }
 }

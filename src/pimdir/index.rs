@@ -23,7 +23,7 @@ use io_pimdir::{
 };
 use jiff::tz::TimeZone;
 use log::warn;
-use pimalaya_cli::error::CodedError;
+use pimalaya_cli::{error::CodedError, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -272,7 +272,8 @@ impl fmt::Display for PimdirCalendarZones {
         writeln!(
             f,
             "The index reads floating times and dates in {}, this search reads days in {}",
-            self.index, self.search
+            sanitize::text(&self.index),
+            sanitize::text(&self.search)
         )
     }
 }
@@ -372,7 +373,7 @@ impl From<&PimdirSearchCoverage> for PimdirCalendarCoverage {
 /// The line under a table, empty when complete.
 impl fmt::Display for PimdirCalendarCoverage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let day = |instant: &str| instant.get(..10).unwrap_or(instant).to_owned();
+        let day = |instant: &str| sanitize::text(instant.get(..10).unwrap_or(instant)).into_owned();
         let mut parts = Vec::new();
 
         if self.bodiless > 0 {
@@ -1158,6 +1159,25 @@ mod tests {
 
         assert!(coverage.complete);
         assert_eq!(coverage.to_string(), "");
+    }
+
+    #[test]
+    fn the_lines_under_a_table_defuse_what_the_store_holds() {
+        let zones = PimdirCalendarZones {
+            index: "UTC\x1b[2J".into(),
+            search: "Europe/Paris".into(),
+        };
+        let line = zones.to_string();
+        assert!(line.contains("in UTC\u{fffd}[2J, this"), "{line:?}");
+
+        let coverage = PimdirCalendarCoverage {
+            since: Some("\x1b]0;x\x07".into()),
+            until: Some("2026\u{202e}".into()),
+            ..Default::default()
+        };
+        let line = coverage.to_string();
+        assert!(line.contains("before \u{fffd}]0;x\u{fffd} are"), "{line:?}");
+        assert!(line.contains("from 2026\u{fffd} on"), "{line:?}");
     }
 
     #[test]

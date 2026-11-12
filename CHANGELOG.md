@@ -82,6 +82,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed `event read` and `item read` printing the stored iCalendar's control characters as is, which could drive the terminal: the text view replaces them and the bidi controls, keeping tabs and line feeds and reading CRLF as LF, and `--json` keeps the stored text.
+- Fixed the lines under `pimdir search` and `pimdir count` printing the index zone and the unsynced days as the store holds them.
 - Fixed a credential command run again each time a unified command reopened its backend (after a composer, say): the account's secrets now go through one resolver for the run, so a command is spawned once per account.
 - Fixed `event agenda` writing terminal escapes into its grid even when piped.
 - Fixed a Google account refusing an event with neither `DTEND` nor `DURATION`: it is written as ending at its start, or the next day after a date start (RFC 5545 3.6.1), and no `DTEND` equal to a timed `DTSTART` is read back (io-gcal 0.3.1).

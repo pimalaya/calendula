@@ -1,6 +1,6 @@
 //! # Item read
 //!
-//! The `item read` command, printing one iCalendar object verbatim.
+//! The `item read` command, printing one iCalendar object as stored.
 
 use std::fmt;
 
@@ -14,11 +14,12 @@ use crate::shared::{arg::CalendarIdArg, client::CalendarClient};
 
 /// Read a single iCalendar item.
 ///
-/// The raw iCalendar bytes are printed verbatim on stdout.
+/// The iCalendar prints as stored, CRLF read as LF and any character that
+/// could drive the terminal replaced.
 ///
-/// JSON output: `{"contents", "etag"}`, the raw iCalendar and the
-/// version a write can be gated on (`--if-match`), `null` when the
-/// backend has none.
+/// JSON output: `{"contents", "etag"}`, the raw iCalendar, its bytes
+/// kept, and the version a write can be gated on (`--if-match`), `null`
+/// when the backend has none.
 #[derive(Debug, Parser)]
 pub struct ItemReadCommand {
     #[command(flatten)]
@@ -53,6 +54,21 @@ pub struct ItemReadOutput {
 
 impl fmt::Display for ItemReadOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "{}", self.contents.trim_end())
+        writeln!(f, "{}", printable(&self.contents).trim_end())
     }
+}
+
+/// Defuses an iCalendar for a terminal, keeping its tabs and line breaks.
+pub fn printable(contents: &str) -> String {
+    let contents = contents.replace("\r\n", "\n");
+
+    contents
+        .chars()
+        .map(|c| match c {
+            '\t' | '\n' => c,
+            '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' => char::REPLACEMENT_CHARACTER,
+            c if c.is_control() => char::REPLACEMENT_CHARACTER,
+            c => c,
+        })
+        .collect()
 }
