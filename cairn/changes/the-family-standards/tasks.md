@@ -5,7 +5,7 @@ change: the-family-standards
 
 # Tasks
 
-- [ ] published-dependencies
+- [x] published-dependencies
 - [ ] events-only
 - [ ] the-wizard-leaves
 - [ ] the-shared-kit

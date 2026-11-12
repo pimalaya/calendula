@@ -13,7 +13,7 @@ change: pimdir-adopts-the-io-pimdir-release-api
 - [x] A missing blob turns `reply` and `cancel` into an error rather than skipping their checks (src/pimdir/backend.rs `body`, shared with `get_item`); `a_reply_or_a_cancel_over_a_missing_body_queues_nothing` failed on the old code (`unwrap_err()` on `Ok(PimdirQueued { row: 2, seq: 1, .. })`).
 - [x] The wizard requires pimdir.db, not just objects/ (src/wizard/local.rs); `a_blob_tree_alone_marks_no_pimdir_store` failed on the old code.
 - [x] Draft citations in CHANGELOG.md: `draft-03`, `draft-04` and `ef8eae0` replaced by the spec documents and sections (pimdir STORAGE §14, §15.6, Annex B.2).
-- [ ] Release (the user's call): `io-pimdir = "0.9"` (or the released version) in `[dependencies]`, the `[patch.crates-io]` pins dropped, Cargo.lock refreshed; the CHANGELOG io-pimdir line naming the released version and the pimdir document versions it implements (storage-draft-05 once tagged).
+- [x] Release: io-pimdir 0.10 from crates.io, the `[patch.crates-io]` pins dropped, Cargo.lock refreshed, the CHANGELOG io-pimdir line naming 0.10 (done by published-dependencies, 2026-11-12; the store drafts the CHANGELOG names are storage-draft-09, sync-draft-08 and search-draft-09 since pimdir-follows-storage-draft-09).
 - [x] CHANGELOG entries.
 - [x] Delta folded into [backends](../../spec/backends.md), [commands](../../spec/commands.md) and [wizard](../../spec/wizard.md) on 2026-10-30, the code behaving so; at landing only the log entry and the status remain.
-- [ ] Log; land.
+- [x] Log; land.

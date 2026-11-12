@@ -11,7 +11,7 @@ change: cli-alignment-leftovers
 - [ ] F1: rename `CalendulaCli` and `CalendulaCommand` to `Cli` and `Command` (src/cli.rs:58, :95, src/main.rs:162-211)
 - [ ] F7: add `footer!` from pimalaya-cli to the clap command
 - [ ] G2: build one `SecretResolver` per account where the runtime assembles its backends (src/shared/client.rs:533-540)
-- [ ] A2: once released, drop the git pins for ical @caa1422, io-pimdir @3b4bed8 and io-webdav @62fad89 (Cargo.toml:70, :73, :74)
+- [x] A2: once released, drop the git pins (done by published-dependencies, 2026-11-12: every Pimalaya crate from crates.io)
 - [ ] H1, H2: once pimalaya-cli ships them, drop src/wizard/configure.rs:91, :220, :246 and src/cli.rs:141
 - [ ] CHANGELOG under [Unreleased]
 - [ ] Fold into the spec; log; land

@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: pimdir-adopts-the-io-pimdir-release-api
-status: active
+status: landed
 created: 2026-10-30
 ---
 

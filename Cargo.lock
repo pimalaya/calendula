@@ -122,12 +122,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "base64"
-version = "0.23.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
-
-[[package]]
 name = "base64-codec"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -205,9 +199,9 @@ dependencies = [
  "crossterm",
  "getrandom 0.4.3",
  "humansize",
- "ical-rs 0.7.0",
+ "ical-rs",
  "io-gcal",
- "io-http 0.6.0",
+ "io-http",
  "io-msgraph",
  "io-pim-discovery",
  "io-pimdir",
@@ -649,8 +643,6 @@ version = "0.11.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de671bd27a75a797dc9ae289ba1e77276e75e2026408aab65185384e2d5cd3f6"
 dependencies = [
- "anstream",
- "anstyle",
  "env_filter",
  "log",
 ]
@@ -797,18 +789,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "git2"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddddbf932745a6be37109b6112d3ee09696106f848449069d3a57bba937ab82e"
-dependencies = [
- "bitflags 2.13.2",
- "libc",
- "libgit2-sys",
- "log",
-]
-
-[[package]]
 name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -878,16 +858,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
 dependencies = [
  "cc",
-]
-
-[[package]]
-name = "ical-rs"
-version = "0.6.1"
-source = "git+https://github.com/pimalaya/ical?rev=99b92736a6a076c72936fac29c9b85a5168e4c2f#99b92736a6a076c72936fac29c9b85a5168e4c2f"
-dependencies = [
- "jiff",
- "jiff-tzdb",
- "memchr",
 ]
 
 [[package]]
@@ -1031,31 +1001,18 @@ dependencies = [
 
 [[package]]
 name = "io-gcal"
-version = "0.2.0"
-source = "git+https://github.com/pimalaya/io-gcal?rev=90537616dd6d7659c6bfe81df9b4a1428e143f06#90537616dd6d7659c6bfe81df9b4a1428e143f06"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97f3e22d8e035908025d797b6f62d87f0be32f4933b587803550aadede4395f6"
 dependencies = [
  "anyhow",
- "ical-rs 0.6.1",
- "io-http 0.5.0",
+ "ical-rs",
+ "io-http",
  "jiff",
  "log",
  "pimalaya-stream",
  "serde",
  "serde_json",
- "thiserror",
- "url",
-]
-
-[[package]]
-name = "io-http"
-version = "0.5.0"
-source = "git+https://github.com/pimalaya/io-http?rev=e1815307771c1ec65a86b77256d46c33241d3038#e1815307771c1ec65a86b77256d46c33241d3038"
-dependencies = [
- "base64",
- "httparse",
- "log",
- "memchr",
- "secrecy",
  "thiserror",
  "url",
 ]
@@ -1078,13 +1035,14 @@ dependencies = [
 
 [[package]]
 name = "io-msgraph"
-version = "0.6.0"
-source = "git+https://github.com/pimalaya/io-msgraph?rev=2ae26370aefa671c16316dbad98107634436bce6#2ae26370aefa671c16316dbad98107634436bce6"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a24cf1d3d017c3b29300fc056f8ad65d9b4af3fa22f48768c5a0bbeb63f65ff4"
 dependencies = [
  "anyhow",
- "base64",
- "ical-rs 0.6.1",
- "io-http 0.5.0",
+ "base64-codec",
+ "ical-rs",
+ "io-http",
  "jiff",
  "log",
  "pimalaya-stream",
@@ -1102,7 +1060,7 @@ dependencies = [
  "anyhow",
  "base64-codec",
  "domain",
- "io-http 0.6.0",
+ "io-http",
  "ipconfig",
  "log",
  "pimalaya-stream",
@@ -1119,13 +1077,14 @@ dependencies = [
 
 [[package]]
 name = "io-pimdir"
-version = "0.9.0"
-source = "git+https://github.com/pimalaya/io-pimdir?rev=5c18a026b9c85b470984192452c2aa66e060a3fe#5c18a026b9c85b470984192452c2aa66e060a3fe"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b17ca9d5a5418bb93d82343ce8e68a1ca7df730e8bfea4756e46219d7ef9536"
 dependencies = [
  "blake3",
  "encoding_rs",
  "fs4",
- "ical-rs 0.7.0",
+ "ical-rs",
  "jiff",
  "log",
  "mime-rs",
@@ -1167,7 +1126,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fe0634d06f91a00dd0a36431c072ebd3482b6731bf7cc2f9e7e8b645bdf3f84"
 dependencies = [
  "anyhow",
- "io-http 0.6.0",
+ "io-http",
  "log",
  "memchr",
  "pimalaya-stream",
@@ -1323,18 +1282,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
-name = "libgit2-sys"
-version = "0.18.8+1.9.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f7c568b25d7489bc3fb2988ed69ab111d2944d2f5fec3d5c987fe545ea97b50"
-dependencies = [
- "cc",
- "libc",
- "libz-sys",
- "pkg-config",
-]
-
-[[package]]
 name = "libm"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1356,18 +1303,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3"
 dependencies = [
  "cc",
- "pkg-config",
- "vcpkg",
-]
-
-[[package]]
-name = "libz-sys"
-version = "1.1.31"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff20308ecabd635a2dc1dd5834a86c462cca20efba1d5d3ddab1f8aea3455cb2"
-dependencies = [
- "cc",
- "libc",
  "pkg-config",
  "vcpkg",
 ]
@@ -1616,8 +1551,9 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pimalaya-cli"
-version = "0.3.1"
-source = "git+https://github.com/pimalaya/cli?rev=f976e40cb609194e21cd8df8a089f86a1cd510fd#f976e40cb609194e21cd8df8a089f86a1cd510fd"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ea1f038c2e981fb3c602db486618bf2c1086cf35aedc8ab5b94e0b024f7656f"
 dependencies = [
  "anyhow",
  "base64-codec",
@@ -1627,8 +1563,8 @@ dependencies = [
  "comfy-table",
  "crossterm",
  "ctrlc",
+ "dirs 7.0.0",
  "env_logger",
- "git2",
  "inquire",
  "log",
  "schemars",
