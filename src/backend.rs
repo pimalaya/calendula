@@ -112,6 +112,16 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(
+        not(any(
+            feature = "vdir",
+            feature = "caldav",
+            feature = "pimdir",
+            feature = "gcal",
+            feature = "msgraph"
+        )),
+        allow(clippy::single_element_loop)
+    )]
     fn every_named_backend_round_trips_through_its_wire_spelling() {
         for backend in [
             Backend::Auto,

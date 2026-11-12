@@ -16,7 +16,15 @@
 //! and the `table` and `account` rendering tables, the output being plain
 //! text.
 
-use std::{collections::HashMap, path::PathBuf};
+use std::collections::HashMap;
+#[cfg(any(
+    feature = "vdir",
+    feature = "caldav",
+    feature = "pimdir",
+    feature = "gcal",
+    feature = "msgraph"
+))]
+use std::path::PathBuf;
 
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use pimalaya_config::secret::Secret;
@@ -510,7 +518,7 @@ impl TlsConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::{env::var, fs};
+    use std::{fs, path::PathBuf};
 
     use pimalaya_config::sample::{Variant, variants};
     use tempfile::NamedTempFile;
@@ -530,8 +538,16 @@ mod tests {
     ];
 
     /// The home directory the tilde in a test path stands for.
+    #[cfg(any(
+        feature = "vdir",
+        feature = "caldav",
+        feature = "pimdir",
+        feature = "gcal",
+        feature = "msgraph"
+    ))]
     fn home() -> PathBuf {
-        PathBuf::from(var("HOME").expect("HOME must be set to expand a tilde"))
+        let home = std::env::var("HOME").expect("HOME must be set to expand a tilde");
+        PathBuf::from(home)
     }
 
     /// Expansion happens at deserialize, so no call site can read a
@@ -681,6 +697,16 @@ mod tests {
 
             let mut config = Config::load(&[file.path().to_path_buf()])
                 .unwrap_or_else(|err| panic!("{context}: {err:?}"));
+            #[cfg_attr(
+                not(any(
+                    feature = "vdir",
+                    feature = "caldav",
+                    feature = "pimdir",
+                    feature = "gcal",
+                    feature = "msgraph"
+                )),
+                allow(unused_variables)
+            )]
             let (account, account_config) = config
                 .take_account(None)
                 .unwrap_or_else(|err| panic!("{context}: {err:?}"));

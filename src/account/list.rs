@@ -54,6 +54,16 @@ pub struct AccountRow {
 
 impl AccountRow {
     fn from_account(name: &str, account: &AccountConfig) -> Self {
+        #[cfg_attr(
+            not(any(
+                feature = "vdir",
+                feature = "caldav",
+                feature = "pimdir",
+                feature = "gcal",
+                feature = "msgraph"
+            )),
+            allow(unused_mut)
+        )]
         let mut backends = Vec::new();
 
         #[cfg(feature = "vdir")]

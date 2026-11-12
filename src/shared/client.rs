@@ -10,6 +10,20 @@
 //! The surface is a strict least-common-denominator: an operation only
 //! appears here when every backend can serve it, and anything narrower
 //! belongs to a protocol-specific subcommand.
+//!
+//! A build without any backend keeps the client, the unified command tree
+//! being the same in every build, with no arm to read its arguments.
+
+#![cfg_attr(
+    not(any(
+        feature = "vdir",
+        feature = "caldav",
+        feature = "pimdir",
+        feature = "gcal",
+        feature = "msgraph"
+    )),
+    allow(unused_variables)
+)]
 
 use std::path::PathBuf;
 
@@ -80,6 +94,7 @@ enum BackendConfig {
         feature = "gcal",
         feature = "msgraph"
     )))]
+    #[allow(dead_code)]
     Unused(Infallible),
 }
 
@@ -104,6 +119,7 @@ enum BackendClient {
         feature = "gcal",
         feature = "msgraph"
     )))]
+    #[allow(dead_code)]
     Unused(Infallible),
 }
 

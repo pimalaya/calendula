@@ -10,7 +10,7 @@ status: current
 The crate SHALL ship a binary only, with no library target. Its architecture document is the src/main.rs header, not a separate file, and the manifest carries no `documentation` field and no docs.rs metadata.
 
 ### Requirement: One cargo feature per backend
-Each backend SHALL sit behind its own cargo feature (`caldav`, `gcal`, `msgraph`, `vdir`, `pimdir`), pulling its io-* crates through `dep:`. A build SHALL compile at least one of them; a build with none is not a supported configuration, since the product would have nothing to talk to.
+Each backend SHALL sit behind its own cargo feature (`caldav`, `gcal`, `msgraph`, `vdir`, `pimdir`), pulling its io-* crates through `dep:`. A build with none SHALL compile: it serves `account list`, `completion`, `manual` and `json-schema`, and `account check` and the unified commands fail, no backend matching being configured.
 
 `caldav` SHALL pull io-pim-discovery, with its RFC 6764 resolution alone, for the `discover` route, so a build without that backend links no discovery code.
 
@@ -41,3 +41,16 @@ calendula SHALL build url's IDNA without a Unicode back end, `idna_adapter` bein
 
 ### Requirement: Dependency checks pass clean
 `cargo deny check` SHALL pass its advisories, bans, licences and sources checks over the targets deny.toml lists, which are the release targets and the ones people build from source, allowing only the licences the tree carries. A duplicate the tree cannot avoid stays a visible warning rather than a skip: today getrandom 0.2 (ring 0.17) and syn 2 (derive_more-impl under inquire's crossterm, domain-macros under io-pim-discovery, windows-core under chrono on Windows).
+
+### Requirement: Every backend builds alone
+`cargo clippy --all-targets -- -D warnings` and `cargo test` SHALL pass with the default features; with `--all-features`; with `--no-default-features` and a TLS provider alone (`rustls-ring`), the build with no backend; with `rustls-ring` and each backend feature alone (`caldav`, `gcal`, `msgraph`, `vdir`, `pimdir`); with the other TLS providers beside CalDAV (`native-tls,caldav`, `rustls-aws,caldav`); and with the two local backends together (`rustls-ring,vdir,pimdir`), checked in CI by the `features` job of .github/workflows/tests.yml. The devshell SHALL carry OpenSSL, so `native-tls` builds without `vendored`. Code only some backends use SHALL be gated on the item with exactly those features, never allowed crate-wide; a lint only the build with no backend raises on an item every build keeps (an argument no arm reads, a stand-in variant never built) SHALL be allowed on that item, or once on the module, in that build alone. A backend's configuration block SHALL stay compiled with its backend alone, as "Unknown fields" (config) says, so a build ignores the block of a backend it leaves out.
+
+#### Scenario: The build with no backend
+- GIVEN `--no-default-features --features rustls-ring`
+- WHEN `cargo clippy --all-targets -- -D warnings` runs
+- THEN it passes, where it reported the unified client's arguments unread and its stand-ins never built
+
+#### Scenario: A block for a compiled-out backend
+- GIVEN a vdir-only build and an account whose `caldav` block carries an unknown key
+- WHEN `account list` reads the configuration
+- THEN the account is listed with vdir alone, where a build with `caldav` refuses the key

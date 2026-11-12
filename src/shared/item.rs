@@ -89,9 +89,29 @@ pub struct CalendarItemQuery<'a> {
     /// Matching items the window holds at most, `None` for every one.
     pub take: Option<usize>,
     /// Day window the item's own dates are read against.
+    #[cfg_attr(
+        not(any(
+            feature = "vdir",
+            feature = "caldav",
+            feature = "pimdir",
+            feature = "gcal",
+            feature = "msgraph"
+        )),
+        allow(dead_code)
+    )]
     pub range: Option<&'a CalendarTimeRange>,
     /// Component kind to keep, `None` keeping every kind, which is what
     /// the raw `item` family asks for.
+    #[cfg_attr(
+        not(any(
+            feature = "vdir",
+            feature = "caldav",
+            feature = "pimdir",
+            feature = "gcal",
+            feature = "msgraph"
+        )),
+        allow(dead_code)
+    )]
     pub kind: Option<IcalComponentKind>,
     /// A `UID` the caller filters the projected events by, a hint only:
     /// a backend MAY leave out an item it can tell carries another one

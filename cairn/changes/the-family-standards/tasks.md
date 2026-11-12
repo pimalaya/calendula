@@ -16,7 +16,7 @@ change: the-family-standards
 - [x] a-read-is-printable (cross-check with cardamum, 2026-11-12: `event read` and `item read` text replaces control and bidi characters, `--json` byte-exact)
 - [x] the-next-page-is-a-token (cross-check: `nextPage` a string resumed through `--page-token`, as cardamum and Himalaya)
 - [x] account-check-reports-its-failure (cross-check: a failed backend exits 2 with the report, as cardamum and Himalaya)
-- [ ] every-feature-set-builds-clean
+- [x] every-feature-set-builds-clean
 - [ ] live-provider-tests
 - [ ] capability-shared-api
 - [ ] the-shared-repl-and-mcp

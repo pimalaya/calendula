@@ -24,16 +24,18 @@ Each backend sits behind its own cargo feature, and exactly one TLS provider mus
 | `rustls-aws`  | Rustls with the aws-lc crypto provider                              |
 | `native-tls`  | the platform TLS stack                                              |
 
-A build must compile at least one backend: a calendula with none has nothing to talk to, and that combination is not supported.
+A build with no backend compiles too: it serves `account list`, `completion`, `manual` and `json-schema`, the commands needing a backend failing.
 
-When touching a feature gate or an import, build the default set plus at least one single-backend set, so no backend-only code leaks across a disabled gate:
+When touching a feature gate or an import, run clippy over the matrix the `features` job of .github/workflows/tests.yml checks, so no backend-only code leaks across a disabled gate:
 
 ```sh
-cargo build
-cargo build --no-default-features --features rustls-ring,vdir
-cargo build --no-default-features --features rustls-ring,pimdir
-cargo build --no-default-features --features rustls-ring,caldav
+cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --all-targets --no-default-features --features rustls-ring -- -D warnings
+cargo clippy --all-targets --no-default-features --features rustls-ring,vdir -- -D warnings
 ```
+
+and so on for `rustls-ring` with each of `caldav`, `gcal`, `msgraph` and `pimdir`, and for `native-tls,caldav`, `rustls-aws,caldav` and `rustls-ring,vdir,pimdir`.
 
 ## Unreleased dependencies
 

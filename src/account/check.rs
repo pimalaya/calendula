@@ -6,12 +6,15 @@ use std::{fmt, path::PathBuf};
 
 use anyhow::{Result, bail};
 use clap::Parser;
-use pimalaya_cli::{
-    error::{PartialOutcome, code_of},
-    fields::Fields,
-    printer::Printer,
-    sanitize,
-};
+#[cfg(any(
+    feature = "vdir",
+    feature = "caldav",
+    feature = "pimdir",
+    feature = "gcal",
+    feature = "msgraph"
+))]
+use pimalaya_cli::error::code_of;
+use pimalaya_cli::{error::PartialOutcome, fields::Fields, printer::Printer, sanitize};
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use pimalaya_config::secret::SecretResolver;
 use schemars::JsonSchema;
@@ -78,6 +81,16 @@ fn check_account(
     #[allow(unused_variables)] account_config: &AccountConfig,
     #[allow(unused_variables)] backend: Backend,
 ) -> Vec<BackendCheck> {
+    #[cfg_attr(
+        not(any(
+            feature = "vdir",
+            feature = "caldav",
+            feature = "pimdir",
+            feature = "gcal",
+            feature = "msgraph"
+        )),
+        allow(unused_mut)
+    )]
     let mut checks = Vec::new();
 
     #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
@@ -220,6 +233,13 @@ pub struct BackendCheck {
 }
 
 impl BackendCheck {
+    #[cfg(any(
+        feature = "vdir",
+        feature = "caldav",
+        feature = "pimdir",
+        feature = "gcal",
+        feature = "msgraph"
+    ))]
     fn from(backend: &'static str, result: Result<()>) -> Self {
         match result {
             Ok(()) => Self {
