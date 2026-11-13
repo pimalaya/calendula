@@ -68,7 +68,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Changed the pimdir writes to be refused before they are queued when a source of the store does not support them, naming the capability, the source and why (pimdir STORAGE §15.6). A write a source supports only in part logs a warning.
 - Changed a scheduled event refused for want of a source that notifies to name the way through: marking its `ORGANIZER` and `ATTENDEE` with `SCHEDULE-AGENT=NONE`.
 - Changed `account check` on pimdir to probe a producer after opening the store, so a store a write cannot reach fails the check rather than the first write, with `store-busy` at once while a collector holds its staging lock; the check writes nothing into the store.
-- Changed the dependencies to the current Pimalaya releases, every one from crates.io but pimalaya-cli, taken from a git revision while its `records` module is unreleased: ical-rs 0.7, io-gcal 0.3.1, io-http 0.6, io-msgraph 0.7.1, io-pim-discovery 0.11, io-pimdir 0.11, io-webdav 0.7, pimalaya-cli and pimalaya-config 0.4. calendula links one ical-rs and one io-http where it linked two, and crossterm left the dependencies.
+- Changed the dependencies to the current Pimalaya releases, every one from crates.io but pimalaya-cli, taken from a git revision while its `records` module is unreleased: ical-rs 0.7, io-gcal 0.4, io-http 0.7, io-msgraph 0.8, io-pim-discovery 0.12, io-pimdir 0.12, io-vdir 0.3, io-webdav 0.8, pimalaya-cli and pimalaya-config 0.4. calendula links one ical-rs and one io-http where it linked two, and crossterm left the dependencies.
+- Changed a CalDAV listing the server answers with anything but one whole multistatus (an HTML page, a cut document, an empty body) to fail, where it read as a shorter or an empty listing, and a delete answered by a multistatus naming failed members to fail (io-webdav 0.8).
+- Changed a Google event holding more lines Google does not model than it stores beside an event (30,000 octets) to be written without the ones that do not fit, a warning naming them. A line wider than 1024 octets is stored whole, where it was left out without a word (io-gcal 0.4).
+- Changed an Outlook recurring event whose `RRULE` Graph has no exact pattern for (a `BYMONTH` or a `BYMONTHDAY` the pattern has no field for, several numbered `BYDAY` elements, a weekday named twice) to be refused, where it was written as another series (io-msgraph 0.8).
+- Changed the Outlook calendar listing to refuse a paging link leaving the Graph origin, as the event listings do.
 - Changed the base64 and quoted-printable codecs linked through the dependencies (the CalDAV `Basic` header io-http encodes among them) to use the SIMD features of the CPU, detected at startup, rather than the portable code. The output is unchanged.
 - Bumped rustls to 0.23.46, rustls-webpki to 0.103.16 and webpki-root-certs to 1.0.11, fixing RUSTSEC-2026-0346 to RUSTSEC-2026-0349, RUSTSEC-2026-0382 and RUSTSEC-2026-0383.
 - Changed the exit codes to the family contract of pimalaya-cli: a command line clap refuses (an unknown flag, a missing argument, a bad value) exits 2 and, with `--json` before any `--`, prints on stdout the failure object coded `usage-invalid` (`{"code":"usage-invalid","error":"<clap message>","sources":[],"backtrace":null}`) where clap's rendering went to stderr; a result whose outcome is not a full success, a failed `account check`, exits 3, no longer 2. An MCP tool call its command refuses and a REPL line clap refuses carry `usage-invalid` too, and the `calendula-error` schema admits it. **Breaking.**
@@ -103,6 +107,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Fixed a msgraph listing failing on a `numbered` recurring series: Graph fills its `endDate` with `0001-01-01`, which bounded the instances request before its start. The window now follows the range type. ([#10](https://github.com/pimalaya/calendula/issues/10))
 - Fixed msgraph listings dropping the cancelled occurrences of a series: Graph returns them only on a read of the master by id, so each master is now read so before projection. ([#11](https://github.com/pimalaya/calendula/issues/11))
 - Fixed msgraph listings repeating an event Graph returned on both sides of a page boundary; one id at two revisions is now an error. ([#12](https://github.com/pimalaya/calendula/issues/12))
+- Fixed a Google calendar or event id holding `#`, `?` or `/` naming another resource: the events of a subscribed calendar such as `en.usa#holiday@group.v.calendar.google.com` list and read (io-gcal 0.4).
+- Fixed a Google listing failing whole on one value calendula does not know: `gcal calendars`, `gcal acl list` and `gcal instances` print an access role, a scope type or a status they do not know as the API spells it, and an update leaves such a status, transparency or visibility as the server has it (io-gcal 0.4).
+- Fixed an update of a Google event whose reminders are off turning the calendar's default reminders back on (io-gcal 0.4).
+- Fixed an Outlook account refusing an event with neither `DTEND` nor `DURATION`: it ends one day after a date start and at its start otherwise (RFC 5545 3.6.1) (io-msgraph 0.8).
+- Fixed an Outlook series ending a day off away from UTC, the `UNTIL` of its `RRULE` having been sent as its UTC date (io-msgraph 0.8).
+- Fixed an Outlook calendar or event id holding `/`, `?`, `#` or `%` naming another resource (io-msgraph 0.8).
+- Fixed a folded line Google or Graph does not model coming back damaged after a write: with a stray CR at each fold on a Google account, cut at its first fold on an Outlook one, a `UID` over 71 octets included (io-gcal 0.4, io-msgraph 0.8).
+- Fixed a CalDAV weak entity tag losing its closing quote, in a listing and in the `If-Match` a `--if-match` sends (io-webdav 0.8).
+- Fixed `caldav.discover` giving up on a failed TXT lookup, where it now probes `.well-known`, and waiting without limit on a silent resolver, which fails after ten seconds (io-pim-discovery 0.12).
+- Fixed a vdir listing failing on a directory or a dangling link named like an item, and on an item deleted while it lists. An item id or a new collection name holding a path separator is refused (io-vdir 0.3).
+- Fixed an HTTP answer preceded by an interim `1xx` response read as that response, and the trailers of a chunked body starting the next answer of a reused connection (io-http 0.7).
+
+### Security
+
+- Fixed the trace log showing sensitive response headers, and the PIN, passcode and password of a Google conference entry point (io-http 0.7, io-gcal 0.4).
 
 ## [0.2.0] - 2026-10-02
 

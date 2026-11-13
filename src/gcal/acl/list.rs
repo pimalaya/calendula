@@ -43,15 +43,19 @@ impl GcalAclListCommand {
             let page = client.acl_list(&calendar_id, &params)?.response;
 
             rows.extend(page.items.into_iter().map(|rule| {
+                let scope_type = rule
+                    .scope
+                    .as_ref()
+                    .and_then(|scope| scope.scope_type.as_ref());
+
                 RuleRow {
                     id: rule.id.unwrap_or_default(),
-                    scope: rule
-                        .scope
+                    scope: scope_type.map(|scope| render::scope_type(scope).to_owned()),
+                    role: rule
+                        .role
                         .as_ref()
-                        .and_then(|scope| scope.scope_type)
-                        .map(render::scope_type),
+                        .map(|role| render::access_role(role).to_owned()),
                     value: rule.scope.and_then(|scope| scope.value),
-                    role: rule.role.map(render::access_role),
                 }
             }));
 
@@ -81,11 +85,11 @@ pub struct RuleRow {
     /// The rule identifier, `<scope type>:<scope value>`.
     pub id: String,
     /// The kind of grantee: `default`, `user`, `group` or `domain`.
-    pub scope: Option<&'static str>,
+    pub scope: Option<String>,
     /// The address or domain the scope names, absent for `default`.
     pub value: Option<String>,
     /// The role the rule grants.
-    pub role: Option<&'static str>,
+    pub role: Option<String>,
 }
 
 impl fmt::Display for GcalAclListOutput {
@@ -93,12 +97,14 @@ impl fmt::Display for GcalAclListOutput {
         let mut columns = Columns::new(["ID", "SCOPE", "ROLE", "VALUE"]);
 
         for rule in &self.rows {
+            let scope = rule.scope.as_deref().unwrap_or_default();
+            let role = rule.role.as_deref().unwrap_or_default();
             let value = rule.value.as_deref().unwrap_or_default();
 
             columns.push([
                 sanitize::text(&rule.id).into_owned(),
-                String::from(rule.scope.unwrap_or_default()),
-                String::from(rule.role.unwrap_or_default()),
+                sanitize::text(scope).into_owned(),
+                sanitize::text(role).into_owned(),
                 sanitize::text(value).into_owned(),
             ]);
         }

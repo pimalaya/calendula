@@ -536,8 +536,6 @@ version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b68712c02bff2348323c1441ab2e8528e32af4f8f9edf29356356290328c8e6"
 dependencies = [
- "bumpalo",
- "bytes",
  "domain-macros",
  "hashbrown",
  "jiff",
@@ -878,9 +876,9 @@ dependencies = [
 
 [[package]]
 name = "io-gcal"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97f3e22d8e035908025d797b6f62d87f0be32f4933b587803550aadede4395f6"
+checksum = "541db6c96e9823a4b968a0ec6432f42a483725ca703d6b81d5b9784746eacffe"
 dependencies = [
  "anyhow",
  "ical-rs",
@@ -896,9 +894,9 @@ dependencies = [
 
 [[package]]
 name = "io-http"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a9086cd840a757b9dd4105caad54a59fdb440c49be33882491a07274ca32e06"
+checksum = "9d195f9fce7b6202be9ec43c8f93e057006ddd5c9223258789606839aea62182"
 dependencies = [
  "anyhow",
  "base64-codec",
@@ -912,9 +910,9 @@ dependencies = [
 
 [[package]]
 name = "io-msgraph"
-version = "0.7.1"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a24cf1d3d017c3b29300fc056f8ad65d9b4af3fa22f48768c5a0bbeb63f65ff4"
+checksum = "74a21fc14a05e97355874bf7c7a87955c433b1b84a1eaca9b828cf0edd43e052"
 dependencies = [
  "anyhow",
  "base64-codec",
@@ -930,9 +928,9 @@ dependencies = [
 
 [[package]]
 name = "io-oauth"
-version = "0.5.2"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b61b6c101769c3603dbd05bcf548bf66d03c044f4815083aad946147a48b86ec"
+checksum = "84b1c9414c0d8b0349553c891962d54aa88b2287555d0893fdae95a0729b0dcf"
 dependencies = [
  "anyhow",
  "base64-codec",
@@ -952,9 +950,9 @@ dependencies = [
 
 [[package]]
 name = "io-pim-discovery"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "319a7b0e55da6e8f93b8a81fc69e77f4762c90c39787467b859a4513f6720f19"
+checksum = "bbc28c8d64fc4fb42a985a548f103eec011302b399e7659f6156d492d0d29f7e"
 dependencies = [
  "anyhow",
  "domain",
@@ -962,6 +960,7 @@ dependencies = [
  "ipconfig",
  "log",
  "pimalaya-stream",
+ "psl",
  "resolv-conf",
  "serde",
  "thiserror",
@@ -1002,9 +1001,9 @@ dependencies = [
 
 [[package]]
 name = "io-vdir"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51dd9e5b5a916bda70244c8ccd6671a4c862ae2debdfaf5ee884a07a658f0f95"
+checksum = "61ecf910fe3d2e5e497e7143203919fbeebcd8b72aa7e8de627ef3c5da1edb61"
 dependencies = [
  "getrandom 0.4.3",
  "log",
@@ -1013,9 +1012,9 @@ dependencies = [
 
 [[package]]
 name = "io-webdav"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fe0634d06f91a00dd0a36431c072ebd3482b6731bf7cc2f9e7e8b645bdf3f84"
+checksum = "57ee0c0d0cf32f762d1a9b6cb704f36ea970acefa0c95b8adeeaaf182bc450f6"
 dependencies = [
  "anyhow",
  "io-http",
@@ -1298,7 +1297,6 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "182eab3e1cd9cdc0ecf1ce3342d9844f3dc7d098f0694569bfdf327b612d69fd"
 dependencies = [
- "bytes",
  "serde",
 ]
 
@@ -1517,6 +1515,21 @@ checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
 ]
+
+[[package]]
+name = "psl"
+version = "2.1.253"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82576eafaa94759a92a0cf047f34d227665811d5cdf70f4b11e25cd813f3de54"
+dependencies = [
+ "psl-types",
+]
+
+[[package]]
+name = "psl-types"
+version = "2.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33cb294fe86a74cbcf50d4445b37da762029549ebeea341421c7c70370f86cac"
 
 [[package]]
 name = "pure-rust-locales"

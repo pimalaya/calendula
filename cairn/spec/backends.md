@@ -40,7 +40,9 @@ CalDAV SHALL adapt io-webdav's RFC 4791 surface over a connected client whose ca
 
 Item ids SHALL be the resource names the server returned, verbatim: io-webdav neither appends nor strips a file extension, so an id a listing showed addresses the same resource on every verb.
 
-A create SHALL propose a resource name derived from the item's own UID when that UID is URL-safe, falling back to a content digest, and SHALL keep the id the server reports in its `Location` header when it names the resource itself.
+A create SHALL propose a resource name derived from the item's own UID when that UID is URL-safe, falling back to a content digest, and SHALL keep the id the server reports in its `Location` header when it names the resource itself, else the last segment of the URL io-webdav sent, percent-encoded, which is the form a listing returns.
+
+A listing the server answers with anything but one whole multistatus (an HTML page, a cut document, an empty body) SHALL fail, never read as a shorter listing, and a delete answered by a multistatus naming failed members SHALL fail.
 
 ### Requirement: CalDAV pushes the time range down
 A [`CalendarTimeRange`](#requirement-time-range-filtering) SHALL reach CalDAV as an RFC 4791 `time-range` filter nested in a VEVENT `comp-filter`, so the server does the narrowing.
@@ -50,7 +52,7 @@ The filter SHALL scope to VEVENT only, since RFC 4791 9.9 defines the overlap te
 ### Requirement: Google Calendar backend
 gcal SHALL adapt io-gcal's Calendar API v3 client. A calendar is a calendar list entry and an item is one calendar object resource of it: a single event, or a recurring event together with the exceptions that modify its instances (see [A recurrence set is one resource](./projection.md#requirement-a-recurrence-set-is-one-resource)).
 
-Item ids SHALL be the event ids the API returned, verbatim, and the id of a set SHALL be the master's.
+Item ids SHALL be the event ids the API returned, verbatim, and the id of a set SHALL be the master's. A calendar, event or rule id SHALL reach io-gcal as it stands, never percent-encoded by calendula: the crate encodes each as one path segment, so an id holding `#`, `?` or `/` names its own resource, and one encoded twice would name another.
 
 `create_item` SHALL use `events.insert` with `sendUpdates=all` when the projected event names at least one `ATTENDEE` and either no `ORGANIZER` or one whose address is the calendar id (case-insensitively), carrying its iCalendar UID as `iCalUID`, so the attendees are invited and the UID survives; a `--send-updates` given to the command SHALL replace that `all`. Otherwise it SHALL use `events.import` when the event carries a UID, so the UID survives, and `events.insert` when it carries none. `update_item` and `delete_item` SHALL honour `if_match` as the API's `If-Match` header, so the optimistic concurrency Google offers is not silently dropped. `update_item` and `delete_item` SHALL send `sendUpdates` only when the command was given `--send-updates`.
 
@@ -79,6 +81,8 @@ An item whose iCalendar carries no VEVENT SHALL be refused by component name rat
 
 ### Requirement: Microsoft Graph backend
 msgraph SHALL adapt io-msgraph's calendars and events. A calendar is a Graph calendar, its colour the read-only `hexColor`, and an item a lone event or a series master, keyed by the event id Graph returned, its `changeKey` as etag, its iCalendar contents synthesized by io-msgraph's `ical` projection with the exceptions of a series folded in, read from the instances of its own date range. Graph keeps no calendar description and names colours from a palette, so msgraph SHALL declare `calendar.description` and `calendar.color` `none`, a create or update naming either refused before connecting.
+
+A listing SHALL follow its pages through io-msgraph, which refuses a paging link leaving the Graph origin, the request it builds carrying the account's token.
 
 Graph narrows a listing by time only through the calendar view, which expands every series, so a range SHALL filter the listed items locally, as on vdir. Graph models a VEVENT and nothing else, so another kind SHALL be answered empty without a round-trip. Only the series master SHALL be written back: an exception edited here does not push, and an update naming an etag SHALL be refused when the master's `changeKey` moved.
 

@@ -24,7 +24,7 @@ use io_gcal::v3::{
         calendar_list::{GcalCalendarListEntry, list::GcalCalendarListListParams},
         calendars::GcalCalendar,
         events::{
-            GcalEvent, GcalSendUpdates, import::GcalEventImportParams,
+            GcalEvent, GcalSendUpdates, ical::GcalEventIcalError, import::GcalEventImportParams,
             insert::GcalEventInsertParams, list::GcalEventsListParams,
             update::GcalEventUpdateParams,
         },
@@ -287,7 +287,7 @@ impl GcalBackend {
         contents: Vec<u8>,
         send_updates: Option<SendUpdates>,
     ) -> Result<String> {
-        let event = GcalEvent::from_ical(&contents)?;
+        let event = project(&contents)?;
 
         let created = match create_path(&event, calendar_id, send_updates)? {
             CreatePath::Insert(send_updates) => {
@@ -320,7 +320,7 @@ impl GcalBackend {
         if_match: Option<&str>,
         send_updates: Option<SendUpdates>,
     ) -> Result<()> {
-        let projected = GcalEvent::from_ical(&contents)?;
+        let projected = project(&contents)?;
         let current = self
             .client
             .event_get(calendar_id, item_id, None, None)?
@@ -366,6 +366,26 @@ impl GcalBackend {
 
         Ok(())
     }
+}
+
+/// Projects an iCalendar document onto the event a write sends.
+///
+/// Lines Google has no room to store beside it are left out with a
+/// warning naming them, the write going on.
+fn project(contents: &[u8]) -> Result<GcalEvent> {
+    let err = match GcalEvent::from_ical(contents) {
+        Ok(event) => return Ok(event),
+        Err(err) => err,
+    };
+
+    let reason = err.to_string();
+    let GcalEventIcalError::StashFull { event, .. } = err else {
+        return Err(err.into());
+    };
+
+    warn!("writing the event without some of its lines: {reason}");
+
+    Ok(*event)
 }
 
 /// How a create reaches Google.
@@ -533,10 +553,104 @@ fn item_from(calendar_id: &str, event: &GcalEvent, exceptions: &[&GcalEvent]) ->
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        collections::VecDeque,
+        io::{Read, Result as IoResult, Write},
+    };
+
     use super::*;
     use io_gcal::v3::rest::events::{GcalEventAttendee, GcalEventDateTime, GcalEventPerson};
 
     use crate::shared::event::Event;
+
+    /// A stream answering each read with the next canned response.
+    struct Scripted {
+        responses: VecDeque<Vec<u8>>,
+        written: Vec<u8>,
+    }
+
+    impl Read for Scripted {
+        fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+            let response = self.responses.pop_front().unwrap_or_default();
+            buf[..response.len()].copy_from_slice(&response);
+            Ok(response.len())
+        }
+    }
+
+    impl Write for Scripted {
+        fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+            self.written.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> IoResult<()> {
+            Ok(())
+        }
+    }
+
+    /// A backend whose server answers 200 with each of `bodies` in turn.
+    fn backend(bodies: &[&str]) -> GcalBackend {
+        let response = |body: &&str| {
+            let len = body.len();
+            format!("HTTP/1.1 200 OK\r\nContent-Length: {len}\r\n\r\n{body}").into_bytes()
+        };
+        let stream = Scripted {
+            responses: bodies.iter().map(response).collect(),
+            written: Vec::new(),
+        };
+
+        GcalBackend {
+            client: GcalClientStd::new(stream, "made-up"),
+        }
+    }
+
+    /// What `backend` wrote to its scripted server.
+    fn written(backend: &mut GcalBackend) -> String {
+        let stream = backend.client.stream.as_any_mut();
+        let stream = stream.downcast_mut::<Scripted>().unwrap();
+        String::from_utf8_lossy(&stream.written).into_owned()
+    }
+
+    #[test]
+    fn an_id_holding_a_hash_or_an_at_names_its_own_resource() {
+        let calendar_id = "en.usa#holiday@group.v.calendar.google.com";
+        let mut backend = backend(&[r#"{"id":"2026#1@x","etag":"\"1\""}"#, ""]);
+
+        let item = backend.get_item(calendar_id, "2026#1@x").unwrap();
+        assert_eq!(item.id, "2026#1@x");
+        assert_eq!(item.calendar_id, calendar_id);
+
+        backend
+            .delete_item(calendar_id, "2026#1@x", None, None)
+            .unwrap();
+
+        let path = "/calendar/v3/calendars/en.usa%23holiday@group.v.calendar.google.com/events/\
+                    2026%231@x HTTP/1.1\r\n";
+        let requests = written(&mut backend);
+        assert!(requests.contains(&format!("GET {path}")), "{requests}");
+        assert!(requests.contains(&format!("DELETE {path}")), "{requests}");
+    }
+
+    #[test]
+    fn a_stash_over_what_google_stores_is_written_without_the_lines_left_out() {
+        let lines: Vec<String> = (0..40)
+            .map(|index| format!("X-LINE-{index}:{}\r\n", "a".repeat(1000)))
+            .collect();
+        let calendar = format!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//x//y//EN\r\nBEGIN:VEVENT\r\n\
+             UID:1@example.org\r\nDTSTAMP:20260101T000000Z\r\nDTSTART:20260814T090000Z\r\n\
+             DTEND:20260814T100000Z\r\n{}END:VEVENT\r\nEND:VCALENDAR\r\n",
+            lines.concat(),
+        );
+
+        let mut backend = backend(&[r#"{"id":"minted"}"#]);
+        let id = backend.create_item("primary", calendar.into_bytes(), None);
+        assert_eq!(id.unwrap(), "minted");
+
+        let requests = written(&mut backend);
+        assert!(requests.contains("X-LINE-0:"), "{requests}");
+        assert!(!requests.contains("X-LINE-39:"), "{requests}");
+    }
 
     #[test]
     fn an_exception_files_with_its_master_rather_than_beside_it() {

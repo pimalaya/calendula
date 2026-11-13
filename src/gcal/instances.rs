@@ -78,13 +78,19 @@ impl GcalInstancesCommand {
                 .event_instances(&calendar_id, &self.event_id, &params)?
                 .response;
 
-            rows.extend(page.items.into_iter().map(|event| InstanceRow {
-                id: event.id.unwrap_or_default(),
-                summary: event.summary.unwrap_or_default(),
-                start: render::boundary(event.start.as_ref()),
-                end: render::boundary(event.end.as_ref()),
-                status: event.status.map(render::event_status).unwrap_or(""),
-                original_start: render::boundary(event.original_start_time.as_ref()),
+            rows.extend(page.items.into_iter().map(|event| {
+                InstanceRow {
+                    id: event.id.unwrap_or_default(),
+                    summary: event.summary.unwrap_or_default(),
+                    start: render::boundary(event.start.as_ref()),
+                    end: render::boundary(event.end.as_ref()),
+                    status: event
+                        .status
+                        .as_ref()
+                        .map(|status| render::event_status(status).to_owned())
+                        .unwrap_or_default(),
+                    original_start: render::boundary(event.original_start_time.as_ref()),
+                }
             }));
 
             match page.next_page_token {
@@ -127,7 +133,7 @@ pub struct InstanceRow {
     /// The end of the occurrence.
     pub end: String,
     /// `confirmed`, `tentative` or `cancelled`.
-    pub status: &'static str,
+    pub status: String,
     /// Where the recurrence rule placed it, set once it has been moved.
     pub original_start: String,
 }
@@ -139,7 +145,7 @@ impl fmt::Display for GcalInstancesOutput {
         for instance in &self.rows {
             columns.push([
                 sanitize::text(&instance.id).into_owned(),
-                String::from(instance.status),
+                sanitize::text(&instance.status).into_owned(),
                 sanitize::text(&instance.start).into_owned(),
                 sanitize::text(&instance.end).into_owned(),
                 sanitize::text(&instance.summary).into_owned(),

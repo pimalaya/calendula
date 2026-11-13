@@ -72,14 +72,16 @@ impl GcalAclRuleArgs {
     pub fn scope(&self) -> Result<GcalAclScope> {
         let scope_type = render::parse_scope_type(&self.scope)?;
 
+        // NOTE: the default scope is everyone, and the API rejects a
+        // value alongside it.
+        let value = match scope_type {
+            GcalAclScopeType::Default => None,
+            _ => self.value.clone(),
+        };
+
         Ok(GcalAclScope {
             scope_type: Some(scope_type),
-            // NOTE: the default scope is everyone, and the API rejects
-            // a value alongside it.
-            value: match scope_type {
-                GcalAclScopeType::Default => None,
-                _ => self.value.clone(),
-            },
+            value,
         })
     }
 }

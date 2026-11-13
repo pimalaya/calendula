@@ -12,11 +12,12 @@ use io_gcal::v3::rest::{
 };
 
 /// The wire spelling of an event status.
-pub fn event_status(status: GcalEventStatus) -> &'static str {
+pub fn event_status(status: &GcalEventStatus) -> &str {
     match status {
         GcalEventStatus::Confirmed => "confirmed",
         GcalEventStatus::Tentative => "tentative",
         GcalEventStatus::Cancelled => "cancelled",
+        GcalEventStatus::Unknown(status) => status,
     }
 }
 
@@ -28,7 +29,7 @@ pub fn boundary(boundary: Option<&GcalEventDateTime>) -> String {
 }
 
 /// The wire spelling of an access role.
-pub fn access_role(role: GcalAccessRole) -> &'static str {
+pub fn access_role(role: &GcalAccessRole) -> &str {
     match role {
         GcalAccessRole::None => "none",
         GcalAccessRole::FreeBusyReader => "freeBusyReader",
@@ -36,12 +37,13 @@ pub fn access_role(role: GcalAccessRole) -> &'static str {
         GcalAccessRole::WriterWithoutPrivateAccess => "writerWithoutPrivateAccess",
         GcalAccessRole::Writer => "writer",
         GcalAccessRole::Owner => "owner",
+        GcalAccessRole::Unknown(role) => role,
     }
 }
 
 /// Reads an access role from a flag, case-insensitively.
 pub fn parse_access_role(value: &str) -> Result<GcalAccessRole> {
-    const ROLES: [GcalAccessRole; 6] = [
+    let roles = [
         GcalAccessRole::None,
         GcalAccessRole::FreeBusyReader,
         GcalAccessRole::Reader,
@@ -50,13 +52,13 @@ pub fn parse_access_role(value: &str) -> Result<GcalAccessRole> {
         GcalAccessRole::Owner,
     ];
 
-    for role in ROLES {
+    for role in &roles {
         if value.eq_ignore_ascii_case(access_role(role)) {
-            return Ok(role);
+            return Ok(role.clone());
         }
     }
 
-    let accepted: Vec<&str> = ROLES.into_iter().map(access_role).collect();
+    let accepted: Vec<&str> = roles.iter().map(access_role).collect();
     bail!(
         "Invalid role `{value}`, expected one of {}",
         accepted.join(", ")
@@ -64,31 +66,32 @@ pub fn parse_access_role(value: &str) -> Result<GcalAccessRole> {
 }
 
 /// The wire spelling of an ACL scope type.
-pub fn scope_type(scope: GcalAclScopeType) -> &'static str {
+pub fn scope_type(scope: &GcalAclScopeType) -> &str {
     match scope {
         GcalAclScopeType::Default => "default",
         GcalAclScopeType::User => "user",
         GcalAclScopeType::Group => "group",
         GcalAclScopeType::Domain => "domain",
+        GcalAclScopeType::Unknown(scope) => scope,
     }
 }
 
 /// Reads an ACL scope type from a flag, case-insensitively.
 pub fn parse_scope_type(value: &str) -> Result<GcalAclScopeType> {
-    const SCOPES: [GcalAclScopeType; 4] = [
+    let scopes = [
         GcalAclScopeType::Default,
         GcalAclScopeType::User,
         GcalAclScopeType::Group,
         GcalAclScopeType::Domain,
     ];
 
-    for scope in SCOPES {
+    for scope in &scopes {
         if value.eq_ignore_ascii_case(scope_type(scope)) {
-            return Ok(scope);
+            return Ok(scope.clone());
         }
     }
 
-    let accepted: Vec<&str> = SCOPES.into_iter().map(scope_type).collect();
+    let accepted: Vec<&str> = scopes.iter().map(scope_type).collect();
     bail!(
         "Invalid scope `{value}`, expected one of {}",
         accepted.join(", ")
@@ -136,7 +139,7 @@ mod tests {
             GcalAccessRole::Writer,
             GcalAccessRole::Owner,
         ] {
-            assert_eq!(parse_access_role(access_role(role)).unwrap(), role);
+            assert_eq!(parse_access_role(access_role(&role)).unwrap(), role);
         }
 
         assert_eq!(parse_access_role("OWNER").unwrap(), GcalAccessRole::Owner);
@@ -152,7 +155,7 @@ mod tests {
             GcalAclScopeType::Group,
             GcalAclScopeType::Domain,
         ] {
-            assert_eq!(parse_scope_type(scope_type(scope)).unwrap(), scope);
+            assert_eq!(parse_scope_type(scope_type(&scope)).unwrap(), scope);
         }
 
         assert!(parse_scope_type("everyone").is_err());

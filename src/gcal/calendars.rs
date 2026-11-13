@@ -58,7 +58,10 @@ impl GcalCalendarListCommand {
                     summary: entry.summary_override.or(entry.summary).unwrap_or_default(),
                     description: entry.description,
                     time_zone: entry.time_zone,
-                    access_role: entry.access_role.map(render::access_role),
+                    access_role: entry
+                        .access_role
+                        .as_ref()
+                        .map(|role| render::access_role(role).to_owned()),
                     primary: entry.primary.unwrap_or(false),
                     selected: entry.selected.unwrap_or(false),
                     color: entry.background_color,
@@ -103,7 +106,7 @@ pub struct CalendarRow {
     pub time_zone: Option<String>,
     /// The effective access role this account has: `owner`, `writer`,
     /// `reader` or `freeBusyReader`.
-    pub access_role: Option<&'static str>,
+    pub access_role: Option<String>,
     /// Whether this is the account's own primary calendar.
     pub primary: bool,
     /// Whether the calendar's contents show in the Google UI.
@@ -122,8 +125,8 @@ impl fmt::Display for GcalCalendarListOutput {
             let mut fields = Fields::default();
             fields.push("Name", sanitize::text(&calendar.summary));
 
-            if let Some(role) = calendar.access_role {
-                fields.push("Role", role);
+            if let Some(role) = &calendar.access_role {
+                fields.push("Role", sanitize::text(role));
             }
 
             let optional = [

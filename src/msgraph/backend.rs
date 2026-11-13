@@ -26,24 +26,19 @@ use io_msgraph::v1::{
     client::{MsgraphClientStd, MsgraphClientStdConnectOptions},
     field::MsgraphField,
     rest::users::{
-        calendars::{
-            MsgraphCalendar,
-            list::{MsgraphCalendarsListParams, MsgraphCalendarsListResponse},
-        },
+        calendars::{MsgraphCalendar, list::MsgraphCalendarsListParams},
         events::{
             MsgraphEvent, MsgraphEventType,
             ical::{MSGRAPH_EVENT_ICAL_SELECT, MSGRAPH_EVENT_STASH_EXPAND},
             list::MsgraphEventsListParams,
         },
     },
-    send::MsgraphSend,
 };
 use jiff::{ToSpan, civil::Date, tz::TimeZone};
 use log::warn;
 use pimalaya_config::secret::SecretResolver;
 use pimalaya_stream::proxy::Proxy;
 use secrecy::ExposeSecret;
-use url::Url;
 
 use crate::{
     config::{MsgraphConfig, default_msgraph_alpn},
@@ -99,10 +94,7 @@ impl MsgraphBackend {
             let Some(next) = page.next_link else {
                 break;
             };
-            let url = Url::parse(&next).context("Cannot parse the calendar paging link")?;
-            let coroutine =
-                MsgraphSend::<MsgraphCalendarsListResponse>::get(&self.client.auth, url);
-            page = self.client.run(coroutine)?.response;
+            page = self.client.page_get(&next, None)?.response;
         }
 
         Ok(calendars)
@@ -415,7 +407,64 @@ fn series_window(master: &MsgraphEvent) -> Option<(String, String)> {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        collections::VecDeque,
+        io::{Read, Result as IoResult, Write},
+    };
+
     use super::*;
+
+    /// A stream answering each read with the next canned response.
+    struct Scripted {
+        responses: VecDeque<Vec<u8>>,
+        written: Vec<u8>,
+    }
+
+    impl Read for Scripted {
+        fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+            let response = self.responses.pop_front().unwrap_or_default();
+            buf[..response.len()].copy_from_slice(&response);
+            Ok(response.len())
+        }
+    }
+
+    impl Write for Scripted {
+        fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+            self.written.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> IoResult<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_calendar_page_link_off_the_graph_origin_is_not_followed() {
+        let pages = [
+            r#"{"value":[{"id":"A"}],"@odata.nextLink":"https://graph.example.org/v1.0/next"}"#,
+            r#"{"value":[{"id":"B"}]}"#,
+        ];
+        let response = |body: &str| {
+            let len = body.len();
+            format!("HTTP/1.1 200 OK\r\nContent-Length: {len}\r\n\r\n{body}").into_bytes()
+        };
+        let stream = Scripted {
+            responses: pages.into_iter().map(response).collect(),
+            written: Vec::new(),
+        };
+        let mut backend = MsgraphBackend {
+            client: MsgraphClientStd::new(stream, "made-up", Default::default()),
+        };
+
+        let err = backend.list_calendars().unwrap_err().to_string();
+        assert!(err.contains("graph.example.org"), "{err}");
+
+        let stream = backend.client.stream.as_any_mut();
+        let written = &stream.downcast_mut::<Scripted>().unwrap().written;
+        let written = String::from_utf8_lossy(written);
+        assert!(!written.contains("graph.example.org"), "{written}");
+    }
 
     fn event(id: &str, change_key: &str) -> MsgraphEvent {
         MsgraphEvent {

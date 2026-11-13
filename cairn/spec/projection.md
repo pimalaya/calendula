@@ -57,7 +57,14 @@ An extended property another client owns SHALL survive a stash rewrite: only the
 ### Requirement: The stash is chunked to the provider limit
 Google caps an extended property value at 1024 characters, so the stash SHALL be split across numbered keys rather than written as one value.
 
-A single line too long to fit a chunk SHALL stay in the local document only, never sent, so an oversized property cannot fail the whole write.
+A line wider than a chunk SHALL run over as many keys as it takes.
+
+Google also caps what an event stores beside itself, io-gcal keeping the two stashes within 30,000 octets together. A line, or a component from its BEGIN to its END, the stash has no room left for SHALL stay in the local document only, never sent, so an oversized remainder cannot fail the whole write: the event SHALL be written without it, on a create and on an update, and a warning SHALL name every line and component left out.
+
+#### Scenario: More lines than Google stores
+- GIVEN an event holding more unmanaged lines than the stash has room for
+- WHEN it is created or updated on a gcal account
+- THEN it is written with the lines that fit, and a warning names the ones left out
 
 ### Requirement: Boundaries carry a zone or nothing
 An all-day boundary SHALL project as a `VALUE=DATE` property and back; a timed one anchored in a named zone SHALL carry a TZID parameter and Google's `timeZone`; a timed one in UTC SHALL carry the `Z` suffix.

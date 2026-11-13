@@ -33,7 +33,7 @@ panic = "abort"
 pimalaya-cli = { version = "0.4", default-features = false, features = ["build"] }
 
 [dev-dependencies]
-io-oauth = { version = "0.5.2", default-features = false, features = ["client", "jwt-bearer", "rustls-ring"] }
+io-oauth = { version = "0.6", default-features = false, features = ["client", "jwt-bearer", "rustls-ring"] }
 pimalaya-config = { version = "0.4", default-features = false, features = ["sample"] }
 tempfile = { version = "3", default-features = false }
 toml = { version = "1.1", default-features = false, features = ["parse", "serde"] }
@@ -47,13 +47,13 @@ getrandom = { version = "0.4", default-features = false }
 humansize = { version = "2", default-features = false }
 ical-rs = { version = "0.7", default-features = false, features = ["parser", "tzdb"] }
 idna_adapter = { version = "=1.0.0", default-features = false }
-io-gcal = { version = "0.3.1", default-features = false, features = ["client"], optional = true }
-io-http = { version = "0.6", default-features = false, optional = true }
-io-msgraph = { version = "0.7.1", default-features = false, optional = true }
-io-pim-discovery = { version = "0.11", default-features = false, features = ["rfc6764", "stream"], optional = true }
+io-gcal = { version = "0.4", default-features = false, features = ["client"], optional = true }
+io-http = { version = "0.7", default-features = false, optional = true }
+io-msgraph = { version = "0.8", default-features = false, optional = true }
+io-pim-discovery = { version = "0.12", default-features = false, features = ["rfc6764", "stream"], optional = true }
 io-pimdir = { version = "0.12", default-features = false, features = ["client"], optional = true }
-io-vdir = { version = "0.2", default-features = false, features = ["client"], optional = true }
-io-webdav = { version = "0.7", default-features = false, features = ["client"], optional = true }
+io-vdir = { version = "0.3", default-features = false, features = ["client"], optional = true }
+io-webdav = { version = "0.8", default-features = false, features = ["client"], optional = true }
 jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-bundle-always"] }
 log = { version = "0.4", default-features = false }
 pimalaya-cli = { version = "0.4", default-features = false, features = ["mcp", "prompt", "repl", "terminal"] }
