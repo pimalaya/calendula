@@ -176,8 +176,9 @@
 //! A failure prints through pimalaya-cli's `ErrorReport` with the stable
 //! [`error::ErrorCode`] a caller acts on, `null` otherwise, and exits 1; a
 //! result whose outcome is not a full success, a failed `account check`,
-//! prints its report and exits 2. Every write prints a receipt, the item it
-//! acted on and whether it waits for a sync.
+//! prints its report and exits 3. A command line the grammar refuses exits
+//! 2, its failure object coded `usage-invalid` under `--json`. Every write
+//! prints a receipt, the item it acted on and whether it waits for a sync.
 //!
 //! Text output is plain text, with no border, no colour and nothing sized
 //! to the terminal: a list of short rows prints as aligned columns, a wide
@@ -218,8 +219,8 @@ mod vdir;
 use std::process;
 
 use anyhow::Result;
-use clap::Parser;
 use pimalaya_cli::{
+    clap::parse,
     error::{EXIT_FAILURE, ErrorReport},
     log::Logger,
     printer::StdoutPrinter,
@@ -239,7 +240,7 @@ fn main() {
     // token, the portable baseline until one is installed.
     let _ = SimdCpu::install_detected();
 
-    let cli = Cli::parse();
+    let cli: Cli = parse();
     let mut printer = StdoutPrinter::new(&cli.json);
     let config_paths = cli.config.paths.clone();
     let result = execute(cli, &mut printer);

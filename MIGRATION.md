@@ -69,7 +69,8 @@ calendula calendar list --json | jq -r '.calendars[].id'
 - **Piped `--json` prints one value per line**, and every schema `json-schema` writes carries an `$id` naming the contract version.
 - **A failure carries a stable `code`** when a caller is expected to act on it (`capability-missing`, `precondition-failed`, `item-duplicate`, `body-pending`, the pimdir store and index codes), described by the `calendula-error` schema, and `null` otherwise. Match on the code, never on the message, which may be reworded.
 - **Listings say whether more follow.** `event list` and `item list` print `nextPage`, the next page number as a string, `null` once the listing is complete: give it back through `--page-token`.
-- **A failed `account check` prints its report and exits 2**, each backend carrying `ok`, its failure's `code` and `error`, where 0.2 exited 0 whatever failed. Read which backends passed from `backends`.
+- **A failed `account check` prints its report and exits 3**, each backend carrying `ok`, its failure's `code` and `error`, where 0.2 exited 0 whatever failed. Read which backends passed from `backends`.
+- **A command line clap refuses exits 2 as before, and under `--json` prints the failure object coded `usage-invalid` on stdout** rather than clap's text on stderr. Exit 1 is a failure object, 2 a refused command line, 3 a printed result that is not a full success.
 
 ### Commands that now fail earlier
 

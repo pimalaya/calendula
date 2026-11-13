@@ -198,7 +198,7 @@ The listing query MAY carry a `UID`, which `event find` sets. A backend MAY leav
 `item read` SHALL add the `etag` of the version read to its JSON, `null` when the backend has none.
 
 ### Requirement: A JSON error carries a stable code
-A failure a caller is expected to act on SHALL carry a stable code, printed under `--json` as a `code` string beside `error`, `sources` and `backtrace`. The code SHALL be found anywhere in the error chain, so added context does not hide it. A failure with no code SHALL print no `code` field. The plain output SHALL stay unchanged. Codes are kebab-case and never renamed; `error` stays free wording.
+A failure a caller is expected to act on SHALL carry a stable code, printed under `--json` as a `code` string beside `error`, `sources` and `backtrace`. The code SHALL be found anywhere in the error chain, so added context does not hide it. A failure with no code SHALL print `"code": null`. The plain output SHALL stay unchanged. Codes are kebab-case and never renamed; `error` stays free wording.
 
 | Code | Raised when |
 |---|---|
@@ -225,6 +225,7 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 | `index-fts5-missing` | the SQLite calendula links lacks FTS5 or is older than 3.43 |
 | `query-refused` | the pimdir search query is malformed or names an unknown field or value |
 | `query-unanswerable` | the pimdir search index could not answer an accepted query |
+| `usage-invalid` | the command line does not match the grammar (an unknown flag or command, a missing argument, a bad value), raised by pimalaya-cli; nothing ran |
 
 #### Scenario: A stale version
 - GIVEN a pimdir event whose body changed since it was read
@@ -232,7 +233,15 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 - THEN the command exits 1, queues nothing and prints `{"code":"precondition-failed","error":"Precondition failed: …","sources":[],"backtrace":null}`
 
 ### Requirement: The JSON contract is described and versioned
-`json-schema` SHALL describe the failure object under the key `calendula-error`, its `code` typed by the code vocabulary. Every generated schema SHALL carry an `$id` naming the contract version: the major version of calendula, or `0.<minor>` before 1.0. Every registered payload SHALL be a JSON object, checked by a test. Piped `--json` output SHALL print one value per line.
+`json-schema` SHALL describe the failure object under the key `calendula-error`, its `code` typed by the code vocabulary or `usage-invalid`, the code pimalaya-cli raises itself. Every generated schema SHALL carry an `$id` naming the contract version: the major version of calendula, or `0.<minor>` before 1.0. Every registered payload SHALL be a JSON object, checked by a test. Piped `--json` output SHALL print one value per line.
+
+### Requirement: A refused command line exits 2
+The command line SHALL be parsed by pimalaya-cli's `clap::parse`: help and version print as clap prints them, and a command line clap refuses (an unknown flag or command, a missing argument, a bad value) SHALL exit 2 before any configuration is read. With a `--json` word before any `--`, it SHALL print on stdout the failure object coded `usage-invalid`, its `error` clap's message without its `error: ` prefix nor colour, and nothing on stderr; otherwise clap's rendering on stderr and nothing on stdout. Exit 1 stays a failure object and 3 a printed result that is not a full success (see "account check fails when a backend fails").
+
+#### Scenario: A misspelt flag
+- WHEN `calendula --json --nope calendar list` runs
+- THEN it exits 2 and prints `{"code":"usage-invalid","error":"unexpected argument '--nope' found …","sources":[],"backtrace":null}` on one line
+- AND `calendula --nope calendar list` exits 2, printing clap's `error: unexpected argument '--nope' found` on stderr and nothing on stdout
 
 ### Requirement: Calendar selection
 A unified command operating inside a calendar SHALL take it through the flattened `-k/--calendar` flag, resolved by the account: the flag wins, otherwise `calendar.default`, otherwise the command bails.
@@ -304,13 +313,13 @@ The report `pimdir search` and `pimdir count` draw over a query they refuse SHAL
 A bare `calendula` SHALL print the help when a configuration exists, a broken one included, its error left to the first command reading it. Without one it SHALL fail as a command loading the configuration does: the welcome, or the error. Nothing prompts.
 
 ### Requirement: account check fails when a backend fails
-`account check` SHALL exercise every backend of the account `--backend` allows and print one verdict per backend: under `--json`, `ok`, the stable `code` of a failure (the code vocabulary of "A JSON error carries a stable code", `null` when the backend passed or its failure carries none) and the error of a failed one; the text shows no code. When any fails, it SHALL still print the report and exit 2, the family's partial outcome (`pimalaya_cli::error::PartialOutcome`), so a script reads the outcome from the exit code alone and which backends passed from the report; when all pass, it SHALL exit 0. It mirrors Himalaya's `account check`.
+`account check` SHALL exercise every backend of the account `--backend` allows and print one verdict per backend: under `--json`, `ok`, the stable `code` of a failure (the code vocabulary of "A JSON error carries a stable code", `null` when the backend passed or its failure carries none) and the error of a failed one; the text shows no code. When any fails, it SHALL still print the report and exit 3, the family's partial outcome (`pimalaya_cli::error::PartialOutcome`), so a script reads the outcome from the exit code alone and which backends passed from the report; when all pass, it SHALL exit 0. It mirrors Himalaya's `account check`.
 
 #### Scenario: One backend of two fails
 - GIVEN the account `test` whose vdir home exists and whose pimdir root does not
 - WHEN `calendula account check` runs
-- THEN it prints `Account:  test`, `vdir:     OK` and `pimdir:   FAIL (<why>)`, and exits 2
-- AND `calendula --json account check` prints the same report as its result, the pimdir verdict carrying `"code":"store-uncreated"` and the vdir one `"code":null`, and exits 2, and `calendula --backend vdir account check` exits 0
+- THEN it prints `Account:  test`, `vdir:     OK` and `pimdir:   FAIL (<why>)`, and exits 3
+- AND `calendula --json account check` prints the same report as its result, the pimdir verdict carrying `"code":"store-uncreated"` and the vdir one `"code":null`, and exits 3, and `calendula --backend vdir account check` exits 0
 
 ### Requirement: An account lists what it serves
 `account capability` SHALL print, for each backend the account configures that `--backend` allows, in the order `auto` tries them, every capability with its level and detail, reading the configuration and the tables and connecting nowhere: `{"account", "backends": [{"backend", "capabilities": [{"name", "level", "detail"}]}]}`, `detail` `null` for a full one. A `--backend` naming no block of the account SHALL be refused as `account check` refuses it.

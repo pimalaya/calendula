@@ -105,6 +105,7 @@ fn a_session_answers_each_line_and_survives_its_failures() {
     assert_eq!(answers.len(), 5, "{answers:#?}");
     assert_eq!(answers[0]["calendars"][0]["id"], "personal");
     assert!(answers[1]["error"].is_string(), "{}", answers[1]);
+    assert_eq!(answers[1]["code"], "usage-invalid", "{}", answers[1]);
     assert!(answers[2]["error"].is_string(), "{}", answers[2]);
     assert!(answers[3]["error"].is_string(), "{}", answers[3]);
     assert_eq!(answers[4]["events"][0]["summary"], "Standup");

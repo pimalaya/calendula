@@ -3,9 +3,9 @@
 //! The built binary's `mcp` server over a vdir account: it says how to use
 //! its tools, lists the reading ones alone unless `--allow-write`, the
 //! scheduling arguments only under `--allow-send` as well, refuses what is
-//! no request and goes on, answers a call with the command's JSON, and
-//! never writes or deletes an item naming attendees without
-//! `--allow-send`.
+//! no request and goes on, answers a call with the command's JSON, codes a
+//! value the command refuses `usage-invalid`, and never writes or deletes
+//! an item naming attendees without `--allow-send`.
 
 #![cfg(feature = "vdir")]
 
@@ -148,13 +148,17 @@ fn properties(tool: &Value) -> Vec<&str> {
     properties.keys().map(String::as_str).collect()
 }
 
-/// The text of the failure object a failed call carries.
-fn refusal(response: &Value) -> String {
+/// The failure object a failed call carries.
+fn report(response: &Value) -> Value {
     let result = &response["result"];
     assert_eq!(result["isError"], true, "{response}");
     let text = result["content"][0]["text"].as_str().unwrap();
-    let report: Value = serde_json::from_str(text).unwrap();
-    report["error"].as_str().unwrap().to_owned()
+    serde_json::from_str(text).unwrap()
+}
+
+/// The text of the failure object a failed call carries.
+fn refusal(response: &Value) -> String {
+    report(response)["error"].as_str().unwrap().to_owned()
 }
 
 /// The arguments a tool lists only under `--allow-send`.
@@ -398,8 +402,26 @@ fn an_unknown_argument_is_a_tool_error() {
     let error = refusal(&responses[0]);
     assert!(error.contains("Unknown argument `query`"), "{error}");
     assert!(error.contains("`calendar`"), "{error}");
+    assert_eq!(report(&responses[0])["code"], "usage-invalid");
 
     assert_eq!(responses[1]["error"]["code"], -32602, "{}", responses[1]);
+}
+
+/// A value the schema lets through but the command refuses is a tool
+/// error coded `usage-invalid`.
+#[test]
+fn a_value_the_command_refuses_is_a_usage_invalid_tool_error() {
+    let home = account();
+    let responses = serve(
+        home.path(),
+        &[],
+        &[call(1, "event_list", json!({ "from": "someday" }))],
+    );
+
+    let error = refusal(&responses[0]);
+    assert!(error.contains("'someday'"), "{error}");
+    assert!(!error.starts_with("error:"), "{error}");
+    assert_eq!(report(&responses[0])["code"], "usage-invalid");
 }
 
 #[test]

@@ -31,7 +31,7 @@ use crate::{backend::Backend, cli::resolve_account, config::AccountConfig, error
 ///
 /// The report is printed whole, each backend with its outcome and, when
 /// it failed, why, its stable code under `--json`. A failed backend exits
-/// the command with status 2, the report being the output rather than a
+/// the command with status 3, the report being the output rather than a
 /// failure object.
 ///
 /// JSON output: `{"account", "backends": [{"backend", "ok", "code",
@@ -338,7 +338,8 @@ mod tests {
 
         let (result, out) = check(&dir.path().join("missing"));
         let err = result.unwrap_err();
-        assert!(err.is::<PartialOutcome>(), "{err:#}");
+        let partial = err.downcast_ref::<PartialOutcome>();
+        assert_eq!(partial.map(PartialOutcome::status), Some(3), "{err:#}");
         assert!(out.starts_with("Account:  test\nvdir:     FAIL ("), "{out}");
         assert!(out.contains("does not exist"), "{out}");
     }

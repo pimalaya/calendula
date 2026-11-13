@@ -2,7 +2,7 @@
 //!
 //! The built binary checking an account whose vdir home exists and whose
 //! pimdir store does not: the report printed whole, in text and in JSON,
-//! and the exit status 2, or 0 once the failing backend is left out.
+//! and the exit status 3, or 0 once the failing backend is left out.
 
 #![cfg(all(feature = "vdir", feature = "pimdir"))]
 
@@ -42,12 +42,12 @@ fn run(home: &Path, args: &[&str]) -> Output {
 }
 
 #[test]
-fn a_failed_backend_prints_the_report_and_exits_2() {
+fn a_failed_backend_prints_the_report_and_exits_3() {
     let home = account();
     let output = run(home.path(), &["account", "check"]);
     let stdout = String::from_utf8(output.stdout).unwrap();
 
-    assert_eq!(output.status.code(), Some(2), "{stdout}");
+    assert_eq!(output.status.code(), Some(3), "{stdout}");
 
     let mut lines = stdout.lines();
     assert_eq!(lines.next(), Some("Account:  test"), "{stdout}");
@@ -64,7 +64,7 @@ fn a_failed_backend_is_the_json_result_with_its_code() {
     let output = run(home.path(), &["--json", "account", "check"]);
     let json: Value = serde_json::from_slice(&output.stdout).unwrap();
 
-    assert_eq!(output.status.code(), Some(2), "{json}");
+    assert_eq!(output.status.code(), Some(3), "{json}");
     assert_eq!(json["account"], "test", "{json}");
 
     let vdir = json!({"backend": "vdir", "ok": true, "code": null, "error": null});
