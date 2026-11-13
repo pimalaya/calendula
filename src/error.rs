@@ -60,6 +60,9 @@ pub enum ErrorCode {
     /// A path of the pimdir store is a link or another user can reach it:
     /// the caller restricts it, a store being its user's alone.
     StoreExposed,
+    /// The lock file of the pimdir store was removed or replaced under a
+    /// write: nothing was queued, and the caller retries.
+    LockReplaced,
     /// A flag set holds a flag the pimdir store cannot: refused before
     /// anything is queued.
     FlagInvalid,

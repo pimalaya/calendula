@@ -28,13 +28,15 @@ The text output changes everywhere, a few JSON outputs and exit codes move, and 
 
 ### pimdir store
 
-The pimdir backend follows pimdir storage-draft-09, and a store is never migrated: one any earlier neverest wrote is refused with the code `store-version`. Reinstall it, in this order, so no queued write is lost:
+The pimdir backend follows pimdir storage-draft-10, sync-draft-10 and search-draft-10, and a store is never migrated: one any earlier neverest wrote is refused with the code `store-version`. Reinstall it, in this order, so no queued write is lost:
 
 1. Run `neverest sync` with the neverest that wrote the store until nothing is queued: the writes calendula queued live in that store alone.
-2. Upgrade to a neverest following storage-draft-09.
+2. Upgrade to a neverest following storage-draft-10.
 3. Run `neverest sync --reset --force -a <account>`, which moves the store aside into a sibling `<dir>.reset-<instant>` directory, deleting nothing, and syncs a new one.
 
-The store keeps its path, so `pimdir.root` does not change.
+The store keeps its path, so `pimdir.root` does not change. The new sync builds the search index `pimdir search` and `pimdir count` read; one an earlier draft built is refused with `index-version` until then.
+
+An update or a delete gated on a version (`--if-match`, or an update starting from the stored event) names the body it read: when a sync replaces that body before the queue drains, the sync engine parks the write rather than apply it. It parks an update or a delete over an event a sync left conflicted too, calendula resolving no conflict. `calendula pimdir status` lists what is parked.
 
 With `pimdir.account` unset, the backend reads the one account the store groups its collections under, and refuses a store several accounts share, naming them, where 0.2 merged their calendars: set `pimdir.account` to the one to read.
 

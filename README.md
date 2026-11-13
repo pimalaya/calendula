@@ -265,11 +265,11 @@ pimdir.root = "~/.local/state/neverest"
 #pimdir.account = "example"
 ```
 
-Run `calendula pimdir status` to see which account you are reading, how much of each calendar is downloaded, how many creations are still queued and which writes the sync engine parked. An item that is listed but not downloaded reads as "body not fetched" until a sync hydrates it.
+Run `calendula pimdir status` to see which account you are reading, how much of each calendar is downloaded, how many creations are still queued and which writes the sync engine parked: an update or a delete whose event a sync changed since it was read, or left conflicted, is parked rather than applied. An item that is listed but not downloaded reads as "body not fetched" until a sync hydrates it.
 
 Run `calendula pimdir search <query>` to search the account's events through the search index the sync engine keeps, in the [pimdir SEARCH](https://github.com/pimalaya/pimdir) query language: `budget location:lisbon`, `attendee:carol@example.org date:2026-11`, `organizer:alice@example.org category:work`. `calendula pimdir count <query>` counts the same.
 
-Days, `today` and `yesterday` are read in the local zone (`TZ`, then the system's); a line under the hits names the index's zone when the sync engine reads floating times and dates in another. A write still queued shows once a sync indexed it.
+Days, `today` and `yesterday` are read in the local zone (`TZ`, then the system's); a line under the hits names the index's zone when a `date:` term reads its days in another than the sync engine read floating times and dates in. Another line says what the answer could not see (an index behind the store, events not downloaded, bodies the index could not read), and `--json` carries it as `coverage`. A write still queued shows once a sync indexed it.
 
 ## Usage
 

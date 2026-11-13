@@ -20,8 +20,8 @@ use crate::pimdir::{
 /// Takes what `pimdir search` takes.
 ///
 /// JSON output: `{"count", "coverage": {"complete", "bodiless",
-/// "unindexed", "behind", "since", "until", "filling", "horizonLeft",
-/// "cut"}}`.
+/// "missing", "unparseable", "unindexed", "behind", "since", "until",
+/// "filling", "horizonLeft", "cut", "zoneDiffers"}}`.
 #[derive(Debug, Parser)]
 pub struct PimdirCountCommand {
     /// Calendar to count in alone; every calendar when omitted.
@@ -61,7 +61,7 @@ pub struct PimdirCountOutput {
     pub count: u64,
     /// What the count could not see.
     pub coverage: PimdirCalendarCoverage,
-    /// The zones, when the index reads floating times in another.
+    /// The zones, when a date term is read in another than the index's.
     #[serde(skip)]
     pub zones: Option<PimdirCalendarZones>,
 }

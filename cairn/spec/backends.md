@@ -144,7 +144,7 @@ An item naming an object the blob tree holds no body for is a different state: t
 ### Requirement: pimdir writes are staged queue actions
 A pimdir write SHALL append one action to the store's queue (pimdir STORAGE §15.1) through one producer opened for that write, before anything is written, and dropped after it: `create_item` to `add`, `update_item` to `update`, `delete_item` to `remove`.
 
-A body SHALL be written with the row that pins it in one step, through that producer's `enqueue_with_body_checked`, which hashes it under the store's algorithm, runs the store's gate (pimdir STORAGE §15.6) and, for an `add`, the duplicate check on the bytes in hand, then writes the body durably and appends the row in one transaction under the producer's staging lock (§8): no collector can remove the body before its row pins it, and a refused write leaves no body in the tree. The partial supports the gate passed the action with, those the body asks for (`calendar.scheduling`, `calendar.online-meeting`, `calendar.occurrence.update`) included, SHALL each be logged as a warning. calendula SHALL NOT hash or write a body itself. The action SHALL address the item by the public `seq` that is already the item's shared id.
+A body SHALL be written with the row that pins it in one step, through that producer's `enqueue_with_body`, which hashes it under the store's algorithm, runs the store's gate once (pimdir STORAGE §15.6) and, for an `add`, the duplicate check on the bytes in hand, then writes the body durably and appends the row in one transaction under the producer's staging lock (§8): no collector can remove the body before its row pins it, and a refused write leaves no body in the tree. The partial supports the enqueue answers, those the gate passed the action with, the ones the body asks for (`calendar.scheduling`, `calendar.online-meeting`, `calendar.occurrence.update`) included, SHALL each be logged as a warning, for a `remove` and an intent too; calendula SHALL NOT run the gate apart from the enqueue. calendula SHALL NOT hash or write a body itself. The action SHALL address the item by the public `seq` that is already the item's shared id.
 
 `update_item` and `delete_item` SHALL honour `if_match` against the item's version. The engine still reconciles an applied edit against the base body it recorded at sync time: the precondition is the caller's, the merge the store's.
 
@@ -157,13 +157,13 @@ A `create_item` or `update_item` whose body newly asks for an online meeting (`X
 A `create_item` or `update_item` whose body is a VTODO SHALL be refused, and nothing queued, when a source concerned states `calendar.component.vtodo` `none` for the calendar, or source-wide with no row of the calendar overriding it (pimdir STORAGE §15.6, Annex B): for a create, a source syncing the calendar; for an update, a source binding the item. The capability is read only where a row states it, so a source stating nothing of it, declared or not, refuses no to-do. The error SHALL start `Stage the pimdir action:`, say the calendar takes no to-do, name the source, the capability and its stated reason when it gives one, and point at `-k/--calendar` to store the to-do in another calendar.
 
 ### Requirement: pimdir refuses a create whose UID the calendar holds
-A `create_item` whose link id (its `UID` under the store's derivation, pimdir STORAGE Annex A.3) names an item the calendar holds live, or a create already queued there, SHALL be refused through io-pimdir's `enqueue_with_body_checked`, whose duplicate check, body write and append are one transaction, and nothing queued nor written. The error SHALL carry the code `item-duplicate`, name the calendar and the link id, and name the live item by its id, to be updated instead, or the queued create by its queue row.
+A `create_item` whose link id (its `UID` under the store's derivation, pimdir STORAGE Annex A.3) names an item the calendar holds live, or a create already queued there, SHALL be refused through io-pimdir's `enqueue_with_body`, whose duplicate check, body write and append are one transaction, and nothing queued nor written. The error SHALL carry the code `item-duplicate`, name the calendar and the link id, and name the live item by its id, to be updated instead, or the queued create by its queue row.
 
 ### Requirement: account check takes both pimdir roles
 `account check` on pimdir SHALL open the store as a reader, then open a producer and probe it (`PimdirProducer::probe`), which takes and releases the staging lock without waiting and the database's write lock, writing nothing into the store. A store a write cannot reach fails the check rather than the first write, with io-pimdir's code: a collector holding the staging lock fails it at once with `store-busy`, and the check leaves nothing in objects/.
 
 ### Requirement: A pimdir store failure carries io-pimdir's code
-A failure to open the store, or to stage into it, SHALL carry the stable code io-pimdir gives it (`PimdirError::code()`) when it is one a caller acts on: `store-uncreated`, `store-version`, `store-foreign`, `store-corrupt`, `store-hash-algo`, `store-busy`, `store-exposed`, `flag-invalid`, `action-malformed`. The message SHALL be io-pimdir's, but for `store-version`, and SHALL never advise deleting the store.
+A failure to open the store, or to stage into it, SHALL carry the stable code io-pimdir gives it (`PimdirError::code()`) when it is one a caller acts on: `store-uncreated`, `store-version`, `store-foreign`, `store-corrupt`, `store-hash-algo`, `store-busy`, `store-exposed`, `lock-replaced`, `flag-invalid`, `action-malformed`. The message SHALL be io-pimdir's, but for `store-version`, and SHALL never advise deleting the store.
 
 A store is never migrated (pimdir STORAGE §6): one of another format version than calendula's io-pimdir is refused as `store-version`, whichever way it differs. One naming no format version, or an earlier draft's, SHALL be refused with a message saying the store was written by an earlier sync engine, and giving the reinstall in the order that keeps its queued writes: sync it with the neverest that wrote it until nothing is queued, then reinstall it with `neverest sync --reset --force -a <account>`, naming the account neverest syncs it for, which moves it aside, deleting nothing, and syncs a new one. Any other SHALL be refused with a message saying a newer sync engine wrote it and to upgrade calendula.
 
@@ -173,12 +173,25 @@ The pimdir backend SHALL report as an item's `etag` the store's hash of its body
 `update_item` and `delete_item` SHALL refuse, before anything is queued, a write whose `if_match` is not that version, surrounding double quotes ignored, with the code `precondition-failed` and an error starting `Precondition failed:`, naming the version found and the one expected. An item with no local body matches no version.
 
 ### Requirement: A queued pimdir edit names the body it replaced
-An `update` that `update_item` queues SHALL state as its `if_match` (pimdir STORAGE §15.3) the item's body hash when the write was gated on a version, by `--if-match` or by the read an update starting from the stored item makes, and none when the caller read no body. The store's owner then parks, rather than applies, an edit whose item holds another body by the time it drains, and the parked row SHALL show in `pimdir status` as every parked action does.
+An `update` that `update_item` queues, and a `remove` that `delete_item` queues, SHALL state as its `if_match` (pimdir STORAGE §15.3) the item's body hash when the write was gated on a version, by `--if-match` or by the read an update starting from the stored item makes, and none when the caller read no body. The store's owner then parks, rather than applies, an edit or a delete whose item holds another body by the time it drains, and the parked row SHALL show in `pimdir status` as every parked action does. A `remove` stating none deletes whatever the item holds.
 
 #### Scenario: A sync lands first
 - GIVEN an event read at version `A` and an `event update` queued from it
 - WHEN a sync replaces the event's body with `B` before the queue drains
 - THEN the owner parks the update, the event keeps `B`, and `pimdir status` lists the row with an error naming `A` and `B`
+
+#### Scenario: A sync lands before a delete
+- GIVEN an event at version `A` and an `event delete --if-match A` queued
+- WHEN a sync replaces the event's body with `B` before the queue drains
+- THEN the owner parks the remove, the event keeps `B`, and `pimdir status` lists the row with an error naming `A` and `B`
+
+### Requirement: A pimdir write settles no conflict
+An `update` and a `remove` calendula queues SHALL state no `resolves` (pimdir STORAGE §15.3): calendula shows no conflict and decides none. The store's owner parks, rather than applies, an edit or a delete meeting a conflict, the item's or that of the binding it runs through (§15.2), so the diverging body nobody read is neither replaced nor deleted, and the parked row SHALL show in `pimdir status` as every parked action does.
+
+#### Scenario: A delete over a conflicted event
+- GIVEN an event a sync left conflicted
+- WHEN `event delete` queues its removal and the queue drains
+- THEN the owner parks the remove, the event and its diverging body stay, and `pimdir status` lists the row with an error naming the conflict
 
 ### Requirement: pimdir queues scheduling intents
 `pimdir reply <EVENT-ID> accept|tentative|decline` SHALL append one `calendar-reply` action `{ "v": 1, "source", "seq", "partstat": "ACCEPTED"|"TENTATIVE"|"DECLINED", "comment"?, "recurrence_id"? }`, and `pimdir cancel <EVENT-ID>` one `calendar-cancel` action `{ "v": 1, "source", "seq", "comment"?, "recurrence_id"? }` (pimdir STORAGE Annex B.2), built and validated by io-pimdir's `PimdirInvitation`, anchored on the item's calendar, through the producer and its §15.6 gate, and SHALL touch no item.

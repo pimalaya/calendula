@@ -395,7 +395,14 @@ impl PimdirBackend {
 
     /// Stages a `remove` action: a tombstone, then a server-side delete.
     ///
-    /// `if_match` gates it as it gates [`update_item`](Self::update_item).
+    /// `if_match` gates it as it gates [`update_item`](Self::update_item),
+    /// and the action names that body as the one it deletes (pimdir
+    /// STORAGE §15.3), so the owner parks it when a sync replaced the body
+    /// while it waited in the queue. Without `if_match` no body was read,
+    /// and the remove deletes whatever the item holds.
+    ///
+    /// It states no `resolves`, calendula deciding no conflict: the owner
+    /// parks a remove meeting one.
     pub fn delete_item(
         &mut self,
         calendar_id: &str,
@@ -406,19 +413,21 @@ impl PimdirBackend {
 
         let stored = self.item(calendar_id, item_id)?;
         check_version(&stored, calendar_id, item_id, if_match)?;
-        let seq = stored.seq;
 
-        let action = PimdirAction::Remove { seq };
+        // NOTE: `check_version` passed, so `if_match` names the body the
+        // item holds.
+        let action = PimdirAction::Remove {
+            seq: stored.seq,
+            if_match: if_match.and(stored.object),
+            resolves: None,
+        };
 
         let mut producer = self.client.producer()?;
-        let partials = producer
-            .check(calendar_id, &action)
-            .map_err(staging_error)?;
-        producer
+        let enqueued = producer
             .enqueue(calendar_id, &action, None)
             .map_err(staging_error)?;
 
-        for partial in &partials {
+        for partial in &enqueued.partial {
             warn!("{partial}");
         }
 
@@ -791,17 +800,16 @@ impl PimdirBackend {
             err => store_error(err, format!("Queue {capability}")),
         };
 
-        let partials = producer.check(calendar_id, &action).map_err(refuse)?;
-        let row = producer
+        let enqueued = producer
             .enqueue(calendar_id, &action, None)
             .map_err(refuse)?;
 
-        for partial in &partials {
+        for partial in &enqueued.partial {
             warn!("{partial}");
         }
 
         Ok(PimdirQueued {
-            row,
+            row: enqueued.handle.id,
             seq,
             source: invitation.source,
         })
@@ -841,7 +849,7 @@ fn enqueue_with_body(
     action: impl FnOnce(PimdirHash) -> PimdirAction,
 ) -> Result<Vec<PimdirPartial>> {
     let enqueued = producer
-        .enqueue_with_body_checked(calendar_id, body, action)
+        .enqueue_with_body(calendar_id, body, action)
         .map_err(staging_error)?;
 
     for partial in &enqueued.partial {
@@ -2409,14 +2417,6 @@ mod tests {
     /// it rather than drop the other write, and `pimdir status` shows it.
     #[test]
     fn an_edit_whose_body_changed_underneath_is_parked() {
-        use io_pimdir::{
-            change::PimdirWriteOp,
-            collection::PimdirCollectionId,
-            hub::PimdirSourceId,
-            object::PimdirObject,
-            placement::{PimdirBase, PimdirStatus},
-        };
-
         let (dir, mut backend, ids) = store(&[ALONE]);
         let mine = ALONE.replace("SUMMARY:Focus", "SUMMARY:Mine");
         let theirs = ALONE.replace("SUMMARY:Focus", "SUMMARY:Theirs");
@@ -2426,8 +2426,113 @@ mod tests {
             .update_item("cal", &ids[0], mine.into(), Some(&etag))
             .unwrap();
 
-        // NOTE: a sync lands the server's own edit of the event while this
-        // one waits in the queue.
+        let (landed, applied, parked) = land_and_drain(&dir, &backend, &theirs, false);
+        assert_eq!((applied, parked), (0, 1));
+
+        let held = backend.get_item("cal", &ids[0]).unwrap();
+        assert_eq!(held.contents, theirs.as_bytes());
+
+        let status = backend.status().unwrap();
+        assert_eq!(status.parked.len(), 1, "{:?}", status.parked);
+        let parked = &status.parked[0];
+        assert_eq!(parked.action, "update");
+        assert!(parked.error.contains(&etag), "{}", parked.error);
+        assert!(parked.error.contains(&landed), "{}", parked.error);
+    }
+
+    /// A delete gated on a version names the body it deletes (pimdir
+    /// STORAGE §15.3): when the item holds another by the time the store's
+    /// owner applies it, the owner parks it rather than delete a body
+    /// nobody read, and `pimdir status` shows it.
+    #[test]
+    fn a_delete_whose_body_changed_underneath_is_parked() {
+        let (dir, mut backend, ids) = store(&[ALONE]);
+        let theirs = ALONE.replace("SUMMARY:Focus", "SUMMARY:Theirs");
+
+        let etag = backend.get_item("cal", &ids[0]).unwrap().etag.unwrap();
+        backend.delete_item("cal", &ids[0], Some(&etag)).unwrap();
+
+        let (landed, applied, parked) = land_and_drain(&dir, &backend, &theirs, false);
+        assert_eq!((applied, parked), (0, 1));
+
+        let held = backend.get_item("cal", &ids[0]).unwrap();
+        assert_eq!(held.contents, theirs.as_bytes());
+
+        let status = backend.status().unwrap();
+        assert_eq!(status.parked.len(), 1, "{:?}", status.parked);
+        let parked = &status.parked[0];
+        assert_eq!(parked.action, "remove");
+        assert!(parked.error.contains(&etag), "{}", parked.error);
+        assert!(parked.error.contains(&landed), "{}", parked.error);
+    }
+
+    /// A delete gated on no version read no body, and deletes whatever the
+    /// item holds by the time the store's owner applies it.
+    #[test]
+    fn a_delete_naming_no_version_removes_whatever_the_item_holds() {
+        let (dir, mut backend, ids) = store(&[ALONE]);
+        let theirs = ALONE.replace("SUMMARY:Focus", "SUMMARY:Theirs");
+
+        backend.delete_item("cal", &ids[0], None).unwrap();
+
+        let (_, applied, parked) = land_and_drain(&dir, &backend, &theirs, false);
+        assert_eq!((applied, parked), (1, 0));
+        assert!(backend.get_item("cal", &ids[0]).is_err());
+        assert!(backend.status().unwrap().parked.is_empty());
+    }
+
+    /// calendula decides no conflict, so its writes name none (pimdir
+    /// STORAGE §15.3): a delete or an edit meeting one is parked by the
+    /// store's owner, the item and its diverging body kept, and `pimdir
+    /// status` shows it.
+    #[test]
+    fn a_delete_or_an_edit_over_a_conflicted_item_is_parked() {
+        let theirs = ALONE.replace("SUMMARY:Focus", "SUMMARY:Theirs");
+        let mine = ALONE.replace("SUMMARY:Focus", "SUMMARY:Mine");
+
+        for action in ["remove", "update"] {
+            let (dir, mut backend, ids) = store(&[ALONE]);
+            match action {
+                "remove" => backend.delete_item("cal", &ids[0], None).unwrap(),
+                _ => backend
+                    .update_item("cal", &ids[0], mine.clone().into(), None)
+                    .unwrap(),
+            }
+
+            let (_, applied, parked) = land_and_drain(&dir, &backend, &theirs, true);
+            assert_eq!((applied, parked), (0, 1), "{action}");
+
+            let status = backend.status().unwrap();
+            assert_eq!(status.parked.len(), 1, "{:?}", status.parked);
+            assert_eq!(status.parked[0].action, action);
+            assert!(
+                status.parked[0].error.contains("conflict"),
+                "{}",
+                status.parked[0].error
+            );
+        }
+    }
+
+    /// Lands `theirs` on the first item of `cal` while a write waits in
+    /// the queue, then drains the queue: as its body, the way a sync
+    /// pulling the server's own edit does, or when `conflicted` as the
+    /// diverging body of a conflict the sync left on it. Answers the hash
+    /// of the body landed and how many actions the drain applied and
+    /// parked.
+    fn land_and_drain(
+        dir: &tempfile::TempDir,
+        backend: &PimdirBackend,
+        theirs: &str,
+        conflicted: bool,
+    ) -> (String, usize, usize) {
+        use io_pimdir::{
+            change::PimdirWriteOp,
+            collection::PimdirCollectionId,
+            hub::PimdirSourceId,
+            object::PimdirObject,
+            placement::{PimdirBase, PimdirStatus},
+        };
+
         let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
             .unwrap()
             .for_source("caldav");
@@ -2442,40 +2547,41 @@ mod tests {
             size: theirs.len(),
         };
         let landed = object.hash.0.clone();
-        let derived = derive(theirs.as_bytes());
-        placement.object = Some(object.hash.clone());
-        placement.summary = derived.summary;
-        placement.sort_key = derived.sort_key;
-        placement.status = PimdirStatus::Clean;
         placement.origin = None;
-        placement.base = Some(PimdirBase {
-            flags: placement.flags.clone(),
-            revision: Some("2".into()),
-            object: Some(object.hash.clone()),
-        });
+        if conflicted {
+            placement.status = PimdirStatus::Conflict;
+            placement.conflict_revision = Some("2".into());
+            placement.conflict_object = Some(object.hash.clone());
+            placement.base = Some(PimdirBase {
+                flags: placement.flags.clone(),
+                revision: Some("1".into()),
+                object: placement.object.clone(),
+            });
+        } else {
+            let derived = derive(theirs.as_bytes());
+            placement.object = Some(object.hash.clone());
+            placement.summary = derived.summary;
+            placement.sort_key = derived.sort_key;
+            placement.status = PimdirStatus::Clean;
+            placement.base = Some(PimdirBase {
+                flags: placement.flags.clone(),
+                revision: Some("2".into()),
+                object: Some(object.hash.clone()),
+            });
+        }
         owner
             .write(vec![
                 PimdirWriteOp::StoreObject {
                     object,
-                    body: Some(theirs.clone().into_bytes()),
+                    body: Some(theirs.to_owned().into_bytes()),
                 },
                 PimdirWriteOp::UpsertPlacement(placement),
             ])
             .unwrap();
 
         let report = owner.drain().unwrap();
-        assert_eq!((report.applied, report.parked), (0, 1), "{report:?}");
-        drop(owner);
 
-        let held = backend.get_item("cal", &ids[0]).unwrap();
-        assert_eq!(held.contents, theirs.as_bytes());
-
-        let status = backend.status().unwrap();
-        assert_eq!(status.parked.len(), 1, "{:?}", status.parked);
-        let parked = &status.parked[0];
-        assert_eq!(parked.action, "update");
-        assert!(parked.error.contains(&etag), "{}", parked.error);
-        assert!(parked.error.contains(&landed), "{}", parked.error);
+        (landed, report.applied, report.parked)
     }
 
     /// A store its sync engine has not created, a database declaring
@@ -2538,8 +2644,8 @@ mod tests {
             std::fs::write(&path, db).unwrap();
             open(&dir)
         };
-        let earlier = versioned("storage-draft-08");
-        let newer = versioned("storage-draft-10");
+        let earlier = versioned("storage-draft-09");
+        let newer = versioned("storage-draft-11");
 
         assert_eq!(code_of(&uncreated), Some(ErrorCode::StoreUncreated));
         assert_eq!(code_of(&foreign), Some(ErrorCode::StoreForeign));

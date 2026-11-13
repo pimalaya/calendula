@@ -42,13 +42,13 @@ use crate::{
 /// The answer is the index as the sync engine last refreshed it: a queued
 /// write is not in it. Each hit prints as a record, its summary then its
 /// snippet as the body; a line under the hits says what the answer could
-/// not see, another names the index's zone when it reads floating times
-/// in another.
+/// not see, another names the index's zone when a `date:` term reads its
+/// days in another than the index read floating times in.
 ///
 /// JSON output: `{"hits": [{...the event projection, "calendarId",
 /// "matched", "snippet"}], "more", "coverage": {"complete", "bodiless",
-/// "unindexed", "behind", "since", "until", "filling", "horizonLeft",
-/// "cut"}}`.
+/// "missing", "unparseable", "unindexed", "behind", "since", "until",
+/// "filling", "horizonLeft", "cut", "zoneDiffers"}}`.
 #[derive(Debug, Parser)]
 pub struct PimdirSearchCommand {
     /// Calendar to search alone; every calendar when omitted.
@@ -140,7 +140,7 @@ pub struct PimdirSearchOutput {
     pub more: bool,
     /// What the answer could not see.
     pub coverage: PimdirCalendarCoverage,
-    /// The zones, when the index reads floating times in another.
+    /// The zones, when a date term is read in another than the index's.
     #[serde(skip)]
     pub zones: Option<PimdirCalendarZones>,
 }

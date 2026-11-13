@@ -215,6 +215,7 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 | `store-hash-algo` | the pimdir store names its bodies by a hash this calendula does not know: upgrade calendula |
 | `store-busy` | another process holds the pimdir store; retry |
 | `store-exposed` | a path of the pimdir store is a link or another user can reach it: restrict it |
+| `lock-replaced` | the lock file of the pimdir store was removed or replaced under a write: nothing was queued; retry |
 | `flag-invalid` | a pimdir write carries a flag the store cannot hold |
 | `action-malformed` | a pimdir queue action's payload is one its schema refuses |
 | `index-missing` | the pimdir store has no search index yet: its sync engine builds it |
@@ -506,7 +507,17 @@ Each hit SHALL print as a record (Text output is plain text): its id, the public
 `calendula pimdir count <query>...` SHALL answer how many items the scoped query matches, with its coverage, under the same scope as `pimdir search`.
 
 ### Requirement: A pimdir calendar search says what it did not cover
-The output of `pimdir search` and `pimdir count` SHALL carry the coverage of the answer (SEARCH §8.2): `bodiless`, the items in scope whose body is not local, matched on their summary alone; `unindexed`, those whose last change the index has not folded in; `behind`, how many changes the store drew above the index, store-wide; `since` and `until`, the range below or above which the store is not known to hold every item; `filling`, whether a first round is still listing a calendar in scope; `horizonLeft`, whether the date range reaches outside the occurrences the index holds; `cut`, how many series stop their occurrences before the range's end; and `complete`, true only when none of these holds. The plain output SHALL print one line after its hits, a blank line apart, naming what did not hold, and nothing when the answer is complete.
+The output of `pimdir search` and `pimdir count` SHALL carry the coverage of the answer (SEARCH §8.2): `bodiless`, the items in scope whose body is not local, matched on their summary alone; `missing`, those whose body the index could not read, and `unparseable`, those whose body it could not parse, both indexed from their summary and counted whatever the query reads; `unindexed`, those whose last change the index has not folded in; `behind`, how many changes the store drew above the index, store-wide; `since` and `until`, the range below or above which the store is not known to hold every item; `filling`, whether a first round is still listing a calendar in scope; `horizonLeft`, whether the date range reaches outside the occurrences the index holds; `cut`, how many series stop their occurrences before the range's end; `zoneDiffers`, whether a date term reads its days in another zone than the index read floating times and dates in; and `complete`, io-pimdir's own judgement of SEARCH §8.2 (`PimdirSearchCoverage::is_complete`), the lag included: false when any of these holds, but for `zoneDiffers`, which leaves an answer complete, and for a `missing` or an `unparseable` count while no term of the query reads a calendar body (a text term, `date:`, `when:`, `has:attachment`). The members SHALL be flat and camelCase. The plain output SHALL print one line after its hits, a blank line apart, naming what left the answer incomplete, a `missing` or an `unparseable` count only while a term reads a calendar body, and nothing when the answer is complete.
+
+#### Scenario: A body the index could not read
+- GIVEN an index recording one event's body as missing
+- WHEN `calendula pimdir search budget` runs
+- THEN the coverage reports `missing` 1 and `complete` false, and the plain output says one item has a body the index could not read
+
+#### Scenario: A query reading no body
+- GIVEN the same index
+- WHEN `calendula pimdir search organizer:alice@example.org` runs
+- THEN the coverage reports `missing` 1 and `complete` true, and the plain output prints no coverage line
 
 #### Scenario: A range past the horizon
 - GIVEN an index holding occurrences two years forward
@@ -514,12 +525,17 @@ The output of `pimdir search` and `pimdir count` SHALL carry the coverage of the
 - THEN the coverage reports `horizonLeft` true and `complete` false
 
 ### Requirement: A pimdir search names an index read in another zone
-When the index reads floating times and dates in another zone than the one `pimdir search` and `pimdir count` read days in (SEARCH §7, `floating_zone`), their plain output SHALL say so after the hits or the count, naming both zones; the JSON output SHALL stay unchanged.
+When the coverage of `pimdir search` or `pimdir count` reports a differing zone (SEARCH §8.2: the query holds a date term that can reach a calendar item, and the index reads floating times and dates in another zone than the one the search reads days in, SEARCH §7, `floating_zone`), the plain output SHALL say so after the hits or the count, naming both zones, and the JSON coverage SHALL carry `zoneDiffers` true. A query of no date term reads no day: it SHALL print no such line and carry `zoneDiffers` false.
 
 #### Scenario: An index read in another zone
 - GIVEN `TZ=Europe/Paris` and an index reading floating times in `UTC`
 - WHEN `calendula pimdir search date:2026-11-07` runs
-- THEN the plain output says the index reads floating times and dates in UTC and this search reads days in Europe/Paris
+- THEN the plain output says the index reads floating times and dates in UTC and this search reads days in Europe/Paris, and the coverage reports `zoneDiffers` true and stays `complete`
+
+#### Scenario: A query of no date term
+- GIVEN `TZ=Europe/Paris` and an index reading floating times in `UTC`
+- WHEN `calendula pimdir search budget` runs
+- THEN the plain output names no zone and the coverage reports `zoneDiffers` false
 
 ### Requirement: A pimdir index or query failure is coded
 A store with no search index SHALL fail both commands with the code `index-missing`, an index another version built with `index-outdated`, one of another draft or shape with `index-version`, one reading floating times, or a search reading days, in a zone the time zone database does not know with `index-zone-unknown`, and a SQLite lacking FTS5 with `index-fts5-missing`, each saying the store's sync engine builds or rebuilds the index and none advising to delete anything. A query the language refuses SHALL fail with `query-refused`: in plain output the SEARCH §8.4 fault drawn over the query, under `--json` the §8.4 code, span and expectations in `error`. An accepted query the index cannot answer SHALL fail with `query-unanswerable`.

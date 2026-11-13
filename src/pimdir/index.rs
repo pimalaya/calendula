@@ -13,7 +13,7 @@ use io_pimdir::{
         search::{PimdirIndex, PimdirSearchClock, PimdirSearchMatched, PimdirSearchOptions},
     },
     search::{
-        coverage::{PimdirSearchCoverage, PimdirSearchTemporal},
+        coverage::{PimdirSearchCoverage, PimdirSearchTemporal, PimdirSearchUnread},
         query::{
             PimdirQuery, PimdirQueryError, PimdirQueryErrorCode, PimdirQueryKind,
             PimdirQueryPredicate, PimdirQueryTerm,
@@ -91,7 +91,7 @@ impl PimdirClient {
             hits,
             more: answer.more,
             coverage: PimdirCalendarCoverage::from(&answer.coverage),
-            zones: PimdirCalendarZones::of(&index, &options.clock)?,
+            zones: PimdirCalendarZones::of(&index, &options.clock, &answer.coverage)?,
         })
     }
 
@@ -111,7 +111,7 @@ impl PimdirClient {
         Ok(PimdirCalendarCount {
             count: answer.count,
             coverage: PimdirCalendarCoverage::from(&answer.coverage),
-            zones: PimdirCalendarZones::of(&index, clock)?,
+            zones: PimdirCalendarZones::of(&index, clock, &answer.coverage)?,
         })
     }
 
@@ -127,7 +127,7 @@ impl PimdirClient {
 
     /// `query` scoped by top-level `kind:event`, `account:` and
     /// `collection:` conjuncts.
-    // NOTE: io-pimdir reads the coverage's scope from top-level terms alone.
+    // NOTE: only a conjunct of the whole query scopes its coverage.
     fn scope(&self, query: PimdirQuery, calendar: Option<&str>) -> PimdirQuery {
         let mut conjuncts = match query {
             PimdirQuery::And(conjuncts) => conjuncts,
@@ -230,7 +230,7 @@ pub struct PimdirCalendarPage {
     pub more: bool,
     /// What the answer could not see.
     pub coverage: PimdirCalendarCoverage,
-    /// The zones, when the index reads floating times in another.
+    /// The zones, when a date term is read in another than the index's.
     pub zones: Option<PimdirCalendarZones>,
 }
 
@@ -240,12 +240,13 @@ pub struct PimdirCalendarCount {
     pub count: u64,
     /// What the count could not see.
     pub coverage: PimdirCalendarCoverage,
-    /// The zones, when the index reads floating times in another.
+    /// The zones, when a date term is read in another than the index's.
     pub zones: Option<PimdirCalendarZones>,
 }
 
 /// The zones of an index reading floating times and dates in another zone
-/// than the search reads days in (pimdir SEARCH §7, §8.1).
+/// than the search reads the days of a date term in (pimdir SEARCH §7,
+/// §8.1, §8.2).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PimdirCalendarZones {
     /// The zone the index reads floating times and dates in.
@@ -255,14 +256,23 @@ pub struct PimdirCalendarZones {
 }
 
 impl PimdirCalendarZones {
-    /// The zones of `index` and `clock`, `None` when they are one.
-    fn of(index: &PimdirIndex, clock: &PimdirSearchClock) -> Result<Option<Self>> {
+    /// The zones of `index` and `clock`, `None` unless `coverage` says
+    /// they differ where a date term can reach a calendar item.
+    fn of(
+        index: &PimdirIndex,
+        clock: &PimdirSearchClock,
+        coverage: &PimdirSearchCoverage,
+    ) -> Result<Option<Self>> {
+        if !coverage.zone_differs {
+            return Ok(None);
+        }
+
         let index = index
             .floating_zone()
             .map_err(|err| store_error(err, "Read the zone of the pimdir index"))?;
         let search = clock.zone.clone().unwrap_or_else(|| String::from("UTC"));
 
-        Ok((index != search).then_some(Self { index, search }))
+        Ok(Some(Self { index, search }))
     }
 }
 
@@ -329,6 +339,12 @@ pub struct PimdirCalendarCoverage {
     pub complete: bool,
     /// Items in scope whose body is not local.
     pub bodiless: u64,
+    /// Items in scope whose body the indexer could not read, indexed from
+    /// their summary, counted whatever the query reads.
+    pub missing: u64,
+    /// Items in scope whose body no parser accepted, indexed from their
+    /// summary, counted whatever the query reads.
+    pub unparseable: u64,
     /// Items in scope whose last change the index has not folded in.
     pub unindexed: u64,
     /// Changes the store drew since the index was refreshed, store-wide.
@@ -343,6 +359,13 @@ pub struct PimdirCalendarCoverage {
     pub horizon_left: bool,
     /// Series in scope whose occurrences stop before the range's end.
     pub cut: u64,
+    /// Whether a date term reads its days in another zone than the index
+    /// read floating times and dates in, which leaves the answer complete.
+    pub zone_differs: bool,
+    /// Whether a term of the query reads a calendar body, so a `missing`
+    /// or an `unparseable` one leaves the answer incomplete.
+    #[serde(skip)]
+    pub reads: bool,
 }
 
 impl From<&PimdirSearchCoverage> for PimdirCalendarCoverage {
@@ -356,9 +379,21 @@ impl From<&PimdirSearchCoverage> for PimdirCalendarCoverage {
             } => (since.clone(), until.clone(), *filling),
         };
 
+        // NOTE: scoped by `kind:event`, so the kinds are the calendar's.
+        let unread = |count: fn(&PimdirSearchUnread) -> u64| -> u64 {
+            coverage.local.kinds.values().map(count).sum()
+        };
+        let reads = coverage
+            .local
+            .kinds
+            .keys()
+            .any(|kind| coverage.local.reads.kinds.contains(kind));
+
         Self {
-            complete: coverage.is_complete() && coverage.local.behind == 0,
-            bodiless: coverage.local.bodiless.values().sum(),
+            complete: coverage.is_complete(),
+            bodiless: unread(|unread| unread.bodiless),
+            missing: unread(|unread| unread.missing),
+            unparseable: unread(|unread| unread.unparseable),
             unindexed: coverage.local.unindexed,
             behind: coverage.local.behind,
             since,
@@ -366,6 +401,8 @@ impl From<&PimdirSearchCoverage> for PimdirCalendarCoverage {
             filling,
             horizon_left: coverage.horizon_left,
             cut: coverage.cut,
+            zone_differs: coverage.zone_differs,
+            reads,
         }
     }
 }
@@ -380,6 +417,21 @@ impl fmt::Display for PimdirCalendarCoverage {
             parts.push(format!(
                 "{} item(s) have no local body and matched on their summary alone",
                 self.bodiless
+            ));
+        }
+        // NOTE: a count no term of the query reads leaves it complete.
+        if self.missing > 0 && self.reads {
+            parts.push(format!(
+                "{} item(s) have a body the index could not read and matched on their \
+                 summary alone",
+                self.missing
+            ));
+        }
+        if self.unparseable > 0 && self.reads {
+            parts.push(format!(
+                "{} item(s) have a body the index could not parse and matched on their \
+                 summary alone",
+                self.unparseable
             ));
         }
         if let Some(since) = &self.since {
@@ -511,7 +563,10 @@ mod tests {
             PimdirBase, PimdirFlags, PimdirHandle, PimdirLevel, PimdirLinkId, PimdirPlacement,
             PimdirStatus,
         },
-        search::{coverage::PimdirSearchCoverage, query::PimdirQuery},
+        search::{
+            coverage::{PimdirSearchCoverage, PimdirSearchUnread},
+            query::PimdirQuery,
+        },
         summary::{
             PimdirSummary,
             calendar::{PimdirEventSummary, PimdirTime},
@@ -853,24 +908,28 @@ mod tests {
         }
     }
 
+    /// The zones are named where a date term reads days in another zone
+    /// than the index's (pimdir SEARCH §8.2), which leaves the answer as
+    /// complete as it was; a query of no date term reads no day.
     #[test]
     fn an_index_read_in_another_zone_is_named() {
         let (_dir, backend) = indexed_store();
         let client = &backend.client;
-        let zones = |clock: PimdirSearchClock| {
+        let zones = |text: &str, clock: PimdirSearchClock| {
             let options = PimdirSearchOptions {
                 clock: clock.clone(),
                 ..Default::default()
             };
-            let page = client
-                .search_items(query("budget"), None, &options)
-                .unwrap();
-            let count = client.count_items(query("budget"), None, &clock).unwrap();
+            let page = client.search_items(query(text), None, &options).unwrap();
+            let count = client.count_items(query(text), None, &clock).unwrap();
             assert_eq!(page.zones, count.zones);
+            assert_eq!(page.coverage.zone_differs, page.zones.is_some());
+            assert_eq!(count.coverage.zone_differs, count.zones.is_some());
             page.zones
         };
 
-        let paris = zones(clock("Europe/Paris")).unwrap();
+        let dated = "budget date:2026-11";
+        let paris = zones(dated, clock("Europe/Paris")).unwrap();
         assert_eq!(
             paris,
             PimdirCalendarZones {
@@ -884,8 +943,9 @@ mod tests {
              Europe/Paris\n"
         );
 
-        assert_eq!(zones(clock("UTC")), None);
-        assert_eq!(zones(PimdirSearchClock::default()), None);
+        assert_eq!(zones(dated, clock("UTC")), None);
+        assert_eq!(zones(dated, PimdirSearchClock::default()), None);
+        assert_eq!(zones("budget", clock("Europe/Paris")), None);
     }
 
     /// The store holds a to-do and a journal entry naming the budget too.
@@ -1185,6 +1245,8 @@ mod tests {
         let coverage = PimdirCalendarCoverage {
             complete: false,
             bodiless: 2,
+            missing: 5,
+            unparseable: 6,
             unindexed: 1,
             behind: 3,
             since: Some("2026-05-15T00:00:00Z".into()),
@@ -1192,6 +1254,8 @@ mod tests {
             filling: true,
             horizon_left: true,
             cut: 4,
+            zone_differs: true,
+            reads: true,
         };
 
         assert_eq!(
@@ -1199,6 +1263,8 @@ mod tests {
             serde_json::json!({
                 "complete": false,
                 "bodiless": 2,
+                "missing": 5,
+                "unparseable": 6,
                 "unindexed": 1,
                 "behind": 3,
                 "since": "2026-05-15T00:00:00Z",
@@ -1206,12 +1272,15 @@ mod tests {
                 "filling": true,
                 "horizonLeft": true,
                 "cut": 4,
+                "zoneDiffers": true,
             })
         );
         let line = coverage.to_string();
         assert_eq!(line.lines().count(), 1, "{line}");
         for part in [
             "2 item(s) have no local body",
+            "5 item(s) have a body the index could not read",
+            "6 item(s) have a body the index could not parse",
             "items before 2026-05-15 are not synced",
             "a first sync is still listing a calendar",
             "the dates reach outside the occurrences the index holds",
@@ -1221,5 +1290,55 @@ mod tests {
         ] {
             assert!(line.contains(part), "{line}");
         }
+    }
+
+    /// A body the index could not read or parse is always counted, and
+    /// leaves the answer incomplete, its line said, only while a term of
+    /// the query reads a calendar body (pimdir SEARCH §8.2).
+    #[test]
+    fn an_unread_body_counts_against_a_query_reading_it_alone() {
+        let kind = String::from("text/calendar");
+        let mut answer = PimdirSearchCoverage::default();
+        answer.local.kinds.insert(
+            kind.clone(),
+            PimdirSearchUnread {
+                missing: 1,
+                unparseable: 2,
+                ..Default::default()
+            },
+        );
+
+        let unread = PimdirCalendarCoverage::from(&answer);
+        assert_eq!((unread.missing, unread.unparseable), (1, 2));
+        assert!(unread.complete);
+        assert_eq!(unread.to_string(), "");
+
+        answer.local.reads.kinds.insert(kind);
+
+        let read = PimdirCalendarCoverage::from(&answer);
+        assert_eq!((read.missing, read.unparseable), (1, 2));
+        assert!(!read.complete);
+        let line = read.to_string();
+        assert!(line.starts_with("Incomplete: "), "{line}");
+        assert!(line.contains("1 item(s) have a body the index could not read"));
+        assert!(line.contains("2 item(s) have a body the index could not parse"));
+    }
+
+    /// A zone that differs is reported and leaves the answer complete; an
+    /// index behind the store does not (pimdir SEARCH §8.2).
+    #[test]
+    fn a_differing_zone_leaves_the_answer_complete_and_a_lag_does_not() {
+        let mut answer = PimdirSearchCoverage {
+            zone_differs: true,
+            ..Default::default()
+        };
+
+        let zoned = PimdirCalendarCoverage::from(&answer);
+        assert!(zoned.zone_differs);
+        assert!(zoned.complete);
+        assert_eq!(zoned.to_string(), "");
+
+        answer.local.behind = 1;
+        assert!(!PimdirCalendarCoverage::from(&answer).complete);
     }
 }

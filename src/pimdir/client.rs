@@ -144,9 +144,10 @@ fn resolve_account(reader: &PimdirReader, configured: Option<String>) -> Result<
 /// has to create, one of another format version, a database another
 /// program wrote, one whose two version stamps disagree, one naming its
 /// bodies by a hash calendula does not know, one another process holds,
-/// one another user can reach, an action or a flag the store refuses
-/// before anything is queued, a search index state, and a search query
-/// refused or unanswered. The message is io-pimdir's, but for a store of
+/// one another user can reach, one whose lock file was replaced under a
+/// write, an action or a flag the store refuses before anything is
+/// queued, a search index state, and a search query refused or
+/// unanswered. The message is io-pimdir's, but for a store of
 /// another format version: a store is never migrated (pimdir STORAGE §6),
 /// so one an earlier sync engine wrote is reinstalled by the engine that
 /// owns it, which moves it aside, and one a newer engine wrote needs a
@@ -160,6 +161,7 @@ pub(crate) fn store_error(err: PimdirError, context: impl fmt::Display) -> anyho
         "store-hash-algo" => ErrorCode::StoreHashAlgo,
         "store-busy" => ErrorCode::StoreBusy,
         "store-exposed" => ErrorCode::StoreExposed,
+        "lock-replaced" => ErrorCode::LockReplaced,
         "flag-invalid" => ErrorCode::FlagInvalid,
         "action-malformed" => ErrorCode::ActionMalformed,
         "index-missing" => ErrorCode::IndexMissing,
@@ -245,6 +247,7 @@ mod tests {
             },
             PimdirError::Busy,
             PimdirError::Exposed("/tmp/store".into()),
+            PimdirError::LockReplaced("/tmp/store/objects.lock".into()),
             PimdirError::Flag("two words".into()),
             PimdirError::Action(PimdirActionError::MissingField("source")),
             PimdirError::IndexMissing("/tmp/store/index.db".into()),
@@ -283,7 +286,7 @@ mod tests {
             .to_string()
         };
 
-        for earlier in [refused(None), refused(Some("storage-draft-08"))] {
+        for earlier in [refused(None), refused(Some("storage-draft-09"))] {
             assert!(earlier.contains("earlier sync engine"), "{earlier}");
             assert!(earlier.contains("until nothing is queued"), "{earlier}");
             assert!(
@@ -294,7 +297,7 @@ mod tests {
         }
 
         for newer in [
-            refused(Some("storage-draft-10")),
+            refused(Some("storage-draft-11")),
             refused(Some("storage-v1.0.0")),
         ] {
             assert!(newer.contains("upgrade calendula"), "{newer}");
