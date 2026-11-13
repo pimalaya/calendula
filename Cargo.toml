@@ -51,7 +51,7 @@ io-gcal = { version = "0.3.1", default-features = false, features = ["client"], 
 io-http = { version = "0.6", default-features = false, optional = true }
 io-msgraph = { version = "0.7.1", default-features = false, optional = true }
 io-pim-discovery = { version = "0.11", default-features = false, features = ["rfc6764", "stream"], optional = true }
-io-pimdir = { version = "0.11", default-features = false, features = ["client"], optional = true }
+io-pimdir = { version = "0.12", default-features = false, features = ["client"], optional = true }
 io-vdir = { version = "0.2", default-features = false, features = ["client"], optional = true }
 io-webdav = { version = "0.7", default-features = false, features = ["client"], optional = true }
 jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-bundle-always"] }
@@ -68,5 +68,4 @@ unicode-width = { version = "0.2", default-features = false }
 url = { version = "2.5", default-features = false }
 
 [patch.crates-io]
-io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "cd33f0e51c93a6276d3b2089e409780bcfbda006" }
 pimalaya-cli = { git = "https://github.com/pimalaya/cli", rev = "eb379626e01e31bed11cbe7f06c252262e810279" }
