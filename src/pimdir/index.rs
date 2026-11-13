@@ -337,7 +337,8 @@ impl fmt::Display for PimdirCalendarMatched {
 pub struct PimdirCalendarCoverage {
     /// Whether every other field is at rest.
     pub complete: bool,
-    /// Items in scope whose body is not local.
+    /// Items in scope whose body is not local, matched on their summary
+    /// alone, counted whatever the query reads.
     pub bodiless: u64,
     /// Items in scope whose body the indexer could not read, indexed from
     /// their summary, counted whatever the query reads.
@@ -366,6 +367,10 @@ pub struct PimdirCalendarCoverage {
     /// or an `unparseable` one leaves the answer incomplete.
     #[serde(skip)]
     pub reads: bool,
+    /// Whether a `bodiless` item leaves the answer incomplete: a term
+    /// reads a calendar body, or io-pimdir counts the kind's without one.
+    #[serde(skip)]
+    pub counts_bodiless: bool,
 }
 
 impl From<&PimdirSearchCoverage> for PimdirCalendarCoverage {
@@ -383,11 +388,10 @@ impl From<&PimdirSearchCoverage> for PimdirCalendarCoverage {
         let unread = |count: fn(&PimdirSearchUnread) -> u64| -> u64 {
             coverage.local.kinds.values().map(count).sum()
         };
-        let reads = coverage
-            .local
-            .kinds
-            .keys()
-            .any(|kind| coverage.local.reads.kinds.contains(kind));
+        let terms = &coverage.local.reads;
+        let kinds = || coverage.local.kinds.keys();
+        let reads = kinds().any(|kind| terms.kinds.contains(kind));
+        let counts_bodiless = reads || kinds().any(|kind| terms.counts_bodiless(kind));
 
         Self {
             complete: coverage.is_complete(),
@@ -403,6 +407,7 @@ impl From<&PimdirSearchCoverage> for PimdirCalendarCoverage {
             cut: coverage.cut,
             zone_differs: coverage.zone_differs,
             reads,
+            counts_bodiless,
         }
     }
 }
@@ -413,13 +418,13 @@ impl fmt::Display for PimdirCalendarCoverage {
         let day = |instant: &str| sanitize::text(instant.get(..10).unwrap_or(instant)).into_owned();
         let mut parts = Vec::new();
 
-        if self.bodiless > 0 {
+        // NOTE: a count no term of the query reads leaves it complete.
+        if self.bodiless > 0 && self.counts_bodiless {
             parts.push(format!(
                 "{} item(s) have no local body and matched on their summary alone",
                 self.bodiless
             ));
         }
-        // NOTE: a count no term of the query reads leaves it complete.
         if self.missing > 0 && self.reads {
             parts.push(format!(
                 "{} item(s) have a body the index could not read and matched on their \
@@ -1008,6 +1013,46 @@ mod tests {
         assert_eq!(cal.bodiless, 0);
         assert!(cal.complete, "{cal:?}");
         assert_eq!(cal.to_string(), "");
+
+        // NOTE: a group that is a conjunct is read through, under the
+        // scope calendula adds (pimdir SEARCH §8.2).
+        for grouped in ["(collection:cal) budget", "(collection:cal budget)"] {
+            assert_eq!(summaries(client, grouped, None), ["Offsite"], "{grouped}");
+            assert_eq!(page(client, grouped, None).coverage, cal, "{grouped}");
+        }
+    }
+
+    /// The event listed without its body leaves an answer incomplete only
+    /// while a term reads a calendar body, which a date term does and an
+    /// address does not (pimdir SEARCH §8.2).
+    #[test]
+    fn a_bodiless_event_counts_against_a_term_reading_its_body_alone() {
+        let (_dir, backend) = indexed_store();
+        let client = &backend.client;
+
+        for text in ["date:2026-11", "budget"] {
+            let read = page(client, text, None).coverage;
+            assert_eq!(read.bodiless, 1, "{text}");
+            assert!(!read.complete, "{text}");
+            assert!(
+                read.to_string().contains("1 item(s) have no local body"),
+                "{text}: {read}"
+            );
+        }
+
+        let unread = page(client, "organizer:alice@example.org", None).coverage;
+        assert_eq!(unread.bodiless, 1);
+        assert!(unread.complete, "{unread:?}");
+        assert_eq!(unread.to_string(), "");
+
+        let count = client
+            .count_items(
+                query("organizer:alice@example.org"),
+                None,
+                &PimdirSearchClock::default(),
+            )
+            .unwrap();
+        assert_eq!(count.coverage, unread);
     }
 
     #[test]
@@ -1256,6 +1301,7 @@ mod tests {
             cut: 4,
             zone_differs: true,
             reads: true,
+            counts_bodiless: true,
         };
 
         assert_eq!(
@@ -1322,6 +1368,42 @@ mod tests {
         assert!(line.starts_with("Incomplete: "), "{line}");
         assert!(line.contains("1 item(s) have a body the index could not read"));
         assert!(line.contains("2 item(s) have a body the index could not parse"));
+    }
+
+    /// An item holding no body is always counted, and leaves the answer
+    /// incomplete, its line said, only while io-pimdir counts it against
+    /// the query: under a term reading its body or, a message, under
+    /// `has:attachment` (pimdir SEARCH §8.2).
+    #[test]
+    fn a_body_not_held_counts_against_a_query_reading_it_alone() {
+        let held = |kind: &str| {
+            let mut answer = PimdirSearchCoverage::default();
+            let unread = PimdirSearchUnread {
+                bodiless: 1,
+                ..Default::default()
+            };
+            answer.local.kinds.insert(kind.into(), unread);
+            answer
+        };
+        let line = "Incomplete: 1 item(s) have no local body and matched on their summary alone\n";
+
+        let mut answer = held("text/calendar");
+        let unread = PimdirCalendarCoverage::from(&answer);
+        assert_eq!(unread.bodiless, 1);
+        assert!(unread.complete);
+        assert_eq!(unread.to_string(), "");
+
+        answer.local.reads.kinds.insert("text/calendar".into());
+        let read = PimdirCalendarCoverage::from(&answer);
+        assert_eq!(read.bodiless, 1);
+        assert!(!read.complete);
+        assert_eq!(read.to_string(), line);
+
+        let mut answer = held("message/rfc822");
+        answer.local.reads.mark = true;
+        let marked = PimdirCalendarCoverage::from(&answer);
+        assert!(!marked.complete);
+        assert_eq!(marked.to_string(), line);
     }
 
     /// A zone that differs is reported and leaves the answer complete; an

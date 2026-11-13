@@ -68,4 +68,5 @@ unicode-width = { version = "0.2", default-features = false }
 url = { version = "2.5", default-features = false }
 
 [patch.crates-io]
+io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "cd33f0e51c93a6276d3b2089e409780bcfbda006" }
 pimalaya-cli = { git = "https://github.com/pimalaya/cli", rev = "eb379626e01e31bed11cbe7f06c252262e810279" }

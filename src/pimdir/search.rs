@@ -237,6 +237,7 @@ mod tests {
             more: false,
             coverage: PimdirCalendarCoverage {
                 bodiless: 1,
+                counts_bodiless: true,
                 ..Default::default()
             },
             zones: Some(PimdirCalendarZones {

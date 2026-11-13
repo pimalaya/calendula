@@ -2644,8 +2644,8 @@ mod tests {
             std::fs::write(&path, db).unwrap();
             open(&dir)
         };
-        let earlier = versioned("storage-draft-09");
-        let newer = versioned("storage-draft-11");
+        let earlier = versioned("storage-draft-10");
+        let newer = versioned("storage-draft-12");
 
         assert_eq!(code_of(&uncreated), Some(ErrorCode::StoreUncreated));
         assert_eq!(code_of(&foreign), Some(ErrorCode::StoreForeign));

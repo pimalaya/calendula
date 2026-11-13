@@ -286,7 +286,7 @@ mod tests {
             .to_string()
         };
 
-        for earlier in [refused(None), refused(Some("storage-draft-09"))] {
+        for earlier in [refused(None), refused(Some("storage-draft-10"))] {
             assert!(earlier.contains("earlier sync engine"), "{earlier}");
             assert!(earlier.contains("until nothing is queued"), "{earlier}");
             assert!(
@@ -297,7 +297,7 @@ mod tests {
         }
 
         for newer in [
-            refused(Some("storage-draft-11")),
+            refused(Some("storage-draft-12")),
             refused(Some("storage-v1.0.0")),
         ] {
             assert!(newer.contains("upgrade calendula"), "{newer}");
