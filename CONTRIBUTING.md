@@ -58,7 +58,7 @@ The `anonymous` tests use a made-up credential and touch no account:
 nix develop --command cargo test --test google -- --ignored anonymous::
 ```
 
-The `credentialed` tests only read the Pimalaya test accounts (`account check`, `calendar list`, `event list`), minting their own token from `CALENDULA_GOOGLE_SERVICE_ACCOUNT_KEY` (or `CALENDULA_GOOGLE_SERVICE_ACCOUNT_KEY_FILE`) for Google, and from `CALENDULA_MICROSOFT_TENANT_ID`, `CALENDULA_MICROSOFT_CLIENT_ID` and `CALENDULA_MICROSOFT_CLIENT_SECRET` for Microsoft; a test missing one fails naming it. Google CalDAV and Fastmail have no credentialed suite. Load a secret into the variable from your secret store, never paste it on the command line, and keep `RUST_LOG` at `debug` at most, trace logs carrying tokens.
+The `credentialed` tests only read the Pimalaya test accounts (`account check`, `calendar list`, `event list`), minting their own token from `CALENDULA_GOOGLE_SERVICE_ACCOUNT_KEY` (or `CALENDULA_GOOGLE_SERVICE_ACCOUNT_KEY_FILE`) for Google, and from `CALENDULA_MICROSOFT_TENANT_ID`, `CALENDULA_MICROSOFT_CLIENT_ID` and `CALENDULA_MICROSOFT_CLIENT_SECRET` for Microsoft; a test missing one fails naming it. Google's CalDAV tests mint a token of the full `https://www.googleapis.com/auth/calendar` scope alone, its server refusing the narrower ones the Calendar API tests ask; Fastmail has no credentialed suite. Load a secret into the variable from your secret store, never paste it on the command line, and keep `RUST_LOG` at `debug` at most, trace logs carrying tokens.
 
 ## Unreleased dependencies
 

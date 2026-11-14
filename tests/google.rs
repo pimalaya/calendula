@@ -6,10 +6,11 @@
 //! service account acting as `CALENDULA_GOOGLE_SERVICE_ACCOUNT_SUBJECT`
 //! (RFC 7523 section 2.1), its key read from
 //! `CALENDULA_GOOGLE_SERVICE_ACCOUNT_KEY` or the file
-//! `CALENDULA_GOOGLE_SERVICE_ACCOUNT_KEY_FILE` names. It only reads, and
-//! only the Calendar API: Google's CalDAV server refuses a token of the
-//! narrow scopes the delegation grants (HTTP 403, insufficient
-//! permission), so CalDAV is covered anonymously only.
+//! `CALENDULA_GOOGLE_SERVICE_ACCOUNT_KEY_FILE` names. It only reads. The
+//! Calendar API takes a token of the narrow scopes the delegation grants;
+//! Google's CalDAV server refuses those (HTTP 403, insufficient
+//! permission), so the CalDAV tests mint their own token of the full
+//! `calendar` scope alone.
 //!
 //! Both accounts are sections of config.sample.toml: Google Calendar, and
 //! Google CalDAV on its principal.
@@ -100,7 +101,7 @@ mod credentialed {
     use serde_json::Value;
     use tempfile::TempDir;
 
-    use crate::{common::*, write_gcal_account};
+    use crate::{common::*, write_caldav_account, write_gcal_account};
 
     /// The user acted as when `CALENDULA_GOOGLE_SERVICE_ACCOUNT_SUBJECT`
     /// is unset.
@@ -108,12 +109,15 @@ mod credentialed {
 
     /// The scopes a read of the Google Calendar API needs, the narrowest
     /// the delegation grants: events, and the calendar list read-only.
-    /// One scope it does not grant fails the whole request, full
-    /// `calendar` among them.
+    /// One scope it does not grant fails the whole request.
     const SCOPES: [&str; 2] = [
         "https://www.googleapis.com/auth/calendar.events",
         "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
     ];
+
+    /// The scope Google's CalDAV server takes, the full `calendar` one: it
+    /// refuses a token of the narrower [`SCOPES`].
+    const CALDAV_SCOPES: [&str; 1] = ["https://www.googleapis.com/auth/calendar"];
 
     /// The variable holding the service account key.
     const KEY_VAR: &str = "CALENDULA_GOOGLE_SERVICE_ACCOUNT_KEY";
@@ -124,58 +128,73 @@ mod credentialed {
         env_var("CALENDULA_GOOGLE_SERVICE_ACCOUNT_SUBJECT").unwrap_or_else(|| SUBJECT.to_owned())
     }
 
-    /// A token of the service account acting as [`subject`], minted once
-    /// per run. A failure never shows the key, nor what it signed.
+    /// A Calendar API token of the service account acting as [`subject`],
+    /// minted once per run.
     fn token() -> &'static str {
         static TOKEN: OnceLock<String> = OnceLock::new();
-
-        TOKEN.get_or_init(|| {
-            let Some(key) = env_content(KEY_VAR) else {
-                panic!("set {KEY_VAR} or {KEY_VAR}_FILE to run this test");
-            };
-            let key: Value = serde_json::from_str(&key)
-                .unwrap_or_else(|_| panic!("{KEY_VAR} is not a service account key"));
-            let (Some(email), Some(pem), Some(endpoint)) = (
-                key["client_email"].as_str(),
-                key["private_key"].as_str(),
-                key["token_uri"].as_str(),
-            ) else {
-                panic!("{KEY_VAR} is not a service account key");
-            };
-            let signer = Oauth20JwtBearerKey::from_pkcs8_pem(pem)
-                .unwrap_or_else(|_| panic!("{KEY_VAR} holds no PKCS#8 key"));
-
-            let tls = Tls::default();
-            let client = Oauth20ClientStd::connect(endpoint.parse().unwrap(), &tls, email);
-            let mut client = client.unwrap_or_else(|err| panic!("cannot reach {endpoint}: {err}"));
-
-            let subject = subject();
-            let claims = Oauth20JwtBearerClaims {
-                iss: email.into(),
-                sub: Some(subject.as_str().into()),
-                scope: SCOPES.map(Into::into).into(),
-                ..Default::default()
-            };
-            let validity = Duration::from_secs(600);
-            let assertion = client
-                .sign_jwt_bearer_assertion(&signer, claims, None, validity)
-                .unwrap_or_else(|_| panic!("cannot sign the assertion"));
-
-            let params = Oauth20JwtBearerGrantRequestParams {
-                assertion,
-                scope: BTreeSet::new(),
-            };
-
-            match client.request_jwt_bearer_grant(params) {
-                Ok(Ok(success)) => success.access_token.expose_secret().to_owned(),
-                Ok(Err(err)) => panic!(
-                    "token refused: {:?}: {:?}",
-                    err.error, err.error_description
-                ),
-                Err(err) => panic!("token request failed: {err}"),
-            }
-        })
+        TOKEN.get_or_init(|| mint(&SCOPES))
     }
+
+    /// A CalDAV token of the service account acting as [`subject`], minted
+    /// once per run.
+    fn caldav_token() -> &'static str {
+        static TOKEN: OnceLock<String> = OnceLock::new();
+        TOKEN.get_or_init(|| mint(&CALDAV_SCOPES))
+    }
+
+    /// A token of the service account acting as [`subject`] for `scopes`.
+    /// A failure never shows the key, nor what it signed.
+    fn mint(scopes: &[&str]) -> String {
+        let Some(key) = env_content(KEY_VAR) else {
+            panic!("set {KEY_VAR} or {KEY_VAR}_FILE to run this test");
+        };
+        let key: Value = serde_json::from_str(&key)
+            .unwrap_or_else(|_| panic!("{KEY_VAR} is not a service account key"));
+        let (Some(email), Some(pem), Some(endpoint)) = (
+            key["client_email"].as_str(),
+            key["private_key"].as_str(),
+            key["token_uri"].as_str(),
+        ) else {
+            panic!("{KEY_VAR} is not a service account key");
+        };
+        let signer = Oauth20JwtBearerKey::from_pkcs8_pem(pem)
+            .unwrap_or_else(|_| panic!("{KEY_VAR} holds no PKCS#8 key"));
+
+        let tls = Tls::default();
+        let client = Oauth20ClientStd::connect(endpoint.parse().unwrap(), &tls, email);
+        let mut client = client.unwrap_or_else(|err| panic!("cannot reach {endpoint}: {err}"));
+
+        let subject = subject();
+        let claims = Oauth20JwtBearerClaims {
+            iss: email.into(),
+            sub: Some(subject.as_str().into()),
+            scope: scopes.iter().map(|&scope| scope.into()).collect(),
+            ..Default::default()
+        };
+        let validity = Duration::from_secs(600);
+        let assertion = client
+            .sign_jwt_bearer_assertion(&signer, claims, None, validity)
+            .unwrap_or_else(|_| panic!("cannot sign the assertion"));
+
+        let params = Oauth20JwtBearerGrantRequestParams {
+            assertion,
+            scope: BTreeSet::new(),
+        };
+
+        match client.request_jwt_bearer_grant(params) {
+            Ok(Ok(success)) => success.access_token.expose_secret().to_owned(),
+            Ok(Err(err)) => panic!(
+                "token refused: {:?}: {:?}",
+                err.error, err.error_description
+            ),
+            Err(err) => panic!("token request failed: {err}"),
+        }
+    }
+
+    /// The CalDAV id of the primary calendar: the one collection directly
+    /// under the home set Google gives [`subject`], named by its last
+    /// segment, every other calendar by its path.
+    const CALDAV_PRIMARY: &str = "events";
 
     #[test]
     #[ignore = "requires Google credentials and --ignored"]
@@ -209,6 +228,40 @@ mod credentialed {
         let primary = subject();
         let args = ["--json", "event", "list", "-s", "5", "-k", &primary];
         let out = calendula(&config, token(), &args);
+        assert_events(&json(&out, 0), 5);
+    }
+
+    #[test]
+    #[ignore = "requires Google credentials and --ignored"]
+    fn caldav_account_check() {
+        let dir = TempDir::new().unwrap();
+        let config = write_caldav_account(dir.path());
+
+        let out = calendula(&config, caldav_token(), &["--json", "account", "check"]);
+        assert_check(&json(&out, 0), "caldav");
+    }
+
+    #[test]
+    #[ignore = "requires Google credentials and --ignored"]
+    fn caldav_calendar_list() {
+        let dir = TempDir::new().unwrap();
+        let config = write_caldav_account(dir.path());
+
+        let out = calendula(&config, caldav_token(), &["--json", "calendar", "list"]);
+        let ids = assert_calendars(&json(&out, 0));
+
+        let primary = ids.iter().any(|id| id == CALDAV_PRIMARY);
+        assert!(primary, "no primary calendar among {} calendars", ids.len());
+    }
+
+    #[test]
+    #[ignore = "requires Google credentials and --ignored"]
+    fn caldav_event_list() {
+        let dir = TempDir::new().unwrap();
+        let config = write_caldav_account(dir.path());
+
+        let args = ["--json", "event", "list", "-s", "5", "-k", CALDAV_PRIMARY];
+        let out = calendula(&config, caldav_token(), &args);
         assert_events(&json(&out, 0), 5);
     }
 }
