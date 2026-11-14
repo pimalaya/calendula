@@ -804,3 +804,25 @@ mod caldav_tests {
         assert_eq!(fs::read_to_string(&runs).unwrap(), "run\n");
     }
 }
+
+#[cfg(all(test, feature = "msgraph"))]
+impl CalendarClient {
+    /// A client of a Graph account already open on `backend`, whose
+    /// server a test scripts.
+    pub(crate) fn over_msgraph(backend: crate::msgraph::backend::MsgraphBackend) -> Self {
+        let toml = "[accounts.a]\nmsgraph.auth.token.raw = \"made-up\"\n";
+        let mut config: Config = toml::from_str(toml).unwrap();
+        let account = config.accounts.remove("a").unwrap();
+        let mut client = Self::new(config, "a".into(), account, Backend::Auto).unwrap();
+        client.inner = Some(BackendClient::Msgraph(Box::new(backend)));
+        client
+    }
+
+    /// The Graph backend the client holds open, to read what it sent.
+    pub(crate) fn into_msgraph(self) -> crate::msgraph::backend::MsgraphBackend {
+        match self.inner {
+            Some(BackendClient::Msgraph(backend)) => *backend,
+            _ => panic!("no Graph backend open"),
+        }
+    }
+}

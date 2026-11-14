@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 use anyhow::{Context, Result, bail};
 use ical::component::IcalComponentKind;
 use io_msgraph::v1::{
-    client::{MsgraphClientStd, MsgraphClientStdConnectOptions},
+    client::{MsgraphClientStd, MsgraphClientStdConnectOptions, MsgraphClientStdError},
     field::MsgraphField,
     rest::users::{
         calendars::{MsgraphCalendar, list::MsgraphCalendarsListParams},
@@ -40,8 +40,11 @@ use pimalaya_config::secret::SecretResolver;
 use pimalaya_stream::proxy::Proxy;
 use secrecy::ExposeSecret;
 
+use pimalaya_cli::error::CodedError;
+
 use crate::{
     config::{MsgraphConfig, default_msgraph_alpn},
+    error::{ErrorCode, recoded},
     shared::{
         calendar::{Calendar, CalendarDiff},
         client::window,
@@ -248,7 +251,7 @@ impl MsgraphBackend {
         if let Some(expected) = if_match
             && current.change_key.as_deref() != Some(expected)
         {
-            bail!("Item `{item_id}` changed on Microsoft Graph since it was read");
+            return Err(changed(item_id));
         }
 
         let exceptions = self.exceptions(&current)?;
@@ -256,7 +259,9 @@ impl MsgraphBackend {
         let base = current.to_ical_series(&exceptions);
 
         let patch = MsgraphEvent::update_from_ical(&contents, base.as_bytes())?;
-        self.client.event_update(item_id, &patch)?;
+        self.client
+            .event_update(item_id, &patch)
+            .map_err(item_refusal)?;
 
         Ok(())
     }
@@ -274,9 +279,9 @@ impl MsgraphBackend {
         if let Some(expected) = if_match
             && self.event(item_id)?.change_key.as_deref() != Some(expected)
         {
-            bail!("Item `{item_id}` changed on Microsoft Graph since it was read");
+            return Err(changed(item_id));
         }
-        self.client.event_delete(item_id)?;
+        self.client.event_delete(item_id).map_err(item_refusal)?;
         Ok(())
     }
 
@@ -288,7 +293,8 @@ impl MsgraphBackend {
                 id,
                 Some(MSGRAPH_EVENT_ICAL_SELECT),
                 Some(MSGRAPH_EVENT_STASH_EXPAND),
-            )?
+            )
+            .map_err(item_refusal)?
             .response;
         Ok(event)
     }
@@ -386,6 +392,48 @@ fn unique(events: Vec<MsgraphEvent>) -> Result<Vec<MsgraphEvent>> {
     }
 
     Ok(unique)
+}
+
+/// The refusal of a write whose `--if-match` names a `changeKey` the event
+/// no longer has, read before the write: Graph takes no `If-Match`.
+fn changed(item_id: &str) -> anyhow::Error {
+    let message = format!("Item `{item_id}` changed on Microsoft Graph since it was read");
+    CodedError::new(ErrorCode::PreconditionFailed, message).into()
+}
+
+/// The code of a Graph refusal in an error chain: Graph's
+/// `ErrorQuotaExceeded` or a 507 is `quota-exceeded`, a 429
+/// `rate-limited`, a 403 `permission-denied`, a 412 `precondition-failed`.
+pub(crate) fn refusal_code(cause: &(dyn std::error::Error + 'static)) -> Option<ErrorCode> {
+    let MsgraphClientStdError::Send(send) = cause.downcast_ref::<MsgraphClientStdError>()? else {
+        return None;
+    };
+    let err = send.api()?;
+
+    match (err.status, err.code.as_str()) {
+        (_, "ErrorQuotaExceeded") | (507, _) => Some(ErrorCode::QuotaExceeded),
+        (429, _) => Some(ErrorCode::RateLimited),
+        (403, _) => Some(ErrorCode::PermissionDenied),
+        (412, _) => Some(ErrorCode::PreconditionFailed),
+        _ => None,
+    }
+}
+
+/// The failure of a request naming one event: a 404, or an id Graph reads
+/// as no id of its own (400 `ErrorInvalidIdMalformed`), is
+/// `item-not-found`.
+fn item_refusal(err: MsgraphClientStdError) -> anyhow::Error {
+    let missing = match &err {
+        MsgraphClientStdError::Send(send) => send.api().is_some_and(|api| {
+            api.status == 404 || (api.status == 400 && api.code == "ErrorInvalidIdMalformed")
+        }),
+        _ => false,
+    };
+
+    match missing {
+        true => recoded(ErrorCode::ItemNotFound, err),
+        false => err.into(),
+    }
 }
 
 /// The window a series' exceptions fall in: its range, an open-ended one
@@ -489,5 +537,171 @@ mod tests {
     #[test]
     fn an_event_repeated_at_another_revision_is_refused() {
         assert!(unique(vec![event("A", "1"), event("A", "2")]).is_err());
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod scripted {
+    use std::{
+        collections::VecDeque,
+        io::{Read, Result as IoResult, Write},
+    };
+
+    use super::*;
+
+    /// A stream answering each read with the next canned response, keeping
+    /// the requests written to it.
+    pub(crate) struct Answers {
+        responses: VecDeque<Vec<u8>>,
+        pub(crate) written: Vec<u8>,
+    }
+
+    impl Read for Answers {
+        fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+            let response = self.responses.pop_front().unwrap_or_default();
+            buf[..response.len()].copy_from_slice(&response);
+            Ok(response.len())
+        }
+    }
+
+    impl Write for Answers {
+        fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+            self.written.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> IoResult<()> {
+            Ok(())
+        }
+    }
+
+    /// A backend whose server answers each `(status, body)` in turn.
+    pub(crate) fn answering(answers: &[(u16, &str)]) -> MsgraphBackend {
+        let response = |(status, body): &(u16, &str)| {
+            let len = body.len();
+            format!(
+                "HTTP/1.1 {status} Answer\r\nContent-Type: application/json\r\n\
+                 Content-Length: {len}\r\n\r\n{body}"
+            )
+            .into_bytes()
+        };
+        let stream = Answers {
+            responses: answers.iter().map(response).collect(),
+            written: Vec::new(),
+        };
+
+        MsgraphBackend {
+            client: MsgraphClientStd::new(stream, "made-up", Default::default()),
+        }
+    }
+
+    /// The requests `backend` sent, one request line each.
+    pub(crate) fn requests(backend: &mut MsgraphBackend) -> Vec<String> {
+        let stream = backend.client.stream.as_any_mut();
+        let written = &stream.downcast_mut::<Answers>().unwrap().written;
+        String::from_utf8_lossy(written)
+            .lines()
+            .filter(|line| line.ends_with(" HTTP/1.1"))
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// A Graph error envelope.
+    pub(crate) fn refusal(code: &str) -> String {
+        format!(r#"{{"error":{{"code":"{code}","message":"Refused"}}}}"#)
+    }
+
+    /// An event as a read by id answers it.
+    const EVENT: &str = r#"{"id":"E1","changeKey":"k1","subject":"Standup"}"#;
+
+    #[test]
+    fn a_refusal_carries_its_code() {
+        let cases = [
+            (403, "ErrorAccessDenied", ErrorCode::PermissionDenied),
+            (507, "ErrorQuotaExceeded", ErrorCode::QuotaExceeded),
+            (400, "ErrorQuotaExceeded", ErrorCode::QuotaExceeded),
+            (429, "ApplicationThrottled", ErrorCode::RateLimited),
+            (
+                412,
+                "ErrorIrresolvableConflict",
+                ErrorCode::PreconditionFailed,
+            ),
+        ];
+
+        for (status, code, expected) in cases {
+            let body = refusal(code);
+            let mut backend = answering(&[(status, &body)]);
+            let err = backend.list_calendars().unwrap_err();
+            assert_eq!(crate::error::code(&err), Some(expected), "{status} {err:#}");
+        }
+
+        let body = refusal("ErrorInternalServerError");
+        let err = answering(&[(500, &body)]).list_calendars().unwrap_err();
+        assert_eq!(crate::error::code(&err), None, "{err:#}");
+    }
+
+    #[test]
+    fn an_event_graph_does_not_hold_is_not_found() {
+        let missing = refusal("ErrorItemNotFound");
+        let malformed = refusal("ErrorInvalidIdMalformed");
+
+        for (status, body) in [(404, &missing), (400, &malformed)] {
+            let err = answering(&[(status, body)])
+                .get_item("cal", "nope")
+                .unwrap_err();
+            assert_eq!(
+                crate::error::code(&err),
+                Some(ErrorCode::ItemNotFound),
+                "{err:#}"
+            );
+        }
+
+        let other = refusal("ErrorInvalidRequest");
+        let err = answering(&[(400, &other)])
+            .get_item("cal", "nope")
+            .unwrap_err();
+        assert_eq!(crate::error::code(&err), None, "{err:#}");
+    }
+
+    /// A write the server refuses prints its code in the failure object,
+    /// its text and its sources as before.
+    #[test]
+    fn a_refused_write_prints_its_code_in_the_failure_object() {
+        use pimalaya_cli::error::ErrorReport;
+
+        let denied = refusal("ErrorAccessDenied");
+        let err = answering(&[(403, &denied)])
+            .delete_item("cal", "E1", None)
+            .unwrap_err()
+            .context("Delete event `E1`");
+        let text = format!("{err:#}");
+
+        let err = crate::error::with_code(err);
+        assert_eq!(format!("{err:#}"), text);
+
+        let json = serde_json::to_value(ErrorReport::<ErrorCode>::from(err)).unwrap();
+        assert_eq!(json["code"], "permission-denied", "{json}");
+        assert_eq!(json["error"], "Delete event `E1`", "{json}");
+        assert_eq!(
+            json["sources"],
+            serde_json::json!([
+                "Microsoft Graph API returned HTTP 403 (ErrorAccessDenied): Refused"
+            ]),
+            "{json}"
+        );
+    }
+
+    /// A version that moved since `--if-match` read it refuses the write
+    /// before it is sent, coded as a 412 would be.
+    #[test]
+    fn a_moved_change_key_refuses_the_delete_as_a_precondition() {
+        let mut backend = answering(&[(200, EVENT)]);
+        let err = backend.delete_item("cal", "E1", Some("k0")).unwrap_err();
+
+        assert_eq!(
+            pimalaya_cli::error::code_of(&err),
+            Some(ErrorCode::PreconditionFailed)
+        );
+        assert_eq!(requests(&mut backend).len(), 1, "no DELETE sent");
     }
 }

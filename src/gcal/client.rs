@@ -13,7 +13,10 @@ use std::{
 };
 
 use anyhow::{Result, anyhow};
-use io_gcal::v3::client::{GcalClientStd, GcalClientStdConnectOptions};
+use io_gcal::v3::{
+    client::{GcalClientStd, GcalClientStdConnectOptions, GcalClientStdError},
+    send::{GcalApiError, GcalSendError},
+};
 use pimalaya_config::secret::SecretResolver;
 use pimalaya_stream::tls::Tls;
 use secrecy::ExposeSecret;
@@ -22,6 +25,7 @@ use crate::{
     account::context::Account,
     cli::resolve_account,
     config::{GcalConfig, default_gcal_alpn},
+    error::{ErrorCode, recoded},
 };
 
 /// A connected client bundled with the merged runtime [`Account`].
@@ -97,4 +101,91 @@ pub fn connect(config: &GcalConfig, resolver: &mut SecretResolver) -> Result<Gca
 fn build_tls(config: &GcalConfig) -> Tls {
     let alpn = config.alpn.clone().unwrap_or_else(default_gcal_alpn);
     config.tls.clone().into_tls(alpn)
+}
+
+/// The code of a Calendar refusal in an error chain: [`google_code`]'s,
+/// else a 412 `precondition-failed`.
+pub(crate) fn refusal_code(cause: &(dyn std::error::Error + 'static)) -> Option<ErrorCode> {
+    let GcalClientStdError::Send(GcalSendError::Api(err)) =
+        cause.downcast_ref::<GcalClientStdError>()?
+    else {
+        return None;
+    };
+
+    match err.status {
+        412 => Some(ErrorCode::PreconditionFailed),
+        _ => google_code(err),
+    }
+}
+
+/// The failure of a request naming one event: a 404 or a 410 is
+/// `item-not-found`, the event gone or never there.
+pub fn item_refusal(err: GcalClientStdError) -> anyhow::Error {
+    match &err {
+        GcalClientStdError::Send(send) if matches!(send.status(), Some(404 | 410)) => {
+            recoded(ErrorCode::ItemNotFound, err)
+        }
+        _ => err.into(),
+    }
+}
+
+/// The code of a Google refusal: a 429, or a 403 naming a rate limit or a
+/// quota ([`throttles`]), is `rate-limited`; any other 403 is
+/// `permission-denied`.
+///
+/// Neverest's (neverest/src/throttle.rs), which reads it after its waits,
+/// calendula taking none.
+fn google_code(err: &GcalApiError) -> Option<ErrorCode> {
+    match err.status {
+        429 => Some(ErrorCode::RateLimited),
+        403 if throttles(err) => Some(ErrorCode::RateLimited),
+        403 => Some(ErrorCode::PermissionDenied),
+        _ => None,
+    }
+}
+
+/// Whether a 403 throttles, the part of neverest's `google_refusal` a 403
+/// reaches: a reason or a wording naming a rate limit or a quota, per
+/// minute or per day, a missing credential's daily limit aside.
+fn throttles(err: &GcalApiError) -> bool {
+    let has_reason = |reason: &str| {
+        err.reasons
+            .iter()
+            .chain(&err.detail_reasons)
+            .any(|r| r == reason)
+    };
+
+    let mut text = err.message.clone();
+    for reason in err.reasons.iter().chain(&err.detail_reasons) {
+        text.push(' ');
+        text.push_str(reason);
+    }
+    let squeezed = squeeze(&text);
+
+    let rate = err.google_status.as_deref() == Some("RESOURCE_EXHAUSTED")
+        || [
+            "rateLimitExceeded",
+            "userRateLimitExceeded",
+            "quotaExceeded",
+            "RATE_LIMIT_EXCEEDED",
+        ]
+        .iter()
+        .any(|reason| has_reason(reason))
+        || squeezed.contains("ratelimitexceeded")
+        || squeezed.contains("quotaexceeded");
+
+    let daily = has_reason("dailyLimitExceeded")
+        || ((squeezed.contains("dailylimit") || squeezed.contains("perday"))
+            && !squeezed.contains("unauthenticated"));
+    let minute = squeezed.contains("perminute") || squeezed.contains("per100seconds");
+
+    daily || minute || rate
+}
+
+/// The ASCII letters and digits of a text, lowercased.
+fn squeeze(text: &str) -> String {
+    text.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
 }

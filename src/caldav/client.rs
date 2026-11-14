@@ -16,8 +16,9 @@ use io_pim_discovery::{
     shared::dns::system_resolver,
 };
 use io_webdav::{
-    client::{WebdavClientStd, WebdavClientStdConnectOptions},
-    rfc4918::WebdavAuth,
+    client::{WebdavClientStd, WebdavClientStdConnectOptions, WebdavClientStdError},
+    rfc4918::{WebdavAuth, follow_redirects::WebdavFollowRedirectsError, send::WebdavSendError},
+    rfc6578::sync_collection::WebdavSyncCollectionError,
 };
 use pimalaya_config::secret::SecretResolver;
 use pimalaya_stream::{proxy::Proxy, tls::Tls};
@@ -27,6 +28,7 @@ use url::{ParseError, Url};
 use crate::{
     cli::resolve_account,
     config::{CaldavAuthConfig, CaldavConfig, default_caldav_alpn},
+    error::{ErrorCode, recoded},
 };
 
 /// The DNS-over-TCP resolver used when the host exposes none.
@@ -157,6 +159,68 @@ fn build_auth(config: &CaldavAuthConfig, resolver: &mut SecretResolver) -> Resul
             WebdavAuth::Bearer(HttpAuthBearer::new(token.expose_secret()))
         }
     })
+}
+
+/// The status and body of an answer that refused an exchange, wherever
+/// io-webdav surfaces it.
+fn refused(err: &WebdavClientStdError) -> Option<(u16, &str)> {
+    match err {
+        WebdavClientStdError::Send(WebdavSendError::HttpStatus { status, body })
+        | WebdavClientStdError::WebdavSyncCollection(WebdavSyncCollectionError::Send(
+            WebdavSendError::HttpStatus { status, body },
+        ))
+        | WebdavClientStdError::WebdavFollowRedirects(WebdavFollowRedirectsError::HttpStatus {
+            status,
+            body,
+        }) => Some((*status, body)),
+        _ => None,
+    }
+}
+
+/// The code of a CalDAV refusal in an error chain.
+///
+/// A 507, or a body naming `quota-not-exceeded` (RFC 4331 §6), is
+/// `quota-exceeded`; a 429 `rate-limited`; a 403 `permission-denied` when
+/// its body names `need-privileges` (RFC 3744 §7.1.1) or no precondition at
+/// all, any other 403 naming a precondition the written body failed (RFC
+/// 4791 §5.3.2), no matter of rights; a 412 `precondition-failed`; a
+/// `no-uid-conflict` (RFC 4791 §5.3.2) `item-duplicate`.
+pub(crate) fn refusal_code(cause: &(dyn std::error::Error + 'static)) -> Option<ErrorCode> {
+    let err = cause.downcast_ref::<WebdavClientStdError>()?;
+
+    if err.is_duplicate_uid() {
+        return Some(ErrorCode::ItemDuplicate);
+    }
+
+    let (status, body) = refused(err)?;
+
+    match status {
+        _ if body.contains("quota-not-exceeded") => Some(ErrorCode::QuotaExceeded),
+        507 => Some(ErrorCode::QuotaExceeded),
+        429 => Some(ErrorCode::RateLimited),
+        403 if body.contains("need-privileges") || !names_precondition(body) => {
+            Some(ErrorCode::PermissionDenied)
+        }
+        412 => Some(ErrorCode::PreconditionFailed),
+        _ => None,
+    }
+}
+
+/// Whether a refusal's body is a `DAV:error` element, which names the
+/// precondition the request failed (RFC 4918 §16).
+fn names_precondition(body: &str) -> bool {
+    body.contains(":error") || body.contains("<error")
+}
+
+/// The failure of a request naming one item: a 404 or a 410 is
+/// `item-not-found`, the item gone or never there.
+pub fn item_refusal(err: WebdavClientStdError) -> anyhow::Error {
+    match err {
+        WebdavClientStdError::Send(WebdavSendError::HttpStatus {
+            status: 404 | 410, ..
+        }) => recoded(ErrorCode::ItemNotFound, err),
+        err => err.into(),
+    }
 }
 
 /// Loads the configuration, picks the active account, then connects.

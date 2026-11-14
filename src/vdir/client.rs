@@ -9,9 +9,16 @@ use std::{
 };
 
 use anyhow::{Result, anyhow};
-use io_vdir::{client::VdirClient as Inner, path::VdirPath};
+use io_vdir::{
+    client::{VdirClient as Inner, VdirClientError},
+    item::{
+        copy::VdirItemCopyError, delete::VdirItemDeleteError, get::VdirItemGetError,
+        locate::VdirItemLocateError, r#move::VdirItemMoveError,
+    },
+    path::VdirPath,
+};
 
-use crate::{cli::resolve_account, config::VdirConfig};
+use crate::{cli::resolve_account, config::VdirConfig, error::ErrorCode};
 
 /// A vdir client rooted at the configured home directory.
 pub struct VdirClient {
@@ -61,4 +68,24 @@ pub fn build_vdir_client(
         .ok_or_else(|| anyhow!("vdir configuration is missing for account `{name}`"))?;
 
     Ok(VdirClient::new(vdir_config))
+}
+
+/// The code of a vdir failure in an error chain: an item id naming no file
+/// of the collection, or naming none it could, is `item-not-found`.
+pub(crate) fn refusal_code(cause: &(dyn std::error::Error + 'static)) -> Option<ErrorCode> {
+    let locate = match cause.downcast_ref::<VdirClientError>()? {
+        VdirClientError::VdirItemLocate(err)
+        | VdirClientError::VdirItemGet(VdirItemGetError::Locate(err))
+        | VdirClientError::VdirItemDelete(VdirItemDeleteError::Locate(err))
+        | VdirClientError::VdirItemCopy(VdirItemCopyError::Locate(err))
+        | VdirClientError::VdirItemMove(VdirItemMoveError::Locate(err)) => err,
+        _ => return None,
+    };
+
+    match locate {
+        VdirItemLocateError::NotFound(_) | VdirItemLocateError::InvalidId(_) => {
+            Some(ErrorCode::ItemNotFound)
+        }
+        _ => None,
+    }
 }

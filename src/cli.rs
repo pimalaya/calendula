@@ -34,7 +34,7 @@ use crate::{
     account::cli::AccountCommand,
     backend::Backend,
     config::{AccountConfig, Config},
-    error::ErrorCode,
+    error::{self, ErrorCode},
     json_schema,
     mcp::McpCommand,
     repl::ReplCommand,
@@ -168,7 +168,16 @@ pub fn welcome<'a>(
 impl Command {
     /// Runs the command over `session`, whose account the protocol
     /// commands resolve and whose unified client the unified ones keep.
+    ///
+    /// A server's refusal it fails with carries its code to the failure
+    /// object ([`error::with_code`]), whoever prints it: the one-shot run,
+    /// the REPL or the MCP server.
     pub fn execute(self, printer: &mut impl Printer, session: &mut Session) -> Result<()> {
+        self.run(printer, session).map_err(error::with_code)
+    }
+
+    /// Runs the command, its failure as the backend gave it.
+    fn run(self, printer: &mut impl Printer, session: &mut Session) -> Result<()> {
         let account = session.account;
         let (config_paths, account_name) = (account.config_paths, account.name);
 
@@ -205,7 +214,7 @@ impl Command {
                 match cmd.execute(session) {
                     Err(err) if err.is::<ConfigMissingError>() && is_wanted(&*printer) => Err(err),
                     result => {
-                        exit_on_failure::<ErrorCode, _>(result);
+                        exit_on_failure::<ErrorCode, _>(result.map_err(error::with_code));
                         Ok(())
                     }
                 }

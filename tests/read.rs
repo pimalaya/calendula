@@ -91,3 +91,31 @@ fn a_read_keeps_the_stored_bytes_in_json() {
         assert_eq!(json["contents"], BODY, "{family}");
     }
 }
+
+/// An id the calendar does not hold fails the read with a failure object
+/// coded `item-not-found`.
+#[test]
+fn an_unknown_id_is_coded_not_found() {
+    let home = account();
+    let config = home.path().join("config.toml");
+
+    for family in ["event", "item"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_calendula"))
+            .args([
+                "-c",
+                config.to_str().unwrap(),
+                "--json",
+                family,
+                "read",
+                "nope",
+            ])
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(output.status.code(), Some(1), "{family}: {stdout}");
+        let json: Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(json["code"], "item-not-found", "{family}: {json}");
+    }
+}

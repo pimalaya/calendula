@@ -35,7 +35,10 @@ use pimalaya_config::secret::SecretResolver;
 
 use crate::{
     config::GcalConfig,
-    gcal::{client::connect, render::rfc3339},
+    gcal::{
+        client::{connect, item_refusal},
+        render::rfc3339,
+    },
     shared::{
         arg::SendUpdates,
         calendar::{Calendar, CalendarDiff},
@@ -213,6 +216,7 @@ impl GcalBackend {
         let event = self
             .client
             .event_get(calendar_id, item_id, None, None)
+            .map_err(item_refusal)
             .with_context(|| format!("Read item `{item_id}` from calendar `{calendar_id}`"))?
             .response;
 
@@ -323,7 +327,8 @@ impl GcalBackend {
         let projected = project(&contents)?;
         let current = self
             .client
-            .event_get(calendar_id, item_id, None, None)?
+            .event_get(calendar_id, item_id, None, None)
+            .map_err(item_refusal)?
             .response;
 
         let event = projected.merge(&current);
@@ -333,7 +338,8 @@ impl GcalBackend {
         };
 
         self.client
-            .event_update(calendar_id, item_id, &event, &params, if_match)?;
+            .event_update(calendar_id, item_id, &event, &params, if_match)
+            .map_err(item_refusal)?;
 
         Ok(())
     }
@@ -349,7 +355,8 @@ impl GcalBackend {
     ) -> Result<()> {
         let send_updates = send_updates.map(gcal_send_updates);
         self.client
-            .event_delete(calendar_id, item_id, send_updates, if_match)?;
+            .event_delete(calendar_id, item_id, send_updates, if_match)
+            .map_err(item_refusal)?;
         Ok(())
     }
 
@@ -604,6 +611,29 @@ mod tests {
         }
     }
 
+    /// A backend whose server answers each `(status, body)` in turn.
+    fn answering(answers: &[(u16, &str)]) -> GcalBackend {
+        let response = |(status, body): &(u16, &str)| {
+            let len = body.len();
+            format!("HTTP/1.1 {status} Answer\r\nContent-Length: {len}\r\n\r\n{body}").into_bytes()
+        };
+        let stream = Scripted {
+            responses: answers.iter().map(response).collect(),
+            written: Vec::new(),
+        };
+
+        GcalBackend {
+            client: GcalClientStd::new(stream, "made-up"),
+        }
+    }
+
+    /// A Calendar error envelope of `status`, naming `reason`.
+    fn refusal(status: u16, reason: &str, message: &str) -> String {
+        format!(
+            r#"{{"error":{{"code":{status},"message":"{message}","errors":[{{"reason":"{reason}","message":"{message}"}}]}}}}"#
+        )
+    }
+
     /// What `backend` wrote to its scripted server.
     fn written(backend: &mut GcalBackend) -> String {
         let stream = backend.client.stream.as_any_mut();
@@ -831,5 +861,85 @@ mod tests {
             &event(Some("bob@example.org"), &["ann@example.org"]),
             calendar
         ));
+    }
+
+    #[test]
+    fn a_refusal_carries_its_code() {
+        use crate::error::{ErrorCode, code};
+
+        let cases = [
+            (
+                403,
+                "insufficientPermissions",
+                "Insufficient Permission",
+                Some(ErrorCode::PermissionDenied),
+            ),
+            (
+                403,
+                "rateLimitExceeded",
+                "Rate Limit Exceeded",
+                Some(ErrorCode::RateLimited),
+            ),
+            (
+                403,
+                "quotaExceeded",
+                "Calendar usage limits exceeded.",
+                Some(ErrorCode::RateLimited),
+            ),
+            (
+                403,
+                "dailyLimitExceeded",
+                "Daily Limit Exceeded",
+                Some(ErrorCode::RateLimited),
+            ),
+            (
+                403,
+                "dailyLimitExceededUnreg",
+                "Daily Limit for Unauthenticated Use Exceeded.",
+                Some(ErrorCode::PermissionDenied),
+            ),
+            (
+                429,
+                "rateLimitExceeded",
+                "Too Many Requests",
+                Some(ErrorCode::RateLimited),
+            ),
+            (
+                412,
+                "conditionNotMet",
+                "Precondition Failed",
+                Some(ErrorCode::PreconditionFailed),
+            ),
+            (500, "backendError", "Backend Error", None),
+        ];
+
+        for (status, reason, message, expected) in cases {
+            let body = refusal(status, reason, message);
+            let err = answering(&[(status, &body)]).list_calendars().unwrap_err();
+            assert_eq!(code(&err), expected, "{status} {reason}: {err:#}");
+        }
+    }
+
+    #[test]
+    fn a_stale_if_match_and_a_missing_event_carry_their_code() {
+        use crate::error::{ErrorCode, code};
+
+        let body = refusal(412, "conditionNotMet", "Precondition Failed");
+        let err = answering(&[(412, &body)])
+            .delete_item("primary", "e1", Some("\"1\""), None)
+            .unwrap_err();
+        assert_eq!(code(&err), Some(ErrorCode::PreconditionFailed), "{err:#}");
+
+        for status in [404, 410] {
+            let body = refusal(status, "notFound", "Not Found");
+            let err = answering(&[(status, &body)])
+                .get_item("primary", "nope")
+                .unwrap_err();
+            assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+        }
+
+        let body = refusal(404, "notFound", "Not Found");
+        let err = answering(&[(404, &body)]).list_calendars().unwrap_err();
+        assert_eq!(code(&err), None, "a calendar request: {err:#}");
     }
 }

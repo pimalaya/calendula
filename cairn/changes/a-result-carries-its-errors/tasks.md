@@ -31,16 +31,16 @@ change: a-result-carries-its-errors
 
 ## Phase 2, the codes (commit `feat: code a server's refusal and a missing item or calendar`)
 
-- [ ] src/error.rs: `PermissionDenied`, `QuotaExceeded`, `RateLimited`, `ItemNotFound`, `CalendarNotFound`, `ItemUnreadable` (and `CalendarUnreadable` only if Phase 3 meets it), declared in every build (`allow(dead_code)` gated as neverest gates it); `error::code` and the chain walk over one reader per enabled backend; the `ItemError` alias.
-- [ ] CalDAV reader (src/caldav/): 507 or `quota-not-exceeded`, 429, 403 with `need-privileges` or no `DAV:error` body, `DuplicateUid` `item-duplicate`, 412 `precondition-failed`, 404/410 on an item request.
-- [ ] Google Calendar reader (src/gcal/) with a copy of neverest's `google_code` and the `google_refusal` parts it reads; 412; 404/410 on an event request.
-- [ ] Graph reader (src/msgraph/): `ErrorQuotaExceeded` or 507, 429, 403, 412, 404 or 400 `ErrorInvalidIdMalformed` on an event request; the `--if-match` mismatch `bail!`s (src/msgraph/backend.rs:250-253, :276-279) become `precondition-failed`.
-- [ ] vdir (src/vdir/backend.rs:91) and pimdir (src/pimdir/backend.rs:603, :530) not-found sites coded; src/shared/event/delete.rs:123 `item-not-found`.
-- [ ] src/shared/event/delete.rs:91: the lookup falls back to a full listing on `item-not-found` only.
-- [ ] src/account/check.rs:254: rows coded through `error::code`.
-- [ ] Tests through the real error path, failing before the phase: Graph and Google Calendar over their scripted streams (src/msgraph/backend.rs:410-440 builds raw responses with any status; src/gcal/backend.rs:565-612's `Scripted` takes any raw response: add a helper answering a status other than 200); CalDAV through a `WebdavClientStd` over a scripted stream (none exists: build one beside the Graph one, a 403, a 507, a 412 and a `no-uid-conflict` body); `event delete` over a scripted Graph answering 403 to the lookup fails coded and lists nothing; `item read` of an unknown id over a temp vdir prints `item-not-found` and exits 1.
-- [ ] Spec: "A JSON error carries a stable code" and "A server's refusal carries its code" (see delta.md).
-- [ ] Phase checks pass.
+- [x] src/error.rs: `PermissionDenied`, `QuotaExceeded`, `RateLimited`, `ItemNotFound`, `CalendarNotFound`, `ItemUnreadable` (and `CalendarUnreadable` only if Phase 3 meets it), declared in every build (`allow(dead_code)` gated as neverest gates it); `error::code` and the chain walk over one reader per enabled backend; the `ItemError` alias. Done with a plain `allow(dead_code)` (each code is raised by some backends only, `item-unreadable` by vdir alone), and `error::with_code` (ortie's pattern) applied in `Command::execute` and the MCP server exit so the failure object reads a refusal's code. `CalendarUnreadable` left out: io-vdir 0.3 reads collections whole (`list_collections` fails on an unreadable metadata file, no tolerant variant), so no backend meets it.
+- [x] CalDAV reader (src/caldav/): 507 or `quota-not-exceeded`, 429, 403 with `need-privileges` or no `DAV:error` body, `DuplicateUid` `item-duplicate`, 412 `precondition-failed`, 404/410 on an item request.
+- [x] Google Calendar reader (src/gcal/) with a copy of neverest's `google_code` and the `google_refusal` parts it reads; 412; 404/410 on an event request.
+- [x] Graph reader (src/msgraph/): `ErrorQuotaExceeded` or 507, 429, 403, 412, 404 or 400 `ErrorInvalidIdMalformed` on an event request; the `--if-match` mismatch `bail!`s (src/msgraph/backend.rs:250-253, :276-279) become `precondition-failed`.
+- [x] vdir (src/vdir/backend.rs:91) and pimdir (src/pimdir/backend.rs:603, :530) not-found sites coded; src/shared/event/delete.rs:123 `item-not-found`.
+- [x] src/shared/event/delete.rs:91: the lookup falls back to a full listing on `item-not-found` only.
+- [x] src/account/check.rs:254: rows coded through `error::code`.
+- [x] Tests through the real error path, failing before the phase: Graph and Google Calendar over their scripted streams (src/msgraph/backend.rs:410-440 builds raw responses with any status; src/gcal/backend.rs:565-612's `Scripted` takes any raw response: add a helper answering a status other than 200); CalDAV through a `WebdavClientStd` over a scripted stream (none exists: build one beside the Graph one, a 403, a 507, a 412 and a `no-uid-conflict` body); `event delete` over a scripted Graph answering 403 to the lookup fails coded and lists nothing; `item read` of an unknown id over a temp vdir prints `item-not-found` and exits 1.
+- [x] Spec: "A JSON error carries a stable code" and "A server's refusal carries its code" (see delta.md).
+- [x] Phase checks pass.
 
 ## Phase 3, the listings (commit `feat!: list the calendars and items a listing could not read`)
 

@@ -11,7 +11,7 @@
 //!
 //! [`CalendarTimeRange`]: crate::shared::item::CalendarTimeRange
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use ical::{component::vevent::VEVENT, prop::uid::UID, tree::cst::IcalCst};
 use io_webdav::{
     client::WebdavClientStd,
@@ -20,8 +20,9 @@ use io_webdav::{
 use pimalaya_config::secret::SecretResolver;
 
 use crate::{
-    caldav::client::connect,
+    caldav::client::{connect, item_refusal},
     config::CaldavConfig,
+    error::calendar_not_found,
     shared::{
         calendar::{Calendar, CalendarDiff},
         client::window,
@@ -82,7 +83,7 @@ impl CaldavBackend {
             .list_calendars()?
             .into_iter()
             .find(|calendar| calendar.id == id)
-            .ok_or_else(|| anyhow!("Calendar `{id}` not found"))?;
+            .ok_or_else(|| calendar_not_found(format!("Calendar `{id}` not found")))?;
 
         if let Some(name) = patch.name {
             calendar.display_name = Some(name);
@@ -129,6 +130,7 @@ impl CaldavBackend {
         let body = self
             .client
             .read_item(calendar_id, item_id)
+            .map_err(item_refusal)
             .with_context(|| format!("Read item `{item_id}` from calendar `{calendar_id}`"))?;
 
         Ok(CalendarItem {
@@ -158,7 +160,8 @@ impl CaldavBackend {
         if_match: Option<&str>,
     ) -> Result<()> {
         self.client
-            .update_item(calendar_id, item_id, contents, if_match)?;
+            .update_item(calendar_id, item_id, contents, if_match)
+            .map_err(item_refusal)?;
         Ok(())
     }
 
@@ -169,7 +172,9 @@ impl CaldavBackend {
         item_id: &str,
         if_match: Option<&str>,
     ) -> Result<()> {
-        self.client.delete_item(calendar_id, item_id, if_match)?;
+        self.client
+            .delete_item(calendar_id, item_id, if_match)
+            .map_err(item_refusal)?;
         Ok(())
     }
 }
@@ -266,10 +271,133 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        collections::VecDeque,
+        io::{Read, Result as IoResult, Write},
+    };
+
     use ical::component::IcalComponentKind;
+    use io_webdav::rfc4918::WebdavAuth;
+    use url::Url;
 
     use super::*;
-    use crate::shared::item::CalendarTimeRange;
+    use crate::{
+        error::{ErrorCode, code},
+        shared::item::CalendarTimeRange,
+    };
+
+    /// A stream answering each read with the next canned response.
+    struct Scripted {
+        responses: VecDeque<Vec<u8>>,
+    }
+
+    impl Read for Scripted {
+        fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+            let response = self.responses.pop_front().unwrap_or_default();
+            buf[..response.len()].copy_from_slice(&response);
+            Ok(response.len())
+        }
+    }
+
+    impl Write for Scripted {
+        fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> IoResult<()> {
+            Ok(())
+        }
+    }
+
+    /// A backend whose server answers `status` with `body`, its home set
+    /// already discovered.
+    fn answering(status: u16, body: &str) -> CaldavBackend {
+        let len = body.len();
+        let response = format!(
+            "HTTP/1.1 {status} Answer\r\nContent-Type: application/xml\r\n\
+             Content-Length: {len}\r\n\r\n{body}"
+        );
+        let stream = Scripted {
+            responses: VecDeque::from([response.into_bytes()]),
+        };
+        let home = Url::parse("https://dav.example.org/calendars/me/").unwrap();
+        let mut client = WebdavClientStd::new(stream, WebdavAuth::None, home.clone());
+        client.calendar_home_set = Some(home);
+
+        CaldavBackend { client }
+    }
+
+    /// A `DAV:error` body naming the precondition `name` of `namespace`.
+    fn precondition(namespace: &str, name: &str) -> String {
+        format!(
+            "<?xml version=\"1.0\"?><D:error xmlns:D=\"DAV:\" xmlns:C=\"{namespace}\">\
+             <C:{name}/></D:error>"
+        )
+    }
+
+    const CALDAV: &str = "urn:ietf:params:xml:ns:caldav";
+
+    const EVENT: &[u8] = b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//x//y//EN\r\n\
+        BEGIN:VEVENT\r\nUID:e1\r\nDTSTAMP:20260101T000000Z\r\n\
+        DTSTART:20260814T090000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    #[test]
+    fn a_refused_write_carries_its_code() {
+        let need_privileges = precondition("DAV:", "need-privileges");
+        let quota = precondition("DAV:", "quota-not-exceeded");
+        let data = precondition(CALDAV, "valid-calendar-data");
+
+        let cases = [
+            (403, "", Some(ErrorCode::PermissionDenied)),
+            (
+                403,
+                need_privileges.as_str(),
+                Some(ErrorCode::PermissionDenied),
+            ),
+            (403, data.as_str(), None),
+            (507, "", Some(ErrorCode::QuotaExceeded)),
+            (403, quota.as_str(), Some(ErrorCode::QuotaExceeded)),
+            (429, "", Some(ErrorCode::RateLimited)),
+            (500, "", None),
+        ];
+
+        for (status, body, expected) in cases {
+            let err = answering(status, body)
+                .create_item("cal", EVENT.to_vec())
+                .unwrap_err();
+            assert_eq!(code(&err), expected, "{status} {body}: {err:#}");
+        }
+    }
+
+    #[test]
+    fn a_duplicate_uid_and_a_stale_version_carry_their_code() {
+        let conflict = precondition(CALDAV, "no-uid-conflict");
+        let err = answering(409, &conflict)
+            .create_item("cal", EVENT.to_vec())
+            .unwrap_err();
+        assert_eq!(code(&err), Some(ErrorCode::ItemDuplicate), "{err:#}");
+
+        let err = answering(412, "")
+            .update_item("cal", "e1.ics", EVENT.to_vec(), Some("\"1\""))
+            .unwrap_err();
+        assert_eq!(code(&err), Some(ErrorCode::PreconditionFailed), "{err:#}");
+    }
+
+    #[test]
+    fn an_item_the_server_does_not_hold_is_not_found() {
+        for status in [404, 410] {
+            let err = answering(status, "")
+                .get_item("cal", "nope.ics")
+                .unwrap_err();
+            assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+            assert!(format!("{err:#}").contains("HTTP"), "{err:#}");
+        }
+
+        let err = answering(404, "")
+            .delete_item("cal", "nope.ics", None)
+            .unwrap_err();
+        assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+    }
 
     #[test]
     fn naming_no_kind_asks_for_every_component_kind() {

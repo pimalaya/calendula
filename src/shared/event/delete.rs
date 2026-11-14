@@ -9,6 +9,7 @@ use pimalaya_cli::printer::Printer;
 
 use crate::{
     capability::Capability,
+    error::{self, ErrorCode, item_not_found},
     shared::{
         arg::{CalendarIdArg, SendUpdatesArg},
         client::CalendarClient,
@@ -83,13 +84,20 @@ impl EventDeleteCommand {
 
 /// The id of the item `event_id` names in `calendar_id`.
 ///
-/// A read by id settles the common case in one call. Failing that, the
-/// calendar's events are listed, as `event find` lists them, and the id
-/// is looked for among their ids, then their `UID`s: an item whose body
-/// is not local still lists under its id.
+/// A read by id settles the common case in one call: an item whose body is
+/// not local is there all the same. Only a read answering `item-not-found`
+/// lists the calendar's events, as `event find` lists them, to look for the
+/// id among their ids, then their `UID`s; any other failure of the read
+/// (a refusal, a dropped connection) fails the command, never read as a
+/// missing id.
 fn resolve(client: &mut CalendarClient, calendar_id: &str, event_id: &str) -> Result<String> {
-    if client.get_item(calendar_id, event_id).is_ok() {
-        return Ok(event_id.to_owned());
+    match client.get_item(calendar_id, event_id) {
+        Ok(_) => return Ok(event_id.to_owned()),
+        Err(err) => match error::code(&err) {
+            Some(ErrorCode::BodyPending) => return Ok(event_id.to_owned()),
+            Some(ErrorCode::ItemNotFound) => {}
+            _ => return Err(err),
+        },
     }
 
     let query = CalendarItemQuery {
@@ -120,7 +128,9 @@ fn pick(items: &[CalendarItem], calendar_id: &str, event_id: &str) -> Result<Str
 
     match carrying.as_slice() {
         [id] => Ok((*id).to_owned()),
-        [] => bail!("Event `{event_id}` not found in calendar `{calendar_id}`, by id or by UID"),
+        [] => Err(item_not_found(format!(
+            "Event `{event_id}` not found in calendar `{calendar_id}`, by id or by UID"
+        ))),
         ids => bail!(
             "Several events of calendar `{calendar_id}` carry the UID `{event_id}` ({}): \
              delete one by its id",
@@ -171,5 +181,54 @@ mod tests {
         let items = [item("7", "abc@example.org")];
         let err = pick(&items, "cal", "nope").unwrap_err();
         assert!(err.to_string().contains("not found"), "{err}");
+    }
+}
+
+#[cfg(all(test, feature = "msgraph"))]
+mod msgraph_tests {
+    use pimalaya_cli::error::ErrorReport;
+
+    use crate::{
+        error::{self, ErrorCode},
+        msgraph::backend::scripted::{answering, refusal, requests},
+        shared::{client::CalendarClient, event::delete::resolve},
+    };
+
+    /// A lookup the server refuses fails the command with the refusal's
+    /// code, in its failure object too, and lists nothing: a 403 is no
+    /// missing id.
+    #[test]
+    fn a_refused_lookup_fails_coded_and_lists_nothing() {
+        let denied = refusal("ErrorAccessDenied");
+        let mut client = CalendarClient::over_msgraph(answering(&[(403, &denied)]));
+
+        let err = resolve(&mut client, "cal", "E1").unwrap_err();
+        let report = ErrorReport::<ErrorCode>::from(error::with_code(err));
+        let json = serde_json::to_value(report).unwrap();
+        assert_eq!(json["code"], "permission-denied", "{json}");
+        assert_eq!(
+            json["error"], "Read item `E1` from calendar `cal`",
+            "{json}"
+        );
+
+        let mut backend = client.into_msgraph();
+        let sent = requests(&mut backend);
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert!(sent[0].starts_with("GET "), "{sent:?}");
+    }
+
+    /// A lookup answered 404 lists the calendar and looks for the id as a
+    /// `UID`, a miss there being `item-not-found`.
+    #[test]
+    fn a_missing_id_falls_back_to_the_listing() {
+        let missing = refusal("ErrorItemNotFound");
+        let backend = answering(&[(404, &missing), (200, r#"{"value":[]}"#)]);
+        let mut client = CalendarClient::over_msgraph(backend);
+
+        let err = resolve(&mut client, "cal", "abc@example.org").unwrap_err();
+        assert_eq!(error::code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+
+        let mut backend = client.into_msgraph();
+        assert_eq!(requests(&mut backend).len(), 2);
     }
 }

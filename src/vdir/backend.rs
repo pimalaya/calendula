@@ -13,14 +13,15 @@
 use anyhow::{Context, Result, anyhow};
 use ical::component::IcalComponentKind;
 use io_vdir::{
-    client::VdirClient,
+    client::{VdirClient, VdirClientError},
     collection::VdirCollection,
-    item::{VdirItem, VdirItemKind},
+    item::{VdirItem, VdirItemKind, get::VdirItemGetError},
     path::VdirPath,
 };
 
 use crate::{
     config::VdirConfig,
+    error::{ErrorCode, calendar_not_found, recoded},
     shared::{
         calendar::{Calendar, CalendarDiff},
         client::window,
@@ -86,7 +87,7 @@ impl VdirBackend {
             .list_collections()?
             .into_iter()
             .find(|collection| collection.path == path)
-            .ok_or_else(|| anyhow!("Calendar `{id}` not found"))?;
+            .ok_or_else(|| calendar_not_found(format!("Calendar `{id}` not found")))?;
 
         if let Some(name) = patch.name {
             collection.display_name = Some(name);
@@ -135,6 +136,7 @@ impl VdirBackend {
         let item = self
             .client
             .get_item(self.path(calendar_id), item_id)
+            .map_err(unreadable)
             .with_context(|| format!("Read item `{item_id}` from calendar `{calendar_id}`"))?;
 
         Ok(item_from(calendar_id, item))
@@ -224,4 +226,76 @@ fn item_from(calendar_id: &str, item: VdirItem) -> CalendarItem {
 /// Whether an item is of `kind`, every item passing when none is named.
 fn is_kind(item: &CalendarItem, kind: Option<IcalComponentKind>) -> bool {
     kind.is_none_or(|kind| holds_kind(&item.contents, kind))
+}
+
+/// The failure of an item read: a file located but not read is
+/// `item-unreadable`, its `io::Error` kept in the message.
+fn unreadable(err: VdirClientError) -> anyhow::Error {
+    match err {
+        VdirClientError::FileRead { .. }
+        | VdirClientError::VdirItemGet(VdirItemGetError::Unreadable(_)) => {
+            recoded(ErrorCode::ItemUnreadable, err)
+        }
+        err => err.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use pimalaya_cli::error::code_of;
+
+    use super::*;
+    use crate::error::{ErrorCode, code};
+
+    /// A backend over a home holding the calendar `cal` and its one item
+    /// `a`.
+    fn backend() -> (tempfile::TempDir, VdirBackend) {
+        let home = tempfile::tempdir().unwrap();
+        fs::create_dir(home.path().join("cal")).unwrap();
+        fs::write(home.path().join("cal").join("a.ics"), "BEGIN:VCALENDAR\r\n").unwrap();
+
+        let config = VdirConfig {
+            home_dir: home.path().to_path_buf(),
+        };
+        (home, VdirBackend::new(config))
+    }
+
+    #[test]
+    fn a_missing_item_or_calendar_carries_its_code() {
+        let (_home, mut backend) = backend();
+
+        let err = backend.get_item("cal", "nope").unwrap_err();
+        assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+
+        let err = backend.delete_item("cal", "nope", None).unwrap_err();
+        assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+
+        let patch = CalendarDiff {
+            name: Some("Renamed".into()),
+            ..Default::default()
+        };
+        let err = backend.update_calendar("nope", patch).unwrap_err();
+        assert_eq!(code_of(&err), Some(ErrorCode::CalendarNotFound), "{err:#}");
+    }
+
+    /// An item file located but not read fails its read as unreadable.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_item_file_is_coded_unreadable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (home, mut backend) = backend();
+        let path = home.path().join("cal").join("a.ics");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+
+        // A superuser reads it all the same: nothing to test.
+        if fs::read(&path).is_ok() {
+            return;
+        }
+
+        let err = backend.get_item("cal", "a").unwrap_err();
+        assert_eq!(code_of(&err), Some(ErrorCode::ItemUnreadable), "{err:#}");
+    }
 }

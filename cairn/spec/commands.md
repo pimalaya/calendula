@@ -192,7 +192,7 @@ An event's JSON SHALL carry `id`, `etag` (the entity tag of its item, `null` whe
 The listing query MAY carry a `UID`, which `event find` sets. A backend MAY leave out an item it can tell carries another `UID` without reading it, and SHALL ignore the hint on a listing naming a page size, which leaving items out would shift. The caller SHALL still compare the `UID` of every event it gets.
 
 ### Requirement: An event is deleted by its id or its UID
-`event delete <EVENT-ID>` SHALL take the id `event list` reports or the event's iCalendar `UID`. It SHALL try the id first, by a read, then list the calendar's events and look for an item of that id, then for the items carrying that `UID`. One item SHALL be deleted whole; several carrying the `UID` SHALL be refused, naming their ids; none SHALL be a clear miss.
+`event delete <EVENT-ID>` SHALL take the id `event list` reports or the event's iCalendar `UID`. It SHALL try the id first, by a read, then, only when that read answers `item-not-found`, list the calendar's events and look for an item of that id, then for the items carrying that `UID`; any other failure of the read SHALL fail the command with its code. A read answering `body-pending` (pimdir) names the item all the same. One item SHALL be deleted whole; several carrying the `UID` SHALL be refused, naming their ids; none SHALL be a clear miss, coded `item-not-found`.
 
 ### Requirement: A delete can be gated on a version
 `event delete` and `item delete` SHALL take `--if-match <ETAG>`. CalDAV and gcal SHALL send it as `If-Match`, msgraph SHALL compare it with the event's `changeKey`, and pimdir SHALL check it as an update does. A backend that cannot gate a write (vdir) SHALL declare `item.update.if-match` and `item.remove.if-match` `none`, so `--if-match` on an update or a delete is refused with `capability-missing` rather than dropped.
@@ -200,16 +200,22 @@ The listing query MAY carry a `UID`, which `event find` sets. A backend MAY leav
 `item read` SHALL add the `etag` of the version read to its JSON, `null` when the backend has none.
 
 ### Requirement: A JSON error carries a stable code
-A failure a caller is expected to act on SHALL carry a stable code, printed under `--json` as a `code` string beside `error`, `sources` and `backtrace`. The code SHALL be found anywhere in the error chain, so added context does not hide it. A failure with no code SHALL print `"code": null`. The plain output SHALL stay unchanged. Codes are kebab-case and never renamed; `error` stays free wording.
+A failure a caller is expected to act on SHALL carry a stable code, printed under `--json` as a `code` string beside `error`, `sources` and `backtrace`. The code SHALL be found anywhere in the error chain, so added context does not hide it, or read from the typed error of the protocol that refused ("A server's refusal carries its code"). A failure with no code SHALL print `"code": null`. The plain output SHALL stay unchanged. Codes are kebab-case and never renamed; `error` stays free wording. Every code SHALL be declared in every build, whatever the backends compiled in.
 
 | Code | Raised when |
 |---|---|
 | `capability-missing` | the backend the account resolves to does not serve a capability the command reaches; nothing was read, opened or connected |
 | `stdin-taken` | a command run inside a session (`repl`, `mcp`) would read its iCalendar from stdin, which carries the session's commands; nothing was read |
+| `item-not-found` | the item a command names is not in the calendar: the failure of `item read`, `item update`, `item delete`, `event read`, `event update` or `event delete` |
+| `calendar-not-found` | the calendar a command names does not exist; nothing was read or written |
+| `item-unreadable` | the backend answered for an item calendula could not read: its file could not be read (vdir) |
+| `permission-denied` | the server refused the request to the account (see "A server's refusal carries its code") |
+| `quota-exceeded` | the write would exceed the account's quota |
+| `rate-limited` | the server throttled the request; calendula retries nothing |
 | `body-pending` | a listed item's body is not local yet (pimdir); a sync brings it |
-| `precondition-failed` | a write's `--if-match` names a version the item no longer has (pimdir) |
+| `precondition-failed` | a write's `--if-match` names a version the item no longer has, on any backend that takes one |
 | `occurrence-unsupported` | `pimdir reply` or `pimdir cancel` names an occurrence its performer cannot act on alone |
-| `item-duplicate` | a pimdir create names a `UID` its calendar holds or has queued |
+| `item-duplicate` | a create names a `UID` its calendar holds: a CalDAV `no-uid-conflict`, a pimdir calendar holding or queuing it |
 | `store-uncreated` | the pimdir store has no schema yet: its sync engine creates it |
 | `store-version` | the pimdir store is of another format version than calendula's: an earlier sync engine's is reinstalled, a newer one's needs calendula upgraded |
 | `store-foreign` | the pimdir database is not a pimdir store: another program wrote it |
@@ -233,6 +239,11 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 - GIVEN a pimdir event whose body changed since it was read
 - WHEN `calendula --json event delete --if-match <old etag>` names it
 - THEN the command exits 1, queues nothing and prints `{"code":"precondition-failed","error":"Precondition failed: …","sources":[],"backtrace":null}`
+
+#### Scenario: An unknown item
+- GIVEN the vdir calendar `personal` holding no item `nope`
+- WHEN `calendula --json item read nope` runs
+- THEN the command exits 1 and prints a failure object coded `item-not-found`
 
 ### Requirement: The JSON contract is described and versioned
 `json-schema` SHALL describe the failure object under the key `calendula-error`, its `code` typed by the code vocabulary or `usage-invalid`, the code pimalaya-cli raises itself. Every generated schema SHALL carry an `$id` naming the contract version: the major version of calendula, or `0.<minor>` before 1.0. Every registered payload SHALL be a JSON object, checked by a test. Piped `--json` output SHALL print one value per line.

@@ -28,6 +28,26 @@ A backend whose writes are queued for a sync to push, rather than made on the se
 
 pimdir is the only backend that queues its writes.
 
+### Requirement: A server's refusal carries its code
+A failure a server refused SHALL carry a code of the vocabulary Himalaya shares, read from the typed error of the protocol that answered it, the failure object and an `account check` row alike:
+
+| Code | When |
+|---|---|
+| `permission-denied` | an HTTP 403 that is no rate limit (Google Calendar, Graph); a CalDAV 403 whose body names no precondition, or `need-privileges` (RFC 3744 §7.1.1) |
+| `quota-exceeded` | an HTTP 507; a CalDAV body naming `quota-not-exceeded` (RFC 4331 §6); Graph's `ErrorQuotaExceeded` |
+| `rate-limited` | an HTTP 429, or a Google Calendar 403 naming a rate limit or a quota; calendula retries nothing, so the first one met |
+| `item-not-found` | an item request answered 404 or 410 (CalDAV, Google Calendar), 404 or 400 `ErrorInvalidIdMalformed` (Graph); a vdir item file or a pimdir item that does not exist |
+| `calendar-not-found` | a calendar named that does not exist (vdir, pimdir) |
+| `precondition-failed` | an HTTP 412 (CalDAV, Google Calendar, Graph), Graph's `--if-match` mismatch read before the write, a pimdir version that moved |
+| `item-duplicate` | a CalDAV create refused for `no-uid-conflict` (RFC 4791 §5.3.2), a pimdir create naming a `UID` its calendar holds or has queued |
+
+A refusal none of these name SHALL carry no code, its reason kept in `sources`. A CalDAV 403 naming another precondition (`valid-calendar-data`, `supported-calendar-component`) is an item the server would not take, no matter of rights, and SHALL carry none.
+
+#### Scenario: A read-only Graph calendar
+- GIVEN a Graph calendar the account may read but not write
+- WHEN `calendula --json event delete <id>` runs
+- THEN it exits 1 printing a failure object coded `permission-denied`
+
 ### Requirement: Backend selection order
 The unified commands SHALL target the backend the global `--backend` flag selects. Its default, `auto`, SHALL take the first configured-and-compiled backend in the order vdir, pimdir, CalDAV, gcal, msgraph, preferring a local read to a network round-trip and a protocol-standard server to a vendor API.
 
@@ -119,7 +139,7 @@ Every pimdir read and write SHALL fail when the calendar id names no collection 
 
 The store's read seam answers an unknown collection with an empty page and its queue accepts an action for any name, so without this a typo in `-k` would read as an empty calendar and stage into one nothing will ever apply.
 
-The refusal SHALL name the calendars the account holds. Ids carry the sync engine's namespace and are not guessable, so an error asking for one that shows none leaves the user nothing to act on.
+The refusal SHALL carry the code `calendar-not-found` and name the calendars the account holds. Ids carry the sync engine's namespace and are not guessable, so an error asking for one that shows none leaves the user nothing to act on.
 
 ### Requirement: pimdir lists in the store's calendar order
 A pimdir listing SHALL scan the collection by the store's own sort key, ascending, which is the item's resolved start. Paging by link id is an arbitrary order for a calendar, and the store maintains the one a reader expects.

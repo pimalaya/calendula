@@ -6,14 +6,6 @@ use std::{fmt, path::PathBuf};
 
 use anyhow::{Result, bail};
 use clap::Parser;
-#[cfg(any(
-    feature = "vdir",
-    feature = "caldav",
-    feature = "pimdir",
-    feature = "gcal",
-    feature = "msgraph"
-))]
-use pimalaya_cli::error::code_of;
 use pimalaya_cli::{error::PartialOutcome, fields::Fields, printer::Printer, sanitize};
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use pimalaya_config::secret::SecretResolver;
@@ -251,7 +243,7 @@ impl BackendCheck {
             Err(err) => Self {
                 backend,
                 ok: false,
-                code: code_of(&err),
+                code: crate::error::code(&err),
                 error: Some(format!("{err:#}")),
             },
         }
@@ -388,5 +380,25 @@ mod pimdir_tests {
             Err(_) => Vec::new(),
         };
         assert!(left.is_empty(), "{left:?}");
+    }
+}
+
+#[cfg(all(test, feature = "msgraph"))]
+mod msgraph_tests {
+    use crate::{
+        account::check::BackendCheck,
+        error::ErrorCode,
+        msgraph::backend::scripted::{answering, refusal},
+    };
+
+    /// A backend the server refuses fails its row with the refusal's code.
+    #[test]
+    fn a_refused_backend_row_carries_the_refusal_code() {
+        let denied = refusal("ErrorAccessDenied");
+        let result = answering(&[(403, &denied)]).list_calendars().map(|_| ());
+        let check = BackendCheck::from("msgraph", result);
+
+        assert!(!check.ok);
+        assert_eq!(check.code, Some(ErrorCode::PermissionDenied));
     }
 }

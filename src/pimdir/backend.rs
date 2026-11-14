@@ -53,7 +53,7 @@ use crate::{
     account::context::Account,
     cli::resolve_account,
     config::PimdirConfig,
-    error::ErrorCode,
+    error::{ErrorCode, calendar_not_found, item_not_found},
     pimdir::{
         client::{PimdirClient, store_error},
         status::{PimdirCalendarStatus, PimdirParkedStatus, PimdirStatusOutput},
@@ -527,10 +527,10 @@ impl PimdirBackend {
 
         ids.sort();
 
-        bail!(
+        Err(calendar_not_found(format!(
             "Calendar `{calendar_id}` not found; this account holds: {}",
             ids.join(", "),
-        )
+        )))
     }
 
     /// Walks every live item of a collection by keyset paging, each
@@ -592,15 +592,23 @@ impl PimdirBackend {
     ///
     /// Anything non-numeric is the internal link id or a mistyped
     /// value, and saying so beats a lookup that silently finds nothing.
+    /// Both are `item-not-found`, an id naming no item, which `event
+    /// delete` then looks for as a `UID`.
     fn item(&self, calendar_id: &str, item_id: &str) -> Result<PimdirItem> {
         let seq = item_id.parse::<i64>().map_err(|_| {
-            anyhow!("Invalid pimdir item id `{item_id}`: expected the number a listing showed")
+            item_not_found(format!(
+                "Invalid pimdir item id `{item_id}`: expected the number a listing showed"
+            ))
         })?;
 
         self.client
             .reader
             .get_item(calendar_id, seq)?
-            .ok_or_else(|| anyhow!("Item `{item_id}` not found in calendar `{calendar_id}`"))
+            .ok_or_else(|| {
+                item_not_found(format!(
+                    "Item `{item_id}` not found in calendar `{calendar_id}`"
+                ))
+            })
     }
 
     /// Projects a stored item onto the shared type, body when local.
@@ -1768,6 +1776,25 @@ mod tests {
             .cancel("cal", &ids[0], Some("20261012T090000Z"), None, None)
             .unwrap_err();
         assert_eq!(code_of(&err), Some(ErrorCode::OccurrenceUnsupported));
+    }
+
+    /// An id naming no item, a non-numeric one included, and a calendar
+    /// the store does not hold carry their code.
+    #[test]
+    fn a_missing_item_or_calendar_carries_its_code() {
+        use pimalaya_cli::error::code_of;
+
+        use crate::error::ErrorCode;
+
+        let (_dir, mut backend, ids) = store(&[ALONE]);
+
+        for id in ["999", "abc@example.org"] {
+            let err = backend.get_item("cal", id).unwrap_err();
+            assert_eq!(code_of(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+        }
+
+        let err = backend.get_item("nope", &ids[0]).unwrap_err();
+        assert_eq!(code_of(&err), Some(ErrorCode::CalendarNotFound), "{err:#}");
     }
 
     #[test]
