@@ -161,9 +161,11 @@
 //! creates it from the shipped sample or downloads it; a script or a JSON
 //! caller gets the error instead. A bare `calendula` prints the help.
 //!
-//! A key or a table calendula no longer reads (`todo`, `journal`, `table`,
-//! the top-level `account`) is refused by name, saying where it went, rather
-//! than ignored.
+//! Every table refuses a key it does not know, the block of a backend left
+//! out of the build loading unread. A table calendula no longer reads
+//! (`todo`, `journal`, `table`, the top-level `account`, `calendar.list`,
+//! `event.list.table`, `item.list.table`) is refused by name, saying where
+//! it went.
 //!
 //! ## Output
 //!

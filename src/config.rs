@@ -8,13 +8,13 @@
 //! so a value set once at the top applies everywhere it is not
 //! overridden.
 //!
-//! `deny_unknown_fields` is set on the leaf blocks but not on [`Config`]
-//! and [`AccountConfig`], whose backend blocks exist only in the builds
-//! carrying their feature: a build without one still loads a file naming
-//! it. The tables calendula no longer reads are refused by name instead:
-//! `todo` and `journal`, their domains having moved to unfog and journal,
-//! and the `table` and `account` rendering tables, the output being plain
-//! text.
+//! Every block sets `deny_unknown_fields`, so a typo fails the load. The
+//! block of a backend left out of the build is an unread field of
+//! [`AccountConfig`], so one file serves every build. The tables calendula
+//! no longer reads are refused by name: `todo` and `journal`, their
+//! domains having moved to unfog and journal, and the rendering tables
+//! (`table`, `account`, `calendar.list`, `event.list.table`,
+//! `item.list.table`), the output being plain text.
 
 use std::collections::HashMap;
 #[cfg(any(
@@ -37,13 +37,22 @@ use pimalaya_config::toml::shell_expanded_string;
 use pimalaya_config::{command::CommandConfig, toml::TomlConfig};
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider, TlsServer};
+#[cfg(not(all(
+    feature = "vdir",
+    feature = "caldav",
+    feature = "pimdir",
+    feature = "gcal",
+    feature = "msgraph"
+)))]
+use serde::de::IgnoredAny;
 use serde::{Deserialize, Deserializer, de::Error};
 #[cfg(feature = "caldav")]
 use url::Url;
 
-/// The whole configuration file: global options and every account.
+/// The whole configuration file: global options and every account,
+/// refusing a key it does not know.
 #[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Config {
     /// Refused: the output is plain text, drawn in no table.
     #[serde(default)]
@@ -96,9 +105,9 @@ impl TomlConfig for Config {
 }
 
 /// One account: the backends it reads calendars from, plus whatever it
-/// overrides of the global options.
+/// overrides of the global options, refusing a key it does not know.
 #[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct AccountConfig {
     /// Whether a command given no `-a/--account` picks this account.
     #[serde(default)]
@@ -139,6 +148,31 @@ pub struct AccountConfig {
     /// Microsoft Graph backend, over the vendor API.
     #[cfg(feature = "msgraph")]
     pub msgraph: Option<MsgraphConfig>,
+    /// The vdir block, unread by a build without vdir.
+    #[cfg(not(feature = "vdir"))]
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub vdir: Option<IgnoredAny>,
+    /// The pimdir block, unread by a build without pimdir.
+    #[cfg(not(feature = "pimdir"))]
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub pimdir: Option<IgnoredAny>,
+    /// The CalDAV block, unread by a build without CalDAV.
+    #[cfg(not(feature = "caldav"))]
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub caldav: Option<IgnoredAny>,
+    /// The Google Calendar block, unread by a build without gcal.
+    #[cfg(not(feature = "gcal"))]
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub gcal: Option<IgnoredAny>,
+    /// The Microsoft Graph block, unread by a build without msgraph.
+    #[cfg(not(feature = "msgraph"))]
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub msgraph: Option<IgnoredAny>,
 }
 
 impl AccountConfig {
@@ -193,6 +227,10 @@ pub struct CalendarConfig {
     /// Calendar id used by `event` and `item` commands when their
     /// `-k/--calendar` flag is omitted.
     pub default: Option<String>,
+    /// Refused: `calendar list` prints plain text, in no colour.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub list: Option<CalendarListRemovedConfig>,
 }
 
 /// Event-level options.
@@ -210,6 +248,10 @@ pub struct EventConfig {
 pub struct EventListConfig {
     /// Default `-s/--page-size` value for `event list`, 25 when unset.
     pub page_size: Option<u32>,
+    /// Refused: `event list` prints plain text, in no colour.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub table: Option<EventListTableRemovedConfig>,
 }
 
 /// The `todo` table, which no configuration holds any more.
@@ -264,6 +306,47 @@ impl<'de> Deserialize<'de> for AccountRemovedConfig {
     }
 }
 
+/// The `calendar.list` table, which no configuration holds any more.
+#[derive(Clone, Debug)]
+pub enum CalendarListRemovedConfig {}
+
+impl<'de> Deserialize<'de> for CalendarListRemovedConfig {
+    fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+        Err(D::Error::custom(
+            "The `calendar.list` table is gone, `calendar list` printing \
+             plain text with no colour; remove it from the calendula \
+             configuration",
+        ))
+    }
+}
+
+/// The `event.list.table` table, which no configuration holds any more.
+#[derive(Clone, Debug)]
+pub enum EventListTableRemovedConfig {}
+
+impl<'de> Deserialize<'de> for EventListTableRemovedConfig {
+    fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+        Err(D::Error::custom(
+            "The `event.list.table` table is gone, `event list` printing \
+             plain text with no colour; remove it from the calendula \
+             configuration",
+        ))
+    }
+}
+
+/// The `item.list.table` table, which no configuration holds any more.
+#[derive(Clone, Debug)]
+pub enum ItemListTableRemovedConfig {}
+
+impl<'de> Deserialize<'de> for ItemListTableRemovedConfig {
+    fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+        Err(D::Error::custom(
+            "The `item.list.table` table is gone, `item list` printing plain \
+             text with no colour; remove it from the calendula configuration",
+        ))
+    }
+}
+
 /// Item-level options.
 ///
 /// The composer lives here rather than under `event`: `event` and `item`
@@ -289,6 +372,10 @@ pub struct ItemConfig {
 pub struct ItemListConfig {
     /// Default `-s/--page-size` value for `item list`, 25 when unset.
     pub page_size: Option<u32>,
+    /// Refused: `item list` prints plain text, in no colour.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub table: Option<ItemListTableRemovedConfig>,
 }
 
 /// vdir backend configuration.
@@ -660,30 +747,94 @@ mod tests {
         assert!(err.contains("line 1"), "{err}");
     }
 
-    /// A list keeps its page size, and a colour key of the former tables
-    /// fails the load naming the block that held it.
+    /// A list keeps its page size, and the colour tables of an earlier
+    /// calendula are refused by name, at the top level and under an
+    /// account.
     #[test]
-    fn a_colour_key_is_refused() {
+    fn a_colour_table_is_refused_by_name() {
         let document = "[event.list]\npage-size = 10\n[accounts.a.item.list]\npage-size = 5\n";
         toml::from_str::<Config>(document).unwrap();
 
-        for (document, unknown) in [
+        let tables = [
             (
-                "[event.list.table]\nid-color = \"red\"\n[accounts]\n",
-                "table",
+                "calendar.list",
+                "calendar.list.table.name-color = \"red\"\n",
+            ),
+            ("event.list.table", "event.list.table.id-color = \"red\"\n"),
+            ("item.list.table", "item.list.table.etag-color = \"red\"\n"),
+        ];
+
+        for (table, line) in tables {
+            let root = format!("{line}[accounts.a]\n");
+            let account = format!("[accounts.a]\n{line}");
+
+            for document in [root, account] {
+                let err = toml::from_str::<Config>(&document).unwrap_err();
+                let err = err.to_string();
+                assert!(
+                    err.contains(&format!("The `{table}` table is gone")),
+                    "{err}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_unknown_root_key_is_refused() {
+        let document = "colour = \"red\"\n[accounts.a]\n";
+        let err = toml::from_str::<Config>(document).unwrap_err().to_string();
+        assert!(err.contains("unknown field `colour`"), "{err}");
+    }
+
+    #[test]
+    fn an_unknown_account_key_is_refused() {
+        let document = "[accounts.a]\ndefualt = true\n";
+        let err = toml::from_str::<Config>(document).unwrap_err().to_string();
+        assert!(err.contains("unknown field `defualt`"), "{err}");
+    }
+
+    /// A backend table, the tables nested in it and the option tables
+    /// refuse a key they do not know.
+    #[cfg(all(feature = "vdir", feature = "caldav"))]
+    #[test]
+    fn an_unknown_backend_or_nested_key_is_refused() {
+        for (document, refusal) in [
+            (
+                "[accounts.a]\nvdir.home-dri = \"~/c\"\n",
+                "unknown field `home-dri`",
             ),
             (
-                "[accounts.a.item.list.table]\nid-color = \"red\"\n",
-                "table",
+                "[accounts.a]\ncaldav.server = \"example.org\"\n\
+                 caldav.auth = \"none\"\ncaldav.tls.certificate = \"ca.pem\"\n",
+                "unknown field `certificate`",
             ),
             (
-                "[calendar.list.table]\nname-color = \"red\"\n[accounts]\n",
-                "list",
+                "[accounts.a]\ncaldav.server = \"example.org\"\n\
+                 caldav.auth.basic.usernme = \"alice\"\n",
+                "unexpected keys in table: usernme",
+            ),
+            (
+                "[accounts.a]\nevent.list.page-sise = 10\n",
+                "unknown field `page-sise`",
             ),
         ] {
             let err = toml::from_str::<Config>(document).unwrap_err().to_string();
-            assert!(err.contains(&format!("unknown field `{unknown}`")), "{err}");
+            assert!(err.contains(refusal), "{err}");
         }
+    }
+
+    /// One file serves every build: a block of each backend loads in a
+    /// build leaving any of them out, unread.
+    #[test]
+    fn a_backend_left_out_of_the_build_still_loads() {
+        let document = "[accounts.a]\n\
+                        vdir.home-dir = \"~/calendars\"\n\
+                        pimdir.root = \"~/store\"\n\
+                        caldav.server = \"example.org\"\n\
+                        caldav.auth = \"none\"\n\
+                        gcal.auth.token.raw = \"token\"\n\
+                        msgraph.auth.token.raw = \"token\"\n";
+        toml::from_str::<Config>(document).unwrap();
     }
 
     /// The rendering tables of an earlier calendula are refused by name,
@@ -717,9 +868,9 @@ mod tests {
     }
 
     /// Checks config.sample.toml: one `[accounts.example]` table and no
-    /// other, the sections of the compiled backends each parsed through the
-    /// loader `-c` uses with every variant on top, `example` resolving as
-    /// the default account and declaring a backend.
+    /// other, every section parsed through the loader `-c` uses with every
+    /// variant on top, `example` resolving as the default account and
+    /// declaring a backend when this build compiles it.
     #[test]
     fn the_sample_configuration_parses_with_each_variant() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("config.sample.toml");
@@ -730,11 +881,9 @@ mod tests {
         let headings = SECTIONS.map(|(heading, _)| heading);
 
         for Variant { name, text } in variants(&sample, &headings) {
-            // NOTE: a build without a backend ignores its block.
+            // NOTE: a build without a backend loads its block unread.
             let heading = name.split(", ").next().unwrap_or_default();
-            if SECTIONS.contains(&(heading, false)) {
-                continue;
-            }
+            let compiled = !SECTIONS.contains(&(heading, false));
 
             let context = format!("config.sample.toml with {name} uncommented");
 
@@ -771,7 +920,10 @@ mod tests {
             ];
 
             assert_eq!(account, "example", "{context}");
-            assert!(blocks.contains(&true), "{context}: no backend declared");
+            assert!(
+                !compiled || blocks.contains(&true),
+                "{context}: no backend declared"
+            );
         }
     }
 }

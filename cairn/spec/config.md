@@ -49,10 +49,20 @@ calendula SHALL NOT write a configuration file: the user writes it, from the doc
 The top-level options SHALL be folded under the selected account, the account's own values overriding them field by field. A value set once at the top therefore applies everywhere it is not overridden.
 
 ### Requirement: Unknown fields
-`deny_unknown_fields` SHALL be set on the leaf blocks, so a typo in an option is reported rather than ignored, and SHALL NOT be set on the top-level and account blocks, whose backend blocks exist only in the builds carrying their feature: a build without a backend still loads a file naming it. A table calendula no longer reads SHALL be refused there by name instead: `todo`, `journal`, `table` and the top-level `account`.
+Every block of the configuration, the top-level and account blocks included, SHALL set `deny_unknown_fields`, so a key calendula does not know fails the load naming it, a typo reported rather than ignored. The block of a backend the build leaves out SHALL load unread, so one file serves every build. A table calendula no longer reads SHALL be refused by name: `todo`, `journal`, `table`, the top-level `account`, `calendar.list`, `event.list.table` and `item.list.table`.
+
+#### Scenario: A typo in an account
+- GIVEN `[accounts.a]` holding `defualt = true`
+- WHEN the configuration is loaded
+- THEN it fails naming the unknown field `defualt`
+
+#### Scenario: A backend left out of the build
+- GIVEN an account holding a `gcal` block, and a build without the `gcal` feature
+- WHEN the configuration is loaded
+- THEN it loads, the `gcal` block unread
 
 ### Requirement: A leftover todo or journal table is refused by name
-A `todo` or `journal` table left in a configuration, at the top level or under an account, SHALL fail the load, naming the CLI that took the domain over (unfog, the Pimalaya CLI for tasks, for `todo`; journal, the Pimalaya CLI for journal entries, for `journal`) and saying to remove the table. The top-level and account blocks still deny no unknown key: these two tables are refused by name, as the family refuses its removed keys, rather than read or ignored.
+A `todo` or `journal` table left in a configuration, at the top level or under an account, SHALL fail the load, naming the CLI that took the domain over (unfog, the Pimalaya CLI for tasks, for `todo`; journal, the Pimalaya CLI for journal entries, for `journal`) and saying to remove the table, as the family refuses its removed keys, rather than as unknown fields.
 
 #### Scenario: An upgraded configuration
 - GIVEN a configuration written for 0.2 with a `[todo.list]` table
@@ -65,12 +75,12 @@ A `todo` or `journal` table left in a configuration, at the top level or under a
 - THEN the command fails, the error naming journal
 
 ### Requirement: No colour or table is configured
-The configuration SHALL hold no colour and no table shape. A `table` table (`table.preset`, `table.arrangement`), at the top level or under an account, and a top-level `account` table (`account.list.table`) SHALL fail the load by name, saying the output is plain text and to remove it. A `*-color` key under `event.list.table` or `item.list.table`, or a `calendar.list` block, SHALL fail the load as an unknown field of the block that holds it. `event.list.page-size` and `item.list.page-size` stay.
+The configuration SHALL hold no colour and no table shape. A `table` table (`table.preset`, `table.arrangement`), at the top level or under an account, a top-level `account` table (`account.list.table`), and the `calendar.list`, `event.list.table` and `item.list.table` tables holding the `*-color` keys, at the top level or under an account, SHALL fail the load by name, saying the output is plain text and to remove it. `event.list.page-size` and `item.list.page-size` stay.
 
 #### Scenario: A colour key
 - GIVEN a configuration written for 0.2 with `event.list.table.id-color = "red"`
 - WHEN any calendula command loads it
-- THEN it fails naming the line and the unknown field `table`, where `page-size` was expected
+- THEN it fails naming the line and saying the `event.list.table` table is gone
 
 ### Requirement: Backend blocks
 An account SHALL carry an optional block per compiled backend: `vdir` with a `home-dir`, `pimdir` with a `root` and an optional `account`, `caldav` with its endpoint, TLS, ALPN and authentication, `gcal` and `msgraph` with TLS, ALPN and authentication.
@@ -136,4 +146,4 @@ The repository SHALL ship config.sample.toml holding one `[accounts.example]` ta
 #### Scenario: A build without a backend
 - GIVEN a build without the `gcal` feature
 - WHEN the test suite runs
-- THEN it skips the Google Calendar section and its variants, whose block that build ignores, and parses the others
+- THEN it parses every section and its variants, the Google Calendar block loading unread

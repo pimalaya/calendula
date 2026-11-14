@@ -4,7 +4,7 @@
 
 The next release brings calendula onto the standards Himalaya, Ortie and cardamum share: it manages events alone, drops the configuration wizard, takes one configuration path per `-c`, prints plain text with no table nor colour, serves a unified API whose backends say what they serve, and adds a REPL and an MCP server.
 
-A 0.2 configuration loads as it is, unless it holds a `todo`, `journal`, `table` or top-level `account` table, a colour key, a non-ASCII CalDAV host, or several default accounts.
+A 0.2 configuration loads as it is, unless it holds a `todo`, `journal`, `table` or top-level `account` table, a colour key, a key calendula does not know, a non-ASCII CalDAV host, or several default accounts.
 
 The text output changes everywhere, a few JSON outputs and exit codes move, and some commands fail earlier. The CHANGELOG lists every change; these are the ones to act on.
 
@@ -23,7 +23,8 @@ The text output changes everywhere, a few JSON outputs and exit codes move, and 
 - **Every default path is read, as layers.** $XDG_CONFIG_HOME/calendula/config.toml, $HOME/.config/calendula/config.toml and $HOME/.calendularc are each deep-merged on top of the ones before, where 0.2 read the first one found. An rc file left beside a config.toml now overrides it: delete the one you do not use.
 - **Several `default = true` accounts are refused**, naming them, where 0.2 took one at random. Keep the mark on one account across the merged files, or name the account with `-a <NAME>`.
 - **A `todo` or `journal` table is refused**, at the top level or under an account (`todo.list.page-size`, `[accounts.<name>.journal]`), naming the CLI that took it over: remove it.
-- **Table and colour keys are refused.** Remove the `table` table (`table.preset`, `table.arrangement`), at the top level or under an account, and the top-level `account` table (`account.list.table`), both refused by name, and the `*-color` keys of `calendar.list.table`, `event.list.table` and `item.list.table`, refused as unknown keys of their block. `event.list.page-size` and `item.list.page-size` stay.
+- **Table and colour keys are refused.** Remove the `table` table (`table.preset`, `table.arrangement`), at the top level or under an account, the top-level `account` table (`account.list.table`), and the `calendar.list`, `event.list.table` and `item.list.table` tables holding the `*-color` keys, at the top level or under an account, each refused by name. `event.list.page-size` and `item.list.page-size` stay.
+- **An unknown key fails the configuration**, at the top level and in an account too, naming the key, where 0.2 ignored it there: a misspelt `default` or `calendar` no longer loads silently. A block for a backend the build leaves out still loads, unread.
 - **CalDAV hosts are ASCII.** A `caldav.server` or `caldav.home` with an internationalised host is refused, `home` when the configuration loads and `server` when the account connects: write the host in Punycode (`https://xn--bcher-kva.example/` for `bücher.example`).
 
 ### pimdir store
