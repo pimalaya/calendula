@@ -290,6 +290,8 @@ calendula gcal free-busy --from 2026-11-16 --to 2026-11-20
 calendula gcal quick-add "Lunch with Ada tomorrow at noon"
 ```
 
+The exit status is `0` on success and `1` on a failure, printed on stdout as the failure object under `--json`, its `code` naming it when a caller can act on it. `2` is a command line calendula refuses (an unknown flag, a missing argument, a bad value): clap's message goes to stderr, or, with `--json`, the failure object coded `usage-invalid` to stdout. `3` means the command printed its result without fully succeeding: an `account check` with a failed backend, or a `calendar list`, `event list`, `event find`, `event agenda` or `item list` whose `errors` names an item it could not read.
+
 ### REPL
 
 `calendula repl` runs the CLI's commands over one account, one per line until `exit` or EOF, the backend connecting once for the session; a program can spawn `calendula repl --json` and read one JSON value per line.

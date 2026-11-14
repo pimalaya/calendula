@@ -16,13 +16,14 @@ use ical::{component::vevent::VEVENT, prop::uid::UID, tree::cst::IcalCst};
 use io_webdav::{
     client::WebdavClientStd,
     rfc4791::{calendar::CaldavCalendar, item::CaldavItemEntry},
+    rfc4918::typed::WebdavUnreadableEntry,
 };
 use pimalaya_config::secret::SecretResolver;
 
 use crate::{
-    caldav::client::{connect, item_refusal},
+    caldav::client::{connect, item_refusal, row_code},
     config::CaldavConfig,
-    error::calendar_not_found,
+    error::{ErrorCode, ItemError, calendar_not_found},
     shared::{
         calendar::{Calendar, CalendarDiff},
         client::window,
@@ -109,22 +110,38 @@ impl CaldavBackend {
 
     /// Lists items through a `calendar-query` REPORT.
     ///
-    /// A range narrows the query server-side rather than locally.
+    /// A range narrows the query server-side rather than locally. Each row
+    /// the server answered without the item's data is an entry, as is a
+    /// listing the server truncated, on the first window alone since the
+    /// whole calendar is read before the window is cut.
     pub fn list_items(
         &mut self,
         calendar_id: &str,
         query: CalendarItemQuery<'_>,
     ) -> Result<CalendarItemList> {
-        let entries = self.client.list_items(calendar_id, &comp_filter(&query))?;
+        let listed = self.client.list_items(calendar_id, &comp_filter(&query))?;
 
-        let items = entries
+        let items = listed
+            .items
             .into_iter()
             .map(|entry| item_from(calendar_id, entry))
             .collect();
 
+        let errors = match query.skip {
+            0 => {
+                let mut errors: Vec<ItemError> =
+                    listed.unreadable.into_iter().map(unreadable_row).collect();
+                if listed.truncated {
+                    errors.push(truncated());
+                }
+                errors
+            }
+            _ => Vec::new(),
+        };
+
         Ok(CalendarItemList {
             items: window(items, query.skip, query.take),
-            errors: Vec::new(),
+            errors,
         })
     }
 
@@ -230,6 +247,43 @@ fn item_from(calendar_id: &str, entry: CaldavItemEntry) -> CalendarItem {
     }
 }
 
+/// The entry of a listed item the server answered without its data: coded
+/// from the row's status or the status refusing its properties, a 403
+/// `permission-denied`, else `item-unreadable`; each refused property in its
+/// sources.
+fn unreadable_row(row: WebdavUnreadableEntry) -> ItemError {
+    let code = row
+        .status
+        .into_iter()
+        .chain(row.failures.iter().map(|failure| failure.status))
+        .find_map(row_code)
+        .unwrap_or(ErrorCode::ItemUnreadable);
+
+    let error = match row.status {
+        Some(status) => format!("The server refused the item with status {status}"),
+        None if !row.failures.is_empty() => String::from("The server refused the item data"),
+        None => String::from("The server sent the item without its data"),
+    };
+
+    ItemError {
+        id: Some(row.id),
+        code: Some(code),
+        error,
+        sources: row.failures.iter().map(ToString::to_string).collect(),
+    }
+}
+
+/// The entry of a listing the server truncated (a 507 row, RFC 6578
+/// §3.6): no item to name and no code, the listing incomplete.
+fn truncated() -> ItemError {
+    ItemError {
+        id: None,
+        code: None,
+        error: String::from("The server truncated the listing: more items exist than it returned"),
+        sources: Vec::new(),
+    }
+}
+
 /// Derives the resource name a create PUTs to from the item's `UID`.
 ///
 /// A content digest stands in when the bytes carry none. Only a
@@ -289,16 +343,23 @@ mod tests {
         shared::item::CalendarTimeRange,
     };
 
-    /// A stream answering each read with the next canned response.
+    /// A stream answering its reads with the canned responses, in order.
     struct Scripted {
         responses: VecDeque<Vec<u8>>,
     }
 
     impl Read for Scripted {
         fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
-            let response = self.responses.pop_front().unwrap_or_default();
-            buf[..response.len()].copy_from_slice(&response);
-            Ok(response.len())
+            let Some(response) = self.responses.front_mut() else {
+                return Ok(0);
+            };
+            let len = response.len().min(buf.len());
+            buf[..len].copy_from_slice(&response[..len]);
+            response.drain(..len);
+            if response.is_empty() {
+                self.responses.pop_front();
+            }
+            Ok(len)
         }
     }
 
@@ -400,6 +461,125 @@ mod tests {
             .delete_item("cal", "nope.ics", None)
             .unwrap_err();
         assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+    }
+
+    /// A listing answering an item, a row refused whole, a row refusing its
+    /// data, a row missing it and a truncation row.
+    const LISTING: &str = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:response>
+    <d:href>/calendars/me/cal/e1.ics</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:getetag>"1"</d:getetag>
+        <c:calendar-data>BEGIN:VCALENDAR&#13;
+VERSION:2.0&#13;
+PRODID:-//x//y//EN&#13;
+BEGIN:VEVENT&#13;
+UID:e1&#13;
+DTSTAMP:20260101T000000Z&#13;
+DTSTART:20260814T090000Z&#13;
+END:VEVENT&#13;
+END:VCALENDAR&#13;
+</c:calendar-data>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/calendars/me/cal/e2.ics</d:href>
+    <d:status>HTTP/1.1 403 Forbidden</d:status>
+  </d:response>
+  <d:response>
+    <d:href>/calendars/me/cal/e3.ics</d:href>
+    <d:propstat>
+      <d:prop><d:getetag>"3"</d:getetag></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+    <d:propstat>
+      <d:prop><c:calendar-data/></d:prop>
+      <d:status>HTTP/1.1 403 Forbidden</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/calendars/me/cal/e4.ics</d:href>
+    <d:propstat>
+      <d:prop><d:getetag>"4"</d:getetag></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/calendars/me/cal/</d:href>
+    <d:status>HTTP/1.1 507 Insufficient Storage</d:status>
+  </d:response>
+</d:multistatus>"#;
+
+    /// Each row the server refused is an entry naming its item, a 403
+    /// `permission-denied`, its refused properties in its sources; the
+    /// truncation an entry naming no item and carrying no code.
+    #[test]
+    fn a_caldav_listing_names_the_rows_it_could_not_read() {
+        let listed = answering(207, LISTING)
+            .list_items("cal", CalendarItemQuery::default())
+            .unwrap();
+
+        let ids: Vec<&str> = listed.items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(ids, ["e1.ics"]);
+
+        let entries: Vec<_> = listed
+            .errors
+            .iter()
+            .map(|entry| {
+                let id = entry.id.as_deref();
+                let sources: Vec<&str> = entry.sources.iter().map(String::as_str).collect();
+                (id, entry.code, entry.error.as_str(), sources)
+            })
+            .collect();
+
+        assert_eq!(
+            entries,
+            [
+                (
+                    Some("e2.ics"),
+                    Some(ErrorCode::PermissionDenied),
+                    "The server refused the item with status 403",
+                    vec![],
+                ),
+                (
+                    Some("e3.ics"),
+                    Some(ErrorCode::PermissionDenied),
+                    "The server refused the item data",
+                    vec!["calendar-data (403)"],
+                ),
+                (
+                    Some("e4.ics"),
+                    Some(ErrorCode::ItemUnreadable),
+                    "The server sent the item without its data",
+                    vec![],
+                ),
+                (
+                    None,
+                    None,
+                    "The server truncated the listing: more items exist than it returned",
+                    vec![],
+                ),
+            ]
+        );
+    }
+
+    /// The whole calendar is read before the window is cut, so the entries
+    /// print on the first window only.
+    #[test]
+    fn a_caldav_listing_names_its_rows_on_the_first_window_only() {
+        let query = CalendarItemQuery {
+            skip: 1,
+            take: Some(2),
+            ..Default::default()
+        };
+        let listed = answering(207, LISTING).list_items("cal", query).unwrap();
+
+        assert!(listed.items.is_empty());
+        assert!(listed.errors.is_empty(), "{:?}", listed.errors);
     }
 
     #[test]

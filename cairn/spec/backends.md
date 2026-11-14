@@ -55,7 +55,8 @@ A backend SHALL report an item it could not read as an `errors` entry and SHALL 
 - vdir: an item file that cannot be read SHALL be an `item-unreadable` entry naming the item, its error in `sources`; an item removed while it lists SHALL be left out with no entry;
 - Graph: an event whose series master or instances the server refused while they were read again SHALL be an entry coded by the refusal (`item-unreadable` when the refusal carries no code), the other events listed; one answered 404 SHALL be left out with no entry;
 - pimdir: a body that cannot be read, or that the blob tree does not hold, SHALL be an `item-unreadable` entry, the item listed with no bytes; a hydrated body that does not parse SHALL be an entry where the kind filter dropped it; an item whose body is not local yet SHALL be no entry;
-- CalDAV, Google Calendar: an answer or a page that fails SHALL fail the listing whole. Until io-webdav returns the rows it could not read, a CalDAV row refused per href is left out.
+- CalDAV: a row the server answered without the item's data (refused whole, its `calendar-data` refused, or missing) SHALL be an entry naming the item, coded from its status, a 403 `permission-denied`, else `item-unreadable`, each refused property in `sources`; a listing the server truncated (a 507 row) SHALL be an entry with a `null` id and no code saying the listing is incomplete;
+- CalDAV, Google Calendar: an answer or a page that fails SHALL fail the listing whole.
 
 ### Requirement: Backend selection order
 The unified commands SHALL target the backend the global `--backend` flag selects. Its default, `auto`, SHALL take the first configured-and-compiled backend in the order vdir, pimdir, CalDAV, gcal, msgraph, preferring a local read to a network round-trip and a protocol-standard server to a vendor API.
@@ -72,6 +73,8 @@ Item ids SHALL be the resource names the server returned, verbatim: io-webdav ne
 A create SHALL propose a resource name derived from the item's own UID when that UID is URL-safe, falling back to a content digest, and SHALL keep the id the server reports in its `Location` header when it names the resource itself, else the last segment of the URL io-webdav sent, percent-encoded, which is the form a listing returns.
 
 A listing the server answers with anything but one whole multistatus (an HTML page, a cut document, an empty body) SHALL fail, never read as a shorter listing, and a delete answered by a multistatus naming failed members SHALL fail.
+
+A listing SHALL name, in its `errors`, each row the server answered without the item's data and a listing the server truncated ("Each backend names the items it could not read"), on the first page only: the whole calendar is read before the page is cut, and such a row holds no place on a page.
 
 ### Requirement: CalDAV pushes the time range down
 A [`CalendarTimeRange`](#requirement-time-range-filtering) SHALL reach CalDAV as an RFC 4791 `time-range` filter nested in a VEVENT `comp-filter`, so the server does the narrowing.

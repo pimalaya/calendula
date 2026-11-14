@@ -193,7 +193,17 @@ pub(crate) fn refusal_code(cause: &(dyn std::error::Error + 'static)) -> Option<
     }
 
     let (status, body) = refused(err)?;
+    status_code(status, body)
+}
 
+/// The code of a listing row the server answered with `status` and no
+/// body, as [`refusal_code`] reads a refusal: a 403 `permission-denied`.
+pub(crate) fn row_code(status: u16) -> Option<ErrorCode> {
+    status_code(status, "")
+}
+
+/// The code of a refusal of `status` answered with `body`.
+fn status_code(status: u16, body: &str) -> Option<ErrorCode> {
     match status {
         _ if body.contains("quota-not-exceeded") => Some(ErrorCode::QuotaExceeded),
         507 => Some(ErrorCode::QuotaExceeded),

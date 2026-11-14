@@ -175,8 +175,9 @@
 //!
 //! A failure prints through pimalaya-cli's `ErrorReport` with the stable
 //! [`error::ErrorCode`] a caller acts on, `null` otherwise, and exits 1; a
-//! result whose outcome is not a full success, a failed `account check`,
-//! prints its report and exits 3. A command line the grammar refuses exits
+//! result whose outcome is not a full success, a failed `account check` or
+//! a listing whose `errors` names a calendar or an item it could not read,
+//! prints its result and exits 3. A command line the grammar refuses exits
 //! 2, its failure object coded `usage-invalid` under `--json`. Every write
 //! prints a receipt, the item it acted on and whether it waits for a sync.
 //!

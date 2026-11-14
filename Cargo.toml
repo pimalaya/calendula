@@ -70,5 +70,5 @@ url = { version = "2.5", default-features = false }
 [patch.crates-io]
 io-gcal = { git = "https://github.com/pimalaya/io-gcal", rev = "dbb4481cd77ef65ca451420cb4e087fdccfe6fdb" }
 io-pim-discovery = { path = "../io-pim-discovery" }
-io-webdav = { git = "https://github.com/pimalaya/io-webdav", rev = "185ab63be5859c5ef6115bef97e4df5cb1187973" }
+io-webdav = { path = "../io-webdav" }
 pimalaya-cli = { git = "https://github.com/pimalaya/cli", rev = "0be1b1f08d19ccb9d16ee8e1d4266c27c96e0cdd" }

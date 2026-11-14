@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: a-result-carries-its-errors
-status: active
+status: landed
 created: 2026-11-14
 ---
 

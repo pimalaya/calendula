@@ -10,7 +10,7 @@ Each requirement names its capability file in parentheses, as Himalaya's delta o
 ## ADDED Requirements
 
 ### Requirement: A listing names the items it could not read
-(commands) `calendar list`, `event list`, `event find`, `event agenda` and `item list` SHALL print an `errors` list beside their items, under `--json` and in text: one pimalaya-cli item error `{id, code, error, sources}` per calendar or item the command could not read, `[]` when there is none, in the order met. `id` SHALL be the item's id as the command prints ids, `null` when the backend named none; `code` a code of the vocabulary or `null`; `error` the message; `sources` the backend's own reasons, outermost first. A non-empty `errors` SHALL make the command exit 3 once it printed its result. A listing that reads the whole calendar before cutting its page SHALL print its entries on the first page only. `event list` SHALL count the events it lists, never an item it could not read.
+(commands) `calendar list`, `event list`, `event find`, `event agenda` and `item list` SHALL print an `errors` list beside their items, under `--json` and in text: one pimalaya-cli item error `{id, code, error, sources}` per calendar or item the command could not read, `[]` when there is none, in the order met. `id` SHALL be the item's id as the command prints ids, `null` when the backend named none, as for a listing the server truncated; `code` a code of the vocabulary or `null`; `error` the message; `sources` the backend's own reasons, outermost first. A non-empty `errors` SHALL make the command exit 3 once it printed its result. A listing that reads the whole calendar before cutting its page SHALL print its entries on the first page only; an item it listed but could not read (an iCalendar that does not parse, a pimdir body the store cannot serve) holds its place on a page, and its entry SHALL print on that page. `event list` SHALL count the events it lists, never an item it could not read.
 
 #### Scenario: An item that does not parse
 - GIVEN the vdir calendar `personal` holding the events `a` and `b` and one `.ics` file `c` that is no iCalendar
@@ -18,7 +18,7 @@ Each requirement names its capability file in parentheses, as Himalaya's delta o
 - THEN it prints `a` and `b`, `"errors":[{"id":"c","code":"item-unreadable",…}]`, and the exit status is 3
 
 ### Requirement: A command's errors print at its end
-(commands) In the text output, each `errors` entry SHALL print as one `Error:` line, `<id>  <code>  <error>` with `-` for a null id or code, last in the command's output: after the items (rows, records or the agenda's lines) and one blank line, the `Error:` lines aligned among themselves. Nothing SHALL print, the blank line included, when `errors` is empty.
+(commands) In the text output, each `errors` entry SHALL print as one `Error:` line, `<id>  <code>  <error>` with `-` for a null id or code, last in the command's output: after the items (rows, records or the agenda's lines) and one blank line, the `Error:` lines aligned among themselves as pimalaya-cli's `Columns` aligns cells, each value sanitized. Nothing SHALL print, the blank line included, when `errors` is empty.
 
 ### Requirement: A server's refusal carries its code
 (backends) A failure a server refused SHALL carry a code of the vocabulary Himalaya shares, read from the typed error of the protocol that answered it, the failure object, an `errors` entry and an `account check` row alike:
@@ -43,11 +43,12 @@ A refusal none of these name SHALL carry no code, its reason kept in `sources`. 
 ### Requirement: Each backend names the items it could not read
 (backends) A backend SHALL report an item it could not read as an `errors` entry and SHALL never drop it silently, with a warning alone, nor fail the listing for it:
 
-- every backend: an item whose iCalendar does not parse SHALL be an `item-unreadable` entry in `event list`, `event find` and the agenda, no event row printed for it; `item list` SHALL list it as it lists any item, with no entry;
+- every backend: an item whose iCalendar does not parse SHALL be an `item-unreadable` entry in `event list`, `event find` and the agenda, no event row printed for it; `item list` SHALL list it as it lists any item, with no entry. A kind or a range filter applied after parsing SHALL keep such an item, whose kind and dates cannot be read;
 - vdir: an item file that cannot be read SHALL be an `item-unreadable` entry naming the item, its error in `sources`; an item removed while it lists SHALL be left out with no entry;
-- Graph: an event whose series master or instances the server refused while they were read again SHALL be an entry coded by the refusal, the other events listed; one answered 404 SHALL be left out with no entry;
+- Graph: an event whose series master or instances the server refused while they were read again SHALL be an entry coded by the refusal (`item-unreadable` when the refusal carries no code), the other events listed; one answered 404 SHALL be left out with no entry;
 - pimdir: a body that cannot be read, or that the blob tree does not hold, SHALL be an `item-unreadable` entry, the item listed with no bytes; a hydrated body that does not parse SHALL be an entry where the kind filter dropped it; an item whose body is not local yet SHALL be no entry;
-- CalDAV, Google Calendar: an answer or a page that fails SHALL fail the listing whole. Until io-webdav returns the rows it could not read, a CalDAV row refused per href is left out.
+- CalDAV: a row the server answered without the item's data (refused whole, its `calendar-data` refused, or missing) SHALL be an entry naming the item, coded from its status, a 403 `permission-denied`, else `item-unreadable`, each refused property in `sources`; a listing the server truncated (a 507 row) SHALL be an entry with a `null` id and no code saying the listing is incomplete;
+- CalDAV, Google Calendar: an answer or a page that fails SHALL fail the listing whole.
 
 ## MODIFIED Requirements
 
@@ -58,7 +59,7 @@ A refusal none of these name SHALL carry no code, its reason kept in `sources`. 
 |---|---|
 | `capability-missing` | the backend the account resolves to does not serve a capability the command reaches; nothing was read, opened or connected |
 | `stdin-taken` | a command run inside a session (`repl`, `mcp`) would read its iCalendar from stdin, which carries the session's commands; nothing was read |
-| `item-not-found` | the item a command names is not in the calendar: the failure of `item read|update|delete` or `event read|update|delete` |
+| `item-not-found` | the item a command names is not in the calendar: the failure of `item read`, `item update`, `item delete`, `event read`, `event update` or `event delete` |
 | `calendar-not-found` | the calendar a command names does not exist; nothing was read or written |
 | `item-unreadable` | the backend answered for an item calendula could not read: its file could not be read (vdir), its iCalendar did not parse, the server refused it while it was read again (Graph), its body could not be read or is missing from the store (pimdir); an `errors` entry |
 | `permission-denied` | the server refused the request to the account (see "A server's refusal carries its code") |
@@ -135,7 +136,7 @@ The `--json` payload SHALL carry the same multiplicity, so a consumer reading it
 No second shape SHALL be kept beside it, since one that still dropped an event would leave the defect reachable.
 
 ### Requirement: An event is deleted by its id or its UID
-(commands) `event delete <EVENT-ID>` SHALL take the id `event list` reports or the event's iCalendar `UID`. It SHALL try the id first, by a read, then, only when that read answers `item-not-found`, list the calendar's events and look for an item of that id, then for the items carrying that `UID`; any other failure of the read SHALL fail the command with its code. One item SHALL be deleted whole; several carrying the `UID` SHALL be refused, naming their ids; none SHALL be a clear miss, coded `item-not-found`.
+(commands) `event delete <EVENT-ID>` SHALL take the id `event list` reports or the event's iCalendar `UID`. It SHALL try the id first, by a read, then, only when that read answers `item-not-found`, list the calendar's events and look for an item of that id, then for the items carrying that `UID`; any other failure of the read SHALL fail the command with its code. A read answering `body-pending` (pimdir) names the item all the same. One item SHALL be deleted whole; several carrying the `UID` SHALL be refused, naming their ids; none SHALL be a clear miss, coded `item-not-found`.
 
 ### Requirement: pimdir is an availability-aware cache
 (backends) An item whose body is not local (`level < Full`, no stored object) SHALL still list, carrying no bytes. `get_item` on such an item SHALL report a clear "body not fetched" state, the cue to sync, not a data-loss error.
@@ -146,6 +147,17 @@ An item naming an object the blob tree holds no body for is a different state: t
 
 ### Requirement: A tool's output is the command's payload
 (mcp) A successful call SHALL return the command's JSON value as `structuredContent` and as text, described as `outputSchema` by its registered schema when that schema's root is typed `object`. `event_create`, `event_update`, `item_create` and `item_update`, whose schema is one of two shapes (the write, or an abandoned composer edit), SHALL carry no `outputSchema`. A call ending with a partial outcome (a listing whose `errors` is not empty, an `account check` with a failed backend) SHALL return its result as `structuredContent` beside `isError: true`. A refused or failed call SHALL return `isError: true` with the `calendula-error` object and no `structuredContent`.
+
+### Requirement: CalDAV backend
+(backends) CalDAV SHALL adapt io-webdav's RFC 4791 surface over a connected client whose calendar home-set is already resolved.
+
+Item ids SHALL be the resource names the server returned, verbatim: io-webdav neither appends nor strips a file extension, so an id a listing showed addresses the same resource on every verb.
+
+A create SHALL propose a resource name derived from the item's own UID when that UID is URL-safe, falling back to a content digest, and SHALL keep the id the server reports in its `Location` header when it names the resource itself, else the last segment of the URL io-webdav sent, percent-encoded, which is the form a listing returns.
+
+A listing the server answers with anything but one whole multistatus (an HTML page, a cut document, an empty body) SHALL fail, never read as a shorter listing, and a delete answered by a multistatus naming failed members SHALL fail.
+
+A listing SHALL name, in its `errors`, each row the server answered without the item's data and a listing the server truncated ("Each backend names the items it could not read"), on the first page only: the whole calendar is read before the page is cut, and such a row holds no place on a page.
 
 ## REMOVED Requirements
 

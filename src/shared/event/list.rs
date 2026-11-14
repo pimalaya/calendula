@@ -63,8 +63,9 @@ use crate::{
 /// "name", "partstat", "role", "rsvp", "cutype"}], "onlineMeetingUrl"}],
 /// "nextPage"}`, `nextPage` being the number of the page following this
 /// one as a string, which `--page-token` takes back, or `null` once the
-/// listing is complete, and `errors` names each item it could not read:
-/// `[{"id", "code", "error", "sources"}]`.
+/// listing is complete, and `errors` names each item it could not read,
+/// and a listing the server cut short by a `null` id: `[{"id", "code",
+/// "error", "sources"}]`.
 #[derive(Debug, Parser)]
 pub struct EventListCommand {
     #[command(flatten)]

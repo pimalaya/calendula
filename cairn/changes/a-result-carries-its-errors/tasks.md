@@ -61,13 +61,13 @@ change: a-result-carries-its-errors
 
 ## Phase 4, CalDAV rows (after io-webdav's a-listing-returns-what-it-could-not-read is pushed and pinned)
 
-- [ ] Pin io-webdav to that commit; src/caldav/backend.rs:112-125 reads the new list output.
-- [ ] Each unread row an `item-unreadable` entry coded from its status; a truncated listing an entry with a `null` id.
-- [ ] A scripted multistatus test with a 403 row and a 507 row.
-- [ ] Spec: "CalDAV backend" says it. Commit `feat: list the CalDAV rows a listing could not read`.
+- [x] Pin io-webdav to that commit; src/caldav/backend.rs:112-125 reads the new list output. Linked as `{ path = "../io-webdav" }` (4ecb2ab is not pushed; owner ruling); no calendula command calls a CalDAV multiget, so `list_items` was the one caller to adapt.
+- [x] Each unread row an `item-unreadable` entry coded from its status; a truncated listing an entry with a `null` id. Coded through `caldav::client::row_code` (the Phase 2 status rule), the row status first, then the status refusing its properties; entries on the first page only.
+- [x] A scripted multistatus test with a 403 row and a 507 row. The scripted stream now answers a response over several reads.
+- [x] Spec: "CalDAV backend" says it. Commit `feat: list the CalDAV rows a listing could not read`.
 
 ## Landing
 
-- [ ] CHANGELOG (Added, **BREAKING**, Changed, Fixed as in the proposal), MIGRATION.md ("JSON output"), README exit statuses, the src/main.rs header.
-- [ ] Delta folded into cairn/spec/commands.md, backends.md and mcp.md; log cairn/log/<date>-a-result-carries-its-errors.md (frontmatter `cairn: log`, `change`, `landed:`) naming what landed per phase, the evidence and the capabilities moved; status landed; `sh cairn/verify.sh` clean.
+- [x] CHANGELOG (Added, **BREAKING**, Changed, Fixed as in the proposal), MIGRATION.md ("JSON output"), README exit statuses, the src/main.rs header. The paging above the rows is no entry of its own: the unreleased text-output entry, which named a footer no release printed, now names the header, and MIGRATION's "Text output" line the same.
+- [x] Delta folded into cairn/spec/commands.md, backends.md and mcp.md; log cairn/log/<date>-a-result-carries-its-errors.md (frontmatter `cairn: log`, `change`, `landed:`) naming what landed per phase, the evidence and the capabilities moved; status landed; `sh cairn/verify.sh` clean.
 - [ ] The live suites (google, microsoft, fastmail) run by the owner on the result.
