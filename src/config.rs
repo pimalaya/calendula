@@ -36,7 +36,7 @@ use pimalaya_config::toml::shell_expanded_path;
 use pimalaya_config::toml::shell_expanded_string;
 use pimalaya_config::{command::CommandConfig, toml::TomlConfig};
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
-use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider};
+use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider, TlsServer};
 use serde::{Deserialize, Deserializer, de::Error};
 #[cfg(feature = "caldav")]
 use url::Url;
@@ -556,7 +556,8 @@ impl TlsConfig {
                 }),
                 alpn,
             },
-            cert: self.cert,
+            server: self.cert.map(|cert| TlsServer { cert }),
+            client: None,
         }
     }
 }

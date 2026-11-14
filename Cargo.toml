@@ -33,7 +33,7 @@ panic = "abort"
 pimalaya-cli = { version = "0.4", default-features = false, features = ["build"] }
 
 [dev-dependencies]
-io-oauth = { version = "0.6", default-features = false, features = ["client", "jwt-bearer", "rustls-ring"] }
+io-oauth = { version = "0.7", default-features = false, features = ["client", "jwt-bearer", "rustls-ring"] }
 pimalaya-config = { version = "0.4", default-features = false, features = ["sample"] }
 tempfile = { version = "3", default-features = false }
 toml = { version = "1.1", default-features = false, features = ["parse", "serde"] }
@@ -48,8 +48,8 @@ humansize = { version = "2", default-features = false }
 ical-rs = { version = "0.7", default-features = false, features = ["parser", "tzdb"] }
 idna_adapter = { version = "=1.0.0", default-features = false }
 io-gcal = { version = "0.4", default-features = false, features = ["client"], optional = true }
-io-http = { version = "0.7", default-features = false, optional = true }
-io-msgraph = { version = "0.8", default-features = false, optional = true }
+io-http = { version = "0.8", default-features = false, optional = true }
+io-msgraph = { version = "0.9", default-features = false, optional = true }
 io-pim-discovery = { version = "0.12", default-features = false, features = ["rfc6764", "stream"], optional = true }
 io-pimdir = { version = "0.12", default-features = false, features = ["client"], optional = true }
 io-vdir = { version = "0.3", default-features = false, features = ["client"], optional = true }
@@ -58,7 +58,7 @@ jiff = { version = "0.2", default-features = false, features = ["std", "tz-syste
 log = { version = "0.4", default-features = false }
 pimalaya-cli = { version = "0.4", default-features = false, features = ["mcp", "prompt", "repl", "terminal"] }
 pimalaya-config = { version = "0.4", default-features = false, features = ["toml", "secret"] }
-pimalaya-stream = { version = "0.3", default-features = false, features = ["std"] }
+pimalaya-stream = { version = "0.4", default-features = false, features = ["std"] }
 schemars = { version = "1", default-features = false, features = ["derive"] }
 secrecy = { version = "0.10", default-features = false, optional = true }
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
@@ -68,4 +68,7 @@ unicode-width = { version = "0.2", default-features = false }
 url = { version = "2.5", default-features = false }
 
 [patch.crates-io]
-pimalaya-cli = { git = "https://github.com/pimalaya/cli", rev = "eb379626e01e31bed11cbe7f06c252262e810279" }
+io-gcal = { git = "https://github.com/pimalaya/io-gcal", rev = "dbb4481cd77ef65ca451420cb4e087fdccfe6fdb" }
+io-pim-discovery = { path = "../io-pim-discovery" }
+io-webdav = { git = "https://github.com/pimalaya/io-webdav", rev = "185ab63be5859c5ef6115bef97e4df5cb1187973" }
+pimalaya-cli = { git = "https://github.com/pimalaya/cli", rev = "0be1b1f08d19ccb9d16ee8e1d4266c27c96e0cdd" }
