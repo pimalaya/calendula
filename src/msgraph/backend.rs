@@ -40,15 +40,15 @@ use pimalaya_config::secret::SecretResolver;
 use pimalaya_stream::proxy::Proxy;
 use secrecy::ExposeSecret;
 
-use pimalaya_cli::error::CodedError;
+use pimalaya_cli::error::{CodedError, code_of};
 
 use crate::{
     config::{MsgraphConfig, default_msgraph_alpn},
-    error::{ErrorCode, recoded},
+    error::{self, ErrorCode, recoded},
     shared::{
         calendar::{Calendar, CalendarDiff},
         client::window,
-        item::{CalendarItem, CalendarItemQuery},
+        item::{CalendarItem, CalendarItemList, CalendarItemQuery},
     },
 };
 
@@ -165,14 +165,14 @@ impl MsgraphBackend {
         &mut self,
         calendar_id: &str,
         query: CalendarItemQuery<'_>,
-    ) -> Result<Vec<CalendarItem>> {
+    ) -> Result<CalendarItemList> {
         // NOTE: Graph models a VEVENT and nothing else, so any other kind
         // is answered without a round-trip.
         if query
             .kind
             .is_some_and(|kind| kind != IcalComponentKind::VEvent)
         {
-            return Ok(Vec::new());
+            return Ok(CalendarItemList::default());
         }
 
         let params = MsgraphEventsListParams {
@@ -197,22 +197,47 @@ impl MsgraphBackend {
         }
 
         let mut items = Vec::new();
+        let mut errors = Vec::new();
         for event in unique(events)? {
-            // NOTE: a listing leaves out cancelledOccurrences, which Graph
-            // returns only on a read of the master by id.
-            let event = if event.event_type == Some(MsgraphEventType::SeriesMaster) {
-                self.event(&event.id)?
-            } else {
-                event
+            let id = event.id.clone();
+            let (event, exceptions) = match self.reread(event) {
+                Ok(read) => read,
+                // NOTE: an event gone since the listing is left out.
+                Err(err) if code_of(&err) == Some(ErrorCode::ItemNotFound) => continue,
+                Err(err) => {
+                    let err = err.context(format!("Cannot read event `{id}` again"));
+                    errors.push(error::unreadable(Some(&id), err));
+                    continue;
+                }
             };
-            let exceptions = self.exceptions(&event)?;
             let item = item_from(calendar_id, &event, &exceptions);
             if item.starts_within(query.range) {
                 items.push(item);
             }
         }
 
-        Ok(window(items, query.skip, query.take))
+        // NOTE: the whole calendar is read for each window, so its errors
+        // are named on the first alone.
+        if query.skip > 0 {
+            errors.clear();
+        }
+
+        Ok(CalendarItemList {
+            items: window(items, query.skip, query.take),
+            errors,
+        })
+    }
+
+    /// A listed event with its exceptions, a series master read again by
+    /// its id: a listing leaves out cancelledOccurrences, which Graph
+    /// returns only on such a read.
+    fn reread(&mut self, event: MsgraphEvent) -> Result<(MsgraphEvent, Vec<MsgraphEvent>)> {
+        let event = match event.event_type {
+            Some(MsgraphEventType::SeriesMaster) => self.event(&event.id)?,
+            _ => event,
+        };
+        let exceptions = self.exceptions(&event)?;
+        Ok((event, exceptions))
     }
 
     /// Reads one event, with the exceptions of a series folded into it.
@@ -323,7 +348,8 @@ impl MsgraphBackend {
         };
         let mut page = self
             .client
-            .event_instances(&event.id, &start, &end, &params)?
+            .event_instances(&event.id, &start, &end, &params)
+            .map_err(item_refusal)?
             .response;
 
         let mut exceptions = Vec::new();
@@ -661,6 +687,45 @@ pub(crate) mod scripted {
             .get_item("cal", "nope")
             .unwrap_err();
         assert_eq!(crate::error::code(&err), None, "{err:#}");
+    }
+
+    /// A series master the server refuses to read again is an entry coded
+    /// by the refusal, the other events listed, and one gone since the
+    /// listing (404) is left out with none; a later window names neither.
+    #[test]
+    fn a_refused_reread_is_an_entry_and_a_gone_one_is_left_out() {
+        let listing = r#"{"value":[
+            {"id":"S1","changeKey":"k1","subject":"Weekly","type":"seriesMaster"},
+            {"id":"S2","changeKey":"k1","subject":"Gone","type":"seriesMaster"},
+            {"id":"L","changeKey":"k1","subject":"Lone","type":"singleInstance"}
+        ]}"#;
+        let denied = refusal("ErrorAccessDenied");
+        let missing = refusal("ErrorItemNotFound");
+        let answers = [(200, listing), (403, &denied), (404, &missing)];
+
+        let listed = answering(&answers)
+            .list_items("cal", CalendarItemQuery::default())
+            .unwrap();
+        let ids: Vec<&str> = listed.items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(ids, ["L"]);
+
+        let [entry] = &listed.errors[..] else {
+            panic!("{:?}", listed.errors);
+        };
+        assert_eq!(entry.id.as_deref(), Some("S1"));
+        assert_eq!(entry.code, Some(ErrorCode::PermissionDenied));
+        assert_eq!(entry.error, "Cannot read event `S1` again");
+        assert_eq!(
+            entry.sources,
+            ["Microsoft Graph API returned HTTP 403 (ErrorAccessDenied): Refused"]
+        );
+
+        let later = CalendarItemQuery {
+            skip: 1,
+            ..Default::default()
+        };
+        let listed = answering(&answers).list_items("cal", later).unwrap();
+        assert!(listed.errors.is_empty(), "{:?}", listed.errors);
     }
 
     /// A write the server refuses prints its code in the failure object,

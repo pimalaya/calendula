@@ -18,6 +18,7 @@ use serde::Serialize;
 
 use crate::{
     capability::Capability,
+    error::{self, ItemError, ItemErrors},
     shared::{calendar::Calendar, client::CalendarClient},
 };
 
@@ -27,7 +28,9 @@ use crate::{
 /// when you need what only one backend exposes.
 ///
 /// JSON output: `{"calendars": [{"id", "name", "description", "color",
-/// "default"}]}`.
+/// "default"}], "errors": [{"id", "code", "error", "sources"}]}`, `errors`
+/// naming each calendar the backend could not read, as `Error:` lines at
+/// the end of the text, the command then exiting 3.
 #[derive(Debug, Parser)]
 pub struct CalendarListCommand;
 
@@ -35,8 +38,15 @@ impl CalendarListCommand {
     pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
         client.require(&[Capability::CalendarList])?;
 
-        let calendars = client.list_calendars()?;
-        printer.out(CalendarListOutput { calendars })
+        // NOTE: no backend names a calendar it could not read yet: each
+        // reads its calendars whole or fails.
+        let output = CalendarListOutput {
+            calendars: client.list_calendars()?,
+            errors: Vec::new(),
+        };
+
+        printer.out(&output)?;
+        error::partial_when(&output.errors)
     }
 }
 
@@ -46,6 +56,9 @@ impl CalendarListCommand {
 pub struct CalendarListOutput {
     /// The calendars of the account.
     pub calendars: Vec<Calendar>,
+    /// The error of each calendar the backend could not read, in the order
+    /// met.
+    pub errors: Vec<ItemError>,
 }
 
 impl fmt::Display for CalendarListOutput {
@@ -75,7 +88,8 @@ impl fmt::Display for CalendarListOutput {
             });
         }
 
-        write!(f, "{records}")
+        write!(f, "{records}")?;
+        ItemErrors::new(&self.errors).write_after(f)
     }
 }
 
@@ -90,11 +104,16 @@ pub(crate) fn body(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::shared::calendar::{Calendar, list::CalendarListOutput};
+    use anyhow::anyhow;
+
+    use crate::{
+        error,
+        shared::calendar::{Calendar, list::CalendarListOutput},
+    };
 
     #[test]
     fn calendars_print_as_records() {
-        let output = CalendarListOutput {
+        let mut output = CalendarListOutput {
             calendars: vec![
                 Calendar {
                     id: "personal".into(),
@@ -109,6 +128,7 @@ mod tests {
                     ..Default::default()
                 },
             ],
+            errors: Vec::new(),
         };
 
         let expected = "\
@@ -121,6 +141,21 @@ Color:  #ff0000
 
 work
 Name:  Work
+";
+        assert_eq!(output.to_string(), expected);
+
+        // NOTE: the errors print after the records and one blank line.
+        output.calendars.truncate(1);
+        output.calendars[0].description = None;
+        let err = anyhow!("Cannot read the metadata of calendar `old`");
+        output.errors.push(error::unreadable(Some("old"), err));
+
+        let expected = "\
+personal (default)
+Name:   Personal
+Color:  #ff0000
+
+Error:  old  item-unreadable  Cannot read the metadata of calendar `old`
 ";
         assert_eq!(output.to_string(), expected);
     }

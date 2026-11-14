@@ -15,6 +15,7 @@ use serde::Serialize;
 
 use crate::{
     capability::Capability,
+    error::{self, ItemError},
     shared::{
         arg::CalendarIdArg,
         client::CalendarClient,
@@ -51,8 +52,9 @@ use crate::{
 /// (`TZ`, then the system's). Each line shows the id, the start and the
 /// end in that local zone (`2026-10-30 09:00`), a whole-day event by its
 /// days, the end being the last one (`2026-05-19`), then the summary,
-/// between a header naming the account and the calendar and a footer
-/// saying where the page stands.
+/// under a header naming the account, the calendar and where the page
+/// stands. An item whose iCalendar does not parse prints no line but an
+/// `Error:` line at the end, and the command exits 3.
 ///
 /// JSON output: `{"events": [{"id", "uid", "recurrenceId", "summary",
 /// "description", "location", "start", "end", "allDay", "startsAt",
@@ -61,7 +63,8 @@ use crate::{
 /// "name", "partstat", "role", "rsvp", "cutype"}], "onlineMeetingUrl"}],
 /// "nextPage"}`, `nextPage` being the number of the page following this
 /// one as a string, which `--page-token` takes back, or `null` once the
-/// listing is complete.
+/// listing is complete, and `errors` names each item it could not read:
+/// `[{"id", "code", "error", "sources"}]`.
 #[derive(Debug, Parser)]
 pub struct EventListCommand {
     #[command(flatten)]
@@ -120,47 +123,50 @@ impl EventListCommand {
             ..Default::default()
         };
         let listed = client.list_items(&calendar_id, page, page_size, query)?;
-        let events = match &range {
+        let mut errors = listed.errors;
+        let (events, count) = match &range {
             Some(range) => {
-                let mut events: Vec<Event> = listed
-                    .items
-                    .iter()
-                    .flat_map(|item| Event::occurrences(item, Some(range)))
-                    .collect();
+                let (mut events, count) = Event::read_all(&listed.items, &mut errors, |item| {
+                    Event::try_occurrences(item, Some(range))
+                });
                 events.sort_by_key(|event| event.start_secs);
-                events
+                (events, count)
             }
-            None => listed.items.iter().flat_map(Event::project).collect(),
+            None => Event::read_all(&listed.items, &mut errors, Event::try_project),
         };
 
         let mut listing = Listing::new(&client.name, client.backend_name(), EVENT_NOUNS);
         listing.push("Calendar", &calendar_id);
         listing.page = page;
         listing.page_size = page_size;
-        listing.count = listed.items.len();
+        listing.count = count;
 
         let next_page = match page {
             Some(page) if listed.more => Some((page + 1).to_string()),
             _ => None,
         };
 
-        printer.out(EventListOutput {
+        let output = EventListOutput {
             listing,
             zone: local_zone(),
             events,
             next_page,
-        })
+            errors,
+        };
+
+        printer.out(&output)?;
+        error::partial_when(&output.errors)
     }
 }
 
-/// What the footer of an event listing calls one event, then several.
+/// What the header of an event listing calls one event, then several.
 pub(crate) const EVENT_NOUNS: [&str; 2] = ["event", "events"];
 
 /// The events of one page and the number of the next.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EventListOutput {
-    /// The header and footer the events print between.
+    /// The header the events print under.
     #[serde(skip)]
     pub listing: Listing,
     /// The zone a timed event's start and end print in.
@@ -171,6 +177,8 @@ pub struct EventListOutput {
     /// The number of the page following this one, given back through
     /// `--page-token`, `null` once the listing is complete.
     pub next_page: Option<String>,
+    /// The error of each item the page could not read, in the order met.
+    pub errors: Vec<ItemError>,
 }
 
 impl fmt::Display for EventListOutput {
@@ -188,8 +196,12 @@ impl fmt::Display for EventListOutput {
             ]);
         }
 
-        self.listing
-            .write(f, &columns.to_string(), self.next_page.as_deref())
+        self.listing.write(
+            f,
+            &columns.to_string(),
+            self.next_page.as_deref(),
+            &self.errors,
+        )
     }
 }
 
@@ -243,12 +255,16 @@ pub(crate) fn row_times(event: &Event, zone: &TimeZone) -> (String, String) {
 mod tests {
     use jiff::tz::TimeZone;
 
-    use crate::shared::{
-        event::{
-            Event,
-            list::{EVENT_NOUNS, EventListOutput, row_times},
+    use crate::{
+        error::ItemError,
+        shared::{
+            event::{
+                Event,
+                list::{EVENT_NOUNS, EventListOutput, row_times},
+            },
+            item::CalendarItem,
+            listing::Listing,
         },
-        listing::Listing,
     };
 
     fn event(all_day: bool, start: &str, end: &str) -> Event {
@@ -271,11 +287,24 @@ mod tests {
         listing
     }
 
+    /// The `errors` entry of an item `id` whose bytes do not parse, as the
+    /// listing builds it.
+    fn unparsed(id: &str) -> ItemError {
+        let item = CalendarItem {
+            id: id.into(),
+            contents: b"not a calendar".to_vec(),
+            ..Default::default()
+        };
+        let mut errors = Vec::new();
+        Event::read_all(&[item], &mut errors, Event::try_project);
+        errors.remove(0)
+    }
+
     /// One aligned line per event: the id, the start and the end, then the
-    /// summary, `-` standing for an empty one, between the account and
-    /// calendar above and the page under.
+    /// summary, `-` standing for an empty one, under the account, the
+    /// calendar and the page.
     #[test]
-    fn events_print_one_line_each_between_a_header_and_a_footer() {
+    fn events_print_one_line_each_under_a_header() {
         let mut standup = event(false, "20261030T080000Z", "20261030T083000Z");
         standup.id = "standup.ics".into();
         standup.summary = "Standup\x1b[2J".into();
@@ -292,17 +321,17 @@ mod tests {
             zone: TimeZone::UTC,
             events: vec![standup, holiday],
             next_page: Some(String::from("2")),
+            errors: Vec::new(),
         };
 
         let expected = "\
 Account:    perso (vdir)
 Calendar:   personal
+Page:       1, events 1 to 2
+Next page:  --page 2
 
 standup.ics  2026-10-30 08:00  2026-10-30 08:30  Standup\u{fffd}[2J
 holiday.ics  2026-05-19        2026-05-20        -
-
-Page:       1, events 1 to 2
-Next page:  --page 2
 ";
         assert_eq!(output.to_string(), expected);
 
@@ -313,10 +342,9 @@ Next page:  --page 2
         let expected = "\
 Account:    perso (vdir)
 Calendar:   personal
+Page:       2, event 3, the last
 
 standup.ics  2026-10-30 08:00  2026-10-30 08:30  Standup\u{fffd}[2J
-
-Page:       2, event 3, the last
 ";
         assert_eq!(output.to_string(), expected);
 
@@ -326,10 +354,59 @@ Page:       2, event 3, the last
         let expected = "\
 Account:    perso (vdir)
 Calendar:   personal
-
 Page:       3, empty
 ";
         assert_eq!(output.to_string(), expected);
+    }
+
+    /// The items the page could not read print last, after the rows and one
+    /// blank line, one aligned `Error:` line each, and with no row after the
+    /// header alone.
+    #[test]
+    fn the_errors_print_last_one_aligned_line_each() {
+        let mut standup = event(false, "20261030T080000Z", "20261030T083000Z");
+        standup.id = "standup.ics".into();
+        standup.summary = "Standup".into();
+        standup.start_secs = Some(1_793_347_200);
+        standup.end_secs = Some(1_793_349_000);
+
+        let mut output = EventListOutput {
+            listing: listing(Some(1), 1),
+            zone: TimeZone::UTC,
+            events: vec![standup],
+            next_page: None,
+            errors: vec![unparsed("c"), unparsed("broken\x1b[2J")],
+        };
+
+        let expected = "\
+Account:    perso (vdir)
+Calendar:   personal
+Page:       1, event 1, the last
+
+standup.ics  2026-10-30 08:00  2026-10-30 08:30  Standup
+
+Error:  c           item-unreadable  Cannot parse item `c` as iCalendar
+Error:  broken\u{fffd}[2J  item-unreadable  Cannot parse item `broken\u{fffd}[2J` as iCalendar
+";
+        assert_eq!(output.to_string(), expected);
+
+        output.listing = listing(Some(1), 0);
+        output.events.clear();
+        output.errors.truncate(1);
+
+        let expected = "\
+Account:    perso (vdir)
+Calendar:   personal
+Page:       1, empty
+
+Error:  c  item-unreadable  Cannot parse item `c` as iCalendar
+";
+        assert_eq!(output.to_string(), expected);
+
+        let json = serde_json::to_value(&output).unwrap();
+        assert_eq!(json["errors"][0]["id"], "c");
+        assert_eq!(json["errors"][0]["code"], "item-unreadable");
+        assert_eq!(json["errors"][0]["sources"].as_array().unwrap().len(), 1);
     }
 
     /// A window lists every match unpaged, and `event find` names the UID
@@ -348,16 +425,16 @@ Page:       3, empty
             zone: TimeZone::UTC,
             events: vec![found],
             next_page: None,
+            errors: Vec::new(),
         };
 
         let expected = "\
 Account:    perso (vdir)
 Calendar:   personal
 UID:        1@example.org
+Page:       all, event 1
 
 a.ics  20260519  20260520  Review
-
-Page:       all, event 1
 ";
         assert_eq!(output.to_string(), expected);
     }

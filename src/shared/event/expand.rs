@@ -31,7 +31,7 @@ use ical::{
         IcalRecurDateTime,
         set::{IcalRecurOverride, IcalRecurSet},
     },
-    tree::cst::IcalCst,
+    tree::{cst::IcalCst, error::IcalParseError},
     tz::{IcalTz, IcalTzOffset},
     tzdb,
     value::IcalValue,
@@ -70,15 +70,13 @@ const MEETING_PROPS: &[&str] = &[
 /// Every VEVENT of an item, one [`Event`] each, unexpanded.
 ///
 /// A series lists once, at its own `DTSTART`, and each override once at
-/// its own. An item whose bytes do not parse yields nothing.
-pub fn project(item: &CalendarItem) -> Vec<Event> {
-    let Ok(cst) = IcalCst::parse(&item.contents) else {
-        return Vec::new();
-    };
+/// its own. An item whose bytes do not parse is the parse error.
+pub fn project(item: &CalendarItem) -> Result<Vec<Event>, IcalParseError> {
+    let cst = IcalCst::parse(&item.contents)?;
     let ical = cst.decode();
     let context = Context::new(&ical);
 
-    vevents(&ical)
+    let events = vevents(&ical)
         .map(|vevent| {
             let start = stamp(vevent, IcalPropKind::DtStart);
             let times = start
@@ -89,7 +87,9 @@ pub fn project(item: &CalendarItem) -> Vec<Event> {
 
             context.event(&item.id, vevent, times, recurrence_id, is_recurring(vevent))
         })
-        .collect()
+        .collect();
+
+    Ok(events)
 }
 
 /// The calendar's `METHOD` uppercased (RFC 5546: `REQUEST`, `CANCEL`,
@@ -106,11 +106,13 @@ pub fn method(contents: &[u8]) -> Option<String> {
 }
 
 /// The occurrences of an item's events overlapping `range`, recurring
-/// series expanded, in start order.
-pub fn occurrences(item: &CalendarItem, range: Option<&CalendarTimeRange>) -> Vec<Event> {
-    let Ok(cst) = IcalCst::parse(&item.contents) else {
-        return Vec::new();
-    };
+/// series expanded, in start order, or the parse error of an item whose
+/// bytes do not parse.
+pub fn occurrences(
+    item: &CalendarItem,
+    range: Option<&CalendarTimeRange>,
+) -> Result<Vec<Event>, IcalParseError> {
+    let cst = IcalCst::parse(&item.contents)?;
     let ical = cst.decode();
     let context = Context::new(&ical);
     let window = range.map(Window::of).unwrap_or_default();
@@ -126,7 +128,7 @@ pub fn occurrences(item: &CalendarItem, range: Option<&CalendarTimeRange>) -> Ve
     }
 
     events.sort_by_key(|(at, _)| *at);
-    events.into_iter().map(|(_, event)| event).collect()
+    Ok(events.into_iter().map(|(_, event)| event).collect())
 }
 
 /// The one occurrence of an item addressed by `recurrence_id`, as an

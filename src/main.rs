@@ -184,10 +184,11 @@
 //! to the terminal: a list of short rows prints as aligned columns, a wide
 //! one as records the way `git log` prints commits, and a record as aligned
 //! `Label: value` lines, every string a server or a file gave defused first.
-//! `event list` and `item list` print one line each between a header naming
-//! the account and the calendar and a footer saying where the page stands;
-//! their JSON names the next page as `nextPage`, which `--page-token` takes
-//! back. A read prints the stored iCalendar defused of what could drive the
+//! `event list` and `item list` print one line each under a header naming
+//! the account, the calendar and where the page stands, and a listing prints
+//! the items it could not read last, one `Error:` line each; their JSON
+//! names the next page as `nextPage`, which `--page-token` takes back. A
+//! read prints the stored iCalendar defused of what could drive the
 //! terminal, its JSON keeping the bytes.
 //!
 //! Each command's doc comment is its help text, which makes `calendula

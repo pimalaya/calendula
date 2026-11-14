@@ -23,11 +23,15 @@ use chrono::{Datelike, Local, Locale, Months, NaiveDate, NaiveDateTime};
 use clap::Parser;
 use pimalaya_cli::{printer::Printer, sanitize};
 use schemars::{JsonSchema, Schema, SchemaGenerator};
-use serde::{Serialize, Serializer, ser::SerializeMap};
+use serde::{
+    Serialize, Serializer,
+    ser::{SerializeMap, SerializeStruct},
+};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
     capability::Capability,
+    error::{self, ItemError, ItemErrors},
     shared::{
         arg::CalendarIdArg,
         client::CalendarClient,
@@ -55,8 +59,13 @@ const DEFAULT_REFORM_YEAR: i32 = 1752;
 /// default, in plain text with no day highlighted. Every event the drawn
 /// days hold is then listed under the grid by its start date and time.
 ///
-/// JSON output: an object mapping each start datetime to the labels of
-/// every event starting at it.
+/// An item whose iCalendar does not parse is named by an `Error:` line at
+/// the end, and the command exits 3.
+///
+/// JSON output: `{"starts": {<datetime>: [<label>...]}, "errors": [{"id",
+/// "code", "error", "sources"}]}`, `starts` mapping each start datetime to
+/// the labels of every event starting at it, `errors` naming each item the
+/// agenda could not read.
 #[derive(Debug, Parser)]
 pub struct EventAgendaCommand {
     #[command(flatten)]
@@ -297,11 +306,10 @@ impl EventAgendaCommand {
             ..Default::default()
         };
         let listed = client.list_items(&calendar_id, None, None, query)?;
-        ctl.all_events = listed
-            .items
-            .iter()
-            .flat_map(|item| Event::occurrences(item, range.as_ref()))
-            .collect();
+        let mut errors = listed.errors;
+        (ctl.all_events, _) = Event::read_all(&listed.items, &mut errors, |item| {
+            Event::try_occurrences(item, range.as_ref())
+        });
 
         let mut grid = String::new();
 
@@ -311,7 +319,9 @@ impl EventAgendaCommand {
             monthly(&mut grid, &mut ctl)?;
         }
 
-        printer.out(EventAgendaOutput::new(grid, ctl.events).with_locale(ctl.names.locale))
+        let output = EventAgendaOutput::new(grid, ctl.events, errors).with_locale(ctl.names.locale);
+        printer.out(&output)?;
+        error::partial_when(&output.errors)
     }
 }
 
@@ -1030,6 +1040,8 @@ struct AgendaEvent {
 pub struct EventAgendaOutput {
     grid: String,
     events: BTreeMap<NaiveDateTime, Vec<AgendaEvent>>,
+    /// The error of each item the agenda could not read, in the order met.
+    errors: Vec<ItemError>,
     /// The locale the event times are stamped in; the JSON payload
     /// ignores it.
     locale: Locale,
@@ -1042,7 +1054,11 @@ impl EventAgendaOutput {
     /// Two copies of one event share a label, so the id is what breaks
     /// the tie and makes the order total: the same calendar renders the
     /// same way twice.
-    fn new(grid: String, mut events: BTreeMap<NaiveDateTime, Vec<AgendaEvent>>) -> Self {
+    fn new(
+        grid: String,
+        mut events: BTreeMap<NaiveDateTime, Vec<AgendaEvent>>,
+        errors: Vec<ItemError>,
+    ) -> Self {
         for at_instant in events.values_mut() {
             at_instant.sort_by(|a, b| a.label.cmp(&b.label).then_with(|| a.id.cmp(&b.id)));
         }
@@ -1050,6 +1066,7 @@ impl EventAgendaOutput {
         Self {
             grid,
             events,
+            errors,
             locale: Locale::POSIX,
         }
     }
@@ -1081,7 +1098,7 @@ impl fmt::Display for EventAgendaOutput {
             }
         }
 
-        Ok(())
+        ItemErrors::new(&self.errors).write_after(f)
     }
 }
 
@@ -1090,9 +1107,26 @@ impl Serialize for EventAgendaOutput {
     where
         S: Serializer,
     {
-        let mut map = serializer.serialize_map(Some(self.events.len()))?;
+        let mut agenda = serializer.serialize_struct("EventAgendaOutput", 2)?;
+        agenda.serialize_field("starts", &Starts(&self.events))?;
+        agenda.serialize_field("errors", &self.errors)?;
+        agenda.end()
+    }
+}
 
-        for (date, events) in &self.events {
+/// The events of an agenda as its JSON maps them: each instant keyed to
+/// the labels of the events starting at it, in the order the text renders
+/// them.
+struct Starts<'a>(&'a BTreeMap<NaiveDateTime, Vec<AgendaEvent>>);
+
+impl Serialize for Starts<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+
+        for (date, events) in self.0 {
             let labels: Vec<&str> = events.iter().map(|event| event.label.as_str()).collect();
             map.serialize_entry(date, &labels)?;
         }
@@ -1101,16 +1135,26 @@ impl Serialize for EventAgendaOutput {
     }
 }
 
-/// Describes exactly what the hand-written [`Serialize`] above emits,
-/// an instant keyed to the labels of the events starting at it, so the
-/// printed shape and the published schema cannot drift apart.
+/// The agenda's JSON shape, described for the schema.
+#[allow(dead_code)]
+#[derive(JsonSchema)]
+struct EventAgendaJson {
+    /// Each start datetime, mapped to the labels of every event starting
+    /// at it, in the order the text renders them.
+    starts: BTreeMap<String, Vec<String>>,
+    /// The error of each item the agenda could not read, in the order met.
+    errors: Vec<ItemError>,
+}
+
+/// Describes exactly what the hand-written [`Serialize`] above emits, so
+/// the printed shape and the published schema cannot drift apart.
 impl JsonSchema for EventAgendaOutput {
     fn schema_name() -> Cow<'static, str> {
         Cow::Borrowed("EventAgendaOutput")
     }
 
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        <BTreeMap<String, Vec<String>> as JsonSchema>::json_schema(generator)
+        EventAgendaJson::json_schema(generator)
     }
 }
 
@@ -1120,6 +1164,7 @@ mod tests {
     use serde_json::to_string;
 
     use super::*;
+    use crate::shared::item::CalendarItem;
 
     fn instant(hour: u32) -> NaiveDateTime {
         NaiveDate::from_ymd_opt(2026, 8, 14)
@@ -1140,7 +1185,7 @@ mod tests {
             events.entry(start).or_default().push(event);
         }
 
-        EventAgendaOutput::new(String::new(), events)
+        EventAgendaOutput::new(String::new(), events, Vec::new())
     }
 
     fn grid(year: i32, month: usize, num_months: usize, span_months: bool) -> CalControl {
@@ -1226,7 +1271,7 @@ mod tests {
 
         assert_eq!(
             to_string(&agenda).unwrap(),
-            r#"{"2026-08-14T09:00:00":["Pre demo MINIS","Pre demo woonies"]}"#
+            r#"{"starts":{"2026-08-14T09:00:00":["Pre demo MINIS","Pre demo woonies"]},"errors":[]}"#
         );
     }
 
@@ -1255,8 +1300,38 @@ mod tests {
         assert_eq!(agenda.to_string(), "Aug 14, 09:00: Stand-up\n");
         assert_eq!(
             to_string(&agenda).unwrap(),
-            r#"{"2026-08-14T09:00:00":["Stand-up"]}"#
+            r#"{"starts":{"2026-08-14T09:00:00":["Stand-up"]},"errors":[]}"#
         );
+    }
+
+    /// An item the agenda could not read prints last, after its lines and
+    /// one blank line, and reaches the JSON under `errors`.
+    #[test]
+    fn an_unparsed_item_prints_after_the_events() {
+        let item = CalendarItem {
+            id: "c".into(),
+            contents: b"not a calendar".to_vec(),
+            ..Default::default()
+        };
+        let mut errors = Vec::new();
+        Event::read_all(&[item], &mut errors, |item| {
+            Event::try_occurrences(item, None)
+        });
+
+        let mut agenda = agenda(vec![(instant(9), "1", "Stand-up")]);
+        agenda.errors = errors;
+
+        assert_eq!(
+            agenda.to_string(),
+            "Aug 14, 09:00: Stand-up\n\
+             \n\
+             Error:  c  item-unreadable  Cannot parse item `c` as iCalendar\n"
+        );
+
+        let json = serde_json::to_value(&agenda).unwrap();
+        assert_eq!(json["starts"]["2026-08-14T09:00:00"][0], "Stand-up");
+        assert_eq!(json["errors"][0]["id"], "c");
+        assert_eq!(json["errors"][0]["code"], "item-unreadable");
     }
 
     #[test]

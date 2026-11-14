@@ -26,8 +26,8 @@ use crate::{
 /// occurrences a rule alone does not describe.
 ///
 /// Each line shows the instance id, its status, its start and end as the
-/// server spells them, then its summary, between a header naming the
-/// account, the calendar and the series and a footer counting them.
+/// server spells them, then its summary, under a header naming the
+/// account, the calendar and the series and counting them.
 ///
 /// JSON output: `{"instances": [{"id", "summary", "start", "end",
 /// "status", "originalStart"}]}`.
@@ -112,7 +112,7 @@ impl GcalInstancesCommand {
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GcalInstancesOutput {
-    /// The header and footer the instances print between.
+    /// The header the instances print under.
     #[serde(skip)]
     pub listing: Listing,
     /// The occurrences of the series, one entry each.
@@ -152,6 +152,6 @@ impl fmt::Display for GcalInstancesOutput {
             ]);
         }
 
-        self.listing.write(f, &columns.to_string(), None)
+        self.listing.write(f, &columns.to_string(), None, &[])
     }
 }

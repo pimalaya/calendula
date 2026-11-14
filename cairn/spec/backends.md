@@ -29,7 +29,7 @@ A backend whose writes are queued for a sync to push, rather than made on the se
 pimdir is the only backend that queues its writes.
 
 ### Requirement: A server's refusal carries its code
-A failure a server refused SHALL carry a code of the vocabulary Himalaya shares, read from the typed error of the protocol that answered it, the failure object and an `account check` row alike:
+A failure a server refused SHALL carry a code of the vocabulary Himalaya shares, read from the typed error of the protocol that answered it, the failure object, an `errors` entry and an `account check` row alike:
 
 | Code | When |
 |---|---|
@@ -47,6 +47,15 @@ A refusal none of these name SHALL carry no code, its reason kept in `sources`. 
 - GIVEN a Graph calendar the account may read but not write
 - WHEN `calendula --json event delete <id>` runs
 - THEN it exits 1 printing a failure object coded `permission-denied`
+
+### Requirement: Each backend names the items it could not read
+A backend SHALL report an item it could not read as an `errors` entry and SHALL never drop it silently, with a warning alone, nor fail the listing for it:
+
+- every backend: an item whose iCalendar does not parse SHALL be an `item-unreadable` entry in `event list`, `event find` and the agenda, no event row printed for it; `item list` SHALL list it as it lists any item, with no entry. A kind or a range filter applied after parsing SHALL keep such an item, whose kind and dates cannot be read;
+- vdir: an item file that cannot be read SHALL be an `item-unreadable` entry naming the item, its error in `sources`; an item removed while it lists SHALL be left out with no entry;
+- Graph: an event whose series master or instances the server refused while they were read again SHALL be an entry coded by the refusal (`item-unreadable` when the refusal carries no code), the other events listed; one answered 404 SHALL be left out with no entry;
+- pimdir: a body that cannot be read, or that the blob tree does not hold, SHALL be an `item-unreadable` entry, the item listed with no bytes; a hydrated body that does not parse SHALL be an entry where the kind filter dropped it; an item whose body is not local yet SHALL be no entry;
+- CalDAV, Google Calendar: an answer or a page that fails SHALL fail the listing whole. Until io-webdav returns the rows it could not read, a CalDAV row refused per href is left out.
 
 ### Requirement: Backend selection order
 The unified commands SHALL target the backend the global `--backend` flag selects. Its default, `auto`, SHALL take the first configured-and-compiled backend in the order vdir, pimdir, CalDAV, gcal, msgraph, preferring a local read to a network round-trip and a protocol-standard server to a vendor API.
@@ -163,7 +172,7 @@ An item whose body is not local (`level < Full`, no stored object) SHALL still l
 
 A range filter SHALL still apply to it, read off the stored `text/calendar` summary rather than off bytes that are not local: a cache that hid its own undownloaded items from a date window would answer a different question than the one asked.
 
-An item naming an object the blob tree holds no body for is a different state: the store is inconsistent rather than partially synced. The blob file may be absent, or its entry no body at all (a directory, a link, bytes that do not hash to its name), which the store reads as absent (pimdir STORAGE §5, §7). It SHALL still list, and the listing SHALL log a warning naming the item, since the row renders the same as an unhydrated one and `get_item` refuses it outright.
+An item naming an object the blob tree holds no body for is a different state: the store is inconsistent rather than partially synced. The blob file may be absent, or its entry no body at all (a directory, a link, bytes that do not hash to its name), which the store reads as absent (pimdir STORAGE §5, §7). It SHALL still list, carrying no bytes, and the listing SHALL name it in its `errors`, coded `item-unreadable`, since the row renders the same as an unhydrated one and `get_item` refuses it outright.
 
 ### Requirement: pimdir writes are staged queue actions
 A pimdir write SHALL append one action to the store's queue (pimdir STORAGE §15.1) through one producer opened for that write, before anything is written, and dropped after it: `create_item` to `add`, `update_item` to `update`, `delete_item` to `remove`.

@@ -8,13 +8,14 @@
 //! keeps its session across lines and the [`crate::mcp`] server across
 //! tool calls, so the unified client connects once. A command that fails
 //! drops the client it ran on, its connection being possibly dead or left
-//! mid-exchange, and the next command builds it again. The protocol
-//! commands build their own client each time.
+//! mid-exchange, and the next command builds it again; one ending with a
+//! partial outcome (a listing with `errors`) printed its result, and keeps
+//! it. The protocol commands build their own client each time.
 
 use std::path::PathBuf;
 
 use anyhow::Result;
-use pimalaya_cli::printer::Printer;
+use pimalaya_cli::{error::partial_outcome_of, printer::Printer};
 
 use crate::{backend::Backend, shared::client::CalendarClient};
 
@@ -40,7 +41,8 @@ pub struct SessionAccount<'a> {
 
 impl Session<'_> {
     /// Runs a unified command over the kept client, building it when the
-    /// session holds none, and dropping it when the command fails.
+    /// session holds none, and dropping it when the command fails, a
+    /// partial outcome aside.
     pub fn run_unified<P: Printer>(
         &mut self,
         printer: &mut P,
@@ -58,7 +60,11 @@ impl Session<'_> {
 
         let result = command(printer, client);
 
-        if result.is_err() {
+        // NOTE: a partial outcome printed its result over a client that
+        // answered, so the session keeps it.
+        if let Err(err) = &result
+            && partial_outcome_of(err).is_none()
+        {
             self.unified = None;
         }
 

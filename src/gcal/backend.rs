@@ -43,7 +43,7 @@ use crate::{
         arg::SendUpdates,
         calendar::{Calendar, CalendarDiff},
         client::window,
-        item::{CalendarItem, CalendarItemQuery},
+        item::{CalendarItem, CalendarItemList, CalendarItemQuery},
     },
 };
 
@@ -166,7 +166,7 @@ impl GcalBackend {
         &mut self,
         calendar_id: &str,
         query: CalendarItemQuery<'_>,
-    ) -> Result<Vec<CalendarItem>> {
+    ) -> Result<CalendarItemList> {
         // NOTE: Google models a VEVENT and nothing else, so any other
         // kind is answered without a round-trip rather than by filtering
         // a listing that could never hold one.
@@ -174,7 +174,7 @@ impl GcalBackend {
             .kind
             .is_some_and(|kind| kind != IcalComponentKind::VEvent)
         {
-            return Ok(Vec::new());
+            return Ok(CalendarItemList::default());
         }
 
         let range = query.range;
@@ -208,7 +208,10 @@ impl GcalBackend {
         }
 
         let items = resources(calendar_id, &events);
-        Ok(window(items, query.skip, query.take))
+        Ok(CalendarItemList {
+            items: window(items, query.skip, query.take),
+            errors: Vec::new(),
+        })
     }
 
     /// Reads one event, with the exceptions of a series folded into it.

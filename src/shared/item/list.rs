@@ -14,6 +14,7 @@ use serde::Serialize;
 
 use crate::{
     capability::Capability,
+    error::{self, ItemError},
     shared::{
         arg::CalendarIdArg,
         client::CalendarClient,
@@ -27,14 +28,16 @@ use crate::{
 /// Every component kind is listed, VEVENT included; use `event list` for the
 /// events-only view with its summary and time columns.
 ///
-/// Each line shows the entity tag, the size and the id of an item, between
-/// a header naming the account and the calendar and a footer saying where
-/// the page stands.
+/// Each line shows the entity tag, the size and the id of an item, under a
+/// header naming the account, the calendar and where the page stands. An
+/// item the backend could not read is named by an `Error:` line at the
+/// end, and the command exits 3.
 ///
 /// JSON output: `{"items": [{"id", "calendarId", "etag", "contents"}],
-/// "nextPage"}`, `nextPage` being the number of the page following this
-/// one as a string, which `--page-token` takes back, or `null` once the
-/// listing is complete.
+/// "nextPage", "errors"}`, `nextPage` being the number of the page
+/// following this one as a string, which `--page-token` takes back, or
+/// `null` once the listing is complete, and `errors` naming each item it
+/// could not read: `[{"id", "code", "error", "sources"}]`.
 #[derive(Debug, Parser)]
 pub struct ItemListCommand {
     #[command(flatten)]
@@ -87,11 +90,15 @@ impl ItemListCommand {
             _ => None,
         };
 
-        printer.out(ItemListOutput {
+        let output = ItemListOutput {
             listing,
             items: listed.items,
             next_page,
-        })
+            errors: listed.errors,
+        };
+
+        printer.out(&output)?;
+        error::partial_when(&output.errors)
     }
 }
 
@@ -99,7 +106,7 @@ impl ItemListCommand {
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemListOutput {
-    /// The header and footer the items print between.
+    /// The header the items print under.
     #[serde(skip)]
     pub listing: Listing,
     /// The items of the page, in the order the backend listed them.
@@ -107,6 +114,8 @@ pub struct ItemListOutput {
     /// The number of the page following this one, given back through
     /// `--page-token`, `null` once the listing is complete.
     pub next_page: Option<String>,
+    /// The error of each item the page could not read, in the order met.
+    pub errors: Vec<ItemError>,
 }
 
 impl fmt::Display for ItemListOutput {
@@ -123,8 +132,12 @@ impl fmt::Display for ItemListOutput {
             ]);
         }
 
-        self.listing
-            .write(f, &columns.to_string(), self.next_page.as_deref())
+        self.listing.write(
+            f,
+            &columns.to_string(),
+            self.next_page.as_deref(),
+            &self.errors,
+        )
     }
 }
 
@@ -141,9 +154,16 @@ fn size_of(item: &CalendarItem) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::shared::{
-        item::{CalendarItem, list::ItemListOutput},
-        listing::Listing,
+    use std::io;
+
+    use anyhow::anyhow;
+
+    use crate::{
+        error,
+        shared::{
+            item::{CalendarItem, list::ItemListOutput},
+            listing::Listing,
+        },
     };
 
     #[test]
@@ -169,16 +189,57 @@ mod tests {
                 },
             ],
             next_page: None,
+            errors: Vec::new(),
         };
 
         let expected = "\
 Account:    perso (caldav)
 Calendar:   personal
+Page:       1, items 1 to 2, the last
 
 \"1a2b\"  2 KiB  standup.ics
 -       -      pending.ics
+";
+        assert_eq!(output.to_string(), expected);
+    }
 
-Page:       1, items 1 to 2, the last
+    /// An item the backend could not read prints as an `Error:` line last,
+    /// built as vdir and pimdir build their entries.
+    #[test]
+    fn an_unread_item_prints_last() {
+        let mut listing = Listing::new("perso", "pimdir", ["item", "items"]);
+        listing.push("Calendar", "personal");
+        listing.page = Some(2);
+        listing.page_size = Some(1);
+        listing.count = 1;
+
+        let denied = io::Error::from(io::ErrorKind::PermissionDenied);
+        let file = anyhow::Error::from(denied).context("Cannot read item file /home/c.ics");
+        let blob = anyhow!("Body blob missing for item `7` in calendar `personal`");
+
+        let output = ItemListOutput {
+            listing,
+            items: vec![CalendarItem {
+                id: "7".into(),
+                ..Default::default()
+            }],
+            next_page: Some(String::from("3")),
+            errors: vec![
+                error::unreadable(Some("c"), file),
+                error::unreadable(Some("7"), blob),
+            ],
+        };
+
+        let expected = "\
+Account:    perso (pimdir)
+Calendar:   personal
+Page:       2, item 2
+Next page:  --page 3
+
+-  -  7
+
+Error:  c  item-unreadable  Cannot read item file /home/c.ics
+Error:  7  item-unreadable  Body blob missing for item `7` in calendar `personal`
 ";
         assert_eq!(output.to_string(), expected);
     }

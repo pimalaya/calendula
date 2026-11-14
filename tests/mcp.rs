@@ -385,6 +385,33 @@ fn a_call_answers_the_payload_its_output_schema_describes() {
     ids.sort_unstable();
     assert_eq!(ids, ["review", "standup"]);
     assert!(responses[2]["result"]["structuredContent"]["nextPage"].is_null());
+    assert_eq!(
+        responses[2]["result"]["structuredContent"]["errors"],
+        json!([])
+    );
+}
+
+/// A listing naming an item it could not read answers its payload, the
+/// item in its `errors`, as a tool error.
+#[test]
+fn a_listing_with_errors_answers_its_payload_as_a_tool_error() {
+    let home = account();
+    let calendar = home.path().join("calendars").join("personal");
+    fs::write(calendar.join("broken.ics"), "not a calendar").unwrap();
+
+    let responses = serve(
+        home.path(),
+        &[],
+        &[call(1, "event_list", json!({ "calendar": "personal" }))],
+    );
+
+    let result = &responses[0]["result"];
+    assert_eq!(result["isError"], true, "{result}");
+
+    let content = &result["structuredContent"];
+    assert_eq!(content["events"].as_array().unwrap().len(), 2, "{result}");
+    assert_eq!(content["errors"][0]["id"], "broken", "{result}");
+    assert_eq!(content["errors"][0]["code"], "item-unreadable", "{result}");
 }
 
 #[test]

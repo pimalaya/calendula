@@ -15,10 +15,17 @@
 //! [`with_code`] hands the code to the failure object, which reads coded
 //! errors alone.
 
+use std::fmt;
+
 use anyhow::Error;
-use pimalaya_cli::error::{CodedError, code_of};
+use pimalaya_cli::{
+    columns::Columns,
+    error::{CodedError, PartialOutcome, code_of},
+    sanitize,
+};
 use schemars::JsonSchema;
 use serde::Serialize;
+use serde_json::Value;
 
 /// The stable codes, each serialised in kebab-case.
 ///
@@ -125,8 +132,81 @@ pub enum ErrorCode {
 }
 
 /// The error of one item a command could not list or act on.
-#[allow(dead_code)]
 pub type ItemError = pimalaya_cli::error::ItemError<ErrorCode>;
+
+/// The `errors` entry of the item `id` a listing could not read: coded by
+/// the refusal `err` carries, else `item-unreadable`.
+pub fn unreadable(id: Option<&str>, err: Error) -> ItemError {
+    let mut entry = ItemError::new(id, &with_code(err));
+    entry.code.get_or_insert(ErrorCode::ItemUnreadable);
+    entry
+}
+
+/// The end of a command that printed its result with `errors`: a partial
+/// outcome, exit 3, when one is listed.
+pub fn partial_when(errors: &[ItemError]) -> Result<(), Error> {
+    match errors.is_empty() {
+        true => Ok(()),
+        false => Err(PartialOutcome::default().into()),
+    }
+}
+
+/// The item errors a command prints last, one aligned `Error:` line each.
+///
+/// A command prints them after its output and one blank line, and prints
+/// nothing, blank line included, when there are none. A copy of
+/// pimalaya-cli's `error::ItemErrors` (79c0d9e), byte for byte, until
+/// calendula takes the release carrying it.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ItemErrors {
+    /// The id, code and message cells of each error, in print order.
+    rows: Vec<[String; 3]>,
+}
+
+impl ItemErrors {
+    /// The lines of `errors`, in their order.
+    pub fn new(errors: &[ItemError]) -> Self {
+        Self {
+            rows: errors.iter().map(cells).collect(),
+        }
+    }
+
+    /// Writes one blank line then the errors, nothing when there are none.
+    pub fn write_after(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.rows.is_empty() {
+            return Ok(());
+        }
+
+        writeln!(f)?;
+        write!(f, "{self}")
+    }
+}
+
+impl fmt::Display for ItemErrors {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut columns = Columns::default();
+
+        for [id, code, error] in &self.rows {
+            columns.push(["Error:", id, code, error]);
+        }
+
+        write!(f, "{columns}")
+    }
+}
+
+/// The id, the code and the message of `error`, sanitized, an absent one
+/// `-`, the code spelled as JSON spells it.
+fn cells(error: &ItemError) -> [String; 3] {
+    let id = sanitize::text(error.id.as_deref().unwrap_or("-")).into_owned();
+
+    let code = match &error.code {
+        Some(code) => serde_json::to_value(code).unwrap_or(Value::Null),
+        None => Value::Null,
+    };
+    let code = code.as_str().unwrap_or("-").to_owned();
+
+    [id, code, sanitize::text(&error.error).into_owned()]
+}
 
 /// A refusal under `item-not-found`: the item a command names is not in
 /// the calendar.

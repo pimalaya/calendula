@@ -184,19 +184,20 @@ fn missing_dtstart(ical: &Ical<'_>) -> Vec<String> {
         .collect()
 }
 
-/// Whether an item carries a component of `kind`.
+/// Whether an item may carry a component of `kind`: it carries one, or
+/// its bytes do not parse.
 ///
 /// Only the two backends that narrow a listing after parsing it read
 /// this; CalDAV pushes the kind down and gcal models one kind only.
 ///
 /// The projections are keyed on a marker type, which a listing narrowing
 /// by a kind it only knows at runtime cannot use, so this reads the
-/// decoded component names instead. Bytes that do not parse carry
-/// nothing, which is what a projection makes of them too.
+/// decoded component names instead. Bytes that do not parse may be of
+/// any kind, so a kind filter keeps them and the listing names them.
 #[cfg(any(feature = "vdir", feature = "pimdir"))]
-pub fn holds_kind(contents: &[u8], kind: IcalComponentKind) -> bool {
+pub fn may_hold_kind(contents: &[u8], kind: IcalComponentKind) -> bool {
     let Ok(cst) = IcalCst::parse(contents) else {
-        return false;
+        return true;
     };
 
     cst.decode()
@@ -306,7 +307,7 @@ mod tests {
     use ical::component::IcalComponentKind;
 
     #[cfg(any(feature = "vdir", feature = "pimdir"))]
-    use crate::shared::ical::holds_kind;
+    use crate::shared::ical::may_hold_kind;
     use crate::shared::ical::{IcalFamily, blank_item, check, invites, read_source};
 
     #[test]
@@ -333,7 +334,7 @@ mod tests {
 
     #[cfg(any(feature = "vdir", feature = "pimdir"))]
     #[test]
-    fn an_item_answers_the_kind_it_carries_and_no_other() {
+    fn an_item_answers_the_kind_it_carries_and_unparsed_bytes_any() {
         let item = |kind: &str| {
             format!(
                 "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//x//y//EN\r\n\
@@ -342,18 +343,18 @@ mod tests {
             )
         };
 
-        assert!(holds_kind(
+        assert!(may_hold_kind(
             item("VTODO").as_bytes(),
             IcalComponentKind::VTodo
         ));
-        assert!(!holds_kind(
+        assert!(!may_hold_kind(
             item("VTODO").as_bytes(),
             IcalComponentKind::VEvent
         ));
 
-        // NOTE: bytes that carry nothing readable carry no kind either,
-        // which is what a projection makes of them too.
-        assert!(!holds_kind(b"not an ical", IcalComponentKind::VEvent));
+        // NOTE: bytes that do not parse may be of any kind, for the
+        // listing to name them.
+        assert!(may_hold_kind(b"not an ical", IcalComponentKind::VEvent));
     }
 
     #[test]

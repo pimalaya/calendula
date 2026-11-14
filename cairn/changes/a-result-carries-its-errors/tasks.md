@@ -44,20 +44,20 @@ change: a-result-carries-its-errors
 
 ## Phase 3, the listings (commit `feat!: list the calendars and items a listing could not read`)
 
-- [ ] `CalendarListOutput` (src/shared/calendar/list.rs:46), `EventListOutput` (src/shared/event/list.rs:162, also `event find`), `ItemListOutput` (src/shared/item/list.rs:101) gain `errors: Vec<ItemError>`, required in their schema; `EventAgendaOutput` (agenda.rs:1030) serializes `{starts, errors}` (its custom `Serialize` :1088 and `JsonSchema` :1107 follow); the unified client (src/shared/client.rs:445-470) carries the entries beside the items.
-- [ ] An unparseable item in `event list`, `event find` and the agenda: an `item-unreadable` entry (src/shared/event/expand.rs:74-77, :107-110 return the error instead of nothing, or their callers keep it); `event list`'s `count` counts listed events (list.rs:139).
-- [ ] vdir (src/vdir/backend.rs:115-131): `list_readable_items`, one entry per failed file; a vanished file left out silently. Check the collection listing on an unreadable metadata file: an entry coded `calendar-unreadable` if it fails today, else drop that code.
-- [ ] Graph (src/msgraph/backend.rs:184-189): a refused re-read is an entry, a 404 leaves the event out, the others listed.
-- [ ] pimdir (src/pimdir/backend.rs:611-625, :613, :1094-1097): entries for an unreadable blob, a blob the tree does not hold and a hydrated body that does not parse; the `warn!` goes; unhydrated items unchanged.
-- [ ] Paging: whole-read backends print their entries on the first page only; pimdir on the page holding the item.
-- [ ] A non-empty `errors` returns `PartialOutcome::default()` after printing (exit 3).
-- [ ] Text: src/shared/listing.rs moves the paging fields from the footer into the header (`gcal instances` included). Every listing prints its `Error:` lines last, after its rows and one blank line, nothing at all when `errors` is empty. The text tests follow the moved paging and gain a case with an entry; "Text output is plain text" folded as delta.md words it.
-- [ ] json-schema: `calendula-item-error` registered (src/json_schema.rs:206).
-- [ ] MCP: the instructions (src/mcp.rs:62-64) name `errors`; tests/mcp.rs gains an `event_list` over a vdir holding an unparseable item, asserting `isError: true` with `structuredContent.errors`.
-- [ ] `Session::run_unified` (src/session.rs:44-66) keeps its client after a `PartialOutcome`; tests/repl.rs asserts a second line reuses the session after an exit-3 line.
-- [ ] Tests: tests/event_list.rs over a temp vdir holding one unparseable `.ics` and one `chmod 000` file (unix only) prints the others, two entries, exit 3; the agenda's JSON root; tests/usage.rs or a new tests/exit.rs case for exit 3; the live suites' helpers (tests/common.rs `assert_events`) adjusted if they compare whole objects.
-- [ ] Spec: the listing requirements folded (see delta.md).
-- [ ] Phase checks pass.
+- [x] `CalendarListOutput` (src/shared/calendar/list.rs:46), `EventListOutput` (src/shared/event/list.rs:162, also `event find`), `ItemListOutput` (src/shared/item/list.rs:101) gain `errors: Vec<ItemError>`, required in their schema; `EventAgendaOutput` (agenda.rs:1030) serializes `{starts, errors}` (its custom `Serialize` :1088 and `JsonSchema` :1107 follow); the unified client (src/shared/client.rs:445-470) carries the entries beside the items. Done through `CalendarItemList {items, errors}` returned by every backend's `list_items` and `CalendarItemPage.errors`; the unified client drops an entry naming the item it cut past the page. `calendar list` always prints `[]`: no backend names a calendar it could not read.
+- [x] An unparseable item in `event list`, `event find` and the agenda: an `item-unreadable` entry (src/shared/event/expand.rs:74-77, :107-110 return the error instead of nothing, or their callers keep it); `event list`'s `count` counts listed events (list.rs:139). Done with `Event::try_project`, `Event::try_occurrences` and `Event::read_all` (src/shared/event.rs); the kind filter (`may_hold_kind`, renamed from `holds_kind`) and the range filters (`starts_within`, pimdir `in_range`) keep an item that does not parse, else vdir and pimdir would drop it before the command sees it.
+- [x] vdir (src/vdir/backend.rs:115-131): `list_readable_items`, one entry per failed file; a vanished file left out silently. Check the collection listing on an unreadable metadata file: an entry coded `calendar-unreadable` if it fails today, else drop that code. `calendar-unreadable` stays dropped (Phase 2): io-vdir 0.3's `list_collections` fails whole on an unreadable metadata file.
+- [x] Graph (src/msgraph/backend.rs:184-189): a refused re-read is an entry, a 404 leaves the event out, the others listed. An entry with no refusal code is `item-unreadable`; the instances call now maps through `item_refusal` so its 404 leaves the event out too.
+- [x] pimdir (src/pimdir/backend.rs:611-625, :613, :1094-1097): entries for an unreadable blob, a blob the tree does not hold and a hydrated body that does not parse; the `warn!` goes; unhydrated items unchanged.
+- [x] Paging: whole-read backends print their entries on the first page only; pimdir on the page holding the item. An item that does not parse holds a place on its page, so its entry prints on that page on every backend.
+- [x] A non-empty `errors` returns `PartialOutcome::default()` after printing (exit 3).
+- [x] Text: src/shared/listing.rs moves the paging fields from the footer into the header (`gcal instances` included). Every listing prints its `Error:` lines last, after its rows and one blank line, nothing at all when `errors` is empty. The text tests follow the moved paging and gain a case with an entry; "Text output is plain text" folded as delta.md words it. The `Error:` lines are a local copy of pimalaya-cli 79c0d9e's `ItemErrors` (src/error.rs).
+- [x] json-schema: `calendula-item-error` registered (src/json_schema.rs:206).
+- [x] MCP: the instructions (src/mcp.rs:62-64) name `errors`; tests/mcp.rs gains an `event_list` over a vdir holding an unparseable item, asserting `isError: true` with `structuredContent.errors`.
+- [x] `Session::run_unified` (src/session.rs:44-66) keeps its client after a `PartialOutcome`; tests/repl.rs asserts a second line reuses the session after an exit-3 line.
+- [x] Tests: tests/event_list.rs over a temp vdir holding one unparseable `.ics` and one `chmod 000` file (unix only) prints the others, two entries, exit 3; the agenda's JSON root; tests/usage.rs or a new tests/exit.rs case for exit 3; the live suites' helpers (tests/common.rs `assert_events`) adjusted if they compare whole objects. Exit 3 is asserted in tests/event_list.rs; `assert_events` compares keys, not whole objects, so it is unchanged.
+- [x] Spec: the listing requirements folded (see delta.md).
+- [x] Phase checks pass.
 
 ## Phase 4, CalDAV rows (after io-webdav's a-listing-returns-what-it-could-not-read is pushed and pinned)
 

@@ -23,11 +23,16 @@ pub mod list;
 pub mod read;
 pub mod update;
 
+use anyhow::Result;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+use ical::tree::error::IcalParseError;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::shared::item::{CalendarItem, CalendarTimeRange};
+use crate::{
+    error::{self, ItemError},
+    shared::item::{CalendarItem, CalendarTimeRange},
+};
 
 /// A VEVENT projected out of a [`CalendarItem`]'s iCalendar bytes, or one
 /// occurrence of a recurring one.
@@ -152,13 +157,67 @@ impl Event {
     /// so one malformed resource does not stop the rest of the calendar from
     /// rendering.
     pub fn project(item: &CalendarItem) -> Vec<Self> {
-        tagged(item, expand::project(item))
+        Self::try_project(item).unwrap_or_default()
+    }
+
+    /// Projects every VEVENT carried by `item` as [`Event::project`] does,
+    /// or the reason its bytes do not parse. An item with no bytes, whose
+    /// body is not local yet, carries no event.
+    pub fn try_project(item: &CalendarItem) -> Result<Vec<Self>> {
+        if item.contents.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let events = expand::project(item).map_err(|err| unparsed(item, err))?;
+        Ok(tagged(item, events))
     }
 
     /// Projects the occurrences of `item`'s events overlapping `range`,
     /// recurring series expanded, in start order.
+    #[cfg_attr(
+        not(any(feature = "vdir", feature = "msgraph", feature = "pimdir")),
+        allow(dead_code)
+    )]
     pub fn occurrences(item: &CalendarItem, range: Option<&CalendarTimeRange>) -> Vec<Self> {
-        tagged(item, expand::occurrences(item, range))
+        Self::try_occurrences(item, range).unwrap_or_default()
+    }
+
+    /// Projects the occurrences of `item`'s events overlapping `range` as
+    /// [`Event::occurrences`] does, or the reason its bytes do not parse.
+    pub fn try_occurrences(
+        item: &CalendarItem,
+        range: Option<&CalendarTimeRange>,
+    ) -> Result<Vec<Self>> {
+        if item.contents.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let events = expand::occurrences(item, range).map_err(|err| unparsed(item, err))?;
+        Ok(tagged(item, events))
+    }
+
+    /// The events `project` reads off each of `items`, an item whose bytes
+    /// do not parse printing no event but an `item-unreadable` entry pushed
+    /// to `errors`. Returns the events and how many items they came from.
+    pub fn read_all(
+        items: &[CalendarItem],
+        errors: &mut Vec<ItemError>,
+        project: impl Fn(&CalendarItem) -> Result<Vec<Self>>,
+    ) -> (Vec<Self>, usize) {
+        let mut events = Vec::new();
+        let mut read = 0;
+
+        for item in items {
+            match project(item) {
+                Ok(projected) => {
+                    events.extend(projected);
+                    read += 1;
+                }
+                Err(err) => errors.push(error::unreadable(Some(&item.id), err)),
+            }
+        }
+
+        (events, read)
     }
 
     /// Projects the one occurrence of `item` that `recurrence_id` names.
@@ -185,6 +244,11 @@ impl Event {
 }
 
 /// Stamps every event projected from `item` with the item's entity tag.
+/// The failure of an item whose bytes do not parse as iCalendar.
+fn unparsed(item: &CalendarItem, err: IcalParseError) -> anyhow::Error {
+    anyhow::Error::from(err).context(format!("Cannot parse item `{}` as iCalendar", item.id))
+}
+
 fn tagged(item: &CalendarItem, events: Vec<Event>) -> Vec<Event> {
     events
         .into_iter()

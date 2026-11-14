@@ -52,7 +52,7 @@ use crate::{
         arg::SendUpdates,
         calendar::{Calendar, CalendarDiff},
         ical::invites,
-        item::{CalendarItem, CalendarItemPage, CalendarItemQuery},
+        item::{CalendarItem, CalendarItemList, CalendarItemPage, CalendarItemQuery},
     },
 };
 
@@ -458,14 +458,26 @@ impl CalendarClient {
             query.take = Some(size.saturating_add(1));
         }
 
-        let mut items = self.list_window(calendar_id, query)?;
+        let CalendarItemList {
+            mut items,
+            mut errors,
+        } = self.list_window(calendar_id, query)?;
         let more = page_size.is_some_and(|size| items.len() > size);
 
-        if let Some(size) = page_size {
-            items.truncate(size);
+        if let Some(size) = page_size
+            && items.len() > size
+        {
+            // NOTE: the item past the page is the next page's, and so is
+            // an entry naming it.
+            let past: Vec<String> = items.drain(size..).map(|item| item.id).collect();
+            errors.retain(|error| error.id.as_ref().is_none_or(|id| !past.contains(id)));
         }
 
-        Ok(CalendarItemPage { items, more })
+        Ok(CalendarItemPage {
+            items,
+            more,
+            errors,
+        })
     }
 
     /// Lists the items of `calendar_id` narrowed by `query`.
@@ -478,7 +490,7 @@ impl CalendarClient {
         &mut self,
         calendar_id: &str,
         query: CalendarItemQuery<'_>,
-    ) -> Result<Vec<CalendarItem>> {
+    ) -> Result<CalendarItemList> {
         match self.open()? {
             #[cfg(not(any(
                 feature = "vdir",

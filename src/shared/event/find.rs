@@ -9,6 +9,7 @@ use pimalaya_cli::printer::Printer;
 
 use crate::{
     capability::Capability,
+    error,
     shared::{
         arg::CalendarIdArg,
         client::CalendarClient,
@@ -34,8 +35,11 @@ use crate::{
 /// summary names each resource's `UID`, only the bodies that may carry
 /// this one are read.
 ///
-/// JSON output: `{"events": [...], "nextPage": null}`, shaped as `event
-/// list` prints them.
+/// An item whose iCalendar does not parse, which may carry the UID, is
+/// named by an `Error:` line at the end, and the command exits 3.
+///
+/// JSON output: `{"events": [...], "nextPage": null, "errors": [...]}`,
+/// shaped as `event list` prints them.
 #[derive(Debug, Parser)]
 pub struct EventFindCommand {
     #[command(flatten)]
@@ -59,12 +63,9 @@ impl EventFindCommand {
         };
         let listed = client.list_items(&calendar_id, None, None, query)?;
 
-        let events: Vec<Event> = listed
-            .items
-            .iter()
-            .flat_map(Event::project)
-            .filter(|event| event.uid == self.uid)
-            .collect();
+        let mut errors = listed.errors;
+        let (mut events, _) = Event::read_all(&listed.items, &mut errors, Event::try_project);
+        events.retain(|event| event.uid == self.uid);
 
         let mut ids: Vec<&str> = events.iter().map(|event| event.id.as_str()).collect();
         ids.dedup();
@@ -74,11 +75,15 @@ impl EventFindCommand {
         listing.push("UID", &self.uid);
         listing.count = ids.len();
 
-        printer.out(EventListOutput {
+        let output = EventListOutput {
             listing,
             zone: local_zone(),
             events,
             next_page: None,
-        })
+            errors,
+        };
+
+        printer.out(&output)?;
+        error::partial_when(&output.errors)
     }
 }

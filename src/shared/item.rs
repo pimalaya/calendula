@@ -25,6 +25,7 @@ use ical::component::IcalComponentKind;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::error::ItemError;
 #[cfg(any(feature = "vdir", feature = "msgraph"))]
 use crate::shared::event::Event;
 
@@ -54,26 +55,46 @@ impl CalendarItem {
     ///
     /// The filter of a backend that cannot narrow a listing server-side.
     /// An item carrying no event is kept only when no range was asked for,
-    /// so a filtered listing never shows an undated resource.
+    /// so a filtered listing never shows an undated resource. One whose
+    /// bytes do not parse is kept, so the listing names it rather than
+    /// drops it.
     pub fn starts_within(&self, range: Option<&CalendarTimeRange>) -> bool {
         let Some(range) = range else {
             return true;
         };
 
-        Event::project(self)
-            .iter()
-            .any(|event| range.contains(&event.start))
+        let Ok(events) = Event::try_project(self) else {
+            return true;
+        };
+
+        events.iter().any(|event| range.contains(&event.start))
             || !Event::occurrences(self, Some(range)).is_empty()
     }
 }
 
+/// The items a backend listed, beside the error of each item it could not
+/// read, in the order met.
+///
+/// A backend reading the whole calendar before cutting its window names
+/// its errors on the first window alone, one listing an item it could not
+/// read names it beside that item.
+#[derive(Clone, Debug, Default)]
+pub struct CalendarItemList {
+    /// The items of the window, in the order the backend lists them.
+    pub items: Vec<CalendarItem>,
+    /// The error of each item the backend could not read.
+    pub errors: Vec<ItemError>,
+}
+
 /// One page of an item listing, and whether an item follows it.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct CalendarItemPage {
     /// The items of the page, in the order the backend lists them.
     pub items: Vec<CalendarItem>,
     /// Whether the listing holds an item past the page.
     pub more: bool,
+    /// The error of each item of the page the backend could not read.
+    pub errors: Vec<ItemError>,
 }
 
 /// What narrows an item listing, and in which order.

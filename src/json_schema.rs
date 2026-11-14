@@ -21,7 +21,7 @@ use schemars::JsonSchema;
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "vdir"))]
 use crate::shared::receipt::IdReceipt;
 use crate::{
-    error::ErrorCode,
+    error::{ErrorCode, ItemError},
     shared::{
         build::{IcalBuildOutput, SavedOutput},
         receipt::WriteReceipt,
@@ -31,7 +31,8 @@ use crate::{
 /// Builds the command-to-schema registry consumed by `json-schema <DIR>`.
 ///
 /// Each value describes the type the command hands to the printer, and
-/// `calendula-error` the failure object every command prints instead.
+/// `calendula-error` the failure object every command prints instead, and
+/// `calendula-item-error` an entry of the `errors` a listing prints.
 pub fn registry() -> JsonSchemaRegistry {
     let mut registry = JsonSchemaRegistry::new("calendula", env!("CARGO_PKG_VERSION"));
 
@@ -204,6 +205,7 @@ pub fn registry() -> JsonSchemaRegistry {
     }
 
     insert!("calendula-error", ErrorReport<ErrorCode>);
+    insert!("calendula-item-error", ItemError);
 
     registry
 }

@@ -26,7 +26,7 @@ use crate::{
     shared::{
         calendar::{Calendar, CalendarDiff},
         client::window,
-        item::{CalendarItem, CalendarItemQuery},
+        item::{CalendarItem, CalendarItemList, CalendarItemQuery},
     },
 };
 
@@ -114,7 +114,7 @@ impl CaldavBackend {
         &mut self,
         calendar_id: &str,
         query: CalendarItemQuery<'_>,
-    ) -> Result<Vec<CalendarItem>> {
+    ) -> Result<CalendarItemList> {
         let entries = self.client.list_items(calendar_id, &comp_filter(&query))?;
 
         let items = entries
@@ -122,7 +122,10 @@ impl CaldavBackend {
             .map(|entry| item_from(calendar_id, entry))
             .collect();
 
-        Ok(window(items, query.skip, query.take))
+        Ok(CalendarItemList {
+            items: window(items, query.skip, query.take),
+            errors: Vec::new(),
+        })
     }
 
     /// Reads one item's raw iCalendar bytes plus its entity tag.

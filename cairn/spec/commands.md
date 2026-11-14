@@ -60,7 +60,7 @@ Both SHALL share the `-k/--calendar` selector and the same item API; only the re
 ### Requirement: One family per stored component kind
 calendula SHALL be the events CLI: the unified API SHALL offer one projected family, `event`, for VEVENT. VTODO belongs to unfog and VJOURNAL to journal, one CLI per iCalendar domain, since CalDAV holds one component type per calendar object resource (RFC 4791 4.1) and the providers run events, tasks and notes as separate services.
 
-`event` SHALL cover `list`, `read`, `create`, `update` and `delete` over the item API. An item whose bytes do not parse SHALL project nothing rather than fail the listing.
+`event` SHALL cover `list`, `read`, `create`, `update` and `delete` over the item API. An item whose bytes do not parse SHALL project nothing rather than fail the listing, the listing naming it in its `errors` ("A listing names the items it could not read").
 
 #### Scenario: A to-do in an event calendar
 - GIVEN a CalDAV calendar holding a VEVENT and a VTODO
@@ -86,7 +86,7 @@ Two events may legitimately start at the same moment: two unrelated meetings at 
 
 A view keyed by the instant alone shows the last one written and reports nothing, which loses exactly the event the store went to the trouble of keeping.
 
-The `--json` payload SHALL carry the same multiplicity, so a consumer reading it is not told there was one event where there were two: it maps each start datetime to the list of the labels starting at it, in the same order the text renders them.
+The `--json` payload SHALL carry the same multiplicity, so a consumer reading it is not told there was one event where there were two: under `starts`, it maps each start datetime to the list of the labels starting at it, in the same order the text renders them, and under `errors` it lists the items the agenda could not read ("A listing names the items it could not read").
 
 No second shape SHALL be kept beside it, since one that still dropped an event would leave the defect reachable.
 
@@ -155,7 +155,7 @@ VFREEBUSY and VTIMEZONE SHALL NOT get a family.
 A VFREEBUSY is the answer to a query rather than a resource a calendar stores, and where a backend offers such a query it belongs to that backend's own protocol-specific family. A VTIMEZONE defines the zones the other components reference and is not an item a user lists.
 
 ### Requirement: Projections never rewrite bytes
-Projecting a VEVENT out of an item SHALL be read-only and lossy by design: calendula returns what the backend holds. An item whose bytes do not parse SHALL project no event rather than fail the listing, so one malformed resource cannot hide a whole calendar.
+Projecting a VEVENT out of an item SHALL be read-only and lossy by design: calendula returns what the backend holds. An item whose bytes do not parse SHALL project no event rather than fail the listing, so one malformed resource cannot hide a whole calendar, and the listing SHALL name it in its `errors`.
 
 "What the backend holds" is verbatim for the backends that store iCalendar, and synthesized for the one that does not; the [projection](./projection.md) capability governs the difference, and no command layer SHALL rewrite bytes of its own.
 
@@ -200,7 +200,7 @@ The listing query MAY carry a `UID`, which `event find` sets. A backend MAY leav
 `item read` SHALL add the `etag` of the version read to its JSON, `null` when the backend has none.
 
 ### Requirement: A JSON error carries a stable code
-A failure a caller is expected to act on SHALL carry a stable code, printed under `--json` as a `code` string beside `error`, `sources` and `backtrace`. The code SHALL be found anywhere in the error chain, so added context does not hide it, or read from the typed error of the protocol that refused ("A server's refusal carries its code"). A failure with no code SHALL print `"code": null`. The plain output SHALL stay unchanged. Codes are kebab-case and never renamed; `error` stays free wording. Every code SHALL be declared in every build, whatever the backends compiled in.
+A failure a caller is expected to act on SHALL carry a stable code, printed under `--json` as a `code` string beside `error`, `sources` and `backtrace`, and in an `errors` entry beside `id`, `error` and `sources`. The code SHALL be found anywhere in the error chain, so added context does not hide it, or read from the typed error of the protocol that refused ("A server's refusal carries its code"). A failure with no code SHALL print `"code": null`. The plain output SHALL stay unchanged. Codes are kebab-case and never renamed; `error` stays free wording. Every code SHALL be declared in every build, whatever the backends compiled in.
 
 | Code | Raised when |
 |---|---|
@@ -208,7 +208,7 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 | `stdin-taken` | a command run inside a session (`repl`, `mcp`) would read its iCalendar from stdin, which carries the session's commands; nothing was read |
 | `item-not-found` | the item a command names is not in the calendar: the failure of `item read`, `item update`, `item delete`, `event read`, `event update` or `event delete` |
 | `calendar-not-found` | the calendar a command names does not exist; nothing was read or written |
-| `item-unreadable` | the backend answered for an item calendula could not read: its file could not be read (vdir) |
+| `item-unreadable` | the backend answered for an item calendula could not read: its file could not be read (vdir), its iCalendar did not parse, the server refused it while it was read again (Graph), its body could not be read or is missing from the store (pimdir); an `errors` entry |
 | `permission-denied` | the server refused the request to the account (see "A server's refusal carries its code") |
 | `quota-exceeded` | the write would exceed the account's quota |
 | `rate-limited` | the server throttled the request; calendula retries nothing |
@@ -246,15 +246,26 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 - THEN the command exits 1 and prints a failure object coded `item-not-found`
 
 ### Requirement: The JSON contract is described and versioned
-`json-schema` SHALL describe the failure object under the key `calendula-error`, its `code` typed by the code vocabulary or `usage-invalid`, the code pimalaya-cli raises itself. Every generated schema SHALL carry an `$id` naming the contract version: the major version of calendula, or `0.<minor>` before 1.0. Every registered payload SHALL be a JSON object, checked by a test. Piped `--json` output SHALL print one value per line.
+`json-schema` SHALL describe the failure object under the key `calendula-error`, its `code` typed by the code vocabulary or `usage-invalid`, the code pimalaya-cli raises itself, and the item error of an `errors` list under `calendula-item-error`, its `code` typed by the code vocabulary. Every generated schema SHALL carry an `$id` naming the contract version: the major version of calendula, or `0.<minor>` before 1.0. Every registered payload SHALL be a JSON object, checked by a test. Piped `--json` output SHALL print one value per line.
 
 ### Requirement: A refused command line exits 2
-The command line SHALL be parsed by pimalaya-cli's `clap::parse`: help and version print as clap prints them, and a command line clap refuses (an unknown flag or command, a missing argument, a bad value) SHALL exit 2 before any configuration is read. With a `--json` word before any `--`, it SHALL print on stdout the failure object coded `usage-invalid`, its `error` clap's message without its `error: ` prefix nor colour, and nothing on stderr; otherwise clap's rendering on stderr and nothing on stdout. Exit 1 stays a failure object and 3 a printed result that is not a full success (see "account check fails when a backend fails").
+The command line SHALL be parsed by pimalaya-cli's `clap::parse`: help and version print as clap prints them, and a command line clap refuses (an unknown flag or command, a missing argument, a bad value) SHALL exit 2 before any configuration is read. With a `--json` word before any `--`, it SHALL print on stdout the failure object coded `usage-invalid`, its `error` clap's message without its `error: ` prefix nor colour, and nothing on stderr; otherwise clap's rendering on stderr and nothing on stdout. Exit 1 stays a failure object and 3 a printed result that is not a full success: `account check` with a failed backend (see "account check fails when a backend fails") and a listing whose `errors` is not empty.
 
 #### Scenario: A misspelt flag
 - WHEN `calendula --json --nope calendar list` runs
 - THEN it exits 2 and prints `{"code":"usage-invalid","error":"unexpected argument '--nope' found …","sources":[],"backtrace":null}` on one line
 - AND `calendula --nope calendar list` exits 2, printing clap's `error: unexpected argument '--nope' found` on stderr and nothing on stdout
+
+### Requirement: A listing names the items it could not read
+`calendar list`, `event list`, `event find`, `event agenda` and `item list` SHALL print an `errors` list beside their items, under `--json` and in text: one pimalaya-cli item error `{id, code, error, sources}` per calendar or item the command could not read, `[]` when there is none, in the order met. `id` SHALL be the item's id as the command prints ids, `null` when the backend named none; `code` a code of the vocabulary or `null`; `error` the message; `sources` the backend's own reasons, outermost first. A non-empty `errors` SHALL make the command exit 3 once it printed its result. A listing that reads the whole calendar before cutting its page SHALL print its entries on the first page only; an item it listed but could not read (an iCalendar that does not parse, a pimdir body the store cannot serve) holds its place on a page, and its entry SHALL print on that page. `event list` SHALL count the events it lists, never an item it could not read.
+
+#### Scenario: An item that does not parse
+- GIVEN the vdir calendar `personal` holding the events `a` and `b` and one `.ics` file `c` that is no iCalendar
+- WHEN `calendula --json event list` runs
+- THEN it prints `a` and `b`, `"errors":[{"id":"c","code":"item-unreadable",…}]`, and the exit status is 3
+
+### Requirement: A command's errors print at its end
+In the text output, each `errors` entry SHALL print as one `Error:` line, `<id>  <code>  <error>` with `-` for a null id or code, last in the command's output: after the items (rows, records or the agenda's lines) and one blank line, the `Error:` lines aligned among themselves as pimalaya-cli's `Columns` aligns cells, each value sanitized. Nothing SHALL print, the blank line included, when `errors` is empty.
 
 ### Requirement: Calendar selection
 A unified command operating inside a calendar SHALL take it through the flattened `-k/--calendar` flag, resolved by the account: the flag wins, otherwise `calendar.default`, otherwise the command bails.
@@ -272,9 +283,9 @@ All data and errors SHALL go to stdout through the printer, with `--json` switch
 ### Requirement: Text output is plain text
 A text output SHALL be plain text: no border, no colour, no terminal escape, nothing sized to or truncated for the terminal, and it SHALL end with one newline; no command takes a width. Every string a server, a store or a file gave (an id, a name, a summary, a description, an error a record carries, the zone and the days the lines under `pimdir search` and `pimdir count` name) SHALL have its control and bidi characters replaced before it prints as text (pimalaya-cli `sanitize::text`); the JSON output SHALL carry it unchanged. The iCalendar `event read` and `item read` print SHALL keep its layout, CRLF read as LF, and have every other control character but tab and line feed (C0, DEL, C1) and every bidi embedding, override and isolate replaced with U+FFFD; their JSON `contents` SHALL carry the stored text unchanged. The iCalendar a `build` prints, or writes to the file `-o` names, SHALL be the bytes it built.
 
-`event list` and `event find` SHALL print as Himalaya's `envelope list` does. Above the events, `Account:` (the account name, then the backend it resolved to in parentheses), `Calendar:` and, for `event find`, `UID:`, then a blank line. Then one line per event through pimalaya-cli's `Columns` with no header row: its item id, its start and its end (Columns follow the kind), then its summary, last, `-` for an empty cell. Under them, after a blank line when any printed, `Page:` (the page number, `all` for an unpaged listing, then the events the page holds, `event N` or `events N to M` followed by `, the last` when no page follows, or `empty`) and, while a page follows, `Next page:` and the `--page` reaching it, these values starting in one column, two spaces after `Next page:`. The events a footer counts are the calendar's events, the resources a page holds: a series counts once, however many lines its overrides or its occurrences in a window print. `, the last` and `Next page:` SHALL be exact on every backend: the unified client asks for one item past the page. `-s 0` lists every item, unpaged.
+`event list` and `event find` SHALL print as Himalaya's `envelope list` does. Above the events, `Account:` (the account name, then the backend it resolved to in parentheses), `Calendar:` and, for `event find`, `UID:`, then `Page:` (the page number, `all` for an unpaged listing, then the events the page holds, `event N` or `events N to M` followed by `, the last` when no page follows, or `empty`), and while a page follows `Next page:` and the `--page` reaching it, these values starting in one column, two spaces after `Next page:`; then a blank line. Then one line per event through pimalaya-cli's `Columns` with no header row: its item id, its start and its end (Columns follow the kind), then its summary, last, `-` for an empty cell. Under them SHALL print only the command's errors ("A command's errors print at its end"). The events `Page:` counts are the calendar's events, the resources a page holds: a series counts once, however many lines its overrides or its occurrences in a window print. `, the last` and `Next page:` SHALL be exact on every backend: the unified client asks for one item past the page. `-s 0` lists every item, unpaged.
 
-`item list` SHALL print the same header and footer around one line per item: its entity tag, its size, then its id. `gcal instances` SHALL print them around one line per instance: its id, its status, its start and end as the server spells them, then its summary, `Event:` naming the series in the header, the footer unpaged.
+`item list` SHALL print the same header above one line per item: its entity tag, its size, then its id. `gcal instances` SHALL print it above one line per instance: its id, its status, its start and end as the server spells them, then its summary, `Event:` naming the series in the header, unpaged.
 
 A list whose items carry more than one value of unbounded length SHALL print through pimalaya-cli's `Records`, the way `git log` prints commits: per item, its id alone on a line, followed by its state words in parentheses, comma-separated, when it has any; its properties as `Fields` prints them; its free text after a blank line, each line indented by four spaces; one blank line between items. A field every item carries SHALL print even when empty, its label alone; a field only some items carry SHALL be left out where it is empty. These lists print as records:
 
@@ -293,8 +304,8 @@ The `event agenda` grid SHALL stay cal's drawing, with no attribute: no day is h
 #### Scenario: An event list
 - GIVEN the vdir account `perso` whose calendar `personal` holds the timed events `a`, `b` and `c`, read in UTC
 - WHEN `calendula event list -s 2` prints them
-- THEN it prints `Account:    perso (vdir)`, `Calendar:   personal` and a blank line, then `a  2026-11-12 09:00  2026-11-12 09:30  Standup` and the line of `b`, aligned, then a blank line, `Page:       1, events 1 to 2` and `Next page:  --page 2`, with no border and no colour
-- AND `calendula event list -s 2 -p 2` prints the line of `c` and `Page:       2, event 3, the last`
+- THEN it prints `Account:    perso (vdir)`, `Calendar:   personal`, `Page:       1, events 1 to 2` and `Next page:  --page 2`, then a blank line, then `a  2026-11-12 09:00  2026-11-12 09:30  Standup` and the line of `b`, aligned, with no border and no colour
+- AND `calendula event list -s 2 -p 2` prints `Page:       2, event 3, the last` above the line of `c`
 
 #### Scenario: A read of a body carrying controls
 - GIVEN a vdir event stored with CRLF line ends, `ESC ]52;c;AAAA BEL` in its summary, U+202E in its location and a description folded on a tab
@@ -308,7 +319,7 @@ The `event agenda` grid SHALL stay cal's drawing, with no attribute: no day is h
 - THEN it prints `personal`, its `Name:` and `Color:` lines and its description indented by four spaces, a blank line, then `work` and its `Name:` line
 
 ### Requirement: A page names the next one
-`event list` and `item list` SHALL print `nextPage` beside their rows: the number of the next page, as a string, while one follows, `null` otherwise, exact on every backend as the footer's `Next page:` is. They SHALL take it back through pimalaya-cli's `--page-token`, which wins over `--page`, refusing a token that does not read as a page number before the backend is reached, `0` reading as 1 as `--page 0` does. An unpaged listing (`-s 0`, or `event list` over a window with no `-s`) SHALL ignore the token as it ignores `--page`. `event find`, which reads the calendar whole, SHALL print `nextPage` as `null` and takes no token.
+`event list` and `item list` SHALL print `nextPage` beside their rows: the number of the next page, as a string, while one follows, `null` otherwise, exact on every backend as the header's `Next page:` is. They SHALL take it back through pimalaya-cli's `--page-token`, which wins over `--page`, refusing a token that does not read as a page number before the backend is reached, `0` reading as 1 as `--page 0` does. An unpaged listing (`-s 0`, or `event list` over a window with no `-s`) SHALL ignore the token as it ignores `--page`. `event find`, which reads the calendar whole, SHALL print `nextPage` as `null` and takes no token.
 
 #### Scenario: A listing resumed from its token
 - GIVEN the vdir account `perso` whose calendar `personal` holds the events `a`, `b` and `c`

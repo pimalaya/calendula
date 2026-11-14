@@ -11,7 +11,7 @@
 
 use std::{
     fs,
-    io::Write,
+    io::{BufRead, BufReader, Read, Write},
     path::Path,
     process::{Command, Stdio},
 };
@@ -109,6 +109,54 @@ fn a_session_answers_each_line_and_survives_its_failures() {
     assert!(answers[2]["error"].is_string(), "{}", answers[2]);
     assert!(answers[3]["error"].is_string(), "{}", answers[3]);
     assert_eq!(answers[4]["events"][0]["summary"], "Standup");
+}
+
+/// A listing exiting 3 printed its result over a client that answered, so
+/// the session keeps that client: the next line runs on it even once the
+/// configuration it was built from is gone, where a client built again
+/// would fail.
+#[test]
+fn a_partial_outcome_keeps_the_session_client() {
+    let home = account();
+    let calendar = home.path().join("calendars").join("personal");
+    fs::write(calendar.join("broken.ics"), "not a calendar").unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_calendula"))
+        .arg("-c")
+        .arg(home.path().join("config.toml"))
+        .args(["--json", "repl"])
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path())
+        .env_remove("XDG_CONFIG_DIRS")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+
+    stdin.write_all(b"event list\n").unwrap();
+    let mut first = String::new();
+    stdout.read_line(&mut first).unwrap();
+    let first: Value = serde_json::from_str(&first).unwrap();
+    assert_eq!(first["errors"][0]["id"], "broken", "{first}");
+
+    fs::remove_file(home.path().join("config.toml")).unwrap();
+
+    stdin.write_all(b"event list\n").unwrap();
+    drop(stdin);
+
+    let mut rest = String::new();
+    stdout.read_to_string(&mut rest).unwrap();
+    let answers = values(&rest);
+    let status = child.wait().unwrap();
+    assert!(status.success(), "{rest}");
+
+    assert_eq!(answers.len(), 1, "{answers:#?}");
+    assert_eq!(answers[0]["events"][0]["id"], "standup", "{}", answers[0]);
+    assert_eq!(answers[0]["errors"][0]["id"], "broken", "{}", answers[0]);
 }
 
 #[test]

@@ -61,7 +61,11 @@ and without it a write or a delete of an item naming an attendee \
 (ATTENDEE), in the iCalendar given or in the one stored, is refused, \
 since the server or a sync may notify them. A failed call answers \
 isError with a calendula-error object, its `code` naming the failure \
-when it has one.";
+when it has one. calendar_list, event_list, event_find and item_list \
+return an `errors` list beside their result, one `{id, code, error, \
+sources}` entry per calendar or item they could not read (an item whose \
+iCalendar does not parse is `item-unreadable`); a call whose `errors` is \
+not empty answers isError with that result as its structured content.";
 
 /// The unified API leaves exposed as tools, with what each may do.
 ///

@@ -1,16 +1,19 @@
 //! # Listing
 //!
 //! The frame a paged listing prints its rows in, as Himalaya prints its
-//! envelopes: a header naming where the rows come from, a blank line, the
-//! rows, another blank line, then a footer saying where the page stands
-//! and how to reach the next one. `event list`, `event find`, `item list`
-//! and `gcal instances` print through it.
+//! envelopes: a header naming where the rows come from, where the page
+//! stands and how to reach the next one, a blank line, then the rows.
+//! Nothing prints under the rows but the command's errors, after one blank
+//! line. `event list`, `event find`, `item list` and `gcal instances`
+//! print through it.
 
 use std::fmt;
 
 use pimalaya_cli::sanitize;
 
-/// The header and footer around the rows of a listing.
+use crate::error::{ItemError, ItemErrors};
+
+/// The header above the rows of a listing.
 #[derive(Clone, Debug, Default)]
 pub struct Listing {
     /// The fields above the rows, their values defused.
@@ -21,7 +24,7 @@ pub struct Listing {
     pub page_size: Option<u32>,
     /// How many items the page holds.
     pub count: usize,
-    /// What the footer calls one item, then several.
+    /// What the header calls one item, then several.
     pub nouns: [&'static str; 2],
 }
 
@@ -44,28 +47,29 @@ impl Listing {
             .push((label, sanitize::text(value).into_owned()));
     }
 
-    /// Writes the header, the `rows` and the footer, `next_page` being
-    /// the number of the page following this one.
+    /// Writes the header with the paging, `next_page` being the number of
+    /// the page following this one, then the `rows`, then the `errors`.
     pub fn write(
         &self,
         f: &mut fmt::Formatter<'_>,
         rows: &str,
         next_page: Option<&str>,
+        errors: &[ItemError],
     ) -> fmt::Result {
         write_fields(f, &self.header)?;
-        writeln!(f)?;
+        write_fields(f, &self.paging(next_page))?;
 
         if !rows.is_empty() {
-            f.write_str(rows)?;
             writeln!(f)?;
+            f.write_str(rows)?;
         }
 
-        write_fields(f, &self.footer(next_page))
+        ItemErrors::new(errors).write_after(f)
     }
 
-    /// The fields under the rows: the page with the items it holds, and
+    /// The fields placing the page: the page with the items it holds, and
     /// the flag reaching the next page while one follows.
-    fn footer(&self, next_page: Option<&str>) -> Vec<(&'static str, String)> {
+    fn paging(&self, next_page: Option<&str>) -> Vec<(&'static str, String)> {
         let [one, several] = self.nouns;
         let count = self.count as u64;
         let (page, first) = match (self.page, self.page_size) {

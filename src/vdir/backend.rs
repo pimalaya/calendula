@@ -10,6 +10,8 @@
 //!
 //! [`CalendarTimeRange`]: crate::shared::item::CalendarTimeRange
 
+use std::io;
+
 use anyhow::{Context, Result, anyhow};
 use ical::component::IcalComponentKind;
 use io_vdir::{
@@ -21,12 +23,12 @@ use io_vdir::{
 
 use crate::{
     config::VdirConfig,
-    error::{ErrorCode, calendar_not_found, recoded},
+    error::{self, ErrorCode, calendar_not_found, recoded},
     shared::{
         calendar::{Calendar, CalendarDiff},
         client::window,
-        ical::holds_kind,
-        item::{CalendarItem, CalendarItemQuery},
+        ical::may_hold_kind,
+        item::{CalendarItem, CalendarItemList, CalendarItemQuery},
     },
 };
 
@@ -113,12 +115,16 @@ impl VdirBackend {
 
     /// Lists a collection's iCalendar items, dropping any vCards a
     /// mixed directory holds beside them.
+    ///
+    /// A file that cannot be read is an `item-unreadable` entry, named on
+    /// the first window alone since it holds no place in any; one removed
+    /// since the directory was listed is left out.
     pub fn list_items(
         &mut self,
         calendar_id: &str,
         query: CalendarItemQuery<'_>,
-    ) -> Result<Vec<CalendarItem>> {
-        let items = self.client.list_items(self.path(calendar_id))?;
+    ) -> Result<CalendarItemList> {
+        let (items, unread) = self.client.list_readable_items(self.path(calendar_id))?;
 
         let items: Vec<CalendarItem> = items
             .into_iter()
@@ -128,7 +134,26 @@ impl VdirBackend {
             .filter(|item| item.starts_within(query.range))
             .collect();
 
-        Ok(window(items, query.skip, query.take))
+        let errors = match query.skip {
+            0 => unread
+                .into_iter()
+                .filter(|(entry, err)| {
+                    entry.kind == VdirItemKind::Ical && err.kind() != io::ErrorKind::NotFound
+                })
+                .map(|(entry, err)| {
+                    let path = entry.path;
+                    let err =
+                        anyhow::Error::from(err).context(format!("Cannot read item file {path}"));
+                    error::unreadable(Some(&entry.id), err)
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+
+        Ok(CalendarItemList {
+            items: window(items, query.skip, query.take),
+            errors,
+        })
     }
 
     /// Reads one item's bytes off disk.
@@ -225,7 +250,7 @@ fn item_from(calendar_id: &str, item: VdirItem) -> CalendarItem {
 ///
 /// Whether an item is of `kind`, every item passing when none is named.
 fn is_kind(item: &CalendarItem, kind: Option<IcalComponentKind>) -> bool {
-    kind.is_none_or(|kind| holds_kind(&item.contents, kind))
+    kind.is_none_or(|kind| may_hold_kind(&item.contents, kind))
 }
 
 /// The failure of an item read: a file located but not read is

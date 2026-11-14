@@ -53,7 +53,7 @@ use crate::{
     account::context::Account,
     cli::resolve_account,
     config::PimdirConfig,
-    error::{ErrorCode, calendar_not_found, item_not_found},
+    error::{self, ErrorCode, ItemError, calendar_not_found, item_not_found},
     pimdir::{
         client::{PimdirClient, store_error},
         status::{PimdirCalendarStatus, PimdirParkedStatus, PimdirStatusOutput},
@@ -61,8 +61,8 @@ use crate::{
     shared::{
         calendar::{Calendar, CalendarDiff},
         event::Event,
-        ical::holds_kind,
-        item::{CalendarItem, CalendarItemQuery, CalendarTimeRange},
+        ical::may_hold_kind,
+        item::{CalendarItem, CalendarItemList, CalendarItemQuery, CalendarTimeRange},
     },
 };
 
@@ -178,6 +178,9 @@ impl PimdirBackend {
     /// An unhydrated item lists with empty contents, and a range still
     /// filters it off the stored summary: a cache hiding its own
     /// undownloaded items from a window would answer another question.
+    /// One whose body cannot be read, or that the blob tree does not hold,
+    /// lists with empty contents too, beside an `item-unreadable` entry
+    /// kept with it in the window.
     ///
     /// The collection streams through in keyset batches, one body held
     /// at a time: what the listing keeps is the window, and the scan stops
@@ -188,12 +191,12 @@ impl PimdirBackend {
         &mut self,
         calendar_id: &str,
         query: CalendarItemQuery<'_>,
-    ) -> Result<Vec<CalendarItem>> {
+    ) -> Result<CalendarItemList> {
         self.known_collection(calendar_id)?;
 
         let mut page = Window::new(query.skip, query.take);
         if page.is_closed() {
-            return Ok(Vec::new());
+            return Ok(CalendarItemList::default());
         }
 
         // NOTE: a hint leaving items out would shift a window.
@@ -215,7 +218,7 @@ impl PimdirBackend {
                 return Ok(ControlFlow::Continue(()));
             }
 
-            let item = self.item_from(calendar_id, &stored)?;
+            let (item, error) = self.item_from(calendar_id, &stored);
 
             if let Some(kind) = query.kind
                 && !is_kind(&item, &stored, kind)
@@ -233,10 +236,10 @@ impl PimdirBackend {
                 return Ok(ControlFlow::Continue(()));
             }
 
-            Ok(page.keep(item))
+            Ok(page.keep(item, error))
         })?;
 
-        Ok(page.into_items())
+        Ok(page.into_list())
     }
 
     /// Reads one item's bytes from its content-addressed blob.
@@ -614,30 +617,43 @@ impl PimdirBackend {
     /// Projects a stored item onto the shared type, body when local.
     ///
     /// Empty contents mean two things and only one is ordinary: the
-    /// sync has not hydrated the item, or its object's blob is gone,
-    /// an inconsistent store, logged since the row renders alike.
-    fn item_from(&self, calendar_id: &str, stored: &PimdirItem) -> Result<CalendarItem> {
-        let contents = match &stored.object {
-            Some(hash) => match self.client.blobs.get(hash)? {
-                Some(contents) => contents,
-                None => {
-                    warn!(
-                        "body blob missing for item `{}` in calendar `{calendar_id}`, \
-                         listing it without contents",
-                        stored.seq
-                    );
-                    Vec::new()
-                }
+    /// sync has not hydrated the item, or its object's body cannot be
+    /// read or is gone from the blob tree, an inconsistent store, whose
+    /// `item-unreadable` entry comes beside it since the row renders
+    /// alike.
+    fn item_from(
+        &self,
+        calendar_id: &str,
+        stored: &PimdirItem,
+    ) -> (CalendarItem, Option<ItemError>) {
+        let id = stored.seq.to_string();
+
+        let read = match &stored.object {
+            Some(hash) => match self.client.blobs.get(hash) {
+                Ok(Some(contents)) => Ok(contents),
+                Ok(None) => Err(anyhow!(
+                    "Body blob missing for item `{id}` in calendar `{calendar_id}`"
+                )),
+                Err(err) => Err(anyhow::Error::from(err).context(format!(
+                    "Cannot read the body of item `{id}` in calendar `{calendar_id}`"
+                ))),
             },
-            None => Vec::new(),
+            None => Ok(Vec::new()),
         };
 
-        Ok(CalendarItem {
-            id: stored.seq.to_string(),
+        let (contents, error) = match read {
+            Ok(contents) => (contents, None),
+            Err(err) => (Vec::new(), Some(error::unreadable(Some(&id), err))),
+        };
+
+        let item = CalendarItem {
+            id,
             calendar_id: calendar_id.to_owned(),
             etag: stored.object.as_ref().map(|hash| hash.0.clone()),
             contents,
-        })
+        };
+
+        (item, error)
     }
 
     /// Queues the account's reply to an invitation, the `calendar-reply`
@@ -1050,7 +1066,9 @@ struct Window {
     skip: usize,
     /// The window size, `None` for no cap.
     take: Option<usize>,
-    items: Vec<CalendarItem>,
+    /// The matches kept, and the error of each kept one that could not be
+    /// read.
+    list: CalendarItemList,
 }
 
 impl Window {
@@ -1058,7 +1076,7 @@ impl Window {
         Self {
             skip,
             take,
-            items: Vec::new(),
+            list: CalendarItemList::default(),
         }
     }
 
@@ -1078,18 +1096,20 @@ impl Window {
         }
     }
 
-    /// Keeps one match, breaking once the window is full.
-    fn keep(&mut self, item: CalendarItem) -> ControlFlow<()> {
-        self.items.push(item);
+    /// Keeps one match with the error of its read, breaking once the
+    /// window is full.
+    fn keep(&mut self, item: CalendarItem, error: Option<ItemError>) -> ControlFlow<()> {
+        self.list.items.push(item);
+        self.list.errors.extend(error);
 
         match self.take {
-            Some(take) if self.items.len() >= take => ControlFlow::Break(()),
+            Some(take) if self.list.items.len() >= take => ControlFlow::Break(()),
             _ => ControlFlow::Continue(()),
         }
     }
 
-    fn into_items(self) -> Vec<CalendarItem> {
-        self.items
+    fn into_list(self) -> CalendarItemList {
+        self.list
     }
 }
 
@@ -1101,7 +1121,7 @@ impl Window {
 /// availability-aware listing stays one.
 fn is_kind(item: &CalendarItem, stored: &PimdirItem, kind: IcalComponentKind) -> bool {
     if !item.contents.is_empty() {
-        return holds_kind(&item.contents, kind);
+        return may_hold_kind(&item.contents, kind);
     }
 
     match &stored.summary {
@@ -1121,9 +1141,12 @@ fn is_kind(item: &CalendarItem, stored: &PimdirItem, kind: IcalComponentKind) ->
 /// summary says recurs passes from that start to its `UNTIL`.
 fn in_range(item: &CalendarItem, stored: &PimdirItem, range: &CalendarTimeRange) -> bool {
     if !item.contents.is_empty() {
-        return Event::project(item)
-            .iter()
-            .any(|event| range.contains(&event.start))
+        // NOTE: bytes that do not parse are kept for the listing to name.
+        let Ok(events) = Event::try_project(item) else {
+            return true;
+        };
+
+        return events.iter().any(|event| range.contains(&event.start))
             || !Event::occurrences(item, Some(range)).is_empty();
     }
 
@@ -1206,7 +1229,11 @@ fn unsupported(verb: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::shared::ical::IcalFamily;
+    use crate::{
+        backend::Backend,
+        config::{AccountConfig, Config},
+        shared::{client::CalendarClient, ical::IcalFamily},
+    };
     use io_pimdir::{
         placement::{PimdirLevel, PimdirLinkId},
         summary::calendar::{PimdirEventSummary, PimdirJournalSummary, PimdirTaskSummary},
@@ -1517,6 +1544,7 @@ mod tests {
         let ids = backend
             .list_items("cal", CalendarItemQuery::default())
             .unwrap()
+            .items
             .into_iter()
             .map(|item| item.id)
             .collect();
@@ -1741,7 +1769,8 @@ mod tests {
         let read = backend.get_item("cal", &ids[0]).unwrap();
         let listed = backend
             .list_items("cal", CalendarItemQuery::default())
-            .unwrap();
+            .unwrap()
+            .items;
         let etag = read.etag.clone().unwrap();
         assert_eq!(listed[0].etag.as_deref(), Some(etag.as_str()));
         assert_eq!(etag, backend.client.reader.hash(ALONE.as_bytes()).0);
@@ -2034,7 +2063,8 @@ mod tests {
                     ..Default::default()
                 },
             )
-            .unwrap();
+            .unwrap()
+            .items;
 
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].id, ids[0]);
@@ -2714,6 +2744,83 @@ mod tests {
         assert_eq!(pending(&backend), 0);
     }
 
+    /// A body the store cannot read, and one its blob tree no longer
+    /// holds, list empty beside an `item-unreadable` entry each, kept on
+    /// the page holding their item: the item past a page takes its entry
+    /// to the next.
+    #[cfg(unix)]
+    #[test]
+    fn a_body_the_store_cannot_serve_is_an_entry_on_its_page() {
+        let (dir, mut backend, ids) = store(&[INVITATION, ALONE]);
+        poison(&backend, &[&ids[0]]);
+        let stored = backend.item("cal", &ids[1]).unwrap();
+        let blob = backend.client.blobs.path(stored.object.as_ref().unwrap());
+        std::fs::remove_file(blob.unwrap()).unwrap();
+
+        let events = CalendarItemQuery {
+            kind: IcalFamily::Event.kind(),
+            ..Default::default()
+        };
+        let listed = backend.list_items("cal", events).unwrap();
+        let listed_ids: Vec<&str> = listed.items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(listed_ids, [ids[0].as_str(), ids[1].as_str()]);
+        assert!(listed.items.iter().all(|item| item.contents.is_empty()));
+
+        let [unread, missing] = &listed.errors[..] else {
+            panic!("{:?}", listed.errors);
+        };
+        assert_eq!(unread.id.as_deref(), Some(ids[0].as_str()));
+        assert_eq!(unread.code, Some(ErrorCode::ItemUnreadable));
+        assert!(
+            unread.error.starts_with("Cannot read the body"),
+            "{unread:?}"
+        );
+        assert!(!unread.sources.is_empty(), "{unread:?}");
+        assert_eq!(missing.id.as_deref(), Some(ids[1].as_str()));
+        assert_eq!(missing.code, Some(ErrorCode::ItemUnreadable));
+        assert!(
+            missing.error.starts_with("Body blob missing"),
+            "{missing:?}"
+        );
+
+        let second = CalendarItemQuery {
+            skip: 1,
+            take: Some(1),
+            ..events
+        };
+        let listed = backend.list_items("cal", second).unwrap();
+        assert_eq!(listed.errors.len(), 1, "{:?}", listed.errors);
+        assert_eq!(listed.errors[0].id.as_deref(), Some(ids[1].as_str()));
+
+        let account = AccountConfig {
+            pimdir: Some(PimdirConfig {
+                root: dir.path().to_path_buf(),
+                account: None,
+            }),
+            ..Default::default()
+        };
+        let mut client =
+            CalendarClient::new(Config::default(), "a".into(), account, Backend::Auto).unwrap();
+        let page = client.list_items("cal", Some(1), Some(1), events).unwrap();
+        assert!(page.more);
+        assert_eq!(page.errors.len(), 1, "{:?}", page.errors);
+        assert_eq!(page.errors[0].id.as_deref(), Some(ids[0].as_str()));
+    }
+
+    /// A hydrated body that does not parse may be of any kind, so an event
+    /// listing keeps it for `event list` to name.
+    #[test]
+    fn a_body_that_does_not_parse_passes_the_kind_filter() {
+        let (_dir, mut backend, ids) = store(&[ALONE]);
+        let mut item = backend.get_item("cal", &ids[0]).unwrap();
+        let stored = backend.item("cal", &ids[0]).unwrap();
+        item.contents = b"not a calendar".to_vec();
+
+        assert!(is_kind(&item, &stored, IcalComponentKind::VEvent));
+        assert!(is_kind(&item, &stored, IcalComponentKind::VTodo));
+        assert!(in_range(&item, &stored, &CalendarTimeRange::default()));
+    }
+
     /// Every file of the store's blob tree, a write's temporary one
     /// included.
     fn blob_files(dir: &std::path::Path) -> Vec<PathBuf> {
@@ -2881,7 +2988,8 @@ mod tests {
         .unwrap();
         let items = backend
             .list_items("cal", CalendarItemQuery::default())
-            .unwrap();
+            .unwrap()
+            .items;
         assert_eq!(items.len(), 2);
         for item in items {
             backend.get_item("cal", &item.id).unwrap();
@@ -3007,7 +3115,10 @@ mod tests {
 
         let mut items = Vec::new();
         for stored in &all {
-            let item = backend.item_from(calendar_id, stored)?;
+            let (item, error) = backend.item_from(calendar_id, stored);
+            if let Some(error) = error {
+                bail!("{}", error.error);
+            }
             if query.kind.is_some_and(|kind| !is_kind(&item, stored, kind)) {
                 continue;
             }
@@ -3083,7 +3194,7 @@ mod tests {
                         kind,
                         uid: None,
                     };
-                    let streamed = backend.list_items("cal", query).unwrap();
+                    let streamed = backend.list_items("cal", query).unwrap().items;
                     let expected = eager(backend, "cal", query).unwrap();
                     assert_eq!(streamed, expected, "{query:?}");
                     listed += streamed.len();
@@ -3109,7 +3220,7 @@ mod tests {
                 uid: Some(uid),
                 ..Default::default()
             };
-            let streamed = backend.list_items("cal", query).unwrap();
+            let streamed = backend.list_items("cal", query).unwrap().items;
             let expected = eager(backend, "cal", query).unwrap();
             assert_eq!(found(&streamed, uid), found(&expected, uid), "{uid}");
 
@@ -3120,7 +3231,7 @@ mod tests {
                 ..query
             };
             assert_eq!(
-                backend.list_items("cal", paged).unwrap(),
+                backend.list_items("cal", paged).unwrap().items,
                 eager(backend, "cal", paged).unwrap(),
                 "{uid}"
             );
@@ -3147,7 +3258,8 @@ mod tests {
                     ..Default::default()
                 },
             )
-            .unwrap();
+            .unwrap()
+            .items;
         assert_eq!(found(&moved, "moved@example.org").len(), 2);
         let week = ranges().remove(2).unwrap();
         let window = CalendarItemQuery {
@@ -3158,6 +3270,7 @@ mod tests {
         let summaries: Vec<String> = backend
             .list_items("cal", window)
             .unwrap()
+            .items
             .iter()
             .flat_map(|item| Event::occurrences(item, Some(&week)))
             .map(|event| event.summary)
@@ -3181,7 +3294,8 @@ mod tests {
         let mut id_of = |uid: &str| {
             let items = backend
                 .list_items("cal", CalendarItemQuery::default())
-                .unwrap();
+                .unwrap()
+                .items;
             let item = items
                 .into_iter()
                 .find(|item| found(std::slice::from_ref(item), uid).len() == 1);
@@ -3217,7 +3331,8 @@ mod tests {
                     ..Default::default()
                 },
             )
-            .unwrap();
+            .unwrap()
+            .items;
         assert!(todos.iter().any(|item| item.id == ids[0]));
         let renamed = backend
             .list_items(
@@ -3228,17 +3343,18 @@ mod tests {
                     ..Default::default()
                 },
             )
-            .unwrap();
+            .unwrap()
+            .items;
         assert_eq!(found(&renamed, "renamed@example.org")[0].id, ids[1]);
     }
 
     /// Makes the bodies of `ids` unreadable: each blob loses every
-    /// permission, so any read of it fails the listing.
+    /// permission, so any read of it is an entry of the listing's errors,
+    /// and fails the eager one.
     ///
-    /// A blob turned into a directory no longer does: the store reads
-    /// such an entry as no body at all (pimdir STORAGE §5), the state of a
-    /// missing one, which a listing logs and passes. Run as root, the
-    /// open would still succeed.
+    /// A blob turned into a directory would do too: the store reads such
+    /// an entry as no body at all (pimdir STORAGE §5), the state of a
+    /// missing one. Run as root, the open would still succeed.
     fn poison(backend: &PimdirBackend, ids: &[&String]) {
         use std::os::unix::fs::PermissionsExt;
 
@@ -3253,6 +3369,13 @@ mod tests {
         }
     }
 
+    /// The items of a listing that read no poisoned body: one it read
+    /// would be an entry of its errors.
+    fn unpoisoned(list: CalendarItemList) -> Vec<CalendarItem> {
+        assert!(list.errors.is_empty(), "{:?}", list.errors);
+        list.items
+    }
+
     /// A listing reads the bodies it returns and those its filters need,
     /// and no other: not those past a full page, not those before a page
     /// no filter narrows, not those the summary rules out by kind or by
@@ -3263,9 +3386,7 @@ mod tests {
         let bodies: Vec<&str> = bodies.iter().map(String::as_str).collect();
         let (_dir, mut backend, _) = store(&bodies);
         let all = || CalendarItemQuery::default();
-        let order: Vec<String> = backend
-            .list_items("cal", all())
-            .unwrap()
+        let order: Vec<String> = unpoisoned(backend.list_items("cal", all()).unwrap())
             .into_iter()
             .map(|item| item.id)
             .collect();
@@ -3277,7 +3398,7 @@ mod tests {
                 IcalComponentKind::VJournal,
             ]
             .into_iter()
-            .find(|kind| holds_kind(&item.contents, *kind))
+            .find(|kind| may_hold_kind(&item.contents, *kind))
         };
         let kinds: Vec<_> = order.iter().map(kind_of).collect();
         let uid_of = |id: &String| {
@@ -3292,9 +3413,7 @@ mod tests {
             take: Some(page_size),
             ..all()
         };
-        let first: Vec<String> = backend
-            .list_items("cal", page(1, 3))
-            .unwrap()
+        let first: Vec<String> = unpoisoned(backend.list_items("cal", page(1, 3)).unwrap())
             .into_iter()
             .map(|item| item.id)
             .collect();
@@ -3302,7 +3421,7 @@ mod tests {
             kind: IcalFamily::Event.kind(),
             ..page(1, 3)
         };
-        let first_events = backend.list_items("cal", events).unwrap();
+        let first_events = unpoisoned(backend.list_items("cal", events).unwrap());
         poison(
             &backend,
             &order
@@ -3313,15 +3432,16 @@ mod tests {
                 .collect::<Vec<_>>(),
         );
         assert_eq!(
-            backend
-                .list_items("cal", page(1, 3))
-                .unwrap()
+            unpoisoned(backend.list_items("cal", page(1, 3)).unwrap())
                 .into_iter()
                 .map(|item| item.id)
                 .collect::<Vec<_>>(),
             first
         );
-        assert_eq!(backend.list_items("cal", events).unwrap(), first_events);
+        assert_eq!(
+            unpoisoned(backend.list_items("cal", events).unwrap()),
+            first_events
+        );
         assert!(eager(&backend, "cal", page(1, 3)).is_err());
 
         // NOTE: each case poisons a store of its own, built alike.
@@ -3334,9 +3454,7 @@ mod tests {
         let (_dir, mut backend) = fresh();
         poison(&backend, &order.iter().take(4).collect::<Vec<_>>());
         assert_eq!(
-            backend
-                .list_items("cal", page(2, 4))
-                .unwrap()
+            unpoisoned(backend.list_items("cal", page(2, 4)).unwrap())
                 .into_iter()
                 .map(|item| item.id)
                 .collect::<Vec<_>>(),
@@ -3361,7 +3479,10 @@ mod tests {
                 kind: Some(kind),
                 ..all()
             };
-            assert_eq!(backend.list_items("cal", query).unwrap().len(), count);
+            assert_eq!(
+                unpoisoned(backend.list_items("cal", query).unwrap()).len(),
+                count
+            );
             assert!(eager(&backend, "cal", query).is_err());
         }
 
@@ -3382,7 +3503,7 @@ mod tests {
             uid: Some("moved@example.org"),
             ..all()
         };
-        let moved = backend.list_items("cal", find).unwrap();
+        let moved = unpoisoned(backend.list_items("cal", find).unwrap());
         assert_eq!(found(&moved, "moved@example.org").len(), 2);
         assert!(eager(&backend, "cal", find).is_err());
     }
