@@ -5,7 +5,10 @@
 
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::printer::Printer;
+use pimalaya_cli::{
+    listing::{Listing, ListingPage},
+    printer::Printer,
+};
 
 use crate::{
     capability::Capability,
@@ -19,7 +22,6 @@ use crate::{
         },
         ical::IcalFamily,
         item::CalendarItemQuery,
-        listing::Listing,
     },
 };
 
@@ -70,10 +72,10 @@ impl EventFindCommand {
         let mut ids: Vec<&str> = events.iter().map(|event| event.id.as_str()).collect();
         ids.dedup();
 
-        let mut listing = Listing::new(&client.name, client.backend_name(), EVENT_NOUNS);
-        listing.push("Calendar", &calendar_id);
-        listing.push("UID", &self.uid);
-        listing.count = ids.len();
+        let mut listing = Listing::new(&client.name, Some(client.backend_name()));
+        listing.head("Calendar", &calendar_id);
+        listing.head("UID", &self.uid);
+        listing.page(ListingPage::All, ids.len(), EVENT_NOUNS, None);
 
         let output = EventListOutput {
             listing,

@@ -391,6 +391,35 @@ fn a_call_answers_the_payload_its_output_schema_describes() {
     );
 }
 
+/// `account_capability` answers one row per capability, each naming the
+/// backend serving it, as its output schema describes.
+#[test]
+fn account_capability_answers_one_row_per_capability() {
+    let home = account();
+    let responses = serve(
+        home.path(),
+        &[],
+        &[list(1), call(2, "account_capability", json!({}))],
+    );
+
+    let schema = &tool(&responses[0], "account_capability")["outputSchema"];
+    let row = &schema["$defs"]["AccountCapability"];
+    let required = row["required"].as_array().unwrap();
+    assert!(required.contains(&json!("backend")), "{schema}");
+
+    let result = &responses[1]["result"];
+    assert_ne!(result["isError"], true, "{result}");
+
+    let content = &result["structuredContent"];
+    assert_eq!(content["account"], "perso", "{content}");
+    assert!(content.get("backends").is_none(), "{content}");
+
+    let rows = content["capabilities"].as_array().unwrap();
+    let row = rows.iter().find(|row| row["name"] == "item.list").unwrap();
+    assert_eq!(row["backend"], "vdir", "{content}");
+    assert_eq!(row["level"], "full", "{content}");
+}
+
 /// A listing naming an item it could not read answers its payload, the
 /// item in its `errors`, as a tool error.
 #[test]

@@ -9,13 +9,17 @@ use anyhow::Result;
 use chrono::NaiveDate;
 use clap::Parser;
 use io_gcal::v3::rest::events::instances::GcalEventInstancesParams;
-use pimalaya_cli::{columns::Columns, printer::Printer, sanitize};
+use pimalaya_cli::{
+    listing::{Listing, ListingPage},
+    printer::Printer,
+    sanitize,
+};
 use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::{
     gcal::{client::GcalClient, render},
-    shared::{item::CalendarTimeRange, listing::Listing},
+    shared::item::CalendarTimeRange,
 };
 
 /// Expand a recurring event into its occurrences.
@@ -99,10 +103,11 @@ impl GcalInstancesCommand {
             }
         }
 
-        let mut listing = Listing::new(&client.name, "gcal", ["instance", "instances"]);
-        listing.push("Calendar", &calendar_id);
-        listing.push("Event", &self.event_id);
-        listing.count = rows.len();
+        let mut listing = Listing::new(&client.name, Some("gcal"));
+        listing.head("Calendar", &calendar_id);
+        listing.head("Event", &self.event_id);
+        let nouns = ["instance", "instances"];
+        listing.page(ListingPage::All, rows.len(), nouns, None);
 
         printer.out(GcalInstancesOutput { listing, rows })
     }
@@ -112,9 +117,9 @@ impl GcalInstancesCommand {
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GcalInstancesOutput {
-    /// The header the instances print under.
+    /// The header the instances print under, its page placed.
     #[serde(skip)]
-    pub listing: Listing,
+    pub listing: Listing<'static>,
     /// The occurrences of the series, one entry each.
     #[serde(rename = "instances")]
     pub rows: Vec<InstanceRow>,
@@ -140,10 +145,10 @@ pub struct InstanceRow {
 
 impl fmt::Display for GcalInstancesOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut columns = Columns::default();
+        let mut listing = self.listing.clone();
 
         for instance in &self.rows {
-            columns.push([
+            listing.items.push([
                 sanitize::text(&instance.id).into_owned(),
                 sanitize::text(&instance.status).into_owned(),
                 sanitize::text(&instance.start).into_owned(),
@@ -152,6 +157,6 @@ impl fmt::Display for GcalInstancesOutput {
             ]);
         }
 
-        self.listing.write(f, &columns.to_string(), None, &[])
+        write!(f, "{listing}")
     }
 }

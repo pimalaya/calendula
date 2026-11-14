@@ -21,7 +21,7 @@ use std::{
 use anyhow::{Result, anyhow, bail};
 use chrono::{Datelike, Local, Locale, Months, NaiveDate, NaiveDateTime};
 use clap::Parser;
-use pimalaya_cli::{printer::Printer, sanitize};
+use pimalaya_cli::{error::ItemErrors, printer::Printer, sanitize};
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{
     Serialize, Serializer,
@@ -31,7 +31,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
     capability::Capability,
-    error::{self, ItemError, ItemErrors},
+    error::{self, ItemError},
     shared::{
         arg::CalendarIdArg,
         client::CalendarClient,
@@ -1098,7 +1098,13 @@ impl fmt::Display for EventAgendaOutput {
             }
         }
 
-        ItemErrors::new(&self.errors).write_after(f)
+        let mut errors = ItemErrors::default();
+
+        for error in &self.errors {
+            errors.push(error);
+        }
+
+        errors.write_after(f)
     }
 }
 

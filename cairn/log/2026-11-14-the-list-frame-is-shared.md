@@ -1,0 +1,19 @@
+---
+cairn: log
+change: the-list-frame-is-shared
+landed: 2026-11-14
+---
+
+# The list frame is shared
+
+Calendula prints its lists, their item errors and `account capability` through pimalaya-cli (79c0d9e, patched by path until its release), following Himalaya (984549dd) and Cardamum (40237d2). Capability **commands** moved.
+
+- **Cargo.toml, Cargo.lock** (its own commit): `pimalaya-cli = { path = "../cli" }` in `[patch.crates-io]`, where it pinned 0be1b1f; the io-gcal pin and the io-webdav and io-pim-discovery path patches stay.
+- **src/shared/listing.rs removed; src/shared/event/list.rs, src/shared/event/find.rs, src/shared/item/list.rs, src/gcal/instances.rs**: each builds a `pimalaya_cli::listing::Listing` when it runs (`Listing::new` with the backend, `head` for `Calendar`, `UID` or `Event`, `page` over `ListingPage::Numbered` or `All`, through `item::list::listing_page`), kept in its output under `#[serde(skip)]`; its `Display` pushes the rows and the item errors into a clone. The text is byte for byte what it was: the label column already sat two spaces past `Next page:`, no label is longer, and the next page is a number, which sanitizing leaves alone. The byte-exact tests pass with their expected text unchanged; only how they build the header moved.
+- **src/error.rs, src/shared/calendar/list.rs, src/shared/event/agenda.rs**: the local `ItemErrors` copy is gone, `calendar list` and `event agenda` printing their errors through `pimalaya_cli::error::ItemErrors::write_after`. `error::with_code` stays (an owner decision is pending on it); the agenda's JSON `{starts, errors}` stays.
+- **src/account/capability.rs, src/capability.rs, src/shared/client.rs, src/json_schema.rs**: `account capability` prints `pimalaya_cli::capability::AccountCapabilityOutput`, `{account, capabilities: [{name, backend, level, detail}]}`, where it printed every configured backend as a block, `{account, backends: [{backend, capabilities: [{name, level, detail}]}]}`. Each row names the backend the unified commands resolve to; `--backend <name>` reads another one. `Support::level` is the typed `CapabilityLevel`, the help footer reading the same. `shared::client::resolve_backend` names the backend `CalendarClient::new` takes, one priority order for both; when it finds none `--backend` allows, every row reads `backend` `null`, level `none`, detail "the account configures no backend `--backend` allows", where the command failed with exit 1. The text is a list headed by `Account:`, then one line per capability, where it was a table under a `CAPABILITY  BACKEND  LEVEL  DETAIL` header row. The `calendula-account-capability` key is unchanged, its schema the shared one (the levels an enum), which the MCP `account_capability` tool lists as its output schema.
+- **Evidence**: tests/capability.rs `account_capability_lists_what_the_backend_serves` (the byte-exact text), `account_capability_names_the_backend_each_capability_resolves_to` (the flat rows, `--backend pimdir`, the store never opened) and `a_backend_the_account_lacks_resolves_none`, tests/mcp.rs `account_capability_answers_one_row_per_capability` (the rows and the schema requiring `backend`), each failing on the old code; every byte-exact listing test passes with its expected text unchanged.
+
+`account capability` is unreleased (v0.2.0 holds no src/account/capability.rs), so the CHANGELOG amends its [Unreleased] Added entry rather than adding a breaking one, as Cardamum did. MIGRATION.md and README.md say what it prints. Left open: the path patch of pimalaya-cli becomes a version once 79c0d9e is released.
+
+Verification, the three changes together: `cargo fmt --check`; `cargo clippy --locked --all-targets -- -D warnings` and `cargo test --locked` over the eleven feature sets of the CI `features` job (359 tests under `--all-features`, 182 with no backend); `cargo deny check` (advisories, bans, licences, sources ok); `sh cairn/verify.sh` conformant.

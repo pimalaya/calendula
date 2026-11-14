@@ -16,6 +16,5 @@ pub mod composer;
 pub mod event;
 pub mod ical;
 pub mod item;
-pub mod listing;
 pub mod receipt;
 pub mod uuid;

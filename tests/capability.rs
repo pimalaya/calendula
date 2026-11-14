@@ -2,9 +2,9 @@
 //!
 //! The built binary refusing what the backend of its account does not
 //! serve with `capability-missing`, before it reads, opens or connects
-//! anything; `account capability` listing what each backend of the
-//! account serves; and the `Backends:` footer of a unified command's
-//! help.
+//! anything; `account capability` listing what the account serves of
+//! the unified API, one row per capability naming its backend; and the
+//! `Backends:` footer of a unified command's help.
 //!
 //! A backend left unreached shows as a credential command that never ran
 //! or a store root never created.
@@ -286,31 +286,33 @@ fn account_capability_lists_what_the_backend_serves() {
     assert!(out.status.success(), "{stdout}");
 
     let expected = "\
-CAPABILITY               BACKEND  LEVEL  DETAIL
-calendar.list            vdir     full   -
-calendar.create          vdir     full   -
-calendar.rename          vdir     full   -
-calendar.delete          vdir     full   -
-calendar.description     vdir     full   -
-calendar.color           vdir     full   -
-item.list                vdir     full   -
-item.read                vdir     full   -
-item.add                 vdir     full   -
-item.update              vdir     full   -
-item.remove              vdir     full   -
-item.update.if-match     vdir     none   the backend exposes no version to compare, so `--if-match` is refused
-item.remove.if-match     vdir     none   the backend exposes no version to compare, so `--if-match` is refused
-online-meeting           vdir     none   `--online-meeting` needs the pimdir backend, whose sync engine creates the meeting
-scheduling.send-updates  vdir     none   a vdir store notifies nobody; `--send-updates` needs the gcal backend
+Account:    test
+
+calendar.list            vdir  full  -
+calendar.create          vdir  full  -
+calendar.rename          vdir  full  -
+calendar.delete          vdir  full  -
+calendar.description     vdir  full  -
+calendar.color           vdir  full  -
+item.list                vdir  full  -
+item.read                vdir  full  -
+item.add                 vdir  full  -
+item.update              vdir  full  -
+item.remove              vdir  full  -
+item.update.if-match     vdir  none  the backend exposes no version to compare, so `--if-match` is refused
+item.remove.if-match     vdir  none  the backend exposes no version to compare, so `--if-match` is refused
+online-meeting           vdir  none  `--online-meeting` needs the pimdir backend, whose sync engine creates the meeting
+scheduling.send-updates  vdir  none  a vdir store notifies nobody; `--send-updates` needs the gcal backend
 ";
     assert_eq!(stdout, expected);
 }
 
-/// Every backend the account configures is listed, in the order `auto`
-/// tries them, and `--backend` keeps one; the pimdir store is not opened.
+/// One row per capability, each naming the backend the unified commands
+/// resolve to, the first `auto` tries; `--backend` names another one, and
+/// the pimdir store is not opened.
 #[cfg(all(feature = "vdir", feature = "pimdir"))]
 #[test]
-fn account_capability_lists_each_backend_of_the_account() {
+fn account_capability_names_the_backend_each_capability_resolves_to() {
     let dir = TempDir::new().unwrap();
     let root = dir.path().join("store");
     let lines = format!(
@@ -329,30 +331,71 @@ fn account_capability_lists_each_backend_of_the_account() {
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
 
     assert_eq!(json["account"], "test", "{json}");
-    let backends = json["backends"].as_array().unwrap();
-    assert_eq!(backends.len(), 2, "{json}");
-    assert_eq!(backends[0]["backend"], "vdir", "{json}");
-    assert_eq!(backends[1]["backend"], "pimdir", "{json}");
+    assert!(json.get("backends").is_none(), "{json}");
 
-    let create = &backends[1]["capabilities"][1];
-    assert_eq!(create["name"], "calendar.create", "{json}");
-    assert_eq!(create["level"], "none", "{json}");
-    assert!(create["detail"].is_string(), "{json}");
+    let capabilities = json["capabilities"].as_array().unwrap();
+    assert_eq!(capabilities.len(), 15, "{json}");
 
-    let list = &backends[1]["capabilities"][0];
-    let full = serde_json::json!({"name": "calendar.list", "level": "full", "detail": null});
-    assert_eq!(*list, full, "{json}");
+    for row in capabilities {
+        assert_eq!(row["backend"], "vdir", "{row}");
+    }
+
+    let full = serde_json::json!({
+        "name": "calendar.list",
+        "backend": "vdir",
+        "level": "full",
+        "detail": null,
+    });
+    assert_eq!(capabilities[0], full, "{json}");
 
     let out = run(
         &config,
         &["--json", "--backend", "pimdir", "account", "capability"],
     );
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
-    let backends = json["backends"].as_array().unwrap();
-    assert_eq!(backends.len(), 1, "{json}");
-    assert_eq!(backends[0]["backend"], "pimdir", "{json}");
+    let capabilities = json["capabilities"].as_array().unwrap();
+
+    for row in capabilities {
+        assert_eq!(row["backend"], "pimdir", "{row}");
+    }
+
+    let create = &capabilities[1];
+    assert_eq!(create["name"], "calendar.create", "{json}");
+    assert_eq!(create["level"], "none", "{json}");
+    assert!(create["detail"].is_string(), "{json}");
 
     assert!(!root.exists());
+}
+
+/// A `--backend` the account configures none of resolves no backend:
+/// every row reads `none`, its backend `null`, and the command succeeds.
+#[cfg(all(feature = "vdir", feature = "pimdir"))]
+#[test]
+fn a_backend_the_account_lacks_resolves_none() {
+    let dir = TempDir::new().unwrap();
+    let config = write_config(dir.path(), &vdir_home(dir.path()));
+
+    let args = ["--json", "--backend", "pimdir", "account", "capability"];
+    let out = run(&config, &args);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let json: Value = serde_json::from_slice(&out.stdout).unwrap();
+
+    for row in json["capabilities"].as_array().unwrap() {
+        assert_eq!(row["backend"], Value::Null, "{row}");
+        assert_eq!(row["level"], "none", "{row}");
+        assert!(row["detail"].is_string(), "{row}");
+    }
+
+    let out = run(&config, &["--backend", "pimdir", "account", "capability"]);
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("\ncalendar.list            -  none  "),
+        "{stdout}"
+    );
 }
 
 /// The footer is generated from the tables, the same in every build.

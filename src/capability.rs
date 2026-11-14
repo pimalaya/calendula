@@ -17,7 +17,7 @@
 use std::fmt;
 
 use anyhow::Result;
-use pimalaya_cli::error::CodedError;
+use pimalaya_cli::{capability::CapabilityLevel, error::CodedError};
 
 use crate::error::ErrorCode;
 
@@ -123,13 +123,13 @@ pub enum Support {
 }
 
 impl Support {
-    /// The level's name, as the help and `account capability` print it.
-    pub fn level(self) -> &'static str {
+    /// The level, as the help and `account capability` print it.
+    pub fn level(self) -> CapabilityLevel {
         match self {
-            Self::Full => "full",
-            Self::Partial(_) => "partial",
-            Self::Server(_) => "server",
-            Self::None(_) => "none",
+            Self::Full => CapabilityLevel::Full,
+            Self::Partial(_) => CapabilityLevel::Partial,
+            Self::Server(_) => CapabilityLevel::Server,
+            Self::None(_) => CapabilityLevel::None,
         }
     }
 
@@ -274,7 +274,7 @@ pub fn help(group: &str, leaf: &str) -> String {
     let mut help = String::from("Backends:");
 
     for capability in *capabilities {
-        let mut levels: Vec<(&str, Vec<&str>)> = Vec::new();
+        let mut levels: Vec<(CapabilityLevel, Vec<&str>)> = Vec::new();
         let mut details: Vec<(&str, Vec<&str>)> = Vec::new();
 
         for backend in BACKENDS {
@@ -303,7 +303,7 @@ pub fn help(group: &str, leaf: &str) -> String {
 
 /// Pushes `item` under `key`, opening the group on first sight so the
 /// groups keep the order they were met in.
-fn group_by<'a>(groups: &mut Vec<(&'a str, Vec<&'a str>)>, key: &'a str, item: &'a str) {
+fn group_by<'a, K: PartialEq>(groups: &mut Vec<(K, Vec<&'a str>)>, key: K, item: &'a str) {
     match groups.iter_mut().find(|(known, _)| *known == key) {
         Some((_, items)) => items.push(item),
         None => groups.push((key, vec![item])),

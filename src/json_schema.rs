@@ -52,7 +52,7 @@ pub fn registry() -> JsonSchemaRegistry {
     );
     insert!(
         "calendula-account-capability",
-        crate::account::capability::AccountCapabilityOutput
+        pimalaya_cli::capability::AccountCapabilityOutput
     );
 
     insert!(

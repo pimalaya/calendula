@@ -149,7 +149,7 @@ At most one account may be marked `default = true` across them: several are refu
 
 Override those paths with `-c <PATH>`. Repeat it to merge several files, such as `-c public.toml -c private.toml`: the first one is the base and the next ones are deep-merged on top. Each `-c` takes one path, never split, and no environment variable is read: a path kept in a shell variable goes through the flag, as `-c "$CALENDULA_CONFIG"`.
 
-To add an account, add an `[accounts.<name>]` table to your configuration. `calendula account list` and `calendula account check` inspect and validate the accounts declared, and `calendula account capability` lists what each of its backends serves.
+To add an account, add an `[accounts.<name>]` table to your configuration. `calendula account list` and `calendula account check` inspect and validate the accounts declared, and `calendula account capability` lists what it serves of the unified API, through the backend `--backend` resolves to.
 
 ### Apple
 

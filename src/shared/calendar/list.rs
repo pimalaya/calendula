@@ -8,6 +8,7 @@ use std::fmt;
 use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::{
+    error::ItemErrors,
     fields::Fields,
     printer::Printer,
     records::{Record, Records},
@@ -18,7 +19,7 @@ use serde::Serialize;
 
 use crate::{
     capability::Capability,
-    error::{self, ItemError, ItemErrors},
+    error::{self, ItemError},
     shared::{calendar::Calendar, client::CalendarClient},
 };
 
@@ -88,8 +89,14 @@ impl fmt::Display for CalendarListOutput {
             });
         }
 
+        let mut errors = ItemErrors::default();
+
+        for error in &self.errors {
+            errors.push(error);
+        }
+
         write!(f, "{records}")?;
-        ItemErrors::new(&self.errors).write_after(f)
+        errors.write_after(f)
     }
 }
 

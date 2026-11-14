@@ -78,7 +78,7 @@ calendula calendar list --json | jq -r '.calendars[].id'
 ### Commands that now fail earlier
 
 - **A verb or a flag the account's backend does not serve is refused before connecting**, with the `capability-missing` code, naming the backend of the account that serves it: a description or a colour on a Graph calendar, refused once its token command ran in 0.2, `calendar create|update|delete` on pimdir, refused once the store was open, and `--if-match` on a vdir `event update` or `item update`, which 0.2 ignored.
-- **`calendula account capability` lists what each backend of an account serves**, and each `calendar`, `event` and `item` command's `--help` ends with a `Backends:` section naming the backends serving it.
+- **`calendula account capability` lists what an account serves of the unified API**, one row per capability naming the backend serving it, its level and what the level leaves out (`--backend <name>` for another backend of the account), and each `calendar`, `event` and `item` command's `--help` ends with a `Backends:` section naming the backends serving it.
 - **pimdir writes are checked before they are queued**: a create whose `UID` the calendar holds or has queued (`item-duplicate`), an update or a delete naming a version the item no longer has (`precondition-failed`), a to-do into a calendar whose source takes none, and a write no source of the store supports are refused, where 0.2 queued them for the sync engine to park or ignored the version.
 
 ### New

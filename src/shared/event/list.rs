@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use chrono::NaiveDate;
 use clap::Parser;
 use jiff::{Timestamp, civil::Date, tz::TimeZone};
-use pimalaya_cli::{clap::args::PageTokenArg, columns::Columns, printer::Printer, sanitize};
+use pimalaya_cli::{clap::args::PageTokenArg, listing::Listing, printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -21,8 +21,7 @@ use crate::{
         client::CalendarClient,
         event::Event,
         ical::IcalFamily,
-        item::{CalendarItemQuery, CalendarTimeRange},
-        listing::Listing,
+        item::{CalendarItemQuery, CalendarTimeRange, list::listing_page},
     },
 };
 
@@ -136,16 +135,15 @@ impl EventListCommand {
             None => Event::read_all(&listed.items, &mut errors, Event::try_project),
         };
 
-        let mut listing = Listing::new(&client.name, client.backend_name(), EVENT_NOUNS);
-        listing.push("Calendar", &calendar_id);
-        listing.page = page;
-        listing.page_size = page_size;
-        listing.count = count;
-
         let next_page = match page {
             Some(page) if listed.more => Some((page + 1).to_string()),
             _ => None,
         };
+
+        let mut listing = Listing::new(&client.name, Some(client.backend_name()));
+        listing.head("Calendar", &calendar_id);
+        let held = listing_page(page, page_size);
+        listing.page(held, count, EVENT_NOUNS, next_page.as_deref());
 
         let output = EventListOutput {
             listing,
@@ -167,9 +165,9 @@ pub(crate) const EVENT_NOUNS: [&str; 2] = ["event", "events"];
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EventListOutput {
-    /// The header the events print under.
+    /// The header the events print under, its page placed.
     #[serde(skip)]
-    pub listing: Listing,
+    pub listing: Listing<'static>,
     /// The zone a timed event's start and end print in.
     #[serde(skip)]
     pub zone: TimeZone,
@@ -184,12 +182,12 @@ pub struct EventListOutput {
 
 impl fmt::Display for EventListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut columns = Columns::default();
+        let mut listing = self.listing.clone();
 
         for event in &self.events {
             let (start, end) = row_times(event, &self.zone);
 
-            columns.push([
+            listing.items.push([
                 sanitize::text(&event.id).into_owned(),
                 sanitize::text(&start).into_owned(),
                 sanitize::text(&end).into_owned(),
@@ -197,12 +195,11 @@ impl fmt::Display for EventListOutput {
             ]);
         }
 
-        self.listing.write(
-            f,
-            &columns.to_string(),
-            self.next_page.as_deref(),
-            &self.errors,
-        )
+        for error in &self.errors {
+            listing.errors.push(error);
+        }
+
+        write!(f, "{listing}")
     }
 }
 
@@ -255,6 +252,7 @@ pub(crate) fn row_times(event: &Event, zone: &TimeZone) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use jiff::tz::TimeZone;
+    use pimalaya_cli::listing::{Listing, ListingPage};
 
     use crate::{
         error::ItemError,
@@ -263,8 +261,7 @@ mod tests {
                 Event,
                 list::{EVENT_NOUNS, EventListOutput, row_times},
             },
-            item::CalendarItem,
-            listing::Listing,
+            item::{CalendarItem, list::listing_page},
         },
     };
 
@@ -278,13 +275,12 @@ mod tests {
     }
 
     /// A page of `count` events of the vdir account `perso`, paged by two
-    /// unless `page` is `None`.
-    fn listing(page: Option<u32>, count: usize) -> Listing {
-        let mut listing = Listing::new("perso", "vdir", EVENT_NOUNS);
-        listing.push("Calendar", "personal");
-        listing.page = page;
-        listing.page_size = page.map(|_| 2);
-        listing.count = count;
+    /// unless `page` is `None`, `next` the page following it.
+    fn listing(page: Option<u32>, count: usize, next: Option<&str>) -> Listing<'static> {
+        let mut listing = Listing::new("perso", Some("vdir"));
+        listing.head("Calendar", "personal");
+        let held = listing_page(page, page.map(|_| 2));
+        listing.page(held, count, EVENT_NOUNS, next);
         listing
     }
 
@@ -318,7 +314,7 @@ mod tests {
         holiday.ends_at = Some("2026-05-21".into());
 
         let mut output = EventListOutput {
-            listing: listing(Some(1), 2),
+            listing: listing(Some(1), 2, Some("2")),
             zone: TimeZone::UTC,
             events: vec![standup, holiday],
             next_page: Some(String::from("2")),
@@ -336,7 +332,7 @@ holiday.ics  2026-05-19        2026-05-20        -
 ";
         assert_eq!(output.to_string(), expected);
 
-        output.listing = listing(Some(2), 1);
+        output.listing = listing(Some(2), 1, None);
         output.events.truncate(1);
         output.next_page = None;
 
@@ -349,7 +345,7 @@ standup.ics  2026-10-30 08:00  2026-10-30 08:30  Standup\u{fffd}[2J
 ";
         assert_eq!(output.to_string(), expected);
 
-        output.listing = listing(Some(3), 0);
+        output.listing = listing(Some(3), 0, None);
         output.events.clear();
 
         let expected = "\
@@ -372,7 +368,7 @@ Page:       3, empty
         standup.end_secs = Some(1_793_349_000);
 
         let mut output = EventListOutput {
-            listing: listing(Some(1), 1),
+            listing: listing(Some(1), 1, None),
             zone: TimeZone::UTC,
             events: vec![standup],
             next_page: None,
@@ -391,7 +387,7 @@ Error:  broken\u{fffd}[2J  item-unreadable  Cannot parse item `broken\u{fffd}[2J
 ";
         assert_eq!(output.to_string(), expected);
 
-        output.listing = listing(Some(1), 0);
+        output.listing = listing(Some(1), 0, None);
         output.events.clear();
         output.errors.truncate(1);
 
@@ -418,8 +414,10 @@ Error:  c  item-unreadable  Cannot parse item `c` as iCalendar
         found.id = "a.ics".into();
         found.summary = "Review".into();
 
-        let mut listing = listing(None, 1);
-        listing.push("UID", "1@example.org");
+        let mut listing = Listing::new("perso", Some("vdir"));
+        listing.head("Calendar", "personal");
+        listing.head("UID", "1@example.org");
+        listing.page(ListingPage::All, 1, EVENT_NOUNS, None);
 
         let output = EventListOutput {
             listing,

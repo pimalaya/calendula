@@ -8,7 +8,12 @@ use std::fmt;
 use anyhow::{Context, Result};
 use clap::Parser;
 use humansize::{BINARY, format_size};
-use pimalaya_cli::{clap::args::PageTokenArg, columns::Columns, printer::Printer, sanitize};
+use pimalaya_cli::{
+    clap::args::PageTokenArg,
+    listing::{Listing, ListingPage},
+    printer::Printer,
+    sanitize,
+};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -19,7 +24,6 @@ use crate::{
         arg::CalendarIdArg,
         client::CalendarClient,
         item::{CalendarItem, CalendarItemQuery},
-        listing::Listing,
     },
 };
 
@@ -79,17 +83,16 @@ impl ItemListCommand {
         let query = CalendarItemQuery::default();
         let listed = client.list_items(&calendar_id, page, page_size, query)?;
 
-        let nouns = ["item", "items"];
-        let mut listing = Listing::new(&client.name, client.backend_name(), nouns);
-        listing.push("Calendar", &calendar_id);
-        listing.page = page;
-        listing.page_size = page_size;
-        listing.count = listed.items.len();
-
         let next_page = match page {
             Some(page) if listed.more => Some((page + 1).to_string()),
             _ => None,
         };
+
+        let mut listing = Listing::new(&client.name, Some(client.backend_name()));
+        listing.head("Calendar", &calendar_id);
+        let held = listing_page(page, page_size);
+        let count = listed.items.len();
+        listing.page(held, count, ["item", "items"], next_page.as_deref());
 
         let output = ItemListOutput {
             listing,
@@ -103,13 +106,25 @@ impl ItemListCommand {
     }
 }
 
+/// The page an item listing holds: the numbered `page` of `size` items,
+/// the whole listing when either is unset.
+pub(crate) fn listing_page(page: Option<u32>, size: Option<u32>) -> ListingPage {
+    match (page, size) {
+        (Some(page), Some(size)) => ListingPage::Numbered {
+            page: page.into(),
+            size: size.into(),
+        },
+        _ => ListingPage::All,
+    }
+}
+
 /// The items of one page and the number of the next.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemListOutput {
-    /// The header the items print under.
+    /// The header the items print under, its page placed.
     #[serde(skip)]
-    pub listing: Listing,
+    pub listing: Listing<'static>,
     /// The items of the page, in the order the backend listed them.
     pub items: Vec<CalendarItem>,
     /// The number of the page following this one, given back through
@@ -121,24 +136,23 @@ pub struct ItemListOutput {
 
 impl fmt::Display for ItemListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut columns = Columns::default();
+        let mut listing = self.listing.clone();
 
         for item in &self.items {
             let etag = item.etag.as_deref().unwrap_or_default();
 
-            columns.push([
+            listing.items.push([
                 sanitize::text(etag).into_owned(),
                 size_of(item),
                 sanitize::text(&item.id).into_owned(),
             ]);
         }
 
-        self.listing.write(
-            f,
-            &columns.to_string(),
-            self.next_page.as_deref(),
-            &self.errors,
-        )
+        for error in &self.errors {
+            listing.errors.push(error);
+        }
+
+        write!(f, "{listing}")
     }
 }
 
@@ -158,22 +172,19 @@ mod tests {
     use std::io;
 
     use anyhow::anyhow;
+    use pimalaya_cli::listing::{Listing, ListingPage};
 
     use crate::{
         error,
-        shared::{
-            item::{CalendarItem, list::ItemListOutput},
-            listing::Listing,
-        },
+        shared::item::{CalendarItem, list::ItemListOutput},
     };
 
     #[test]
     fn items_print_one_line_each_the_id_last() {
-        let mut listing = Listing::new("perso", "caldav", ["item", "items"]);
-        listing.push("Calendar", "personal");
-        listing.page = Some(1);
-        listing.page_size = Some(25);
-        listing.count = 2;
+        let mut listing = Listing::new("perso", Some("caldav"));
+        listing.head("Calendar", "personal");
+        let page = ListingPage::Numbered { page: 1, size: 25 };
+        listing.page(page, 2, ["item", "items"], None);
 
         let output = ItemListOutput {
             listing,
@@ -208,11 +219,10 @@ Page:       1, items 1 to 2, the last
     /// built as vdir and pimdir build their entries.
     #[test]
     fn an_unread_item_prints_last() {
-        let mut listing = Listing::new("perso", "pimdir", ["item", "items"]);
-        listing.push("Calendar", "personal");
-        listing.page = Some(2);
-        listing.page_size = Some(1);
-        listing.count = 1;
+        let mut listing = Listing::new("perso", Some("pimdir"));
+        listing.head("Calendar", "personal");
+        let page = ListingPage::Numbered { page: 2, size: 1 };
+        listing.page(page, 1, ["item", "items"], Some("3"));
 
         let denied = io::Error::from(io::ErrorKind::PermissionDenied);
         let file = anyhow::Error::from(denied).context("Cannot read item file /home/c.ics");

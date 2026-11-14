@@ -79,6 +79,38 @@ pub struct CalendarClient {
     pub account: Account,
 }
 
+/// The backend the unified commands run against: the first one the account
+/// configures that `backend` allows, in priority order (vdir, pimdir,
+/// CalDAV, gcal, msgraph).
+pub fn resolve_backend(account_config: &AccountConfig, backend: Backend) -> Option<Backend> {
+    #[cfg(feature = "vdir")]
+    if backend.allows_vdir() && account_config.vdir.is_some() {
+        return Some(Backend::Vdir);
+    }
+
+    #[cfg(feature = "pimdir")]
+    if backend.allows_pimdir() && account_config.pimdir.is_some() {
+        return Some(Backend::Pimdir);
+    }
+
+    #[cfg(feature = "caldav")]
+    if backend.allows_caldav() && account_config.caldav.is_some() {
+        return Some(Backend::Caldav);
+    }
+
+    #[cfg(feature = "gcal")]
+    if backend.allows_gcal() && account_config.gcal.is_some() {
+        return Some(Backend::Gcal);
+    }
+
+    #[cfg(feature = "msgraph")]
+    if backend.allows_msgraph() && account_config.msgraph.is_some() {
+        return Some(Backend::Msgraph);
+    }
+
+    None
+}
+
 /// The configuration of the backend a [`CalendarClient`] speaks to.
 enum BackendConfig {
     #[cfg(feature = "vdir")]
@@ -147,48 +179,28 @@ impl CalendarClient {
     ) -> Result<Self> {
         let configured = account_config.backends();
 
-        #[allow(unused_mut)]
-        let mut selected: Option<BackendConfig> = None;
-
-        #[cfg(feature = "vdir")]
-        if selected.is_none()
-            && backend.allows_vdir()
-            && let Some(vdir_config) = account_config.vdir.take()
-        {
-            selected = Some(BackendConfig::Vdir(vdir_config));
-        }
-
-        #[cfg(feature = "pimdir")]
-        if selected.is_none()
-            && backend.allows_pimdir()
-            && let Some(pimdir_config) = account_config.pimdir.take()
-        {
-            selected = Some(BackendConfig::Pimdir(pimdir_config));
-        }
-
-        #[cfg(feature = "caldav")]
-        if selected.is_none()
-            && backend.allows_caldav()
-            && let Some(caldav_config) = account_config.caldav.take()
-        {
-            selected = Some(BackendConfig::Caldav(Box::new(caldav_config)));
-        }
-
-        #[cfg(feature = "gcal")]
-        if selected.is_none()
-            && backend.allows_gcal()
-            && let Some(gcal_config) = account_config.gcal.take()
-        {
-            selected = Some(BackendConfig::Gcal(Box::new(gcal_config)));
-        }
-
-        #[cfg(feature = "msgraph")]
-        if selected.is_none()
-            && backend.allows_msgraph()
-            && let Some(msgraph_config) = account_config.msgraph.take()
-        {
-            selected = Some(BackendConfig::Msgraph(Box::new(msgraph_config)));
-        }
+        let selected = match resolve_backend(&account_config, backend) {
+            #[cfg(feature = "vdir")]
+            Some(Backend::Vdir) => account_config.vdir.take().map(BackendConfig::Vdir),
+            #[cfg(feature = "pimdir")]
+            Some(Backend::Pimdir) => account_config.pimdir.take().map(BackendConfig::Pimdir),
+            #[cfg(feature = "caldav")]
+            Some(Backend::Caldav) => account_config
+                .caldav
+                .take()
+                .map(|config| BackendConfig::Caldav(Box::new(config))),
+            #[cfg(feature = "gcal")]
+            Some(Backend::Gcal) => account_config
+                .gcal
+                .take()
+                .map(|config| BackendConfig::Gcal(Box::new(config))),
+            #[cfg(feature = "msgraph")]
+            Some(Backend::Msgraph) => account_config
+                .msgraph
+                .take()
+                .map(|config| BackendConfig::Msgraph(Box::new(config))),
+            _ => None,
+        };
 
         let Some(config_) = selected else {
             bail!("No backend matching `{backend}` is configured for this account");
