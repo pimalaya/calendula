@@ -50,7 +50,7 @@ idna_adapter = { version = "=1.0.0", default-features = false }
 io-gcal = { version = "0.5", default-features = false, features = ["client"], optional = true }
 io-http = { version = "0.8", default-features = false, optional = true }
 io-msgraph = { version = "0.9.1", default-features = false, optional = true }
-io-pimdir = { version = "0.12", default-features = false, features = ["client"], optional = true }
+io-pimdir = { version = "0.13", default-features = false, features = ["client"], optional = true }
 io-vdir = { version = "0.3", default-features = false, features = ["client"], optional = true }
 io-webdav = { version = "0.9", default-features = false, features = ["client"], optional = true }
 jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-bundle-always"] }
