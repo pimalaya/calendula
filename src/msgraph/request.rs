@@ -10,12 +10,16 @@ use pimalaya_cli::printer::Printer;
 use serde_json::Value;
 use url::Url;
 
-use crate::{msgraph::client::MsgraphClient, shared::raw_json::RawJsonOutput};
+use crate::{
+    msgraph::client::MsgraphClient,
+    shared::raw_json::{RawJsonOutput, request_url},
+};
 
 /// Send a raw Microsoft Graph request and print the JSON response.
 ///
 /// The path is joined onto the Graph `v1.0/` base, or a full URL is used
-/// as-is. JSON output: `{response}`, the raw Graph response.
+/// as-is when it is on Graph's origin, refused before anything is sent
+/// otherwise. JSON output: `{response}`, the raw Graph response.
 #[derive(Debug, Parser)]
 pub struct MsgraphRequestCommand {
     /// HTTP method: get, post, patch, delete.
@@ -54,12 +58,8 @@ fn parse_body(body: Option<&str>) -> Result<Value> {
     serde_json::from_str(body.unwrap_or("null")).context("Parse request body JSON error")
 }
 
-/// Resolves a Graph path onto the `v1.0/` base, a full URL being taken
-/// as-is.
+/// Resolves a Graph path onto the `v1.0/` base, a full URL taken as-is
+/// when it is on Graph's origin and refused otherwise.
 fn resolve_url(path: &str) -> Result<Url> {
-    if path.starts_with("http") {
-        Ok(Url::parse(path)?)
-    } else {
-        Ok(Url::parse(MSGRAPH_API_BASE)?.join(path.trim_start_matches('/'))?)
-    }
+    request_url(MSGRAPH_API_BASE, path, "Microsoft Graph")
 }

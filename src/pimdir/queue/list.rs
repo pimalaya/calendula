@@ -210,9 +210,9 @@ mod tests {
         };
 
         let expected = "\
-Account:    perso (pimdir)
-Calendar:   all
-Cancel:     calendula pimdir queue cancel <ROW>
+Account:   perso (pimdir)
+Calendar:  all
+Cancel:    calendula pimdir queue cancel <ROW>
 
 3  queued  2026-11-15T09:00:00Z  add             cal  Standup
 4  queued  2026-11-15T09:05:00Z  calendar-reply  cal  7
@@ -266,8 +266,8 @@ Cancel:     calendula pimdir queue cancel <ROW>
         };
 
         let expected = "\
-Account:    perso (pimdir)
-Calendar:   cal
+Account:   perso (pimdir)
+Calendar:  cal
 
 Nothing queued nor parked
 ";

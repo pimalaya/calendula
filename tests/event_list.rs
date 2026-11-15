@@ -86,21 +86,22 @@ fn an_event_list_prints_a_header_then_one_line_per_event() {
     let home = account();
 
     let expected = "\
-Account:    perso (vdir)
-Calendar:   personal
-Page:       1, events 1 to 2
-Next page:  --page 2
+Account:   perso (vdir)
+Calendar:  personal
+Page:      1, events 1 to 2
 
 a  2026-11-12 09:00  2026-11-12 09:30  Standup
 b  2026-11-13 14:00  2026-11-13 15:00  Review
+
+Next page: --page 2
 ";
     let args = ["event", "list", "-s", "2"];
     assert_eq!(run(home.path(), &args), expected);
 
     let expected = "\
-Account:    perso (vdir)
-Calendar:   personal
-Page:       2, event 3, the last
+Account:   perso (vdir)
+Calendar:  personal
+Page:      2, event 3, the last
 
 c  2026-11-14 10:00  2026-11-14 11:00  -
 ";
@@ -290,9 +291,9 @@ fn an_unreadable_item_is_named_last_and_exits_3() {
 
     let expected = format!(
         "\
-Account:    perso (vdir)
-Calendar:   personal
-Page:       all, events 1 to 3
+Account:   perso (vdir)
+Calendar:  personal
+Page:      all, events 1 to 3
 
 a  2026-11-12 09:00  2026-11-12 09:30  Standup
 b  2026-11-13 14:00  2026-11-13 15:00  Review

@@ -322,13 +322,14 @@ mod tests {
         };
 
         let expected = "\
-Account:    perso (vdir)
-Calendar:   personal
-Page:       1, events 1 to 2
-Next page:  --page 2
+Account:   perso (vdir)
+Calendar:  personal
+Page:      1, events 1 to 2
 
 standup.ics  2026-10-30 08:00  2026-10-30 08:30  Standup\u{fffd}[2J
 holiday.ics  2026-05-19        2026-05-20        -
+
+Next page: --page 2
 ";
         assert_eq!(output.to_string(), expected);
 
@@ -337,9 +338,9 @@ holiday.ics  2026-05-19        2026-05-20        -
         output.next_page = None;
 
         let expected = "\
-Account:    perso (vdir)
-Calendar:   personal
-Page:       2, event 3, the last
+Account:   perso (vdir)
+Calendar:  personal
+Page:      2, event 3, the last
 
 standup.ics  2026-10-30 08:00  2026-10-30 08:30  Standup\u{fffd}[2J
 ";
@@ -349,9 +350,9 @@ standup.ics  2026-10-30 08:00  2026-10-30 08:30  Standup\u{fffd}[2J
         output.events.clear();
 
         let expected = "\
-Account:    perso (vdir)
-Calendar:   personal
-Page:       3, empty
+Account:   perso (vdir)
+Calendar:  personal
+Page:      3, empty
 ";
         assert_eq!(output.to_string(), expected);
     }
@@ -376,9 +377,9 @@ Page:       3, empty
         };
 
         let expected = "\
-Account:    perso (vdir)
-Calendar:   personal
-Page:       1, event 1, the last
+Account:   perso (vdir)
+Calendar:  personal
+Page:      1, event 1, the last
 
 standup.ics  2026-10-30 08:00  2026-10-30 08:30  Standup
 
@@ -392,9 +393,9 @@ Error:  broken\u{fffd}[2J  item-unreadable  Cannot parse item `broken\u{fffd}[2J
         output.errors.truncate(1);
 
         let expected = "\
-Account:    perso (vdir)
-Calendar:   personal
-Page:       1, empty
+Account:   perso (vdir)
+Calendar:  personal
+Page:      1, empty
 
 Error:  c  item-unreadable  Cannot parse item `c` as iCalendar
 ";
@@ -428,10 +429,10 @@ Error:  c  item-unreadable  Cannot parse item `c` as iCalendar
         };
 
         let expected = "\
-Account:    perso (vdir)
-Calendar:   personal
-UID:        1@example.org
-Page:       all, event 1
+Account:   perso (vdir)
+Calendar:  personal
+UID:       1@example.org
+Page:      all, event 1
 
 a.ics  20260519  20260520  Review
 ";

@@ -354,7 +354,7 @@ mod tests {
         }
 
         for newer in [
-            refused(Some("storage-draft-12")),
+            refused(Some("storage-draft-14")),
             refused(Some("storage-v1.0.0")),
         ] {
             assert!(newer.contains("upgrade calendula"), "{newer}");

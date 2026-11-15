@@ -17,17 +17,23 @@ use crate::pimdir::backend::PimdirBackend;
 /// Shows the account this client reads, every account the store groups
 /// collections under, one row per calendar with how many of its items
 /// carry a local body and how many creations are still queued, and
-/// every write the store's owner parked in those calendars.
+/// every write the store's owner parked in those calendars, and every
+/// event a server refused for good.
 ///
 /// A calendar whose items list but do not read is waiting on a sync to
 /// hydrate them, and this is where to see that coming. A parked write
 /// never lands: it is shown by its queue row (ROW), the id `pimdir queue
 /// cancel` cancels it by, `pimdir queue list` listing every row of a
-/// calendar.
+/// calendar. A refused event was applied in the store, but a server
+/// refused for good the change it led to (a time its calendar does not
+/// take, a value it does not store): the sync engine holds that change,
+/// pushing it again only once the event is edited or removed (pimdir
+/// STORAGE §15.4).
 ///
 /// JSON output: `{"account", "accounts", "calendars": [{"id", "name",
 /// "total", "hydrated", "queued"}], "parked": [{"row", "calendarId",
-/// "kind", "error"}]}`, `kind` kebab-case as the queue spells it.
+/// "kind", "error"}], "refused": [{"calendarId", "itemId", "source",
+/// "reason", "refusedAt"}]}`, `kind` kebab-case as the queue spells it.
 #[derive(Debug, Parser)]
 pub struct PimdirStatusCommand;
 
@@ -50,6 +56,8 @@ pub struct PimdirStatusOutput {
     /// Every action the store's owner parked in those calendars, in the
     /// order it was queued.
     pub parked: Vec<PimdirParkedStatus>,
+    /// Every refusal standing in those calendars, per event and source.
+    pub refused: Vec<PimdirRefusedStatus>,
 }
 
 /// One calendar's row in a [`PimdirStatusOutput`].
@@ -86,6 +94,22 @@ pub struct PimdirParkedStatus {
     pub error: String,
 }
 
+/// One refused event in a [`PimdirStatusOutput`] (pimdir STORAGE §15.4).
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PimdirRefusedStatus {
+    /// The calendar holding the event.
+    pub calendar_id: String,
+    /// The event, as `event read` takes it.
+    pub item_id: String,
+    /// The source whose server refused the change.
+    pub source: String,
+    /// The text the server gave.
+    pub reason: String,
+    /// When the refusal was recorded, RFC 3339.
+    pub refused_at: String,
+}
+
 impl fmt::Display for PimdirStatusOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut fields = Fields::default();
@@ -118,23 +142,43 @@ impl fmt::Display for PimdirStatusOutput {
             write!(f, "{columns}")?;
         }
 
-        if self.parked.is_empty() {
-            return Ok(());
+        if !self.parked.is_empty() {
+            let mut columns = Columns::new(["ROW", "KIND", "CALENDAR", "ERROR"]);
+
+            for parked in &self.parked {
+                columns.push([
+                    parked.row.to_string(),
+                    sanitize::text(&parked.kind).into_owned(),
+                    sanitize::text(&parked.calendar_id).into_owned(),
+                    sanitize::text(&parked.error).into_owned(),
+                ]);
+            }
+
+            writeln!(f)?;
+            write!(f, "{columns}")?;
+            writeln!(f, "Parked by the store's owner, never applied")?;
         }
 
-        let mut columns = Columns::new(["ROW", "KIND", "CALENDAR", "ERROR"]);
+        if !self.refused.is_empty() {
+            let mut columns = Columns::new(["EVENT", "CALENDAR", "SOURCE", "REASON"]);
 
-        for parked in &self.parked {
-            columns.push([
-                parked.row.to_string(),
-                sanitize::text(&parked.kind).into_owned(),
-                sanitize::text(&parked.calendar_id).into_owned(),
-                sanitize::text(&parked.error).into_owned(),
-            ]);
+            for refused in &self.refused {
+                columns.push([
+                    sanitize::text(&refused.item_id).into_owned(),
+                    sanitize::text(&refused.calendar_id).into_owned(),
+                    sanitize::text(&refused.source).into_owned(),
+                    sanitize::text(&refused.reason).into_owned(),
+                ]);
+            }
+
+            writeln!(f)?;
+            write!(f, "{columns}")?;
+            writeln!(
+                f,
+                "Refused by the server, held until the event is edited or removed"
+            )?;
         }
 
-        writeln!(f)?;
-        write!(f, "{columns}")?;
-        writeln!(f, "Parked by the store's owner, never applied")
+        Ok(())
     }
 }

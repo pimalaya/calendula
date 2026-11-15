@@ -268,13 +268,33 @@ fn a_graph_calendar_description_is_refused_before_the_token_is_resolved() {
     );
     let config = write_config(dir.path(), &lines);
 
-    let args = [
-        "--json", "calendar", "create", "Work", "--id", "work", "-d", "Mine",
-    ];
+    let args = ["--json", "calendar", "create", "Work", "-d", "Mine"];
     let message = refused(&run(&config, &args), "calendar.description");
     assert!(message.contains("msgraph backend"), "{message}");
 
     assert!(!marker.exists());
+}
+
+/// Google and Graph mint a calendar's id: `--id` is refused before the
+/// token command runs, where it was ignored.
+#[cfg(all(feature = "gcal", feature = "msgraph"))]
+#[test]
+fn a_calendar_id_on_a_minting_backend_is_refused_before_the_token_is_resolved() {
+    for backend in ["gcal", "msgraph"] {
+        let dir = TempDir::new().unwrap();
+        let marker = dir.path().join("marker");
+        let lines = format!(
+            "{backend}.auth.token.command = {:?}\n",
+            marker_command(&marker)
+        );
+        let config = write_config(dir.path(), &lines);
+
+        let args = ["--json", "calendar", "create", "Work", "--id", "work"];
+        let message = refused(&run(&config, &args), "calendar.create.id");
+        assert!(message.contains(&format!("{backend} backend")), "{message}");
+
+        assert!(!marker.exists(), "{backend}");
+    }
 }
 
 #[cfg(feature = "vdir")]
@@ -288,10 +308,11 @@ fn account_capability_lists_what_the_backend_serves() {
     assert!(out.status.success(), "{stdout}");
 
     let expected = "\
-Account:    test
+Account:  test
 
 calendar.list            vdir  full  -
 calendar.create          vdir  full  -
+calendar.create.id       vdir  full  -
 calendar.rename          vdir  full  -
 calendar.delete          vdir  full  -
 calendar.description     vdir  full  -
@@ -336,7 +357,7 @@ fn account_capability_names_the_backend_each_capability_resolves_to() {
     assert!(json.get("backends").is_none(), "{json}");
 
     let capabilities = json["capabilities"].as_array().unwrap();
-    assert_eq!(capabilities.len(), 15, "{json}");
+    assert_eq!(capabilities.len(), 16, "{json}");
 
     for row in capabilities {
         assert_eq!(row["backend"], "vdir", "{row}");

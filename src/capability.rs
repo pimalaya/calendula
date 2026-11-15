@@ -31,6 +31,8 @@ pub enum Capability {
     CalendarList,
     /// Creating a calendar.
     CalendarCreate,
+    /// Choosing the id of a calendar created.
+    CalendarCreateId,
     /// Renaming a calendar.
     CalendarRename,
     /// Deleting a calendar and the items it holds.
@@ -61,9 +63,10 @@ pub enum Capability {
 
 impl Capability {
     /// Every capability, in the order the listings print them.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         C::CalendarList,
         C::CalendarCreate,
+        C::CalendarCreateId,
         C::CalendarRename,
         C::CalendarDelete,
         C::CalendarDescription,
@@ -84,6 +87,7 @@ impl Capability {
         match self {
             Self::CalendarList => "calendar.list",
             Self::CalendarCreate => "calendar.create",
+            Self::CalendarCreateId => "calendar.create.id",
             Self::CalendarRename => "calendar.rename",
             Self::CalendarDelete => "calendar.delete",
             Self::CalendarDescription => "calendar.description",
@@ -203,7 +207,12 @@ const LEAVES: &[(&str, &str, &[Capability])] = &[
     (
         "calendar",
         "create",
-        &[C::CalendarCreate, C::CalendarDescription, C::CalendarColor],
+        &[
+            C::CalendarCreate,
+            C::CalendarCreateId,
+            C::CalendarDescription,
+            C::CalendarColor,
+        ],
     ),
     (
         "calendar",
@@ -325,11 +334,18 @@ const PIMDIR_CALENDAR: &str = "the store is an offline cache whose calendars com
 const PIMDIR_QUEUED: &str = "queued for the next sync, and refused when a source of the store \
      does not support it";
 
-/// What a server minting calendar ids does with the one given.
-const MINTED_ID: &str = "the server mints the calendar's id, reported in place of any given";
+/// Why a server minting calendar ids takes no `--id`.
+const MINTED_ID: &str = "the server mints the id of a calendar, so `--id` is refused";
 
-/// What a backend modelling events alone does with another component.
-const EVENT_ONLY: &str = "an event only: a to-do or a journal entry is refused";
+/// What a Google series write leaves out.
+const GCAL_SERIES: &str = "an event only: a to-do or a journal entry is refused, and a \
+     series' overrides are written through its instances, an override with a RANGE and the \
+     lines past what Google stores left out with a warning";
+
+/// What a Graph series write leaves out.
+const MSGRAPH_SERIES: &str = "an event only: a to-do or a journal entry is refused, and a \
+     series' cancelled and overridden occurrences are written through its instances, what \
+     Graph cannot hold (an RDATE, an EXRULE, a RANGE) left out with a warning";
 
 /// What a version compared in a request of its own leaves open.
 const CHANGE_KEY: &str = "compared with the event's `changeKey` read just before the write, \
@@ -339,6 +355,7 @@ const CHANGE_KEY: &str = "compared with the event's `changeKey` read just before
 const VDIR: &[Row] = &[
     (C::CalendarList, Full),
     (C::CalendarCreate, Full),
+    (C::CalendarCreateId, Full),
     (C::CalendarRename, Full),
     (C::CalendarDelete, Full),
     (C::CalendarDescription, Full),
@@ -361,6 +378,7 @@ const VDIR: &[Row] = &[
 const PIMDIR: &[Row] = &[
     (C::CalendarList, Full),
     (C::CalendarCreate, Not(PIMDIR_CALENDAR)),
+    (C::CalendarCreateId, Not(PIMDIR_CALENDAR)),
     (C::CalendarRename, Not(PIMDIR_CALENDAR)),
     (C::CalendarDelete, Not(PIMDIR_CALENDAR)),
     (C::CalendarDescription, Not(PIMDIR_CALENDAR)),
@@ -395,6 +413,7 @@ const CALDAV: &[Row] = &[
         C::CalendarCreate,
         Server("the server may refuse to create a calendar (`MKCALENDAR`, RFC 4791 section 5.3.1)"),
     ),
+    (C::CalendarCreateId, Full),
     (C::CalendarRename, Full),
     (
         C::CalendarDelete,
@@ -422,7 +441,8 @@ const CALDAV: &[Row] = &[
 /// Google Calendar API v3.
 const GCAL: &[Row] = &[
     (C::CalendarList, Full),
-    (C::CalendarCreate, Partial(MINTED_ID)),
+    (C::CalendarCreate, Full),
+    (C::CalendarCreateId, Not(MINTED_ID)),
     (C::CalendarRename, Full),
     (
         C::CalendarDelete,
@@ -435,8 +455,8 @@ const GCAL: &[Row] = &[
     ),
     (C::ItemList, Full),
     (C::ItemRead, Full),
-    (C::ItemAdd, Partial(EVENT_ONLY)),
-    (C::ItemUpdate, Partial(EVENT_ONLY)),
+    (C::ItemAdd, Partial(GCAL_SERIES)),
+    (C::ItemUpdate, Partial(GCAL_SERIES)),
     (C::ItemRemove, Full),
     (C::ItemUpdateIfMatch, Full),
     (C::ItemRemoveIfMatch, Full),
@@ -453,7 +473,8 @@ const GCAL: &[Row] = &[
 /// Microsoft Graph calendars.
 const MSGRAPH: &[Row] = &[
     (C::CalendarList, Full),
-    (C::CalendarCreate, Partial(MINTED_ID)),
+    (C::CalendarCreate, Full),
+    (C::CalendarCreateId, Not(MINTED_ID)),
     (C::CalendarRename, Full),
     (
         C::CalendarDelete,
@@ -469,14 +490,8 @@ const MSGRAPH: &[Row] = &[
     ),
     (C::ItemList, Full),
     (C::ItemRead, Full),
-    (C::ItemAdd, Partial(EVENT_ONLY)),
-    (
-        C::ItemUpdate,
-        Partial(
-            "an event only, and the series master alone is written: an override edited in the \
-             item does not reach the server",
-        ),
-    ),
+    (C::ItemAdd, Partial(MSGRAPH_SERIES)),
+    (C::ItemUpdate, Partial(MSGRAPH_SERIES)),
     (C::ItemRemove, Full),
     (C::ItemUpdateIfMatch, Partial(CHANGE_KEY)),
     (C::ItemRemoveIfMatch, Partial(CHANGE_KEY)),

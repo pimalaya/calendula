@@ -79,10 +79,10 @@ The text output changes everywhere, a few JSON outputs and exit codes move, and 
 
 ### pimdir store
 
-The pimdir backend follows pimdir storage-draft-11, sync-draft-11 and search-draft-11, and a store is never migrated: one any earlier neverest wrote is refused with the code `store-version`. Reinstall it, in this order, so no queued write is lost:
+The pimdir backend follows pimdir storage-draft-13, sync-draft-13 and search-draft-13, and a store is never migrated: one any earlier neverest wrote is refused with the code `store-version`. Reinstall it, in this order, so no queued write is lost:
 
 1. Run `neverest sync` with the neverest that wrote the store until nothing is queued: the writes calendula queued live in that store alone.
-2. Upgrade to a neverest following storage-draft-11.
+2. Upgrade to a neverest following storage-draft-13.
 3. Move the store directory aside, deleting nothing: what it held that no server holds stays there.
 4. Run `neverest init`, then `neverest sync`, which builds a new store at the same path.
 

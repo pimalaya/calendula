@@ -120,8 +120,8 @@ fn a_search_resumes_at_the_next_page_it_names() {
 
     let text = run(home, &["pimdir", "search", "-s", "2", "budget"]);
     let text = String::from_utf8(text.stdout).unwrap();
-    assert!(text.contains("Page:       1, events 1 to 2\n"), "{text}");
-    assert!(text.contains("Next page:  --page 2\n"), "{text}");
+    assert!(text.contains("Page:      1, events 1 to 2\n"), "{text}");
+    assert!(text.contains("\nNext page: --page 2\n"), "{text}");
 }
 
 #[test]

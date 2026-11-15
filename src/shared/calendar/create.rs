@@ -18,7 +18,8 @@ use crate::{capability::Capability, shared::client::CalendarClient};
 /// commands address the calendar by. Given only a name, vdir names the
 /// calendar's directory after it and CalDAV mints a UUID for its URL
 /// segment; an id given with `--id` is kept by both. Google and Graph
-/// mint their own either way.
+/// mint their own, so they refuse `--id` with `capability-missing`
+/// before connecting.
 ///
 /// JSON output: `{"id", "name", "queued"}`, the calendar created, the name
 /// it was given and whether a sync engine applies the write later.
@@ -29,7 +30,7 @@ pub struct CalendarCreateCommand {
     pub name: String,
 
     /// Stable calendar identifier, on the backends letting a client name a
-    /// calendar.
+    /// calendar (vdir, CalDAV), refused on the others.
     ///
     /// Omitted, vdir takes the name, which must then be one directory
     /// name, and CalDAV a fresh UUID.
@@ -48,6 +49,9 @@ pub struct CalendarCreateCommand {
 impl CalendarCreateCommand {
     pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
         let mut capabilities = vec![Capability::CalendarCreate];
+        if self.id.is_some() {
+            capabilities.push(Capability::CalendarCreateId);
+        }
         if self.description.is_some() {
             capabilities.push(Capability::CalendarDescription);
         }

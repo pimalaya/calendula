@@ -14,9 +14,14 @@
 //! applied locally, and the listing walks `nextPageToken` only as far as the
 //! requested window reaches.
 //!
+//! A series is written as its master, its EXDATEs among its recurrence
+//! lines, then each override through the instance Google lists for it,
+//! merged onto it and updated. What Google cannot hold (an override with a
+//! RANGE, lines past what it stores) is left out with a warning naming it.
+//!
 //! [`CalendarTimeRange`]: crate::shared::item::CalendarTimeRange
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use ical::component::IcalComponentKind;
 use io_gcal::v3::{
     client::GcalClientStd,
@@ -24,9 +29,10 @@ use io_gcal::v3::{
         calendar_list::{GcalCalendarListEntry, list::GcalCalendarListListParams},
         calendars::GcalCalendar,
         events::{
-            GcalEvent, GcalEventStatus, GcalSendUpdates, ical::GcalEventIcalError,
+            GcalEvent, GcalEventStatus, GcalSendUpdates, ical::GcalEventSeries,
             import::GcalEventImportParams, insert::GcalEventInsertParams,
-            list::GcalEventsListParams, update::GcalEventUpdateParams,
+            instances::GcalEventInstancesParams, list::GcalEventsListParams,
+            update::GcalEventUpdateParams,
         },
     },
 };
@@ -313,14 +319,19 @@ impl GcalBackend {
     /// A UID the calendar already holds is refused `item-duplicate`
     /// before anything is written: an import matches on it and would
     /// overwrite that event.
+    ///
+    /// A series' overrides follow the master, written as its write mails;
+    /// one that fails deletes the series again, so a failed create leaves
+    /// nothing half written.
     pub fn create_item(
         &mut self,
         calendar_id: &str,
         contents: Vec<u8>,
         send_updates: Option<SendUpdates>,
     ) -> Result<String> {
-        let event = project(&contents)?;
-        let path = create_path(&event, calendar_id, send_updates)?;
+        let series = project(&contents)?;
+        let event = &series.master;
+        let path = create_path(event, calendar_id, send_updates)?;
 
         if let Some(uid) = event.ical_uid.as_deref().filter(|uid| !uid.is_empty())
             && let Some(id) = self.holding(calendar_id, uid)?
@@ -332,25 +343,39 @@ impl GcalBackend {
             return Err(CodedError::new(ErrorCode::ItemDuplicate, message).into());
         }
 
-        let created = match path {
+        // NOTE: an import mails nobody, so neither do its overrides.
+        let (created, mails) = match path {
             CreatePath::Insert(send_updates) => {
                 let params = GcalEventInsertParams {
                     send_updates,
                     ..Default::default()
                 };
-                self.client
-                    .event_insert(calendar_id, &event, &params)
-                    .map_err(|err| invalid_event(err).unwrap_or_else(Into::into))?
+                let created = self
+                    .client
+                    .event_insert(calendar_id, event, &params)
+                    .map_err(|err| invalid_event(err).unwrap_or_else(Into::into))?;
+                (created, send_updates)
             }
             CreatePath::Import => {
                 let params = GcalEventImportParams::default();
-                self.client
-                    .event_import(calendar_id, &event, &params)
-                    .map_err(|err| invalid_event(err).unwrap_or_else(Into::into))?
+                let created = self
+                    .client
+                    .event_import(calendar_id, event, &params)
+                    .map_err(|err| invalid_event(err).unwrap_or_else(Into::into))?;
+                (created, Some(GcalSendUpdates::None))
             }
         };
 
-        Ok(created.response.id.unwrap_or_default())
+        let id = created.response.id.unwrap_or_default();
+
+        if let Err(err) = self.change_instances(calendar_id, &id, &series.instances, mails) {
+            if let Err(undo) = self.client.event_delete(calendar_id, &id, mails, None) {
+                warn!("cannot delete the series `{id}` again: {undo}");
+            }
+            return Err(err.context("Cannot create the occurrences of the series"));
+        }
+
+        Ok(id)
     }
 
     /// The id of the event of `calendar_id` carrying `uid`, the series
@@ -401,12 +426,13 @@ impl GcalBackend {
         if_match: Option<&str>,
         send_updates: Option<SendUpdates>,
     ) -> Result<()> {
-        let projected = project(&contents)?;
+        let series = project(&contents)?;
         let current = self.event(calendar_id, item_id)?;
 
-        let event = projected.merge(&current);
+        let event = series.master.merge(&current);
+        let send_updates = send_updates.map(gcal_send_updates);
         let params = GcalEventUpdateParams {
-            send_updates: send_updates.map(gcal_send_updates),
+            send_updates,
             ..Default::default()
         };
 
@@ -414,7 +440,92 @@ impl GcalBackend {
             .event_update(calendar_id, item_id, &event, &params, if_match)
             .map_err(|err| invalid_event(err).unwrap_or_else(item_refusal))?;
 
+        self.change_instances(calendar_id, item_id, &series.instances, send_updates)
+            .context("The series is updated, but not all of its occurrences")
+    }
+
+    /// Writes each override of `overrides` onto the instance of the series
+    /// `master_id` Google lists for it, merged onto it and gated on its
+    /// etag, mailing whom `send_updates` names.
+    ///
+    /// An override no listing holds is cancelled already when it says so,
+    /// and names an occurrence the series does not have otherwise.
+    fn change_instances(
+        &mut self,
+        calendar_id: &str,
+        master_id: &str,
+        overrides: &[GcalEvent],
+        send_updates: Option<GcalSendUpdates>,
+    ) -> Result<()> {
+        let params = GcalEventUpdateParams {
+            send_updates,
+            ..Default::default()
+        };
+
+        for instance in overrides {
+            let original = instance
+                .original_start_time
+                .as_ref()
+                .and_then(|start| start.date_time.as_deref().or(start.date.as_deref()))
+                .unwrap_or_default();
+            let Some(window) = instance.instance_window() else {
+                bail!("An override of series `{master_id}` names no readable occurrence");
+            };
+
+            let Some(listed) = self.instance(calendar_id, master_id, &window, instance)? else {
+                if instance.status == Some(GcalEventStatus::Cancelled) {
+                    continue;
+                }
+                bail!("Series `{master_id}` has no occurrence starting at {original}");
+            };
+
+            let id = listed.id.clone().unwrap_or_default();
+            let merged = instance.clone().merge(&listed);
+            self.client
+                .event_update(calendar_id, &id, &merged, &params, listed.etag.as_deref())
+                .map_err(|err| invalid_event(err).unwrap_or_else(item_refusal))?;
+        }
+
         Ok(())
+    }
+
+    /// The instance of the series `master_id` that `instance` replaces,
+    /// listed within `window`.
+    fn instance(
+        &mut self,
+        calendar_id: &str,
+        master_id: &str,
+        window: &(String, String),
+        instance: &GcalEvent,
+    ) -> Result<Option<GcalEvent>> {
+        let mut page_token: Option<String> = None;
+
+        loop {
+            let params = GcalEventInstancesParams {
+                time_min: Some(&window.0),
+                time_max: Some(&window.1),
+                page_token: page_token.as_deref(),
+                ..Default::default()
+            };
+            let page = self
+                .client
+                .event_instances(calendar_id, master_id, &params)
+                .map_err(item_refusal)?
+                .response;
+
+            let listed = page
+                .items
+                .into_iter()
+                .find(|listed| instance.replaces(listed));
+            if listed.is_some() {
+                return Ok(listed);
+            }
+
+            match page.next_page_token {
+                Some(next) => page_token = Some(next),
+                None => return Ok(None),
+            }
+        }
     }
 
     /// Deletes an event, optionally gated on an `if_match` etag, mailing
@@ -448,24 +559,23 @@ impl GcalBackend {
     }
 }
 
-/// Projects an iCalendar document onto the event a write sends.
+/// Projects an iCalendar document onto the series a write sends: its
+/// master and its overrides.
 ///
-/// Lines Google has no room to store beside it are left out with a
-/// warning naming them, the write going on.
-fn project(contents: &[u8]) -> Result<GcalEvent> {
-    let err = match GcalEvent::from_ical(contents) {
-        Ok(event) => return Ok(event),
-        Err(err) => err,
-    };
+/// What Google cannot hold (lines past what it stores beside an event, an
+/// override with a RANGE) is left out with a warning naming it, the write
+/// going on.
+fn project(contents: &[u8]) -> Result<GcalEventSeries> {
+    let series = GcalEventSeries::from_ical(contents)?;
 
-    let reason = err.to_string();
-    let GcalEventIcalError::StashFull { event, .. } = err else {
-        return Err(err.into());
-    };
+    for unit in &series.left_out {
+        warn!(
+            "writing the event without some of its lines, which Google cannot hold: {}",
+            unit.join(" ")
+        );
+    }
 
-    warn!("writing the event without some of its lines: {reason}");
-
-    Ok(*event)
+    Ok(series)
 }
 
 /// How a create reaches Google.
@@ -1123,6 +1233,87 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(calendar_from(entry).description, None);
+    }
+
+    /// A weekly series cancelling its second occurrence (an EXDATE) and
+    /// moving its third (an override).
+    const SERIES: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n\
+        BEGIN:VEVENT\r\nUID:s@example.org\r\nDTSTAMP:20261101T000000Z\r\n\
+        DTSTART:20261102T090000Z\r\nDTEND:20261102T093000Z\r\n\
+        RRULE:FREQ=WEEKLY;COUNT=4\r\nEXDATE:20261109T090000Z\r\nSUMMARY:Standup\r\n\
+        END:VEVENT\r\nBEGIN:VEVENT\r\nUID:s@example.org\r\nDTSTAMP:20261101T000000Z\r\n\
+        RECURRENCE-ID:20261116T090000Z\r\nDTSTART:20261116T100000Z\r\n\
+        DTEND:20261116T103000Z\r\nSUMMARY:Standup moved\r\nEND:VEVENT\r\n\
+        END:VCALENDAR\r\n";
+
+    /// A series is imported with its EXDATE, then its override written onto
+    /// the instance Google lists for it, gated on that instance's etag,
+    /// where the master alone was written.
+    #[test]
+    fn a_series_creates_its_exceptions() {
+        let instances = r#"{"items":[{"id":"M_20261116T090000Z","etag":"\"e3\"",
+            "recurringEventId":"M","originalStartTime":{"dateTime":"2026-11-16T09:00:00Z"},
+            "start":{"dateTime":"2026-11-16T09:00:00Z"},"end":{"dateTime":"2026-11-16T09:30:00Z"}}]}"#;
+        let mut backend = backend(&[
+            r#"{"items":[]}"#,
+            r#"{"id":"M"}"#,
+            instances,
+            r#"{"id":"M_20261116T090000Z"}"#,
+        ]);
+
+        let id = backend
+            .create_item("primary", SERIES.as_bytes().to_vec(), None)
+            .unwrap();
+        assert_eq!(id, "M");
+
+        let sent = written(&mut backend);
+        let import = sent
+            .find("POST /calendar/v3/calendars/primary/events/import")
+            .unwrap();
+        let listed = sent
+            .find("GET /calendar/v3/calendars/primary/events/M/instances")
+            .unwrap();
+        let updated = sent
+            .find("PUT /calendar/v3/calendars/primary/events/M_20261116T090000Z")
+            .unwrap();
+        assert!(import < listed && listed < updated, "{sent}");
+        assert!(sent.contains("EXDATE"), "{sent}");
+        assert!(sent.contains("Standup moved"), "{sent}");
+        assert!(sent[updated..].contains("If-Match: \"e3\""), "{sent}");
+    }
+
+    /// A weekly series at 09:00 in Paris read from a calendar in UTC keeps
+    /// 09:00 across the daylight-saving change, as Google expands it, where
+    /// the projection wrote its first instant in UTC and the occurrences
+    /// after the change fell at 10:00 (io-gcal 0.5.1).
+    #[test]
+    fn a_zoned_series_keeps_its_wall_time_across_dst() {
+        let event = r#"{"id":"w","status":"confirmed","iCalUID":"w@example.org",
+            "start":{"dateTime":"2027-03-15T08:00:00Z","timeZone":"Europe/Paris"},
+            "end":{"dateTime":"2027-03-15T08:30:00Z","timeZone":"Europe/Paris"},
+            "recurrence":["RRULE:FREQ=WEEKLY;COUNT=3"]}"#;
+        let mut backend = backend(&[event, r#"{"items":[]}"#]);
+
+        let item = backend.get_item("primary", "w").unwrap();
+        let contents = String::from_utf8_lossy(&item.contents).into_owned();
+        assert!(
+            contents.contains("DTSTART;TZID=Europe/Paris:20270315T090000"),
+            "{contents}"
+        );
+
+        let starts: Vec<String> = crate::shared::event::expand::occurrences(&item, None)
+            .unwrap()
+            .into_iter()
+            .filter_map(|event| event.start)
+            .collect();
+        assert_eq!(
+            starts,
+            [
+                "2027-03-15T09:00:00+01:00",
+                "2027-03-22T09:00:00+01:00",
+                "2027-03-29T09:00:00+02:00",
+            ]
+        );
     }
 
     /// The user's primary calendar is the default one, as `gcal

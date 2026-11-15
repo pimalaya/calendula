@@ -56,7 +56,9 @@ use crate::{
     error::{self, ErrorCode, ItemError, calendar_not_found, item_not_found},
     pimdir::{
         client::{PimdirClient, store_error},
-        status::{PimdirCalendarStatus, PimdirParkedStatus, PimdirStatusOutput},
+        status::{
+            PimdirCalendarStatus, PimdirParkedStatus, PimdirRefusedStatus, PimdirStatusOutput,
+        },
     },
     shared::{
         calendar::{Calendar, CalendarDiff},
@@ -443,13 +445,23 @@ impl PimdirBackend {
         Ok(())
     }
 
-    /// Collects the accounts, the per-calendar hydration state and the
-    /// parked actions that `pimdir status` reports.
+    /// Collects the accounts, the per-calendar hydration state, the parked
+    /// actions and the refusals standing that `pimdir status` reports.
     pub fn status(&mut self) -> Result<PimdirStatusOutput> {
         let accounts = self.client.reader.list_accounts()?;
         let mut calendars = Vec::new();
+        let mut refused = Vec::new();
 
         for collection in self.calendar_collections()? {
+            let refusals = self.client.reader.refusals(&collection.id)?;
+            refused.extend(refusals.into_iter().map(|row| PimdirRefusedStatus {
+                calendar_id: collection.id.clone(),
+                item_id: row.seq.to_string(),
+                source: row.source,
+                reason: row.reason,
+                refused_at: row.refused_at,
+            }));
+
             let (mut total, mut hydrated) = (0, 0);
             self.scan(&collection.id, |item| {
                 total += 1;
@@ -496,6 +508,7 @@ impl PimdirBackend {
             accounts,
             calendars,
             parked,
+            refused,
         })
     }
 
@@ -2818,8 +2831,8 @@ mod tests {
             std::fs::write(&path, db).unwrap();
             open(&dir)
         };
-        let earlier = versioned("storage-draft-10");
-        let newer = versioned("storage-draft-12");
+        let earlier = versioned("storage-draft-12");
+        let newer = versioned("storage-draft-14");
 
         assert_eq!(code_of(&uncreated), Some(ErrorCode::StoreUncreated));
         assert_eq!(code_of(&foreign), Some(ErrorCode::StoreForeign));

@@ -297,11 +297,12 @@ Account:     perso (pimdir)
 Calendar:    all
 Query:       budget
 Page:        1, event 1
-Next page:   --page 2
 Incomplete:  1 item(s) have no local body and matched on their summary alone
 Zones:       the index reads floating times and dates in UTC, this search reads days in Europe/Paris
 
 7  2026-11-10  2026-11-10  cal  summary  Budget review
+
+Next page: --page 2
 
 Error:  9  item-unreadable  Read item `9`
 ";

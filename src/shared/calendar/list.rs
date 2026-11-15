@@ -135,7 +135,7 @@ mod tests {
         };
 
         let expected = "\
-Account:    perso (vdir)
+Account:  perso (vdir)
 
 personal  default  #ff0000  Personal\u{fffd}[2J
 work      -        -        Work
@@ -147,7 +147,7 @@ work      -        -        Work
         output.errors.push(error::unreadable(Some("old"), err));
 
         let expected = "\
-Account:    perso (vdir)
+Account:  perso (vdir)
 
 personal  default  #ff0000  Personal\u{fffd}[2J
 

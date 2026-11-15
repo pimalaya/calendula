@@ -14,8 +14,11 @@
 //! A series is one item: its master read by id, the only read Graph
 //! returns its cancelled occurrences on, and its exceptions read from its
 //! instances within the range listed, or [`HORIZON_YEARS`] either side of
-//! today when none is, in the windows Graph accepts. Only the series master
-//! is written back: an exception edited here does not push.
+//! today when none is, in the windows Graph accepts. A series is written as
+//! its master, then each occurrence the document cancels (an EXDATE) or
+//! overrides (a RECURRENCE-ID) through the instance Graph lists for it:
+//! deleted, or patched. What Graph cannot hold (an RDATE, an EXRULE, a
+//! RANGE) is left out with a warning naming it.
 
 use std::collections::BTreeMap;
 
@@ -28,7 +31,10 @@ use io_msgraph::v1::{
         calendars::{MsgraphCalendar, list::MsgraphCalendarsListParams},
         events::{
             MsgraphEvent, MsgraphEventType,
-            ical::{MSGRAPH_EVENT_ICAL_SELECT, MSGRAPH_EVENT_STASH_EXPAND},
+            ical::{
+                MSGRAPH_EVENT_ICAL_SELECT, MSGRAPH_EVENT_STASH_EXPAND, MsgraphEventInstanceAction,
+                MsgraphEventInstanceChange, MsgraphEventSeries,
+            },
             list::MsgraphEventsListParams,
         },
     },
@@ -253,13 +259,26 @@ impl MsgraphBackend {
     }
 
     /// Creates an event from an iCalendar document, its UID riding the
-    /// projection's stash.
+    /// projection's stash, then the occurrences of a series it cancels or
+    /// overrides.
+    ///
+    /// A series whose occurrence fails to change is deleted again, so a
+    /// failed create leaves nothing half written.
     pub fn create_item(&mut self, calendar_id: &str, contents: Vec<u8>) -> Result<String> {
-        let event = MsgraphEvent::create_from_ical(&contents)?;
+        let series = MsgraphEventSeries::create_from_ical(&contents)?;
+        left_out(&series.left_out);
+
         let created = self
             .client
-            .event_create(Some(calendar_id), &event)?
+            .event_create(Some(calendar_id), &series.master)?
             .response;
+
+        if let Err(err) = self.change_instances(&created.id, &series.instances) {
+            if let Err(undo) = self.client.event_delete(&created.id) {
+                warn!("cannot delete the series `{}` again: {undo}", created.id);
+            }
+            return Err(err.context("Cannot create the occurrences of the series"));
+        }
 
         Ok(created.id)
     }
@@ -287,10 +306,71 @@ impl MsgraphBackend {
         let exceptions: Vec<&MsgraphEvent> = exceptions.iter().collect();
         let base = current.to_ical_series(&exceptions);
 
-        let patch = MsgraphEvent::update_from_ical(&contents, base.as_bytes())?;
+        let series = MsgraphEventSeries::update_from_ical(&contents, base.as_bytes())?;
+        left_out(&series.left_out);
+
         self.client
-            .event_update(item_id, &patch)
+            .event_update(item_id, &series.master)
             .map_err(event_refusal)?;
+
+        self.change_instances(item_id, &series.instances)
+            .context("The series is updated, but not all of its occurrences")
+    }
+
+    /// Makes each change of `changes` on the instance of the series
+    /// `master_id` Graph lists for it: a cancelled occurrence deleted, an
+    /// overridden one patched.
+    ///
+    /// A delete whose instance Graph does not list is done already; a
+    /// patch naming an occurrence the series does not have is refused.
+    fn change_instances(
+        &mut self,
+        master_id: &str,
+        changes: &[MsgraphEventInstanceChange],
+    ) -> Result<()> {
+        let params = MsgraphEventsListParams {
+            top: Some(PAGE_SIZE),
+            select: Some(MSGRAPH_EVENT_ICAL_SELECT),
+            ..Default::default()
+        };
+
+        for change in changes {
+            let (start, end) = &change.window;
+            let mut page = self
+                .client
+                .event_instances(master_id, start, end, &params)
+                .map_err(event_refusal)?
+                .response;
+
+            let instance = loop {
+                if let Some(at) = page.value.iter().position(|i| change.is_instance(i)) {
+                    break Some(page.value.swap_remove(at));
+                }
+
+                let Some(next) = page.next_link else {
+                    break None;
+                };
+                page = self.client.events_list_from_link(&next)?.response;
+            };
+
+            match (instance, &change.action) {
+                (None, MsgraphEventInstanceAction::Delete) => {}
+                (None, MsgraphEventInstanceAction::Update(_)) => bail!(
+                    "Series `{master_id}` has no occurrence starting at {}",
+                    change.original_start
+                ),
+                (Some(instance), MsgraphEventInstanceAction::Delete) => {
+                    self.client
+                        .event_delete(&instance.id)
+                        .map_err(event_refusal)?;
+                }
+                (Some(instance), MsgraphEventInstanceAction::Update(patch)) => {
+                    self.client
+                        .event_update(&instance.id, patch)
+                        .map_err(event_refusal)?;
+                }
+            }
+        }
 
         Ok(())
     }
@@ -383,6 +463,13 @@ impl MsgraphBackend {
         }
 
         unique(exceptions)
+    }
+}
+
+/// Warns of each line of a series Graph cannot hold, the write going on.
+fn left_out(lines: &[String]) {
+    for line in lines {
+        warn!("writing the series without a line Microsoft Graph cannot hold: {line}");
     }
 }
 
@@ -700,6 +787,85 @@ pub(crate) mod scripted {
 
     /// An event as a read by id answers it.
     const EVENT: &str = r#"{"id":"E1","changeKey":"k1","subject":"Standup"}"#;
+
+    /// A weekly series cancelling its second occurrence (an EXDATE) and
+    /// moving its third (an override).
+    const SERIES: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n\
+        BEGIN:VEVENT\r\nUID:s@example.org\r\nDTSTAMP:20261101T000000Z\r\n\
+        DTSTART:20261102T090000Z\r\nDTEND:20261102T093000Z\r\n\
+        RRULE:FREQ=WEEKLY;COUNT=4\r\nEXDATE:20261109T090000Z\r\nSUMMARY:Standup\r\n\
+        END:VEVENT\r\nBEGIN:VEVENT\r\nUID:s@example.org\r\nDTSTAMP:20261101T000000Z\r\n\
+        RECURRENCE-ID:20261116T090000Z\r\nDTSTART:20261116T100000Z\r\n\
+        DTEND:20261116T103000Z\r\nSUMMARY:Standup moved\r\nEND:VEVENT\r\n\
+        END:VCALENDAR\r\n";
+
+    /// A series is created as its master, then its cancelled occurrence
+    /// deleted and its overridden one patched through the instances Graph
+    /// lists, where the master alone was written.
+    #[test]
+    fn a_series_creates_its_exceptions() {
+        let second = r#"{"value":[{"id":"I2","originalStart":"2026-11-09T09:00:00Z"}]}"#;
+        let third = r#"{"value":[{"id":"I3","originalStart":"2026-11-16T09:00:00Z"}]}"#;
+        let mut backend = answering(&[
+            (201, r#"{"id":"M"}"#),
+            (200, second),
+            (204, ""),
+            (200, third),
+            (200, r#"{"id":"I3"}"#),
+        ]);
+
+        let id = backend
+            .create_item("cal", SERIES.as_bytes().to_vec())
+            .unwrap();
+        assert_eq!(id, "M");
+
+        // NOTE: a request line follows the body before it on its line.
+        let sent = requests(&mut backend).join("\n");
+        let order = [
+            "POST /v1.0/me/calendars/cal/events ",
+            "GET /v1.0/me/events/M/instances?",
+            "DELETE /v1.0/me/events/I2 ",
+            "GET /v1.0/me/events/M/instances?",
+            "PATCH /v1.0/me/events/I3 ",
+        ];
+        let mut rest = sent.as_str();
+        for request in order {
+            let at = rest
+                .find(request)
+                .unwrap_or_else(|| panic!("{request}: {sent}"));
+            rest = &rest[at + request.len()..];
+        }
+    }
+
+    /// An occurrence that fails to change deletes the series again, so a
+    /// failed create leaves no master without its exceptions.
+    #[test]
+    fn a_series_whose_exception_fails_is_deleted_again() {
+        let second = r#"{"value":[{"id":"I2","originalStart":"2026-11-09T09:00:00Z"}]}"#;
+        let denied = refusal("ErrorAccessDenied");
+        let mut backend = answering(&[
+            (201, r#"{"id":"M"}"#),
+            (200, second),
+            (403, &denied),
+            (204, ""),
+        ]);
+
+        let err = backend
+            .create_item("cal", SERIES.as_bytes().to_vec())
+            .unwrap_err();
+        assert_eq!(
+            crate::error::code(&err),
+            Some(ErrorCode::PermissionDenied),
+            "{err:#}"
+        );
+
+        let sent = requests(&mut backend);
+        let last = sent.last().unwrap();
+        assert!(
+            last.starts_with("DELETE ") && last.contains("/events/M "),
+            "{sent:?}"
+        );
+    }
 
     #[test]
     fn a_refusal_carries_its_code() {

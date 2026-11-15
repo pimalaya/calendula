@@ -207,9 +207,9 @@ mod tests {
         };
 
         let expected = "\
-Account:    perso (caldav)
-Calendar:   personal
-Page:       1, items 1 to 2, the last
+Account:   perso (caldav)
+Calendar:  personal
+Page:      1, items 1 to 2, the last
 
 standup.ics  2 KiB  \"1a2b\"
 pending.ics  -      -
@@ -244,12 +244,13 @@ pending.ics  -      -
         };
 
         let expected = "\
-Account:    perso (pimdir)
-Calendar:   personal
-Page:       2, item 2
-Next page:  --page 3
+Account:   perso (pimdir)
+Calendar:  personal
+Page:      2, item 2
 
 7  -  -
+
+Next page: --page 3
 
 Error:  c  item-unreadable  Cannot read item file /home/c.ics
 Error:  7  item-unreadable  Body blob missing for item `7` in calendar `personal`

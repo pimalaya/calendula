@@ -10,12 +10,16 @@ use pimalaya_cli::printer::Printer;
 use serde_json::Value;
 use url::Url;
 
-use crate::{gcal::client::GcalClient, shared::raw_json::RawJsonOutput};
+use crate::{
+    gcal::client::GcalClient,
+    shared::raw_json::{RawJsonOutput, request_url},
+};
 
 /// Send a raw Google Calendar API request and print the JSON response.
 ///
 /// The path is joined onto the Calendar `v3/` base, or a full URL is used
-/// as-is. JSON output: `{response}`, the raw Calendar response.
+/// as-is when it is on Google's API origin, refused before anything is
+/// sent otherwise. JSON output: `{response}`, the raw Calendar response.
 #[derive(Debug, Parser)]
 pub struct GcalRequestCommand {
     /// HTTP method: get, post, put, patch, delete.
@@ -55,13 +59,10 @@ fn parse_body(body: Option<&str>) -> Result<Value> {
     serde_json::from_str(body.unwrap_or("null")).context("Parse request body JSON error")
 }
 
-/// The request URL: a full URL as-is, else joined onto the Calendar base.
+/// The request URL: a path joined onto the Calendar base, a full URL
+/// as-is when it is on Google's API origin and refused otherwise.
 fn resolve_url(path: &str) -> Result<Url> {
-    if path.starts_with("http") {
-        Ok(Url::parse(path)?)
-    } else {
-        Ok(Url::parse(GCAL_API_BASE)?.join(path.trim_start_matches('/'))?)
-    }
+    request_url(GCAL_API_BASE, path, "Google Calendar")
 }
 
 #[cfg(test)]
@@ -125,5 +126,27 @@ mod tests {
         let mut printer = CapturePrinter::default();
         let err = command.execute(&mut printer, client).unwrap_err();
         assert!(err.to_string().contains("`HEAD`"), "{err}");
+    }
+
+    /// A full URL off Google's API origin is refused before anything is
+    /// sent, so the token never reaches that host.
+    #[test]
+    fn a_url_off_the_api_origin_sends_nothing() {
+        let (script, requests) = Script::new([]);
+        let client = GcalClient::new(
+            GcalClientStd::new(script, "made-up"),
+            "perso".into(),
+            Account::default(),
+        );
+        let command = GcalRequestCommand {
+            method: "get".into(),
+            path: "https://collector.example.org/calendar/v3/colors".into(),
+            body: None,
+        };
+
+        let mut printer = CapturePrinter::default();
+        let err = command.execute(&mut printer, client).unwrap_err();
+        assert!(err.to_string().contains("collector.example.org"), "{err}");
+        assert!(requests.lock().unwrap().is_empty());
     }
 }
