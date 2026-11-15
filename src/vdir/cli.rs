@@ -13,7 +13,7 @@ use crate::vdir::{
     rename::VdirCollectionRenameCommand,
 };
 
-/// Vdir CLI.
+/// vdir-specific API.
 ///
 /// Direct access to the on-disk vdir backend rooted at the active
 /// account's `vdir.root`, without going through the unified API. The flat

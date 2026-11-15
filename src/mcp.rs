@@ -194,7 +194,8 @@ enum McpToolKind {
     /// Changes a calendar, listed under `--allow-write`.
     Write,
     /// Changes an item, whose attendees it may notify: listed under
-    /// `--allow-write`, reaching them under `--allow-send` alone.
+    /// `--allow-write`, reaching them under `--allow-send` alone, open to
+    /// the world when it lists an argument inviting or notifying people.
     Schedule,
 }
 
@@ -268,6 +269,14 @@ impl McpToolSpec {
             };
 
             let grammar = Grammar::new(&[tool.group, tool.leaf], cmd).retain(|name| !gated(name));
+            let input_schema = grammar.input_schema();
+
+            // NOTE: the hint follows the arguments listed, never the gate
+            // alone (pimalaya-cli's mcp spec): an item write lists the
+            // same ones with or without `--allow-send`.
+            let reaches_people = SEND_ARGS
+                .iter()
+                .any(|name| input_schema["properties"].get(name).is_some());
 
             let description = cmd
                 .get_long_about()
@@ -278,11 +287,11 @@ impl McpToolSpec {
             let mut definition = json!({
                 "name": format!("{}_{}", tool.group, tool.leaf),
                 "description": description,
-                "inputSchema": grammar.input_schema(),
+                "inputSchema": input_schema,
                 "annotations": {
                     "readOnlyHint": tool.kind == McpToolKind::Read,
                     "destructiveHint": tool.destructive,
-                    "openWorldHint": tool.kind == McpToolKind::Schedule && allow_send,
+                    "openWorldHint": tool.kind == McpToolKind::Schedule && reaches_people,
                 },
             });
 

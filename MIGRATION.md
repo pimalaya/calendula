@@ -184,7 +184,7 @@ calendula calendar list --json | jq -r '.calendars[].id'
   calendula event delete a.ics --json | jq -r 'if .queued then "queued for the next sync" else "deleted" end'
   ```
 
-- **An item prints as one row.** `item list`, `item read` and `event read` print `{id, calendarId, etag, contents, encoding}`, `event read` adding `events`. `contents` is the iCalendar text, `encoding` `utf-8`, or the base64 of bytes that are not valid UTF-8, `encoding` `base64`, both `null` for an item carrying no bytes (a pimdir body not local yet). 0.2 printed `item list`'s `contents` as an array of integers, and the reads `{"contents": ...}`, a body that is not UTF-8 decoded lossily. An event's `description` and `location` are `null` when it carries none.
+- **An item prints as one row.** `item list`, `item read` and `event read` print `{id, calendarId, etag, contents, encoding}`, `event read` adding `events`. `contents` is the iCalendar text, `encoding` `utf-8`, or the base64 of bytes that are not valid UTF-8, `encoding` `base64`, both `null` in `item list` for an item carrying no bytes (a pimdir body not local yet), a read always carrying them. 0.2 printed `item list`'s `contents` as an array of integers, and the reads `{"contents": ...}`, a body that is not UTF-8 decoded lossily. An event's `description` and `location` are `null` when it carries none.
 
   ```sh
   # 0.2: {"contents":"BEGIN:VCALENDAR..."}

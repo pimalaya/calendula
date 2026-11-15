@@ -16,7 +16,7 @@ use crate::pimdir::{
     status::PimdirStatusCommand,
 };
 
-/// pimdir CLI.
+/// pimdir-specific API.
 ///
 /// Direct access to the local pimdir store behind the account: what it
 /// holds and how much of it is downloaded, the writes queued for its sync

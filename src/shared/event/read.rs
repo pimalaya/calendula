@@ -13,11 +13,12 @@ use serde::Serialize;
 
 use crate::{
     capability::Capability,
+    error::event_missing,
     shared::{
         arg::CalendarIdArg,
         client::CalendarClient,
         event::Event,
-        item::{CalendarItem, read::printable},
+        item::{ItemReadRow, read::printable},
     },
 };
 
@@ -55,7 +56,9 @@ impl EventReadCommand {
         client.require(&[Capability::ItemRead])?;
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
-        let item = client.get_item(&calendar_id, &self.event_id)?;
+        let item = client
+            .get_item(&calendar_id, &self.event_id)
+            .map_err(|err| event_missing(err, &self.event_id, &calendar_id))?;
 
         let events = match &self.recurrence_id {
             None => Event::project(&item),
@@ -70,7 +73,11 @@ impl EventReadCommand {
             }
         };
 
-        printer.out(EventReadOutput { item, events })
+        printer.out(EventReadOutput {
+            row: ItemReadRow::from(&item),
+            events,
+            bytes: item.contents,
+        })
     }
 }
 
@@ -81,13 +88,16 @@ impl EventReadCommand {
 pub struct EventReadOutput {
     /// The item holding the event.
     #[serde(flatten)]
-    pub item: CalendarItem,
+    pub row: ItemReadRow,
     /// What the bytes project to, or the one occurrence asked for.
     pub events: Vec<Event>,
+    /// The bytes read, which the text prints.
+    #[serde(skip)]
+    pub bytes: Vec<u8>,
 }
 
 impl fmt::Display for EventReadOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "{}", printable(&self.item.contents).trim_end())
+        writeln!(f, "{}", printable(&self.bytes).trim_end())
     }
 }

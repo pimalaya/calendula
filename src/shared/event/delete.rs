@@ -9,7 +9,7 @@ use pimalaya_cli::printer::Printer;
 
 use crate::{
     capability::Capability,
-    error::{self, ErrorCode, item_not_found},
+    error::{self, ErrorCode, event_missing},
     shared::{
         arg::{CalendarIdArg, SendUpdatesArg},
         client::CalendarClient,
@@ -62,12 +62,14 @@ impl EventDeleteCommand {
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         check(client, &calendar_id, &self.event_id)?;
-        client.delete_item(
-            &calendar_id,
-            &self.event_id,
-            self.if_match.as_deref(),
-            self.send_updates.send_updates,
-        )?;
+        client
+            .delete_item(
+                &calendar_id,
+                &self.event_id,
+                self.if_match.as_deref(),
+                self.send_updates.send_updates,
+            )
+            .map_err(|err| event_missing(err, &self.event_id, &calendar_id))?;
         printer.out(WriteReceipt {
             id: self.event_id,
             queued: client.queues_writes(),
@@ -92,11 +94,7 @@ fn check(client: &mut CalendarClient, calendar_id: &str, event_id: &str) -> Resu
 
     match error::code(&err) {
         Some(ErrorCode::BodyPending) => Ok(()),
-        Some(ErrorCode::ItemNotFound) => Err(item_not_found(format!(
-            "Event `{event_id}` not found in calendar `{calendar_id}`; an event is \
-             named by the id `event list` shows, `event search <UID>` finding it by \
-             its iCalendar UID"
-        ))),
+        Some(ErrorCode::ItemNotFound) => Err(event_missing(err, event_id, calendar_id)),
         _ => Err(err),
     }
 }

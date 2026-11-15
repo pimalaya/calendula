@@ -13,7 +13,11 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use pimalaya_cli::{clap::parsers::path_parser, output::SavedOutput, printer::Printer};
+use pimalaya_cli::{
+    clap::parsers::path_parser,
+    output::{Bytes, SavedOutput},
+    printer::Printer,
+};
 use pimalaya_config::command::CommandConfig;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -26,6 +30,7 @@ use crate::{
         composer::IcalComposer,
         event::build::EventBuildOutput,
         ical::{IcalFamily, blank_item, ensure_valid, read_source},
+        item::{ItemContents, ItemEncoding},
     },
 };
 
@@ -150,13 +155,14 @@ impl IcalBuildArgs {
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct IcalBuildOutput {
-    /// The raw iCalendar, as text.
-    pub contents: String,
+    /// The raw iCalendar, as text or as base64.
+    #[serde(flatten)]
+    pub contents: ItemContents,
 }
 
 impl fmt::Display for IcalBuildOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.contents)
+        write!(f, "{}", self.contents.contents)
     }
 }
 
@@ -181,6 +187,10 @@ fn item_composer(
 }
 
 /// Hands the item over: to the file `-o` names, or to the printer.
+///
+/// An item that is not UTF-8 goes out as its bytes in text, which a pipe
+/// takes on as they are, and in base64 under `--json`, as cardamum's
+/// `card build` hands a vCard over.
 fn emit(
     printer: &mut impl Printer,
     output: Option<&Path>,
@@ -188,10 +198,19 @@ fn emit(
     item: &[u8],
 ) -> Result<()> {
     let Some(path) = output else {
-        let contents = String::from_utf8(item.to_vec())?;
-        if family == IcalFamily::Event {
-            return printer.out(EventBuildOutput::of(contents));
+        let contents = ItemContents::of(item);
+
+        if contents.encoding == ItemEncoding::Base64 && !printer.is_json() {
+            return printer.out_bytes(Bytes {
+                data: item.to_vec(),
+                mime: String::from("text/calendar"),
+            });
         }
+
+        if family == IcalFamily::Event {
+            return printer.out(EventBuildOutput::of(item, contents));
+        }
+
         return printer.out(IcalBuildOutput { contents });
     };
 
@@ -201,4 +220,67 @@ fn emit(
         path: path.display().to_string(),
         size: item.len(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use core::fmt;
+
+    use anyhow::Result;
+    use pimalaya_cli::{output::Bytes, printer::CapturePrinter, printer::Printer};
+    use serde::Serialize;
+    use serde_json::json;
+
+    use super::emit;
+    use crate::shared::ical::IcalFamily;
+
+    /// A printer keeping the text it was handed, and the raw bytes.
+    #[derive(Default)]
+    struct TextPrinter(Vec<u8>);
+
+    impl Printer for TextPrinter {
+        fn out<T: fmt::Display + Serialize>(&mut self, data: T) -> Result<()> {
+            self.0.extend(data.to_string().into_bytes());
+            Ok(())
+        }
+
+        fn event<T: fmt::Display + Serialize>(&mut self, _event: T) -> Result<()> {
+            Ok(())
+        }
+
+        fn out_bytes(&mut self, bytes: Bytes) -> Result<()> {
+            self.0.extend(bytes.data);
+            Ok(())
+        }
+    }
+
+    const TEXT: &[u8] = b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n";
+    const LATIN1: &[u8] = b"BEGIN:VCALENDAR\r\nX-NOTE:Caf\xe9\r\nEND:VCALENDAR\r\n";
+
+    /// A built item names how `contents` spells its bytes, as cardamum's
+    /// `card build` does: its text, or the base64 of bytes that are not
+    /// UTF-8, which the text output prints as they are.
+    #[test]
+    fn a_built_item_names_its_encoding() {
+        for family in [IcalFamily::Item, IcalFamily::Event] {
+            let mut printer = CapturePrinter::default();
+            emit(&mut printer, None, family, TEXT).unwrap();
+            emit(&mut printer, None, family, LATIN1).unwrap();
+
+            let [text, latin1] = &printer.values[..] else {
+                panic!("{:?}", printer.values);
+            };
+            assert_eq!(text["contents"], json!(String::from_utf8_lossy(TEXT)));
+            assert_eq!(text["encoding"], "utf-8");
+            assert_eq!(
+                latin1["contents"],
+                "QkVHSU46VkNBTEVOREFSDQpYLU5PVEU6Q2Fm6Q0KRU5EOlZDQUxFTkRBUg0K"
+            );
+            assert_eq!(latin1["encoding"], "base64");
+
+            let mut printer = TextPrinter::default();
+            emit(&mut printer, None, family, LATIN1).unwrap();
+            assert_eq!(printer.0, LATIN1);
+        }
+    }
 }

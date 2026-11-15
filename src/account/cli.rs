@@ -15,11 +15,11 @@ use crate::{
     backend::Backend,
 };
 
-/// Inspect the accounts the configuration declares.
+/// Manage accounts defined in the TOML configuration file.
 ///
-/// An account is a named group of backend settings (vdir, pimdir,
-/// caldav). Accounts are written by hand, from the sample; these
-/// subcommands only read them.
+/// An account is a named group of backend settings. These subcommands
+/// inspect them and validate their connection; creating one means adding
+/// an `[accounts.<name>]` table, as config.sample.toml shows.
 #[derive(Debug, Subcommand)]
 pub enum AccountCommand {
     #[command(visible_alias = "ls")]

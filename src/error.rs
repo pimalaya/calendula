@@ -206,8 +206,49 @@ pub fn partial_when(errors: &[ItemError]) -> Result<(), Error> {
 
 /// A refusal under `item-not-found`: the item a command names is not in
 /// the calendar.
+#[cfg_attr(not(any(feature = "gcal", feature = "pimdir")), allow(dead_code))]
 pub fn item_not_found(message: impl Into<String>) -> Error {
     CodedError::new(ErrorCode::ItemNotFound, message.into()).into()
+}
+
+/// `err` read as the item `item_id` missing from `calendar_id`, when coded
+/// `item-not-found`: ``Item `<id>` not found in calendar `<calendar>` ``,
+/// as Himalaya words a missing message (see [`missing`]).
+pub fn item_missing(err: Error, item_id: &str, calendar_id: &str) -> Error {
+    missing(err, || {
+        format!("Item `{item_id}` not found in calendar `{calendar_id}`")
+    })
+}
+
+/// `err` read as the event `event_id` missing from `calendar_id`, when
+/// coded `item-not-found`: ``Event `<id>` not found in calendar
+/// `<calendar>` ``, then how an event is named, a UID being no id (see
+/// [`missing`]).
+pub fn event_missing(err: Error, event_id: &str, calendar_id: &str) -> Error {
+    missing(err, || {
+        format!(
+            "Event `{event_id}` not found in calendar `{calendar_id}`; an event is \
+             named by the id `event list` shows, `event search <UID>` finding it by \
+             its iCalendar UID"
+        )
+    })
+}
+
+/// `err` under the not-found `sentence`, when coded `item-not-found`, one
+/// sentence whatever the backend: its code kept, the backend's own words
+/// under it as its sources. Any other failure is returned as it is.
+fn missing(err: Error, sentence: impl FnOnce() -> String) -> Error {
+    if code(&err) != Some(ErrorCode::ItemNotFound) {
+        return err;
+    }
+
+    let sentence = sentence();
+
+    // NOTE: the pimdir backend words its miss so already.
+    match err.to_string() == sentence {
+        true => err,
+        false => err.context(sentence),
+    }
 }
 
 /// A refusal under `calendar-not-found`: the calendar a command names does

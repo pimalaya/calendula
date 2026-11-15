@@ -13,6 +13,7 @@ use serde::Serialize;
 
 use crate::{
     capability::Capability,
+    error::item_missing,
     shared::{
         arg::{CalendarIdArg, IcalComposerArgs},
         client::CalendarClient,
@@ -71,6 +72,7 @@ impl ItemUpdateCommand {
         }
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
+        let missing = |err| item_missing(err, &self.item_id, &calendar_id);
 
         // NOTE: reading the stored bytes also gives the version they are
         // being changed from, so an edit that took a minute cannot
@@ -78,7 +80,9 @@ impl ItemUpdateCommand {
         let (seed, etag) = match &self.ical {
             Some(source) => (read_source(source)?, None),
             None => {
-                let item = client.get_item(&calendar_id, &self.item_id)?;
+                let item = client
+                    .get_item(&calendar_id, &self.item_id)
+                    .map_err(missing)?;
                 (item.contents, item.etag)
             }
         };
@@ -86,7 +90,9 @@ impl ItemUpdateCommand {
         let if_match = self.if_match.or(etag);
 
         if !self.composer.interactive {
-            client.update_item(&calendar_id, &self.item_id, seed, if_match.as_deref(), None)?;
+            client
+                .update_item(&calendar_id, &self.item_id, seed, if_match.as_deref(), None)
+                .map_err(missing)?;
 
             return printer.out(ItemUpdateOutput::Applied(ItemUpdatedOutput {
                 id: self.item_id,
@@ -108,13 +114,15 @@ impl ItemUpdateCommand {
             return printer.out(ItemUpdateOutput::Abandoned {});
         };
 
-        let updated = client.update_item(
-            &calendar_id,
-            &self.item_id,
-            draft.contents.clone(),
-            if_match.as_deref(),
-            None,
-        );
+        let updated = client
+            .update_item(
+                &calendar_id,
+                &self.item_id,
+                draft.contents.clone(),
+                if_match.as_deref(),
+                None,
+            )
+            .map_err(missing);
 
         draft.finish(updated)?;
 

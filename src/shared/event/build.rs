@@ -17,7 +17,7 @@ use crate::shared::{
         fields::{EventFieldsArgs, EventMethodArg, set_method},
     },
     ical::IcalFamily,
-    item::CalendarItem,
+    item::{CalendarItem, ItemContents},
 };
 
 /// Build an event and print it, writing it nowhere.
@@ -39,9 +39,11 @@ use crate::shared::{
 /// invitation attached to a mail) is read the way a calendar's events
 /// are: zones resolved, the end computed, people listed.
 ///
-/// JSON output: `{"contents", "method", "events": [...]}`, the raw
-/// iCalendar as text, the calendar's `METHOD` and its events shaped as
-/// `event read` prints them; or `{"path", "size"}` with `-o`.
+/// JSON output: `{"contents", "encoding", "method", "events": [...]}`,
+/// the raw iCalendar as text (`encoding` `utf-8`) or the base64 of bytes
+/// that are not UTF-8 (`encoding` `base64`), which the text prints as
+/// they are, the calendar's `METHOD` and its events shaped as `event
+/// read` prints them; or `{"path", "size"}` with `-o`.
 #[derive(Debug, Parser)]
 pub struct EventBuildCommand {
     #[command(flatten)]
@@ -106,8 +108,9 @@ impl IcalFields for EventBuildFields {
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EventBuildOutput {
-    /// The raw iCalendar, as text.
-    pub contents: String,
+    /// The raw iCalendar, as text or as base64.
+    #[serde(flatten)]
+    pub contents: ItemContents,
     /// The calendar's `METHOD` uppercased (`REQUEST`, `CANCEL`,
     /// `REPLY`...), `null` when it carries none.
     pub method: Option<String>,
@@ -117,10 +120,10 @@ pub struct EventBuildOutput {
 }
 
 impl EventBuildOutput {
-    /// Projects the built bytes.
-    pub fn of(contents: String) -> Self {
+    /// Projects the built `bytes`, `contents` their JSON spelling.
+    pub fn of(bytes: &[u8], contents: ItemContents) -> Self {
         let item = CalendarItem {
-            contents: contents.clone().into_bytes(),
+            contents: bytes.to_vec(),
             ..Default::default()
         };
 
@@ -134,7 +137,7 @@ impl EventBuildOutput {
 
 impl fmt::Display for EventBuildOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.contents)
+        write!(f, "{}", self.contents.contents)
     }
 }
 

@@ -40,7 +40,7 @@ use crate::{
 ///
 /// `start` and `end` keep the iCalendar wire spelling, so what a listing
 /// prints is what the calendar carries; `startsAt` and `endsAt` are the
-/// same times resolved, with their UTC offset.
+/// same times resolved, with their UTC offset, `Z` for UTC.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Event {
@@ -68,8 +68,8 @@ pub struct Event {
     pub end: String,
     /// Whether the event spans whole days (a `DATE` start).
     pub all_day: bool,
-    /// The start as RFC 3339 with its UTC offset, or `YYYY-MM-DD` for a
-    /// whole day.
+    /// The start as RFC 3339 with its UTC offset, `Z` for UTC, or
+    /// `YYYY-MM-DD` for a whole day.
     pub starts_at: Option<String>,
     /// The end, spelled as `startsAt` is; a whole day's is exclusive.
     pub ends_at: Option<String>,

@@ -120,11 +120,9 @@ fn an_item_id_out_of_its_calendar_is_not_found() {
     let code = Value::from("item-not-found");
 
     for id in ["..", ".", "", "/", "a/../..", "%2E%2E", "a/"] {
-        let error = format!("Item `{id}` not found");
+        let error = format!("Item `{id}` not found in calendar `cal`");
 
         let commands: &[&[&str]] = &[
-            &["event", "read", "-k", "cal", id],
-            &["event", "update", "-k", "cal", id, "--summary", "Bob"],
             &["item", "read", "-k", "cal", id],
             &["item", "update", "-k", "cal", id, ICAL],
             &["item", "delete", "-k", "cal", id],
@@ -134,13 +132,21 @@ fn an_item_id_out_of_its_calendar_is_not_found() {
             refused(dir.path(), args, code.clone(), &error);
         }
 
-        // NOTE: `event delete` names the event in its own sentence.
+        // NOTE: an `event` command names the event in its own sentence.
         let error = format!(
             "Event `{id}` not found in calendar `cal`; an event is named by the id \
              `event list` shows, `event search <UID>` finding it by its iCalendar UID"
         );
-        let args = ["event", "delete", "-k", "cal", id];
-        refused(dir.path(), &args, code.clone(), &error);
+
+        let commands: &[&[&str]] = &[
+            &["event", "read", "-k", "cal", id],
+            &["event", "update", "-k", "cal", id, "--summary", "Bob"],
+            &["event", "delete", "-k", "cal", id],
+        ];
+
+        for args in commands {
+            refused(dir.path(), args, code.clone(), &error);
+        }
     }
 
     let out = run(dir.path(), &["item", "read", "-k", "cal", ".."]);

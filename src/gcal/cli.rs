@@ -20,7 +20,7 @@ use crate::gcal::{
     settings::GcalSettingsCommand,
 };
 
-/// Google Calendar CLI.
+/// Google Calendar-specific API.
 ///
 /// Direct access to the half of the Calendar API iCalendar cannot express:
 /// sharing, availability, recurrence expansion, server-side parsing and the

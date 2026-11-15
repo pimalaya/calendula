@@ -17,8 +17,10 @@ use crate::shared::{build::IcalBuildArgs, ical::IcalFamily};
 /// item is judged before it is sent. No account is resolved unless
 /// `-i` needs the configured composer.
 ///
-/// JSON output: `{"contents"}`, the raw iCalendar as text, or
-/// `{"path", "size"}` with `-o`.
+/// JSON output: `{"contents", "encoding"}`, the raw iCalendar as text
+/// (`encoding` `utf-8`) or the base64 of bytes that are not UTF-8
+/// (`encoding` `base64`), which the text prints as they are; or `{"path",
+/// "size"}` with `-o`.
 #[derive(Debug, Parser)]
 pub struct ItemBuildCommand {
     #[command(flatten)]

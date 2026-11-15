@@ -38,7 +38,7 @@ use crate::pimdir::{backend::PimdirBackend, cli::PimdirCommand};
 use crate::vdir::{cli::VdirCommand, client::build_vdir_client};
 use crate::{
     account::cli::AccountCommand,
-    backend::Backend,
+    backend::{self, Backend},
     config::{AccountConfig, Config},
     error::{self, ErrorCode},
     json_schema,
@@ -67,21 +67,18 @@ pub struct Cli {
     pub config: ConfigFlags,
     #[command(flatten)]
     pub account: AccountFlag,
-    /// Force a specific backend for the cross-protocol commands.
+    /// Force a specific backend for cross-protocol commands.
     ///
-    /// The unified commands (`calendar`, `event`, `item`), `account
-    /// check` and `account capability` read it, and so do `repl` and
-    /// `mcp` for the session they run: the protocol-specific subcommands
-    /// each already name their backend.
-    ///
-    /// With `auto`, the first configured backend wins, in calendula's
-    /// priority order (vdir, pimdir, caldav, gcal, msgraph), whatever
-    /// the command needs: one it does not serve is refused, naming the
-    /// backend of the account that does, and one this build leaves out is
-    /// refused, naming the cargo feature bringing it back. Any other value
-    /// pins that one, and the command bails when the account carries no
-    /// matching block.
-    #[arg(short, long, global = true, default_value_t)]
+    /// Only the unified commands read it (`calendar`, `event`, `item`,
+    /// `account check`, `account capability`, and `repl` and `mcp` for
+    /// their session), the protocol-specific ones always using their own
+    /// backend. `auto`, the default, picks the first configured backend,
+    /// whatever the command needs: a command it does not serve is refused
+    /// naming the backend of the account that does, and a backend this
+    /// build leaves out naming the cargo feature bringing it back. An
+    /// explicit value bails when the account has no such block, or the
+    /// command no such implementation.
+    #[arg(short, long, global = true, default_value_t, value_parser = backend::parser())]
     pub backend: Backend,
     #[command(flatten)]
     pub json: JsonFlag,

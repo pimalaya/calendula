@@ -12,7 +12,8 @@ use serde::Serialize;
 
 use crate::{
     capability::Capability,
-    shared::{arg::CalendarIdArg, client::CalendarClient, item::CalendarItem},
+    error::item_missing,
+    shared::{arg::CalendarIdArg, client::CalendarClient, item::ItemReadRow},
 };
 
 /// Read a single iCalendar item.
@@ -40,9 +41,14 @@ impl ItemReadCommand {
         client.require(&[Capability::ItemRead])?;
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
-        let item = client.get_item(&calendar_id, &self.item_id)?;
+        let item = client
+            .get_item(&calendar_id, &self.item_id)
+            .map_err(|err| item_missing(err, &self.item_id, &calendar_id))?;
 
-        printer.out(ItemReadOutput { item })
+        printer.out(ItemReadOutput {
+            row: ItemReadRow::from(&item),
+            bytes: item.contents,
+        })
     }
 }
 
@@ -52,12 +58,15 @@ impl ItemReadCommand {
 pub struct ItemReadOutput {
     /// The item read.
     #[serde(flatten)]
-    pub item: CalendarItem,
+    pub row: ItemReadRow,
+    /// The bytes read, which the text prints.
+    #[serde(skip)]
+    pub bytes: Vec<u8>,
 }
 
 impl fmt::Display for ItemReadOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "{}", printable(&self.item.contents).trim_end())
+        writeln!(f, "{}", printable(&self.bytes).trim_end())
     }
 }
 

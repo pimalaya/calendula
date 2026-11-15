@@ -2147,7 +2147,7 @@ mod tests {
             Event::occurrences(&items[0], Some(&range))[0]
                 .starts_at
                 .as_deref(),
-            Some("2026-10-12T09:00:00+00:00")
+            Some("2026-10-12T09:00:00Z")
         );
     }
 

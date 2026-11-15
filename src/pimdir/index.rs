@@ -921,10 +921,7 @@ mod tests {
             hit.snippet.as_deref().unwrap().contains("quarter"),
             "{hit:?}"
         );
-        assert_eq!(
-            hit.event.starts_at.as_deref(),
-            Some("2026-11-07T00:30:00+00:00")
-        );
+        assert_eq!(hit.event.starts_at.as_deref(), Some("2026-11-07T00:30:00Z"));
         let read = backend
             .client
             .reader
@@ -1070,11 +1067,11 @@ mod tests {
         assert_eq!(hits[0].event.uid, "invoice@example.org");
         assert_eq!(
             hits[0].event.starts_at.as_deref(),
-            Some("2026-11-20T14:00:00+00:00")
+            Some("2026-11-20T14:00:00Z")
         );
         assert_eq!(
             hits[0].event.ends_at.as_deref(),
-            Some("2026-11-20T15:00:00+00:00")
+            Some("2026-11-20T15:00:00Z")
         );
         assert_eq!(invoice.coverage.bodiless, 1);
         assert!(!invoice.coverage.complete);

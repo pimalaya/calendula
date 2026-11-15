@@ -15,12 +15,11 @@ use pimalaya_config::toml::TomlConfig;
 
 use crate::config::Config;
 
-/// List the accounts declared in the configuration.
+/// List all accounts declared in the configuration.
 ///
-/// One line per account: its name, the backends it carries a
-/// configuration block for, and `default` for the account a command with
-/// no `-a` runs against. A backend this build leaves out shows as
-/// `<name> (not built)`, its block loading unread.
+/// Each row shows the account name, the backends with a config block, a
+/// backend this build leaves out marked `(not built)`, and `default` on
+/// the default account.
 ///
 /// JSON output: `{"accounts": [{"name", "default", "backends",
 /// "notBuilt"}]}`, `backends` the ones this build serves.

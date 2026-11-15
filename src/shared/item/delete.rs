@@ -9,6 +9,7 @@ use pimalaya_cli::printer::Printer;
 
 use crate::{
     capability::Capability,
+    error::item_missing,
     shared::{
         arg::CalendarIdArg,
         client::CalendarClient,
@@ -45,7 +46,10 @@ impl ItemDeleteCommand {
         client.require(&capabilities)?;
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
-        client.delete_item(&calendar_id, &self.item_id, self.if_match.as_deref(), None)?;
+        client
+            .delete_item(&calendar_id, &self.item_id, self.if_match.as_deref(), None)
+            .map_err(|err| item_missing(err, &self.item_id, &calendar_id))?;
+
         printer.out(WriteReceipt {
             id: self.item_id,
             queued: client.queues_writes(),

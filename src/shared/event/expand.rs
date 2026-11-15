@@ -785,13 +785,20 @@ fn database_zone(zone: &TimeZone, anchor: i64) -> Option<IcalTz> {
         .find_map(IcalTz::of_component)
 }
 
-/// An instant at an offset, as RFC 3339 spells it.
+/// An instant at an offset, as RFC 3339 spells it, a zero offset `Z` as
+/// pimalaya-cli's output contract and Himalaya spell UTC.
 fn rfc3339(at: i64, offset: i32) -> Option<String> {
     let offset = Offset::from_seconds(offset).ok()?;
     let zoned = Timestamp::from_second(at)
         .ok()?
         .to_zoned(TimeZone::fixed(offset));
-    Some(zoned.strftime("%Y-%m-%dT%H:%M:%S%:z").to_string())
+
+    let format = match offset == Offset::UTC {
+        true => "%Y-%m-%dT%H:%M:%SZ",
+        false => "%Y-%m-%dT%H:%M:%S%:z",
+    };
+
+    Some(zoned.strftime(format).to_string())
 }
 
 /// A civil date as ISO 8601 spells it.
@@ -1092,19 +1099,16 @@ mod tests {
         assert_eq!(
             starts(&events),
             [
-                "2026-10-05T09:00:00+00:00",
-                "2026-10-06T09:00:00+00:00",
-                "2026-10-07T09:00:00+00:00",
+                "2026-10-05T09:00:00Z",
+                "2026-10-06T09:00:00Z",
+                "2026-10-07T09:00:00Z",
             ]
         );
         assert_eq!(
             ids(&events),
             ["20261005T090000Z", "20261006T090000Z", "20261007T090000Z"]
         );
-        assert_eq!(
-            events[2].ends_at.as_deref(),
-            Some("2026-10-07T09:30:00+00:00")
-        );
+        assert_eq!(events[2].ends_at.as_deref(), Some("2026-10-07T09:30:00Z"));
         assert!(
             events
                 .iter()
@@ -1156,7 +1160,7 @@ mod tests {
 
         let events = Event::occurrences(&item, Some(&days("2026-10-05", "2026-10-11")));
 
-        assert_eq!(starts(&events), ["2026-10-05T09:00:00+00:00"]);
+        assert_eq!(starts(&events), ["2026-10-05T09:00:00Z"]);
     }
 
     #[test]
@@ -1202,14 +1206,8 @@ mod tests {
 
         assert_eq!(events.len(), 3);
         assert_eq!(events[1].summary, "Sync (moved)");
-        assert_eq!(
-            events[1].starts_at.as_deref(),
-            Some("2026-10-06T15:00:00+00:00")
-        );
-        assert_eq!(
-            events[1].ends_at.as_deref(),
-            Some("2026-10-06T15:30:00+00:00")
-        );
+        assert_eq!(events[1].starts_at.as_deref(), Some("2026-10-06T15:00:00Z"));
+        assert_eq!(events[1].ends_at.as_deref(), Some("2026-10-06T15:30:00Z"));
         assert_eq!(events[1].recurrence_id.as_deref(), Some("20261006T090000Z"));
 
         let read = Event::occurrence(&item, "20261006T090000Z").unwrap();
@@ -1298,7 +1296,7 @@ mod tests {
             Event::occurrences(&item("", &events), Some(&days("2026-10-05", "2026-10-10")));
 
         assert_eq!(ids(&events), ["20270301T090000Z"]);
-        assert_eq!(starts(&events), ["2026-10-07T09:00:00+00:00"]);
+        assert_eq!(starts(&events), ["2026-10-07T09:00:00Z"]);
     }
 
     #[test]
@@ -1472,8 +1470,8 @@ mod tests {
                 "start": "20261005T090000Z",
                 "end": "20261005T094500Z",
                 "allDay": false,
-                "startsAt": "2026-10-05T09:00:00+00:00",
-                "endsAt": "2026-10-05T09:45:00+00:00",
+                "startsAt": "2026-10-05T09:00:00Z",
+                "endsAt": "2026-10-05T09:45:00Z",
                 "timeZone": "UTC",
                 "zoneAssumed": false,
                 "recurring": false,

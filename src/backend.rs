@@ -6,7 +6,10 @@
 use std::{fmt, str::FromStr};
 
 use anyhow::{Error, bail};
-use clap::Parser;
+use clap::{
+    Parser,
+    builder::{PossibleValue, PossibleValuesParser, TypedValueParser},
+};
 
 /// Every backend calendula knows, as `--backend` and its cargo feature
 /// spell it, in the order `auto` tries them.
@@ -15,6 +18,29 @@ pub const ALL: [&str; 5] = ["vdir", "pimdir", "caldav", "gcal", "msgraph"];
 /// Why nothing reaches `backend`, one of [`ALL`] this build leaves out.
 pub fn not_built(backend: &str) -> String {
     format!("This build leaves out the `{backend}` backend, rebuild with `--features {backend}`")
+}
+
+/// The parser of `--backend`: `auto` and every backend calendula knows,
+/// built in or not, each with its help, so the help lists them and a
+/// value none is spelled is refused listing them, as Himalaya's is. A
+/// backend this build leaves out is refused naming its cargo feature.
+pub fn parser() -> impl TypedValueParser<Value = Backend> {
+    let auto = PossibleValue::new("auto")
+        .help("Take the first backend the account configures, in this order");
+
+    let values = ALL.map(|name| {
+        let label = match name {
+            "caldav" => "CalDAV",
+            "gcal" => "Google Calendar",
+            "msgraph" => "Microsoft Graph",
+            name => name,
+        };
+
+        PossibleValue::new(name).help(format!("Pin the command to the account's {label} backend"))
+    });
+
+    PossibleValuesParser::new([auto].into_iter().chain(values))
+        .try_map(|backend| Backend::from_str(&backend))
 }
 
 /// Selects which backend a cross-protocol command targets.

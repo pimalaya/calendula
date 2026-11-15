@@ -66,7 +66,10 @@ impl JsonSchema for CalendarItem {
     }
 }
 
-/// An item as `item list` lists it and `item read` reads it.
+/// An item as `item list` lists it.
+///
+/// A listed item may carry no bytes, which only a listing shows: a read
+/// fails instead ([`ItemReadRow`]).
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(rename = "CalendarItem")]
@@ -75,15 +78,58 @@ pub struct ItemRow {
     pub id: String,
     /// The calendar the item lives in.
     pub calendar_id: String,
-    /// The entity tag of the version listed or read, which a write can be
-    /// gated on (`--if-match`), `null` when the backend versions no item.
+    /// The entity tag of the version listed, which a write can be gated on
+    /// (`--if-match`), `null` when the backend versions no item.
+    pub etag: Option<String>,
+    /// The iCalendar text, or its base64 when `encoding` is `base64`;
+    /// `null` when the item carries no bytes, a pimdir item whose body is
+    /// not local yet or cannot be read.
+    pub contents: Option<String>,
+    /// How `contents` spells the bytes: `utf-8` for the text itself,
+    /// `base64` for bytes that are not valid UTF-8; `null` when the item
+    /// carries no bytes.
+    pub encoding: Option<ItemEncoding>,
+}
+
+impl From<&CalendarItem> for ItemRow {
+    fn from(item: &CalendarItem) -> Self {
+        let (contents, encoding) = match item.contents.is_empty() {
+            true => (None, None),
+            false => {
+                let contents = ItemContents::of(&item.contents);
+                (Some(contents.contents), Some(contents.encoding))
+            }
+        };
+
+        Self {
+            id: item.id.clone(),
+            calendar_id: item.calendar_id.clone(),
+            etag: item.etag.clone(),
+            contents,
+            encoding,
+        }
+    }
+}
+
+/// An item as `item read` and `event read` read it: the row `item list`
+/// prints, its bytes always there, the read of an item carrying none
+/// failing (`body-pending`).
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemReadRow {
+    /// Backend-specific identifier the other commands address it by.
+    pub id: String,
+    /// The calendar the item lives in.
+    pub calendar_id: String,
+    /// The entity tag of the version read, which a write can be gated on
+    /// (`--if-match`), `null` when the backend versions no item.
     pub etag: Option<String>,
     /// The iCalendar, as text or as base64.
     #[serde(flatten)]
     pub contents: ItemContents,
 }
 
-impl From<&CalendarItem> for ItemRow {
+impl From<&CalendarItem> for ItemReadRow {
     fn from(item: &CalendarItem) -> Self {
         Self {
             id: item.id.clone(),
@@ -95,43 +141,35 @@ impl From<&CalendarItem> for ItemRow {
 }
 
 /// iCalendar bytes as JSON carries them, never decoded lossily: the text
-/// when they are valid UTF-8, their base64 otherwise.
+/// when they are valid UTF-8, their base64 otherwise, as cardamum carries
+/// a vCard.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemContents {
-    /// The iCalendar text, or its base64 when `encoding` is `base64`;
-    /// `null` when the item carries no bytes, as a pimdir item whose body
-    /// is not local yet.
-    pub contents: Option<String>,
+    /// The iCalendar text, or its base64 when `encoding` is `base64`.
+    pub contents: String,
     /// How `contents` spells the bytes: `utf-8` for the text itself,
-    /// `base64` for bytes that are not valid UTF-8; `null` when the item
-    /// carries no bytes.
-    pub encoding: Option<ItemEncoding>,
+    /// `base64` for bytes that are not valid UTF-8.
+    pub encoding: ItemEncoding,
 }
 
 impl ItemContents {
-    /// The contents of `bytes`.
+    /// The contents of `bytes`, no bytes the empty text.
     pub fn of(bytes: &[u8]) -> Self {
-        if bytes.is_empty() {
-            return Self::default();
-        }
-
         let (contents, encoding) = match str::from_utf8(bytes) {
             Ok(text) => (text.to_owned(), ItemEncoding::Utf8),
             Err(_) => (base64(bytes), ItemEncoding::Base64),
         };
 
-        Self {
-            contents: Some(contents),
-            encoding: Some(encoding),
-        }
+        Self { contents, encoding }
     }
 }
 
 /// How an item's `contents` spells its bytes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, JsonSchema)]
 pub enum ItemEncoding {
     /// The text itself, the bytes being valid UTF-8.
+    #[default]
     #[serde(rename = "utf-8")]
     Utf8,
     /// The standard base64 alphabet, padded (RFC 4648 §4), the bytes not

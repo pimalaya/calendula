@@ -15,6 +15,7 @@ use serde::Serialize;
 
 use crate::{
     capability::Capability,
+    error::event_missing,
     shared::{
         arg::{CalendarIdArg, IcalComposerArgs, SendUpdatesArg},
         client::CalendarClient,
@@ -117,6 +118,7 @@ impl EventUpdateCommand {
         self.fields.check_backend(client.backend_name())?;
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
+        let missing = |err| event_missing(err, &self.event_id, &calendar_id);
 
         // NOTE: reading the stored bytes also gives the version they are
         // being changed from, so an edit that took a minute cannot
@@ -124,7 +126,9 @@ impl EventUpdateCommand {
         let (base, etag) = match &self.ical {
             Some(source) => (read_source(source)?, None),
             None => {
-                let item = client.get_item(&calendar_id, &self.event_id)?;
+                let item = client
+                    .get_item(&calendar_id, &self.event_id)
+                    .map_err(missing)?;
                 (item.contents, item.etag)
             }
         };
@@ -140,13 +144,15 @@ impl EventUpdateCommand {
 
         if !self.composer.interactive {
             let contents = revise(&seed, now())?;
-            client.update_item(
-                &calendar_id,
-                &self.event_id,
-                contents,
-                if_match.as_deref(),
-                send_updates,
-            )?;
+            client
+                .update_item(
+                    &calendar_id,
+                    &self.event_id,
+                    contents,
+                    if_match.as_deref(),
+                    send_updates,
+                )
+                .map_err(missing)?;
 
             return printer.out(EventUpdateOutput::Applied(EventUpdatedOutput {
                 id: self.event_id,
@@ -171,13 +177,15 @@ impl EventUpdateCommand {
         // NOTE: stamped once the edit is over, the instant it is written,
         // whatever the editor left in DTSTAMP.
         let updated = revise(&draft.contents, now()).and_then(|contents| {
-            client.update_item(
-                &calendar_id,
-                &self.event_id,
-                contents,
-                if_match.as_deref(),
-                send_updates,
-            )
+            client
+                .update_item(
+                    &calendar_id,
+                    &self.event_id,
+                    contents,
+                    if_match.as_deref(),
+                    send_updates,
+                )
+                .map_err(missing)
         });
 
         draft.finish(updated)?;

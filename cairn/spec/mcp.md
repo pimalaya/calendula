@@ -46,4 +46,4 @@ Inside a server without `--allow-send`, a create or an update SHALL be refused w
 Inside the MCP server, an iCalendar source SHALL be taken as text, a local path naming a file being no way in, and a source given as `-` SHALL be refused with `stdin-taken`.
 
 ### Requirement: Tool annotations say what a tool does
-A reading tool SHALL be `readOnlyHint`; an update or a delete SHALL be `destructiveHint`. `openWorldHint` SHALL be true exactly when the tool's effect may reach people beyond the account: on `event_add`, `event_update`, `event_delete`, `item_add`, `item_update` and `item_delete` under `--allow-send`, and on no tool otherwise.
+A reading tool SHALL be `readOnlyHint`; an update or a delete SHALL be `destructiveHint`. `openWorldHint` SHALL be true exactly when the tool lists an argument inviting or notifying people: on `event_add`, `event_update` and `event_delete` under `--allow-send`, and on no tool otherwise. A gate SHALL move neither hint by itself (pimalaya-cli's mcp spec): `item_add`, `item_update` and `item_delete` list the same arguments with or without `--allow-send`, and carry the same hints.

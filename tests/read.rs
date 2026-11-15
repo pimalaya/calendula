@@ -92,32 +92,57 @@ fn a_read_keeps_the_stored_bytes_in_json() {
     }
 }
 
-/// An id the calendar does not hold fails the read with a failure object
-/// coded `item-not-found`.
+/// An id the calendar does not hold fails a read, an update or a delete
+/// with a failure object coded `item-not-found`, its sentence Himalaya's
+/// for a missing message, the event commands saying how an event is
+/// named.
 #[test]
 fn an_unknown_id_is_coded_not_found() {
     let home = account();
     let config = home.path().join("config.toml");
 
-    for family in ["event", "item"] {
+    let item = "Item `nope` not found in calendar `personal`";
+    let event = "Event `nope` not found in calendar `personal`; an event is named by \
+                 the id `event list` shows, `event search <UID>` finding it by its \
+                 iCalendar UID";
+
+    // NOTE: a vdir `item update` given a source writes the file, whether
+    // or not it was there.
+    let commands: &[(&[&str], &str)] = &[
+        (&["item", "read", "nope"], item),
+        (&["item", "delete", "nope"], item),
+        (&["event", "read", "nope"], event),
+        (&["event", "update", "nope", "--summary", "Bob"], event),
+        (&["event", "delete", "nope"], event),
+    ];
+
+    for (args, error) in commands {
         let output = Command::new(env!("CARGO_BIN_EXE_calendula"))
-            .args([
-                "-c",
-                config.to_str().unwrap(),
-                "--json",
-                family,
-                "read",
-                "nope",
-            ])
+            .args(["-c", config.to_str().unwrap(), "--json"])
+            .args(*args)
             .stdin(Stdio::null())
             .output()
             .unwrap();
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert_eq!(output.status.code(), Some(1), "{family}: {stdout}");
+        assert_eq!(output.status.code(), Some(1), "{args:?}: {stdout}");
         let json: Value = serde_json::from_str(&stdout).unwrap();
-        assert_eq!(json["code"], "item-not-found", "{family}: {json}");
+        assert_eq!(json["code"], "item-not-found", "{args:?}: {json}");
+        assert_eq!(json["error"], *error, "{args:?}: {json}");
     }
+}
+
+/// A read always carries the item's bytes, as cardamum's card reads do: an
+/// empty file reads as the empty text, never `null`.
+#[test]
+fn an_empty_item_reads_as_the_empty_text() {
+    let home = account();
+    fs::write(home.path().join("personal").join("e.ics"), "").unwrap();
+
+    let stdout = run(home.path(), &["--json", "item", "read", "e"]);
+    let json: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["contents"], "", "{json}");
+    assert_eq!(json["encoding"], "utf-8", "{json}");
 }
 
 /// Both reads print the row `item list` prints: the item's id, its

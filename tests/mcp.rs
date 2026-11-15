@@ -303,12 +303,38 @@ fn scheduling_is_listed_under_allow_send_as_well() {
     for name in ["event_add", "event_update", "event_delete"] {
         assert_eq!(tool(listed, name)["annotations"]["openWorldHint"], true);
     }
+    // NOTE: an item write lists no argument inviting anyone, so its hint
+    // stays the one it carries without the gate.
     for name in ["item_add", "item_update", "item_delete"] {
-        assert_eq!(tool(listed, name)["annotations"]["openWorldHint"], true);
+        assert_eq!(tool(listed, name)["annotations"]["openWorldHint"], false);
     }
     for name in ["calendar_create", "calendar_delete", "event_list"] {
         assert_eq!(tool(listed, name)["annotations"]["openWorldHint"], false);
     }
+}
+
+/// A gate moves no hint by itself (pimalaya-cli's mcp spec): a tool
+/// listing the same arguments with and without `--allow-send` carries the
+/// same annotations.
+#[test]
+fn a_gate_moves_no_hint_by_itself() {
+    let home = account();
+    let writing = serve(home.path(), &["--allow-write"], &[list(1)]);
+    let sending = serve(home.path(), &["--allow-write", "--allow-send"], &[list(1)]);
+
+    let mut compared = 0;
+
+    for before in tools(&writing[0]) {
+        let name = before["name"].as_str().unwrap();
+        let after = tool(&sending[0], name);
+
+        if before["inputSchema"] == after["inputSchema"] {
+            assert_eq!(before["annotations"], after["annotations"], "{name}");
+            compared += 1;
+        }
+    }
+
+    assert!(compared > 0);
 }
 
 #[test]
