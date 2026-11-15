@@ -32,7 +32,7 @@ use crate::{
 /// Every component kind is listed, VEVENT included; use `event list` for the
 /// events-only view with its summary and time columns.
 ///
-/// Each line shows the entity tag, the size and the id of an item, under a
+/// Each line shows the id, the size and the entity tag of an item, under a
 /// header naming the account, the calendar and where the page stands. An
 /// item the backend could not read is named by an `Error:` line at the
 /// end, and the command exits 3.
@@ -144,9 +144,9 @@ impl fmt::Display for ItemListOutput {
             let etag = item.etag.as_deref().unwrap_or_default();
 
             listing.items.push([
-                sanitize::text(etag).into_owned(),
-                size_of(item),
                 sanitize::text(&item.id).into_owned(),
+                size_of(item),
+                sanitize::text(etag).into_owned(),
             ]);
         }
 
@@ -182,7 +182,7 @@ mod tests {
     };
 
     #[test]
-    fn items_print_one_line_each_the_id_last() {
+    fn items_print_one_line_each_the_id_first() {
         let mut listing = Listing::new("perso", Some("caldav"));
         listing.head("Calendar", "personal");
         let page = ListingPage::Numbered { page: 1, size: 25 };
@@ -211,8 +211,8 @@ Account:    perso (caldav)
 Calendar:   personal
 Page:       1, items 1 to 2, the last
 
-\"1a2b\"  2 KiB  standup.ics
--       -      pending.ics
+standup.ics  2 KiB  \"1a2b\"
+pending.ics  -      -
 ";
         assert_eq!(output.to_string(), expected);
     }
@@ -249,7 +249,7 @@ Calendar:   personal
 Page:       2, item 2
 Next page:  --page 3
 
--  -  7
+7  -  -
 
 Error:  c  item-unreadable  Cannot read item file /home/c.ics
 Error:  7  item-unreadable  Body blob missing for item `7` in calendar `personal`

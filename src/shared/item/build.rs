@@ -12,7 +12,7 @@ use crate::shared::{build::IcalBuildArgs, ical::IcalFamily};
 
 /// Build an item and print it, writing it nowhere.
 ///
-/// The source and `-i` stack as they do on `item create`, and the item
+/// The source and `-i` stack as they do on `item add`, and the item
 /// comes back on stdout instead of going to a backend, which is how an
 /// item is judged before it is sent. No account is resolved unless
 /// `-i` needs the configured composer.

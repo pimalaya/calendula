@@ -175,7 +175,7 @@ const READS: [&str; 7] = [
     "calendar_list",
     "event_list",
     "event_read",
-    "event_find",
+    "event_search",
     "item_list",
     "item_read",
 ];
@@ -202,7 +202,7 @@ fn initialize_tells_the_agent_how_to_use_the_tools() {
     for word in [
         "calendar_list",
         "event_list",
-        "event_find",
+        "event_search",
         "--allow-write",
         "--allow-send",
         "ATTENDEE",
@@ -241,10 +241,10 @@ fn writes_are_listed_under_allow_write_without_scheduling() {
         "calendar_create",
         "calendar_update",
         "calendar_delete",
-        "event_create",
+        "event_add",
         "event_update",
         "event_delete",
-        "item_create",
+        "item_add",
         "item_update",
         "item_delete",
     ]);
@@ -261,18 +261,28 @@ fn writes_are_listed_under_allow_write_without_scheduling() {
         assert_eq!(tool["annotations"]["openWorldHint"], false, "{tool}");
     }
 
-    assert!(properties(tool(listed, "event_create")).contains(&"summary"));
-    assert!(properties(tool(listed, "event_create")).contains(&"ical"));
+    assert!(properties(tool(listed, "event_add")).contains(&"summary"));
+    assert!(properties(tool(listed, "event_add")).contains(&"ical"));
     assert_eq!(
-        tool(listed, "event_create")["annotations"]["readOnlyHint"],
+        tool(listed, "event_add")["annotations"]["readOnlyHint"],
         false
     );
 
     for name in ["event_update", "event_delete", "item_delete"] {
         assert_eq!(tool(listed, name)["annotations"]["destructiveHint"], true);
     }
+
+    // NOTE: the calendar a delete takes is a required positional, its
+    // hidden `-k` no property.
+    let delete = tool(listed, "calendar_delete");
     assert_eq!(
-        tool(listed, "event_create")["annotations"]["destructiveHint"],
+        delete["inputSchema"]["required"],
+        json!(["calendar"]),
+        "{delete}"
+    );
+    assert_eq!(properties(delete), ["calendar"], "{delete}");
+    assert_eq!(
+        tool(listed, "event_add")["annotations"]["destructiveHint"],
         false
     );
 }
@@ -284,16 +294,16 @@ fn scheduling_is_listed_under_allow_send_as_well() {
     let responses = serve(home.path(), &flags, &[list(1)]);
     let listed = &responses[0];
 
-    let create = properties(tool(listed, "event_create"));
+    let create = properties(tool(listed, "event_add"));
     for argument in ["attendee", "add-attendee", "remove-attendee", "organizer"] {
         assert!(create.contains(&argument), "{argument}: {create:?}");
     }
     assert!(properties(tool(listed, "event_delete")).contains(&"send-updates"));
 
-    for name in ["event_create", "event_update", "event_delete"] {
+    for name in ["event_add", "event_update", "event_delete"] {
         assert_eq!(tool(listed, name)["annotations"]["openWorldHint"], true);
     }
-    for name in ["item_create", "item_update", "item_delete"] {
+    for name in ["item_add", "item_update", "item_delete"] {
         assert_eq!(tool(listed, name)["annotations"]["openWorldHint"], true);
     }
     for name in ["calendar_create", "calendar_delete", "event_list"] {
@@ -451,7 +461,7 @@ fn an_unknown_argument_is_a_tool_error() {
         &[],
         &[
             call(1, "event_list", json!({ "query": "standup" })),
-            call(2, "event_create", json!({ "summary": "Nope" })),
+            call(2, "event_add", json!({ "summary": "Nope" })),
         ],
     );
 
@@ -491,9 +501,9 @@ fn an_ical_source_is_taken_as_text_never_as_a_local_path() {
         home.path(),
         &["--allow-write"],
         &[
-            call(1, "item_create", json!({ "ical": secret })),
-            call(2, "item_create", json!({ "ical": "-" })),
-            call(3, "item_create", json!({ "ical": event("lunch", "") })),
+            call(1, "item_add", json!({ "ical": secret })),
+            call(2, "item_add", json!({ "ical": "-" })),
+            call(3, "item_add", json!({ "ical": event("lunch", "") })),
         ],
     );
 
@@ -522,8 +532,8 @@ fn a_write_naming_attendees_needs_allow_send() {
     let home = account();
     let invitation = event("invite", GUEST);
     let calls = [
-        call(1, "event_create", json!({ "ical": invitation })),
-        call(2, "item_create", json!({ "ical": invitation })),
+        call(1, "event_add", json!({ "ical": invitation })),
+        call(2, "item_add", json!({ "ical": invitation })),
         call(
             3,
             "event_update",
@@ -538,7 +548,7 @@ fn a_write_naming_attendees_needs_allow_send() {
         call(6, "item_delete", json!({ "item-id": "review" })),
         call(
             7,
-            "event_create",
+            "event_add",
             json!({ "summary": "Lunch", "start": "2026-11-13T12:00" }),
         ),
         call(8, "event_delete", json!({ "event-id": "standup" })),
@@ -590,7 +600,7 @@ fn a_tool_the_account_cannot_serve_is_not_listed() {
     let names = names(&responses[0]);
 
     assert!(names.contains(&"calendar_list"), "{names:?}");
-    assert!(names.contains(&"event_create"), "{names:?}");
+    assert!(names.contains(&"event_add"), "{names:?}");
     for name in ["calendar_create", "calendar_update", "calendar_delete"] {
         assert!(!names.contains(&name), "{name}: {names:?}");
     }

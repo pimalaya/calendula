@@ -1,6 +1,6 @@
-//! # Event create
+//! # Event add
 //!
-//! The `event create` command, storing one VEVENT into the selected
+//! The `event add` command, storing one VEVENT into the selected
 //! calendar, from an iCalendar source, from field flags, from the
 //! composer, or from any combination of the three.
 
@@ -23,7 +23,7 @@ use crate::{
     },
 };
 
-/// Create a new event from an iCalendar source.
+/// Add a new event to a calendar, from an iCalendar source.
 ///
 /// The source, the field flags and `-i` stack: the source is the event
 /// to start from, the flags set the properties they name on it, and `-i`
@@ -134,7 +134,7 @@ impl EventCreateCommand {
     }
 }
 
-/// What `event create` prints, which is whether it wrote anything.
+/// What `event add` prints, which is whether it wrote anything.
 ///
 /// Untagged, so the write serializes exactly as it would on its own. The
 /// second shape is reachable through `-i` alone, which `--json` refuses

@@ -1,6 +1,6 @@
 # Migration guide
 
-## 0.2.x -> unreleased
+## From v0.2 to v0.3
 
 The next release brings calendula onto the standards Himalaya, Ortie and cardamum share: it manages events alone, drops the configuration wizard, takes one configuration path per `-c`, prints plain text with no table nor colour, serves a unified API whose backends say what they serve, and adds a REPL and an MCP server.
 
@@ -88,11 +88,49 @@ pimdir.root = "~/.local/state/neverest"
 pimdir.account = "example"
 ```
 
+### Commands and flags
+
+- **`event create`, `item create` and `event find` are `event add`, `item add` and `event search`**, the verbs of Himalaya. The old names stay hidden aliases, so a script keeps working; an MCP client calls the tools `event_add`, `item_add` and `event_search`, where it called `event_create`, `item_create` and `event_find`.
+- **`calendar delete` and `calendar update` take the calendar as an argument**, as Himalaya's `mailbox delete`; `-k` stays a hidden alias. `calendar create` takes the name alone, the id derived from it (the name on vdir, a UUID on CalDAV), and an id before the name as before.
+
+  ```sh
+  # 0.2
+  calendula calendar delete -k work
+  calendula calendar create work Work
+  # next
+  calendula calendar delete work
+  calendula calendar create Work
+  ```
+
+- **`-d` on `caldav create` and `vdir create` sets the description**, as on `calendar create`, where it set the display name: pass the display name with `-n/--display-name`. `-D` still sets the description, and `--color` takes `-C` on every calendar command.
+
+  ```sh
+  # 0.2
+  calendula caldav create work -d Work -D "Team calendar"
+  # next
+  calendula caldav create work -n Work -d "Team calendar"
+  ```
+
+- **`event delete` takes the event's id alone**, as `event read` and `event update` do: a `UID` fails `item-not-found`, where 0.2 listed the calendar to find the event carrying it. Look the id up with `event search` first.
+
+  ```sh
+  # 0.2
+  calendula event delete 1234@example.org
+  # next
+  calendula event search 1234@example.org --json 
+- **A `pimdir search` or `pimdir count` query word starting with `-` goes after `--`**, the options before it: an option is read wherever it stands, so `pimdir search budget --json` prints JSON where a development build searched `budget --json`.
+
+  ```sh
+  calendula pimdir search -s 5 -- budget -lisbon
+  ```
+| jq -r '.events[0].id' | xargs calendula event delete
+  ```
+
 ### Text output
 
 - **Every list is plain text**, with no border, no colour and nothing sized to the terminal. A script cutting the 0.2 tables reads `--json` instead.
-- **`event list` prints one line per event**, `id  start  end  summary`, the times in the local zone (a whole-day event by its days) and an empty cell as `-`, under `Account:`, `Calendar:`, `Page:` and `Next page:` and a blank line. A listing that could not read an item prints one `Error:` line for it last, after the rows and a blank line. `item list` prints its entity tag, size and id the same way, and `gcal instances` its id, status, start, end and summary.
-- **Other lists print columns or records.** `vdir list`, `gcal acl list` and `gcal colors` print columns under an uppercase header, and `account list` one line per account with no header, `default` marking the default one; `calendar list`, `caldav list`, `gcal calendars` and `gcal free-busy` print records the way `git log` prints commits; `account check`, `caldav discover`, `gcal settings` and `pimdir status` print `Label: value` lines.
+- **`event list` prints one line per event**, `id  start  end  summary`, the times in the local zone (a whole-day event by its days) and an empty cell as `-`, under `Account:`, `Calendar:`, `Page:` and `Next page:` and a blank line. A listing that could not read an item prints one `Error:` line for it last, after the rows and a blank line. `item list` prints its id, size and entity tag the same way, and `gcal instances` its id, status, start, end and summary.
+- **Other lists print columns or records.** `calendar list` prints `Account:`, then one line per calendar, `id  default  color  name`, its description under `--json` alone; `vdir list`, `gcal acl list` and `gcal colors` print columns under an uppercase header, and `account list` one line per account with no header, `default` marking the default one; `caldav list`, `gcal calendars` and `gcal free-busy` print records the way `git log` prints commits; `account check`, `caldav discover`, `gcal settings` and `pimdir status` print `Label: value` lines.
 - **`event agenda` highlights no day.** Its grid writes no escape any more, today and the days holding an event included; the events listed under it name their days, the months and weekdays named in the time locale (`LC_ALL`, then `LC_TIME`, then `LANG`).
 - **Every string a server or a file gave is defused** of its control and bidi characters in the text output; `--json` keeps the stored text.
 - **A pimdir write says it is queued** (`Event <id> queued for the next sync`, `... update queued ...`, `... deletion queued ...`) rather than created, updated or deleted.
@@ -135,8 +173,8 @@ calendula calendar list --json | jq -r '.calendars[].id'
 
 - **Piped `--json` prints one value per line**, and every schema `json-schema` writes carries an `$id` naming the contract version.
 - **A failure carries a stable `code`** when a caller is expected to act on it (`capability-missing`, `precondition-failed`, `item-duplicate`, `body-pending`, the pimdir store and index codes), described by the `calendula-error` schema, and `null` otherwise. Match on the code, never on the message, which may be reworded.
-- **Listings say whether more follow.** `event list`, `event find` and `item list` print `nextPage`, the next page number as a string, `null` once the listing is complete: give it back through `--page-token`.
-- **A listing names what it could not read in `errors` and exits 3.** `calendar list`, `event list`, `event find`, `event agenda` and `item list` print `errors` beside their items, one `{id, code, error, sources}` per calendar or item they could not read (`item-unreadable`, `permission-denied`...), `[]` when none, and exit 3 when it is not empty, where 0.2 skipped an item that does not parse, or failed the whole listing for a vdir file or a Graph event it could not read. Treat exit 3 as a result: read the items, then `errors`; under `set -e`, or where a script tested for a zero status, accept 3 too.
+- **Listings say whether more follow.** `event list`, `event search` and `item list` print `nextPage`, the next page number as a string, `null` once the listing is complete: give it back through `--page-token`.
+- **A listing names what it could not read in `errors` and exits 3.** `calendar list`, `event list`, `event search`, `event agenda` and `item list` print `errors` beside their items, one `{id, code, error, sources}` per calendar or item they could not read (`item-unreadable`, `permission-denied`...), `[]` when none, and exit 3 when it is not empty, where 0.2 skipped an item that does not parse, or failed the whole listing for a vdir file or a Graph event it could not read. Treat exit 3 as a result: read the items, then `errors`; under `set -e`, or where a script tested for a zero status, accept 3 too.
 
   ```sh
   # 0.2: exit 0, an item that does not parse skipped without a word
@@ -191,10 +229,10 @@ calendula calendar list --json | jq -r '.calendars[].id'
 ### New
 
 - `calendula repl` runs commands over one account, the unified client connecting once, and `calendula mcp` serves the unified API to an AI agent, reads only unless `--allow-write`, and nothing reaching an attendee unless `--allow-send`.
-- `event build`, `event create` and `event update` take field flags (`--summary`, `--start`, `--attendee`, `--alarm`...), `event list --from/--to` expands recurring series, and `event find` reads the events carrying a `UID`.
-- `pimdir search`, `pimdir count`, `pimdir reply` and `pimdir cancel` query the store's index and queue the replies and cancellations its sync engine sends.
+- `event build`, `event add` and `event update` take field flags (`--summary`, `--start`, `--attendee`, `--alarm`...), `event list --from/--to` expands recurring series, and `event search` reads the events carrying a `UID`.
+- `pimdir search`, `pimdir count`, `pimdir reply` and `pimdir cancel` query the store's index and queue the replies and cancellations its sync engine sends, and `pimdir queue list`, `show` and `cancel` read and retract what is queued.
 
-## 0.1.x -> 0.2.0
+## From v0.1 to v0.2
 
 calendula 0.2.0 drops `pimalaya-toolbox` and the inline CalDAV implementation in favour of the Pimalaya stack, and owns its cross-protocol layer rather than borrowing one: `pimalaya-cli` for the clap scaffolding, prompts, spinners and tables, `pimalaya-config` for the TOML loading and secrets, `pimalaya-stream` for the transport, `io-webdav` for CalDAV over WebDAV, `io-vdir` for the filesystem backend, `io-pimdir` for the local store, `io-pim-discovery` for server discovery, and `ical-rs` for iCalendar.
 

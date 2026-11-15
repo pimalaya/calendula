@@ -11,7 +11,9 @@
 //!
 //! Writes are staged as queue actions for the store's owner to apply
 //! and push. A staged creation shows in no listing, having no public id
-//! until the owner applies it, which is what `pimdir status` counts.
+//! until the owner applies it, which is what `pimdir status` counts and
+//! `pimdir queue list` lists. `pimdir queue cancel` alone opens the store
+//! as its owner, for the one row it drops.
 //!
 //! Searches read the store's search index, never refreshing it.
 //!
@@ -28,5 +30,6 @@ pub mod client;
 pub mod count;
 pub mod index;
 pub mod intent;
+pub mod queue;
 pub mod search;
 pub mod status;

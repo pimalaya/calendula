@@ -27,15 +27,15 @@ pub struct VdirCollectionCreateCommand {
     pub id: String,
 
     /// Display name, written to the `displayname` marker file.
-    #[arg(short, long, value_name = "NAME")]
+    #[arg(short = 'n', long, value_name = "NAME")]
     pub display_name: Option<String>,
 
     /// Description, written to the `description` marker file.
-    #[arg(short = 'D', long, value_name = "TEXT")]
+    #[arg(short, short_alias = 'D', long, value_name = "TEXT")]
     pub description: Option<String>,
 
     /// Hex color (`#RRGGBB`), written to the `color` marker file.
-    #[arg(long, value_name = "HEX")]
+    #[arg(short = 'C', long, value_name = "HEX")]
     pub color: Option<String>,
 }
 

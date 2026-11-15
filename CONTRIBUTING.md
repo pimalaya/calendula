@@ -11,6 +11,12 @@ Whether you are a human or an AI agent, read these in order before touching the 
 
 Everything below documents only what differs from the Pimalaya standards.
 
+## Where changes belong
+
+Calendula owns no protocol code. It aggregates the backends, renders the results and reads the configuration, and everything on the wire or on disk belongs to the crate that speaks that protocol: [io-webdav](https://github.com/pimalaya/io-webdav) for CalDAV, [io-gcal](https://github.com/pimalaya/io-gcal), [io-msgraph](https://github.com/pimalaya/io-msgraph), [io-vdir](https://github.com/pimalaya/io-vdir) and [io-pimdir](https://github.com/pimalaya/io-pimdir), with [ical-rs](https://github.com/pimalaya/ical) for iCalendar itself.
+
+The cross-backend layer is owned here rather than by an aggregator crate: the shared types live in src/shared, and each backend maps them onto its protocol crate through its own backend.rs. A verb some backends serve with the same result joins the unified API, each backend declaring its level in src/capability.rs (`full`, `partial`, `server` or `none`); a concept only one protocol has, or one whose result differs, belongs to that protocol's command family.
+
 ## Feature matrix
 
 Each backend sits behind its own cargo feature, and a network backend needs one of the TLS providers `rustls-ring`, `rustls-aws` or `native-tls`. Several may be built in, a backend block's `tls.provider` choosing among them. The default set is every backend, `rustls-ring` and `vendored`.

@@ -47,7 +47,7 @@ use jiff::{
 
 use crate::shared::{event::Event, item::CalendarItem};
 
-/// The VEVENT fields `event build`, `event create` and `event update` set
+/// The VEVENT fields `event build`, `event add` and `event update` set
 /// from flags.
 ///
 /// Each flag names one property, and writing it replaces every instance

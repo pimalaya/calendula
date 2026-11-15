@@ -47,20 +47,21 @@ events with event_list, a page at a time (give `nextPage` back as \
 `page-token`), or between two days with `from` and `to` (YYYY-MM-DD), \
 which also lists each occurrence of a recurring event. An event's `id` \
 names it, in that calendar, for event_read, event_update and \
-event_delete; event_find looks one up by the iCalendar UID an invitation \
-carries. item_list and item_read give the raw iCalendar of any \
-component. event_create and event_update take the event as field \
-arguments (`summary`, `start`, `end`, `location`) or as iCalendar text \
-in `ical`, never as a path. account_capability says what this account's \
-backend serves; a tool it cannot serve is not listed. The tools that \
-change the calendars are listed only when the server runs with \
---allow-write. Inviting people is sending: the `attendee`, `organizer` \
-and `send-updates` arguments are listed only with --allow-send as well, \
-and without it a write or a delete of an item naming an attendee \
+event_delete, which take no UID; event_search looks one up by the \
+iCalendar UID an invitation carries. item_list and item_read give the \
+raw iCalendar of any component. event_add and event_update take the \
+event as field arguments (`summary`, `start`, `end`, `location`) or as \
+iCalendar text in `ical`, never as a path. account_capability says \
+what this account's backend serves; a tool it cannot serve is not \
+listed. The tools that change the calendars are listed only when the \
+server runs with --allow-write. Inviting people is sending: the \
+`attendee`, `organizer` and `send-updates` arguments are listed only \
+with --allow-send as well, and without it a write or a delete of an \
+item naming an attendee \
 (ATTENDEE), in the iCalendar given or in the one stored, is refused, \
 since the server or a sync may notify them. A failed call answers \
 isError with a calendula-error object, its `code` naming the failure \
-when it has one. calendar_list, event_list, event_find and item_list \
+when it has one. calendar_list, event_list, event_search and item_list \
 return an `errors` list beside their result, one `{id, code, error, \
 sources}` entry per calendar or item they could not read (an item whose \
 iCalendar does not parse is `item-unreadable`); a call whose `errors` is \
@@ -80,13 +81,13 @@ const TOOLS: &[McpTool] = &[
     McpTool::write("calendar", "delete", true),
     McpTool::read("event", "list"),
     McpTool::read("event", "read"),
-    McpTool::read("event", "find"),
-    McpTool::schedule("event", "create", false),
+    McpTool::read("event", "search"),
+    McpTool::schedule("event", "add", false),
     McpTool::schedule("event", "update", true),
     McpTool::schedule("event", "delete", true),
     McpTool::read("item", "list"),
     McpTool::read("item", "read"),
-    McpTool::schedule("item", "create", false),
+    McpTool::schedule("item", "add", false),
     McpTool::schedule("item", "update", true),
     McpTool::schedule("item", "delete", true),
 ];
@@ -123,7 +124,7 @@ pub struct McpCommand {
     /// List the tools that change the calendars and the items too.
     ///
     /// Adds the calendar create, update and delete tools and the event
-    /// and item create, update and delete tools, without the arguments
+    /// and item add, update and delete tools, without the arguments
     /// inviting people.
     #[arg(long)]
     pub allow_write: bool,

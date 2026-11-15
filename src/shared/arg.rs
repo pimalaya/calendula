@@ -35,7 +35,7 @@ pub struct IcalComposerArgs {
     pub composer: Option<String>,
 }
 
-/// Who a gcal write mails, for an `event create`, `update` or `delete`.
+/// Who a gcal write mails, for an `event add`, `update` or `delete`.
 #[derive(Debug, Parser)]
 pub struct SendUpdatesArg {
     /// Who Google mails about the write (`sendUpdates`): every guest,

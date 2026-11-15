@@ -15,14 +15,14 @@ status: current
 Every command SHALL run over a session holding the unified client, built the first time a unified command needs it and kept for the commands after it. A command that fails SHALL drop the client it ran on, so the next command builds it again; the failed command SHALL NOT be retried. The protocol-specific commands SHALL build their own client each time. A one-shot run SHALL use a fresh session for its single command.
 
 ### Requirement: A session refuses what cannot finish inside it
-Inside a session, `repl` and `mcp` SHALL be refused by pimalaya-cli's loop before calendula runs anything, with `Cannot start a session inside a session`, coded `usage-invalid`, and the composer (`-i`, with or without `--composer`, on `event build`, `event create`, `event update`, `item build`, `item create` and `item update`) SHALL be refused by name, its editor needing the terminal the session reads its commands from. The session SHALL go on after each.
+Inside a session, `repl` and `mcp` SHALL be refused by pimalaya-cli's loop before calendula runs anything, with `Cannot start a session inside a session`, coded `usage-invalid`, and the composer (`-i`, with or without `--composer`, on `event build`, `event add`, `event update`, `item build`, `item add` and `item update`) SHALL be refused by name, its editor needing the terminal the session reads its commands from. The session SHALL go on after each.
 
 ### Requirement: A session never reads command input from stdin
 A command run inside the session that would read its input from stdin (an iCalendar source given as `-`) SHALL be refused with the code `stdin-taken`, its input given as text instead.
 
 #### Scenario: An event given as stdin
 - GIVEN a piped session started with `--json`
-- WHEN the line `event create -` is followed by `event list`
+- WHEN the line `event add -` is followed by `event list`
 - THEN the first answers the failure object with `code` `stdin-taken` and the second lists the calendar, the event not created
 
 ### Requirement: A piped session answers once per line

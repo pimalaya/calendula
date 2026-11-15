@@ -71,7 +71,7 @@ pub fn registry() -> JsonSchemaRegistry {
         crate::shared::event::read::EventReadOutput
     );
     insert!(
-        "calendula-event-find",
+        "calendula-event-search",
         crate::shared::event::list::EventListOutput
     );
     insert!(
@@ -89,7 +89,7 @@ pub fn registry() -> JsonSchemaRegistry {
         OneOf<crate::shared::event::build::EventBuildOutput, SavedOutput>
     );
     insert!(
-        "calendula-event-create",
+        "calendula-event-add",
         crate::shared::event::create::EventCreateOutput
     );
     insert!(
@@ -101,7 +101,7 @@ pub fn registry() -> JsonSchemaRegistry {
         OneOf<IcalBuildOutput, SavedOutput>
     );
     insert!(
-        "calendula-item-create",
+        "calendula-item-add",
         crate::shared::item::create::ItemCreateOutput
     );
     insert!(
@@ -175,6 +175,21 @@ pub fn registry() -> JsonSchemaRegistry {
         "calendula-pimdir-status",
         crate::pimdir::status::PimdirStatusOutput
     );
+    #[cfg(feature = "pimdir")]
+    {
+        insert!(
+            "calendula-pimdir-queue-list",
+            crate::pimdir::queue::list::PimdirQueueListOutput
+        );
+        insert!(
+            "calendula-pimdir-queue-show",
+            crate::pimdir::queue::show::PimdirQueueShowOutput
+        );
+        insert!(
+            "calendula-pimdir-queue-cancel",
+            crate::pimdir::queue::cancel::PimdirQueueCancelOutput
+        );
+    }
     #[cfg(feature = "pimdir")]
     insert!(
         "calendula-pimdir-reply",

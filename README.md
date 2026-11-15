@@ -263,7 +263,7 @@ pimdir.root = "~/.local/state/neverest"
 #pimdir.account = "example"
 ```
 
-Run `calendula pimdir status` to see which account you are reading, how much of each calendar is downloaded, how many creations are still queued and which writes the sync engine parked: an update or a delete whose event a sync changed since it was read, or left conflicted, is parked rather than applied. An item that is listed but not downloaded reads as "body not fetched" until a sync hydrates it.
+Run `calendula pimdir status` to see which account you are reading, how much of each calendar is downloaded, how many creations are still queued and which writes the sync engine parked: an update or a delete whose event a sync changed since it was read, or left conflicted, is parked rather than applied. `calendula pimdir queue list` lists every creation, reply and cancellation still queued, by its queue row, and `calendula pimdir queue cancel <ROW>` retracts one before the next sync. An item that is listed but not downloaded reads as "body not fetched" until a sync hydrates it.
 
 Run `calendula pimdir search <query>` to search the account's events through the search index the sync engine keeps, in the [pimdir SEARCH](https://github.com/pimalaya/pimdir) query language: `budget location:lisbon`, `attendee:carol@example.org date:2026-11`, `organizer:alice@example.org category:work`. `calendula pimdir count <query>` counts the same.
 
@@ -279,7 +279,7 @@ A few real command lines:
 calendula calendar list
 calendula event list --calendar personal --from 2026-11-16 --to 2026-11-22
 calendula event agenda -3
-calendula event create --calendar personal --summary Lunch --start 2026-11-20T12:00 --duration PT1H
+calendula event add --calendar personal --summary Lunch --start 2026-11-20T12:00 --duration PT1H
 calendula event update --calendar personal -i <EVENT-ID>
 calendula item read --calendar personal <ITEM-ID>
 calendula account capability
@@ -288,7 +288,7 @@ calendula gcal free-busy --from 2026-11-16 --to 2026-11-20
 calendula gcal quick-add "Lunch with Ada tomorrow at noon"
 ```
 
-The exit status is `0` on success and `1` on a failure, printed on stdout as the failure object under `--json`, its `code` naming it when a caller can act on it. `2` is a command line calendula refuses (an unknown flag, a missing argument, a bad value): clap's message goes to stderr, or, with `--json`, the failure object coded `usage-invalid` to stdout. `3` means the command printed its result without fully succeeding: an `account check` with a failed backend, or a `calendar list`, `event list`, `event find`, `event agenda` or `item list` whose `errors` names an item it could not read.
+The exit status is `0` on success and `1` on a failure, printed on stdout as the failure object under `--json`, its `code` naming it when a caller can act on it. `2` is a command line calendula refuses (an unknown flag, a missing argument, a bad value): clap's message goes to stderr, or, with `--json`, the failure object coded `usage-invalid` to stdout. `3` means the command printed its result without fully succeeding: an `account check` with a failed backend, or a `calendar list`, `event list`, `event search`, `event agenda` or `item list` whose `errors` names an item it could not read.
 
 ### REPL
 

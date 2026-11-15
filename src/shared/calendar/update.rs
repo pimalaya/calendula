@@ -10,7 +10,6 @@ use pimalaya_cli::printer::Printer;
 use crate::{
     capability::Capability,
     shared::{
-        arg::CalendarIdArg,
         calendar::CalendarDiff,
         client::CalendarClient,
         receipt::{Write, WriteReceipt},
@@ -25,8 +24,17 @@ use crate::{
 /// JSON output: `{"id", "queued"}`.
 #[derive(Debug, Parser)]
 pub struct CalendarUpdateCommand {
-    #[command(flatten)]
-    pub calendar: CalendarIdArg,
+    /// Calendar to update, by its id.
+    ///
+    /// Falls back to the `calendar.default` config when omitted, otherwise
+    /// the command fails coded `calendar-default-missing`.
+    #[arg(value_name = "CALENDAR")]
+    pub id: Option<String>,
+
+    /// The calendar as a flag, the former spelling.
+    #[arg(short = 'k', long = "calendar", value_name = "CALENDAR")]
+    #[arg(hide = true, conflicts_with = "id")]
+    pub flag: Option<String>,
 
     /// New display name.
     #[arg(short, long, value_name = "NAME")]
@@ -37,7 +45,7 @@ pub struct CalendarUpdateCommand {
     pub description: Option<String>,
 
     /// New hex color (`#RRGGBB`). Pass an empty string to clear.
-    #[arg(long, value_name = "HEX")]
+    #[arg(short = 'C', long, value_name = "HEX")]
     pub color: Option<String>,
 }
 
@@ -65,7 +73,7 @@ impl CalendarUpdateCommand {
                 .map(|s| if s.is_empty() { None } else { Some(s) }),
         };
 
-        let calendar_id = client.account.calendar_id(self.calendar.id)?;
+        let calendar_id = client.account.calendar_id(self.id.or(self.flag))?;
         client.update_calendar(&calendar_id, patch)?;
 
         printer.out(WriteReceipt {
@@ -74,5 +82,39 @@ impl CalendarUpdateCommand {
             what: "Calendar",
             write: Write::Update,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::{CommandFactory, Parser, error::ErrorKind};
+
+    use super::CalendarUpdateCommand;
+
+    fn parse(args: &[&str]) -> Result<Option<String>, ErrorKind> {
+        CalendarUpdateCommand::try_parse_from([&["update"], args].concat())
+            .map(|cmd| cmd.id.or(cmd.flag))
+            .map_err(|err| err.kind())
+    }
+
+    /// The calendar is an optional positional, falling back to the
+    /// default, the former `-k` a hidden spelling of it, and the two
+    /// together a conflict.
+    #[test]
+    fn the_calendar_is_a_positional_and_k_its_hidden_spelling() {
+        assert_eq!(parse(&["work", "-n", "Job"]), Ok(Some("work".into())));
+        assert_eq!(parse(&["-k", "work", "-n", "Job"]), Ok(Some("work".into())));
+        assert_eq!(parse(&["-n", "Job"]), Ok(None));
+        assert_eq!(
+            parse(&["work", "-k", "home"]),
+            Err(ErrorKind::ArgumentConflict)
+        );
+
+        let usage = CalendarUpdateCommand::command().render_usage().to_string();
+        assert_eq!(usage, "Usage: calendula [OPTIONS] [CALENDAR]");
+        let help = CalendarUpdateCommand::command()
+            .render_long_help()
+            .to_string();
+        assert!(!help.contains("-k,"), "{help}");
     }
 }

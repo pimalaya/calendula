@@ -20,15 +20,15 @@ pub struct CaldavCalendarCreateCommand {
     pub id: String,
 
     /// Human-readable display name.
-    #[arg(short, long, value_name = "NAME")]
+    #[arg(short = 'n', long, value_name = "NAME")]
     pub display_name: Option<String>,
 
     /// Free-form description.
-    #[arg(short = 'D', long, value_name = "TEXT")]
+    #[arg(short, short_alias = 'D', long, value_name = "TEXT")]
     pub description: Option<String>,
 
     /// Hex color (`#RRGGBB`).
-    #[arg(long, value_name = "HEX")]
+    #[arg(short = 'C', long, value_name = "HEX")]
     pub color: Option<String>,
 
     /// Component kinds the calendar accepts (RFC 4791 5.2.3), such as

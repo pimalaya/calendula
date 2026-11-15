@@ -1,6 +1,6 @@
-//! # Item create
+//! # Item add
 //!
-//! The `item create` command, storing one iCalendar object into the selected
+//! The `item add` command, storing one iCalendar object into the selected
 //! calendar.
 
 use core::fmt;
@@ -21,7 +21,7 @@ use crate::{
     },
 };
 
-/// Create a new iCalendar item from an iCalendar source.
+/// Add a new iCalendar item to a calendar, from an iCalendar source.
 ///
 /// The source and `-i` stack: the source is the item to start from,
 /// and `-i` opens it in the composer. `item` names no component kind,
@@ -91,7 +91,7 @@ impl ItemCreateCommand {
     }
 }
 
-/// What `item create` prints, which is whether it wrote anything.
+/// What `item add` prints, which is whether it wrote anything.
 ///
 /// Untagged, so the write serializes exactly as it would on its own. The
 /// second shape is reachable through `-i` alone, which `--json` refuses

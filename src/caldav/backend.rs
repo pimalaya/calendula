@@ -28,6 +28,7 @@ use crate::{
         calendar::{Calendar, CalendarDiff},
         client::window,
         item::{CalendarItem, CalendarItemList, CalendarItemQuery},
+        uuid::uuid_v4,
     },
 };
 
@@ -54,16 +55,22 @@ impl CaldavBackend {
         Ok(calendars.into_iter().map(calendar_from).collect())
     }
 
-    /// Creates a calendar collection through MKCALENDAR.
+    /// Creates a calendar collection through MKCALENDAR, its URL segment
+    /// `id`, else a fresh UUID: a display name may hold what a path cannot.
     pub fn create_calendar(
         &mut self,
-        id: &str,
+        id: Option<&str>,
         name: &str,
         description: Option<&str>,
         color: Option<&str>,
     ) -> Result<String> {
+        let id = match id {
+            Some(id) => id.to_owned(),
+            None => uuid_v4()?,
+        };
+
         let calendar = CaldavCalendar {
-            id: id.to_owned(),
+            id: id.clone(),
             display_name: Some(name.to_owned()),
             description: description.map(str::to_owned),
             color: color.map(str::to_owned),
@@ -71,7 +78,7 @@ impl CaldavBackend {
         };
 
         self.client.create_calendar(&calendar)?;
-        Ok(id.to_owned())
+        Ok(id)
     }
 
     /// Rewrites a calendar's properties through PROPPATCH.

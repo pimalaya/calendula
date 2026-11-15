@@ -33,8 +33,8 @@ use crate::{
 /// The query is pimdir SEARCH.md §8: words, "phrases", `field:value`
 /// terms (`summary:`, `body:`, `location:`, `attendee:`, `organizer:`,
 /// `category:`, `date:2026-11-09`, `date:2026-01..2026-03`), `and`, `or`,
-/// `not` or `-`, and parentheses. Every calendar is searched unless `-k`
-/// names one.
+/// `not` or `-`, and parentheses, a query holding a `-` term written after
+/// `--`. Every calendar is searched unless `-k` names one.
 ///
 /// `date:` matches occurrences, a series included. Days, `today` and
 /// `yesterday` are read in the local zone (`TZ`, then the system's).
@@ -68,8 +68,11 @@ pub struct PimdirSearchCommand {
     pub page_size: Option<u32>,
 
     /// The query, its words joined by spaces.
+    ///
+    /// An option is read wherever it stands, before the query or after
+    /// it. A word starting with `-`, a negated term, goes after `--`, the
+    /// options before it: `pimdir search -s 5 -- budget -lisbon`.
     #[arg(value_name = "QUERY", required = true)]
-    #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
     pub query: Vec<String>,
 }
 

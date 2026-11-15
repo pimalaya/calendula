@@ -374,10 +374,11 @@ impl CalendarClient {
     /// Creates a calendar under `id`, with a name and optional decorations.
     ///
     /// Returns the identifier the backend actually assigned: `id` wherever
-    /// it lets the caller name a collection, a server-minted one elsewhere.
+    /// it lets the caller name a collection, one it derives when `id` is
+    /// `None`, a server-minted one elsewhere.
     pub fn create_calendar(
         &mut self,
-        id: &str,
+        id: Option<&str>,
         name: &str,
         description: Option<&str>,
         color: Option<&str>,

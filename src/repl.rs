@@ -64,10 +64,10 @@ impl ReplCommand {
 fn composes(cmd: &Command) -> bool {
     match cmd {
         Command::Event(EventCommand::Build(cmd)) => cmd.args.composer.interactive,
-        Command::Event(EventCommand::Create(cmd)) => cmd.composer.interactive,
+        Command::Event(EventCommand::Add(cmd)) => cmd.composer.interactive,
         Command::Event(EventCommand::Update(cmd)) => cmd.composer.interactive,
         Command::Item(ItemCommand::Build(cmd)) => cmd.args.composer.interactive,
-        Command::Item(ItemCommand::Create(cmd)) => cmd.composer.interactive,
+        Command::Item(ItemCommand::Add(cmd)) => cmd.composer.interactive,
         Command::Item(ItemCommand::Update(cmd)) => cmd.composer.interactive,
         _ => false,
     }

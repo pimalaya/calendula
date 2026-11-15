@@ -21,12 +21,13 @@ use crate::pimdir::backend::PimdirBackend;
 ///
 /// A calendar whose items list but do not read is waiting on a sync to
 /// hydrate them, and this is where to see that coming. A parked write
-/// never lands: it is shown by its queue row (ROW), the id the store's
-/// own operator tooling retries or cancels it by.
+/// never lands: it is shown by its queue row (ROW), the id `pimdir queue
+/// cancel` cancels it by, `pimdir queue list` listing every row of a
+/// calendar.
 ///
 /// JSON output: `{"account", "accounts", "calendars": [{"id", "name",
 /// "total", "hydrated", "queued"}], "parked": [{"row", "calendarId",
-/// "action", "error"}]}`.
+/// "kind", "error"}]}`, `kind` kebab-case as the queue spells it.
 #[derive(Debug, Parser)]
 pub struct PimdirStatusCommand;
 
@@ -78,8 +79,9 @@ pub struct PimdirParkedStatus {
     pub row: i64,
     /// The calendar the action targets.
     pub calendar_id: String,
-    /// The action kind (`add`, `update`, `remove`, `calendar-reply`…).
-    pub action: String,
+    /// The action kind, as the queue spells it: `add`, `update`, `remove`,
+    /// `calendar-reply`...
+    pub kind: String,
     /// Why the owner parked it.
     pub error: String,
 }
@@ -120,12 +122,12 @@ impl fmt::Display for PimdirStatusOutput {
             return Ok(());
         }
 
-        let mut columns = Columns::new(["ROW", "ACTION", "CALENDAR", "ERROR"]);
+        let mut columns = Columns::new(["ROW", "KIND", "CALENDAR", "ERROR"]);
 
         for parked in &self.parked {
             columns.push([
                 parked.row.to_string(),
-                sanitize::text(&parked.action).into_owned(),
+                sanitize::text(&parked.kind).into_owned(),
                 sanitize::text(&parked.calendar_id).into_owned(),
                 sanitize::text(&parked.error).into_owned(),
             ]);

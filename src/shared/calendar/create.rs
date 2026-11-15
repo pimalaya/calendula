@@ -15,16 +15,23 @@ use crate::{capability::Capability, shared::client::CalendarClient};
 /// Create a new calendar.
 ///
 /// The reported id is the one the backend assigned, and it is what later
-/// commands address the calendar by. Every backend that lets a client name a
-/// collection keeps the id given here; Google and Graph mint their own.
+/// commands address the calendar by. Given only a name, vdir names the
+/// calendar's directory after it and CalDAV mints a UUID for its URL
+/// segment; an id given before the name is kept by both. Google and Graph
+/// mint their own either way.
 ///
 /// JSON output: `{"id", "name", "queued"}`, the calendar created, the name
 /// it was given and whether a sync engine applies the write later.
 #[derive(Debug, Parser)]
+#[command(allow_missing_positional = true)]
 pub struct CalendarCreateCommand {
-    /// Stable calendar identifier.
+    /// Stable calendar identifier, on the backends letting a client name a
+    /// calendar.
+    ///
+    /// Omitted, vdir takes the name, which must then be one directory
+    /// name, and CalDAV a fresh UUID.
     #[arg(value_name = "ID")]
-    pub id: String,
+    pub id: Option<String>,
 
     /// Human-readable display name.
     #[arg(value_name = "NAME")]
@@ -35,7 +42,7 @@ pub struct CalendarCreateCommand {
     pub description: Option<String>,
 
     /// Hex color (`#RRGGBB`).
-    #[arg(long, value_name = "HEX")]
+    #[arg(short = 'C', long, value_name = "HEX")]
     pub color: Option<String>,
 }
 
@@ -51,7 +58,7 @@ impl CalendarCreateCommand {
         client.require(&capabilities)?;
 
         let id = client.create_calendar(
-            &self.id,
+            self.id.as_deref(),
             &self.name,
             self.description.as_deref(),
             self.color.as_deref(),

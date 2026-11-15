@@ -109,7 +109,7 @@ impl MsgraphBackend {
     /// rather than taking any RGB, so neither is accepted.
     pub fn create_calendar(
         &mut self,
-        id: &str,
+        id: Option<&str>,
         name: &str,
         description: Option<&str>,
         color: Option<&str>,
@@ -124,7 +124,7 @@ impl MsgraphBackend {
         };
         let created = self.client.calendar_create(&calendar)?.response;
 
-        if created.id != id {
+        if let Some(id) = id.filter(|id| *id != created.id) {
             warn!(
                 "graph assigned the calendar id `{}`, not `{id}`",
                 created.id

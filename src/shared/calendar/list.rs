@@ -1,19 +1,13 @@
 //! # Calendar list
 //!
-//! The `calendar list` command, printing the account's calendars as
-//! records.
+//! The `calendar list` command, printing the account's calendars one line
+//! each.
 
 use std::fmt;
 
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::{
-    error::ItemErrors,
-    fields::Fields,
-    printer::Printer,
-    records::{Record, Records},
-    sanitize,
-};
+use pimalaya_cli::{listing::Listing, printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -28,10 +22,14 @@ use crate::{
 /// Every backend serves this the same way; use the protocol-specific listings
 /// when you need what only one backend exposes.
 ///
+/// Each line shows the id of a calendar, `default` on the one the server
+/// names the default, its color, then its name, under a header naming the
+/// account. A calendar the backend could not read is named by an `Error:`
+/// line at the end, and the command exits 3.
+///
 /// JSON output: `{"calendars": [{"id", "name", "description", "color",
 /// "default"}], "errors": [{"id", "code", "error", "sources"}]}`, `errors`
-/// naming each calendar the backend could not read, as `Error:` lines at
-/// the end of the text, the command then exiting 3.
+/// naming each calendar the backend could not read.
 #[derive(Debug, Parser)]
 pub struct CalendarListCommand;
 
@@ -42,6 +40,7 @@ impl CalendarListCommand {
         // NOTE: no backend names a calendar it could not read yet: each
         // reads its calendars whole or fails.
         let output = CalendarListOutput {
+            listing: Listing::new(&client.name, Some(client.backend_name())),
             calendars: client.list_calendars()?,
             errors: Vec::new(),
         };
@@ -55,6 +54,9 @@ impl CalendarListCommand {
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CalendarListOutput {
+    /// The header the calendars print under.
+    #[serde(skip)]
+    pub listing: Listing<'static>,
     /// The calendars of the account.
     pub calendars: Vec<Calendar>,
     /// The error of each calendar the backend could not read, in the order
@@ -64,43 +66,32 @@ pub struct CalendarListOutput {
 
 impl fmt::Display for CalendarListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut records = Records::default();
+        let mut listing = self.listing.clone();
 
         for calendar in &self.calendars {
-            let mut fields = Fields::default();
-            fields.push("Name", sanitize::text(&calendar.name));
-
-            if let Some(color) = &calendar.color {
-                fields.push("Color", sanitize::text(color));
-            }
-
-            let state = match calendar.default {
-                true => vec![String::from("default")],
-                false => Vec::new(),
+            let default = match calendar.default {
+                true => String::from("default"),
+                false => String::new(),
             };
 
-            let description = calendar.description.as_deref().unwrap_or_default();
-
-            records.push(Record {
-                title: sanitize::text(&calendar.id).into_owned(),
-                state,
-                fields,
-                body: body(description),
-            });
+            listing.items.push([
+                sanitize::text(&calendar.id).into_owned(),
+                default,
+                sanitize::text(calendar.color.as_deref().unwrap_or_default()).into_owned(),
+                sanitize::text(&calendar.name).into_owned(),
+            ]);
         }
-
-        let mut errors = ItemErrors::default();
 
         for error in &self.errors {
-            errors.push(error);
+            listing.errors.push(error);
         }
 
-        write!(f, "{records}")?;
-        errors.write_after(f)
+        write!(f, "{listing}")
     }
 }
 
 /// A free text as a record body, each line defused.
+#[cfg(any(feature = "caldav", feature = "gcal"))]
 pub(crate) fn body(text: &str) -> String {
     let lines = text
         .trim()
@@ -112,20 +103,25 @@ pub(crate) fn body(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use anyhow::anyhow;
+    use pimalaya_cli::listing::Listing;
 
     use crate::{
         error,
         shared::calendar::{Calendar, list::CalendarListOutput},
     };
 
+    /// The calendars print one line each under the account, as Himalaya's
+    /// mailboxes do: the id first, the name last, `-` for an empty cell,
+    /// and the errors after the lines.
     #[test]
-    fn calendars_print_as_records() {
+    fn calendars_print_one_line_each_under_the_account() {
         let mut output = CalendarListOutput {
+            listing: Listing::new("perso", Some("vdir")),
             calendars: vec![
                 Calendar {
                     id: "personal".into(),
-                    name: "Personal".into(),
-                    description: Some("Family\nand friends\x1b[2J".into()),
+                    name: "Personal\x1b[2J".into(),
+                    description: Some("Family\nand friends".into()),
                     color: Some("#ff0000".into()),
                     default: true,
                 },
@@ -139,28 +135,21 @@ mod tests {
         };
 
         let expected = "\
-personal (default)
-Name:   Personal
-Color:  #ff0000
+Account:    perso (vdir)
 
-    Family
-    and friends\u{fffd}[2J
-
-work
-Name:  Work
+personal  default  #ff0000  Personal\u{fffd}[2J
+work      -        -        Work
 ";
         assert_eq!(output.to_string(), expected);
 
-        // NOTE: the errors print after the records and one blank line.
         output.calendars.truncate(1);
-        output.calendars[0].description = None;
         let err = anyhow!("Cannot read the metadata of calendar `old`");
         output.errors.push(error::unreadable(Some("old"), err));
 
         let expected = "\
-personal (default)
-Name:   Personal
-Color:  #ff0000
+Account:    perso (vdir)
+
+personal  default  #ff0000  Personal\u{fffd}[2J
 
 Error:  old  item-unreadable  Cannot read the metadata of calendar `old`
 ";

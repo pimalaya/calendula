@@ -185,7 +185,7 @@ fn a_caldav_flag_it_does_not_serve_is_refused_before_connecting() {
     let args = [
         "--json",
         "event",
-        "create",
+        "add",
         "-k",
         "cal",
         "--summary",
@@ -242,7 +242,7 @@ fn a_gcal_online_meeting_is_refused_before_the_token_is_resolved() {
     let args = [
         "--json",
         "event",
-        "create",
+        "add",
         "-k",
         "primary",
         "--summary",

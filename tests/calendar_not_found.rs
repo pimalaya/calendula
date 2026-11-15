@@ -110,19 +110,12 @@ fn every_unified_command_refuses_an_unknown_calendar() {
         &["item", "list", "-k", "nope"],
         &["event", "read", "-k", "nope", "a"],
         &["item", "read", "-k", "nope", "a"],
-        &[
-            "event",
-            "create",
-            "-k",
-            "nope",
-            "--start",
-            "2026-11-20T10:00",
-        ],
+        &["event", "add", "-k", "nope", "--start", "2026-11-20T10:00"],
         &["event", "update", "-k", "nope", "a", "--summary", "Review"],
         &["event", "delete", "-k", "nope", "a"],
         &["item", "delete", "-k", "nope", "a"],
-        &["calendar", "update", "-k", "nope", "-n", "Renamed"],
-        &["calendar", "delete", "-k", "nope"],
+        &["calendar", "update", "nope", "-n", "Renamed"],
+        &["calendar", "delete", "nope"],
     ];
 
     for args in commands {

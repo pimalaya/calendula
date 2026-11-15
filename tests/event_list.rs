@@ -142,6 +142,57 @@ fn a_page_token_that_is_no_page_number_is_refused() {
     assert!(json["error"].as_str().unwrap().contains("`x2`"), "{json}");
 }
 
+/// `event search` pages its matches by the `nextPage` it prints, every
+/// match on one page without `-s`, and answers to `event find` still.
+#[test]
+fn a_search_resumes_at_the_next_page_it_names() {
+    let home = account();
+    let calendar = home.path().join("personal");
+    let copy = fs::read_to_string(calendar.join("a.ics")).unwrap();
+    fs::write(calendar.join("a2.ics"), copy.replace("Standup", "Copy")).unwrap();
+    let json = |args: &[&str]| -> Value { serde_json::from_str(&run(home.path(), args)).unwrap() };
+
+    let uid = "a@example.org";
+    let first = json(&["--json", "event", "search", "-s", "1", uid]);
+    assert_eq!(first["events"].as_array().unwrap().len(), 1, "{first}");
+    assert_eq!(first["nextPage"], "2", "{first}");
+
+    let token = first["nextPage"].as_str().unwrap();
+    let next = json(&[
+        "--json",
+        "event",
+        "search",
+        "-s",
+        "1",
+        "--page-token",
+        token,
+        uid,
+    ]);
+    assert_eq!(next["events"].as_array().unwrap().len(), 1, "{next}");
+    assert_ne!(next["events"][0]["id"], first["events"][0]["id"], "{next}");
+    assert_eq!(next["nextPage"], Value::Null, "{next}");
+
+    let all = json(&["--json", "event", "find", uid]);
+    assert_eq!(all["events"].as_array().unwrap().len(), 2, "{all}");
+    assert_eq!(all["nextPage"], Value::Null, "{all}");
+}
+
+/// The event commands take the id a listing shows, never a UID: `event
+/// delete` given one refuses it `item-not-found`, naming `event search`,
+/// and deletes nothing.
+#[test]
+fn a_uid_is_no_event_id() {
+    let home = account();
+    let output = output(home.path(), &["--json", "event", "delete", "a@example.org"]);
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert_eq!(output.status.code(), Some(1), "{json}");
+    assert_eq!(json["code"], "item-not-found", "{json}");
+    let error = json["error"].as_str().unwrap();
+    assert!(error.contains("`event search <UID>`"), "{error}");
+    assert!(home.path().join("personal").join("a.ics").is_file());
+}
+
 /// The token wins over a `--page` given beside it, as in the family.
 #[test]
 fn a_page_token_wins_over_a_page() {

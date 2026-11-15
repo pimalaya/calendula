@@ -27,8 +27,8 @@ pub enum ItemCommand {
     List(ItemListCommand),
     #[command(after_long_help = capability::help("item", "read"))]
     Read(ItemReadCommand),
-    #[command(after_long_help = capability::help("item", "create"))]
-    Create(ItemCreateCommand),
+    #[command(alias = "create", after_long_help = capability::help("item", "add"))]
+    Add(ItemCreateCommand),
     #[command(after_long_help = capability::help("item", "update"))]
     Update(ItemUpdateCommand),
     #[command(after_long_help = capability::help("item", "delete"))]
@@ -48,7 +48,7 @@ impl ItemCommand {
             Self::Build(cmd) => cmd.execute(printer, account.config_paths, account.name),
             Self::List(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
             Self::Read(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
-            Self::Create(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
+            Self::Add(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
             Self::Update(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
             Self::Delete(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
         }

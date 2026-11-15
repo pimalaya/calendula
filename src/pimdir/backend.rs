@@ -82,6 +82,8 @@ pub struct PimdirBackend {
     pub(crate) client: PimdirClient,
     /// The account's settings, default when built from no account.
     pub(crate) account: Account,
+    /// The name of the account, empty when built from no account.
+    pub(crate) name: String,
 }
 
 impl PimdirBackend {
@@ -90,6 +92,7 @@ impl PimdirBackend {
         Ok(Self {
             client: PimdirClient::new(config)?,
             account: Account::default(),
+            name: String::new(),
         })
     }
 
@@ -109,6 +112,7 @@ impl PimdirBackend {
 
         let mut backend = Self::new(pimdir_config)?;
         backend.account = account;
+        backend.name = name;
         Ok(backend)
     }
 
@@ -150,7 +154,7 @@ impl PimdirBackend {
     /// is one no sync would carry.
     pub fn create_calendar(
         &mut self,
-        _id: &str,
+        _id: Option<&str>,
         _name: &str,
         _description: Option<&str>,
         _color: Option<&str>,
@@ -482,7 +486,7 @@ impl PimdirBackend {
             .map(|parked| PimdirParkedStatus {
                 row: parked.id,
                 calendar_id: parked.collection,
-                action: parked.action,
+                kind: parked.action,
                 error: parked.error,
             })
             .collect();
@@ -499,7 +503,7 @@ impl PimdirBackend {
     ///
     /// Narrowed to the account read, configured or derived (pimdir
     /// STORAGE §9.2), every collection when the store groups none.
-    fn calendar_collections(&self) -> Result<Vec<PimdirCollection>> {
+    pub(crate) fn calendar_collections(&self) -> Result<Vec<PimdirCollection>> {
         let collections = match self.client.account.as_deref() {
             Some(account) => self
                 .client
@@ -597,9 +601,8 @@ impl PimdirBackend {
     ///
     /// Anything non-numeric is the internal link id or a mistyped
     /// value, and saying so beats a lookup that silently finds nothing.
-    /// Both are `item-not-found`, an id naming no item, which `event
-    /// delete` then looks for as a `UID`.
-    fn item(&self, calendar_id: &str, item_id: &str) -> Result<PimdirItem> {
+    /// Both are `item-not-found`, an id naming no item.
+    pub(crate) fn item(&self, calendar_id: &str, item_id: &str) -> Result<PimdirItem> {
         let seq = item_id.parse::<i64>().map_err(|_| {
             item_not_found(format!(
                 "Invalid pimdir item id `{item_id}`: expected the number a listing showed"
@@ -1384,7 +1387,10 @@ mod tests {
         assert_eq!(status.parked.len(), 1, "{:?}", status.parked);
         let parked = &status.parked[0];
         assert_eq!(parked.calendar_id, "caldav/work");
-        assert_eq!(parked.action, "add");
+        assert_eq!(parked.kind, "add");
+        let json = serde_json::to_value(&status).unwrap();
+        assert_eq!(json["parked"][0]["kind"], "add", "{json}");
+        assert!(json["parked"][0].get("action").is_none(), "{json}");
         assert!(
             parked.error.contains("alone@example.org"),
             "{}",
@@ -1392,7 +1398,7 @@ mod tests {
         );
 
         let text = status.to_string();
-        assert!(text.contains("\nROW  ACTION  CALENDAR"), "{text}");
+        assert!(text.contains("\nROW  KIND  CALENDAR"), "{text}");
         let row = parked.row.to_string();
         let words = |line: &str| line.split_whitespace().take(2).eq([row.as_str(), "add"]);
         assert!(text.lines().any(words), "{text}");
@@ -2521,7 +2527,7 @@ mod tests {
         let status = backend.status().unwrap();
         assert_eq!(status.parked.len(), 1, "{:?}", status.parked);
         let parked = &status.parked[0];
-        assert_eq!(parked.action, "update");
+        assert_eq!(parked.kind, "update");
         assert!(parked.error.contains(&etag), "{}", parked.error);
         assert!(parked.error.contains(&landed), "{}", parked.error);
     }
@@ -2547,7 +2553,7 @@ mod tests {
         let status = backend.status().unwrap();
         assert_eq!(status.parked.len(), 1, "{:?}", status.parked);
         let parked = &status.parked[0];
-        assert_eq!(parked.action, "remove");
+        assert_eq!(parked.kind, "remove");
         assert!(parked.error.contains(&etag), "{}", parked.error);
         assert!(parked.error.contains(&landed), "{}", parked.error);
     }
@@ -2590,7 +2596,7 @@ mod tests {
 
             let status = backend.status().unwrap();
             assert_eq!(status.parked.len(), 1, "{:?}", status.parked);
-            assert_eq!(status.parked[0].action, action);
+            assert_eq!(status.parked[0].kind, action);
             assert!(
                 status.parked[0].error.contains("conflict"),
                 "{}",
@@ -3158,7 +3164,7 @@ mod tests {
         Ok(crate::shared::client::window(items, query.skip, query.take))
     }
 
-    /// What `event find` prints for `uid` out of `items`.
+    /// What `event search` prints for `uid` out of `items`.
     fn found(items: &[CalendarItem], uid: &str) -> Vec<Event> {
         items
             .iter()

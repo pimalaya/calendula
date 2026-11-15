@@ -29,10 +29,10 @@ pub enum EventCommand {
     List(EventListCommand),
     #[command(after_long_help = capability::help("event", "read"))]
     Read(EventReadCommand),
-    #[command(after_long_help = capability::help("event", "find"))]
-    Find(EventFindCommand),
-    #[command(after_long_help = capability::help("event", "create"))]
-    Create(Box<EventCreateCommand>),
+    #[command(alias = "find", after_long_help = capability::help("event", "search"))]
+    Search(EventFindCommand),
+    #[command(alias = "create", after_long_help = capability::help("event", "add"))]
+    Add(Box<EventCreateCommand>),
     #[command(after_long_help = capability::help("event", "update"))]
     Update(Box<EventUpdateCommand>),
     #[command(after_long_help = capability::help("event", "delete"))]
@@ -53,8 +53,8 @@ impl EventCommand {
             Self::Agenda(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
             Self::List(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
             Self::Read(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
-            Self::Find(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
-            Self::Create(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
+            Self::Search(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
+            Self::Add(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
             Self::Update(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
             Self::Delete(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
         }

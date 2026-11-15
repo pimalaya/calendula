@@ -283,13 +283,51 @@ mod tests {
         assert_eq!(paths(&args), [two, one]);
     }
 
+    /// An option after a `pimdir search` or `pimdir count` query is read
+    /// as the option, never as a query word, `--json` included; a word
+    /// starting with `-` passes after `--`, and is refused before it.
+    #[cfg(feature = "pimdir")]
+    #[test]
+    fn an_option_after_a_query_is_an_option() {
+        use crate::{
+            cli::Command,
+            pimdir::cli::PimdirCommand::{Count, Search},
+        };
+
+        let parse = |args: &[&str]| Cli::try_parse_from([&["calendula"][..], args].concat());
+
+        let cli = parse(&["pimdir", "search", "x", "--page-size", "3", "--json"]).unwrap();
+        assert!(cli.json.enabled);
+        let Some(Command::Pimdir(Search(search))) = cli.cmd else {
+            panic!("not a search");
+        };
+        assert_eq!(search.query, ["x"]);
+        assert_eq!(search.page_size, Some(3));
+
+        let cli = parse(&["pimdir", "count", "budget", "-k", "work"]).unwrap();
+        let Some(Command::Pimdir(Count(count))) = cli.cmd else {
+            panic!("not a count");
+        };
+        assert_eq!(count.query, ["budget"]);
+        assert_eq!(count.calendar.as_deref(), Some("work"));
+
+        let cli = parse(&["pimdir", "search", "-s", "5", "--", "budget", "-lisbon"]).unwrap();
+        let Some(Command::Pimdir(Search(search))) = cli.cmd else {
+            panic!("not a search");
+        };
+        assert_eq!(search.query, ["budget", "-lisbon"]);
+        assert_eq!(search.page_size, Some(5));
+
+        assert!(parse(&["pimdir", "search", "budget", "-lisbon"]).is_err());
+    }
+
     /// Text output is sized to nothing, so no list takes a width.
     #[test]
     fn a_max_width_is_refused() {
         for list in [
             &["calendar", "list"][..],
             &["event", "list"],
-            &["event", "find", "1@example.org"],
+            &["event", "search", "1@example.org"],
             &["item", "list"],
         ] {
             let args = [&["calendula"][..], list, &["-w", "80"]].concat();

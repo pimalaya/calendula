@@ -214,10 +214,10 @@ const LEAVES: &[(&str, &str, &[Capability])] = &[
     ("event", "agenda", &[C::ItemList]),
     ("event", "list", &[C::ItemList]),
     ("event", "read", &[C::ItemRead]),
-    ("event", "find", &[C::ItemList]),
+    ("event", "search", &[C::ItemList]),
     (
         "event",
-        "create",
+        "add",
         &[C::ItemAdd, C::OnlineMeeting, C::SchedulingSendUpdates],
     ),
     (
@@ -241,7 +241,7 @@ const LEAVES: &[(&str, &str, &[Capability])] = &[
     ),
     ("item", "list", &[C::ItemList]),
     ("item", "read", &[C::ItemRead]),
-    ("item", "create", &[C::ItemAdd]),
+    ("item", "add", &[C::ItemAdd]),
     ("item", "update", &[C::ItemUpdate, C::ItemUpdateIfMatch]),
     ("item", "delete", &[C::ItemRemove, C::ItemRemoveIfMatch]),
 ];
@@ -326,7 +326,7 @@ const PIMDIR_QUEUED: &str = "queued for the next sync, and refused when a source
      does not support it";
 
 /// What a server minting calendar ids does with the one given.
-const MINTED_ID: &str = "the server mints the calendar's id, reported in place of the one given";
+const MINTED_ID: &str = "the server mints the calendar's id, reported in place of any given";
 
 /// What a backend modelling events alone does with another component.
 const EVENT_ONLY: &str = "an event only: a to-do or a journal entry is refused";

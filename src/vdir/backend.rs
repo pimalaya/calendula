@@ -60,20 +60,27 @@ impl VdirBackend {
         Ok(collections.into_iter().map(calendar_from).collect())
     }
 
-    /// Creates the collection directory and its metadata markers.
+    /// Creates the collection directory and its metadata markers, the
+    /// directory named `id`, else `name`.
     ///
     /// An id that is not one directory name is refused, as it would reach
     /// out of the home or below one of its calendars.
     pub fn create_calendar(
         &mut self,
-        id: &str,
+        id: Option<&str>,
         name: &str,
         description: Option<&str>,
         color: Option<&str>,
     ) -> Result<String> {
-        if !is_dir_name(id) {
-            bail!("Calendar id `{id}` is not one directory name");
-        }
+        let id = match id {
+            Some(id) if !is_dir_name(id) => bail!("Calendar id `{id}` is not one directory name"),
+            Some(id) => id,
+            None if !is_dir_name(name) => bail!(
+                "Calendar name `{name}` is not one directory name: give the calendar an id \
+                 before its name"
+            ),
+            None => name,
+        };
 
         let collection = VdirCollection {
             path: self.root.join(id),

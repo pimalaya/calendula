@@ -406,7 +406,7 @@ Error:  c  item-unreadable  Cannot parse item `c` as iCalendar
         assert_eq!(json["errors"][0]["sources"].as_array().unwrap().len(), 1);
     }
 
-    /// A window lists every match unpaged, and `event find` names the UID
+    /// A window lists every match unpaged, and `event search` names the UID
     /// it looked for.
     #[test]
     fn an_unpaged_listing_holds_all_its_events() {

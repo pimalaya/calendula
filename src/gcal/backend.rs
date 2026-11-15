@@ -99,7 +99,7 @@ impl GcalBackend {
     /// be honoured: the assigned one is returned instead.
     pub fn create_calendar(
         &mut self,
-        id: &str,
+        id: Option<&str>,
         name: &str,
         description: Option<&str>,
         color: Option<&str>,
@@ -113,7 +113,7 @@ impl GcalBackend {
         let created = self.client.calendar_insert(&calendar)?.response;
         let created_id = created.id.unwrap_or_default();
 
-        if created_id != id {
+        if let Some(id) = id.filter(|id| *id != created_id) {
             warn!("google assigned the calendar id `{created_id}`, not `{id}`");
         }
 

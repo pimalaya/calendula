@@ -63,7 +63,7 @@ fn every_write_receipt_says_whether_it_is_queued() {
     let home = account("calendar.default = \"personal\"\n");
     let home = home.path();
 
-    let created = json(&run(home, &["--json", "event", "create", EVENT]), 0);
+    let created = json(&run(home, &["--json", "event", "add", EVENT]), 0);
     assert_eq!(created["queued"], false, "{created}");
     let id = created["id"].as_str().unwrap().to_owned();
 
@@ -72,7 +72,7 @@ fn every_write_receipt_says_whether_it_is_queued() {
     assert_eq!(updated, serde_json::json!({ "id": id, "queued": false }));
 
     let item = EVENT.replace("standup@", "item@");
-    let created = json(&run(home, &["--json", "item", "create", &item]), 0);
+    let created = json(&run(home, &["--json", "item", "add", &item]), 0);
     assert_eq!(created["queued"], false, "{created}");
     let id = created["id"].as_str().unwrap().to_owned();
 
@@ -92,7 +92,7 @@ fn no_calendar_and_no_default_one_is_coded() {
     for args in [
         &["--json", "event", "list"][..],
         &["--json", "item", "read", "a"],
-        &["--json", "event", "create", EVENT],
+        &["--json", "event", "add", EVENT],
     ] {
         let error = json(&run(home.path(), args), 1);
         assert_eq!(
@@ -127,4 +127,71 @@ fn a_build_written_to_a_file_names_its_size() {
         0,
     );
     assert_eq!(saved, serde_json::json!({ "path": target, "size": size }));
+}
+
+/// `calendar create` takes a name alone, the vdir directory named after
+/// it, and an id before the name as before; `calendar update` and
+/// `calendar delete` take the calendar as an argument, the former `-k`
+/// still read; `-C` sets the color.
+#[test]
+fn the_calendar_commands_take_the_calendar_as_an_argument() {
+    let home = account("");
+    let home = home.path();
+
+    let created = json(&run(home, &["--json", "calendar", "create", "Work"]), 0);
+    let expected = serde_json::json!({ "id": "Work", "name": "Work", "queued": false });
+    assert_eq!(created, expected);
+    assert!(home.join("Work").is_dir());
+
+    let args = [
+        "--json", "calendar", "create", "team", "The team", "-C", "#00ff00",
+    ];
+    let created = json(&run(home, &args), 0);
+    assert_eq!(created["id"], "team", "{created}");
+    let color = fs::read_to_string(home.join("team").join("color")).unwrap();
+    assert_eq!(color.trim(), "#00ff00");
+
+    let args = ["--json", "calendar", "create", "x/y"];
+    let error = json(&run(home, &args), 1);
+    let message = error["error"].as_str().unwrap_or_default();
+    assert!(message.contains("give the calendar an id"), "{message}");
+
+    let args = [
+        "--json", "calendar", "update", "Work", "-n", "Job", "-C", "#ff0000",
+    ];
+    let updated = json(&run(home, &args), 0);
+    assert_eq!(
+        updated,
+        serde_json::json!({ "id": "Work", "queued": false })
+    );
+    let name = fs::read_to_string(home.join("Work").join("displayname")).unwrap();
+    assert_eq!(name.trim(), "Job");
+
+    let args = ["--json", "calendar", "update", "-k", "team", "-n", "Crew"];
+    json(&run(home, &args), 0);
+
+    json(&run(home, &["--json", "calendar", "delete", "Work"]), 0);
+    assert!(!home.join("Work").exists());
+    json(
+        &run(home, &["--json", "calendar", "delete", "-k", "team"]),
+        0,
+    );
+    assert!(!home.join("team").exists());
+
+    let error = json(&run(home, &["--json", "calendar", "delete"]), 2);
+    assert_eq!(error["code"], "usage-invalid", "{error}");
+}
+
+/// `create` stays a hidden alias of `event add` and `item add`.
+#[test]
+fn create_still_adds() {
+    let home = account("calendar.default = \"personal\"\n");
+    let home = home.path();
+
+    let created = json(&run(home, &["--json", "event", "create", EVENT]), 0);
+    assert_eq!(created["queued"], false, "{created}");
+
+    let item = EVENT.replace("standup@", "item@");
+    let created = json(&run(home, &["--json", "item", "create", &item]), 0);
+    assert_eq!(created["queued"], false, "{created}");
 }

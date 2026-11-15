@@ -26,11 +26,11 @@ A unified command SHALL require the capabilities its verb and its flags reach (`
 Requiring the capabilities SHALL leave the output of every verb a backend serves unchanged. Only a verb or a flag a backend declares `none` changes: from an uncoded refusal, or from a flag ignored (`--if-match` on a vdir update), to `capability-missing` before anything is reached.
 
 ### Requirement: Protocol-specific families
-`caldav`, `gcal`, `pimdir` and `vdir` SHALL each expose what only that backend has, gated behind its own cargo feature. CalDAV covers `discover`, its own calendar listing (carrying the ctag, the sync token and the accepted component kinds), `create` and `delete`.
+`caldav`, `gcal`, `pimdir` and `vdir` SHALL each expose what only that backend has, gated behind its own cargo feature. CalDAV covers `discover`, its own calendar listing (carrying the ctag, the sync token and the accepted component kinds), `create` and `delete`. `caldav create` and `vdir create` SHALL take the calendar's metadata with the letters `calendar create` and `calendar update` use: `-n/--display-name`, `-d/--description`, `-C/--color`, the former `-D` read as `-d`.
 
 gcal covers the half of the Calendar API iCalendar cannot express: sharing, availability, recurrence expansion, server-side parsing and the palettes. vdir covers its collection verbs including `rename`, which the unified API has no home for.
 
-pimdir covers `status`, reporting the account being read, every account the store groups collections under, how much of each calendar is downloaded, how many creations are queued for the next sync, and every action the store's owner parked in those calendars, by its queue row (ROW), its calendar, its kind and the error that parked it; `reply` and `cancel`, the scheduling intents only its sync engine can perform; and `search` and `count`, the store's search index queried in the pimdir SEARCH language.
+pimdir covers `status`, reporting the account being read, every account the store groups collections under, how much of each calendar is downloaded, how many creations are queued for the next sync, and every action the store's owner parked in those calendars, by its queue row (ROW), its calendar, its kind and the error that parked it, `{row, calendarId, kind, error}`, `kind` kebab-case as the queue spells it; `queue list`, `queue show` and `queue cancel`, the store's queue as Himalaya reads and retracts it; `reply` and `cancel`, the scheduling intents only its sync engine can perform; and `search` and `count`, the store's search index queried in the pimdir SEARCH language.
 
 A backend MAY exist without a family where its protocol adds nothing the unified surface lacks; a family SHALL NOT push protocol-specific concepts into the unified API instead.
 
@@ -60,7 +60,7 @@ Both SHALL share the `-k/--calendar` selector and the same item API; only the re
 ### Requirement: One family per stored component kind
 calendula SHALL be the events CLI: the unified API SHALL offer one projected family, `event`, for VEVENT. VTODO belongs to unfog and VJOURNAL to journal, one CLI per iCalendar domain, since CalDAV holds one component type per calendar object resource (RFC 4791 4.1) and the providers run events, tasks and notes as separate services.
 
-`event` SHALL cover `list`, `read`, `create`, `update` and `delete` over the item API. An item whose bytes do not parse SHALL project nothing rather than fail the listing, the listing naming it in its `errors` ("A listing names the items it could not read").
+`event` SHALL cover `list`, `read`, `search`, `add`, `update` and `delete` over the item API, and `item` `list`, `read`, `add`, `update` and `delete`: the verbs of Himalaya, `add` storing an item as `message add` does and `search` looking events up as `envelope search` does, `create` and `find` kept as their hidden aliases. An item whose bytes do not parse SHALL project nothing rather than fail the listing, the listing naming it in its `errors` ("A listing names the items it could not read").
 
 #### Scenario: A to-do in an event calendar
 - GIVEN a CalDAV calendar holding a VEVENT and a VTODO
@@ -194,13 +194,18 @@ An item SHALL print as one row in `item list`, `item read` and `event read`: `{i
 - THEN each prints the file's bytes in base64 as `contents` and `"encoding":"base64"`, and `calendula item read a` prints `SUMMARY:Caf` and U+FFFD
 
 ### Requirement: An event is found by its UID
-`event find <UID>` SHALL list, unexpanded, every VEVENT of the calendar carrying that `UID`, with the id the other `event` commands take.
+`event search <UID>` SHALL list, unexpanded, every VEVENT of the calendar carrying that `UID`, with the id the other `event` commands take. `find` SHALL stay its hidden alias.
 
-### Requirement: A UID hint narrows a find
-The listing query MAY carry a `UID`, which `event find` sets. A backend MAY leave out an item it can tell carries another `UID` without reading it, and SHALL ignore the hint on a listing naming a page size, which leaving items out would shift. The caller SHALL still compare the `UID` of every event it gets.
+### Requirement: A UID hint narrows a search
+The listing query MAY carry a `UID`, which `event search` sets. A backend MAY leave out an item it can tell carries another `UID` without reading it, and SHALL ignore the hint on a listing naming a page size, which leaving items out would shift. The caller SHALL still compare the `UID` of every event it gets.
 
-### Requirement: An event is deleted by its id or its UID
-`event delete <EVENT-ID>` SHALL take the id `event list` reports or the event's iCalendar `UID`. It SHALL try the id first, by a read, then, only when that read answers `item-not-found`, list the calendar's events and look for an item of that id, then for the items carrying that `UID`; any other failure of the read SHALL fail the command with its code. A read answering `body-pending` (pimdir) names the item all the same. One item SHALL be deleted whole; several carrying the `UID` SHALL be refused, naming their ids; none SHALL be a clear miss, coded `item-not-found`.
+### Requirement: An event is named by its id alone
+`event read`, `event update` and `event delete` SHALL take the id `event list` reports and never an iCalendar `UID`, which `event search` turns into that id: resolving a `UID` costs a listing of the whole calendar on every backend but pimdir. `event delete` SHALL read the id first: a read answering `item-not-found` SHALL fail the command coded `item-not-found`, its message naming `event search <UID>`, and list nothing; any other failure of the read SHALL fail the command with its code; a read answering `body-pending` (pimdir) names the item all the same. The item SHALL be deleted whole.
+
+#### Scenario: A UID given to event delete
+- GIVEN the vdir calendar `personal` holding `a.ics`, whose `UID` is `a@example.org`
+- WHEN `calendula --json event delete a@example.org` runs
+- THEN it fails coded `item-not-found`, naming `event search <UID>`, and `a.ics` stays
 
 ### Requirement: A delete can be gated on a version
 `event delete` and `item delete` SHALL take `--if-match <ETAG>`. CalDAV and gcal SHALL send it as `If-Match`, msgraph SHALL compare it with the event's `changeKey`, and pimdir SHALL check it as an update does. A backend that cannot gate a write (vdir) SHALL declare `item.update.if-match` and `item.remove.if-match` `none`, so `--if-match` on an update or a delete is refused with `capability-missing` rather than dropped.
@@ -280,7 +285,7 @@ The command line SHALL be parsed by pimalaya-cli's `clap::parse`: help and versi
 - AND `calendula --nope calendar list` exits 2, printing clap's `error: unexpected argument '--nope' found` on stderr and nothing on stdout
 
 ### Requirement: A listing names the items it could not read
-`calendar list`, `event list`, `event find`, `event agenda` and `item list` SHALL print an `errors` list beside their items, under `--json` and in text: one pimalaya-cli item error `{id, code, error, sources}` per calendar or item the command could not read, `[]` when there is none, in the order met. `id` SHALL be the item's id as the command prints ids, `null` when the backend named none, as for a listing the server truncated; `code` a code of the vocabulary or `null`; `error` the message; `sources` the backend's own reasons, outermost first. A non-empty `errors` SHALL make the command exit 3 once it printed its result. A listing that reads the whole calendar before cutting its page SHALL print its entries on the first page only; an item it listed but could not read (an iCalendar that does not parse, a pimdir body the store cannot serve) holds its place on a page, and its entry SHALL print on that page. `event list` SHALL count the events it lists, never an item it could not read.
+`calendar list`, `event list`, `event search`, `event agenda` and `item list` SHALL print an `errors` list beside their items, under `--json` and in text: one pimalaya-cli item error `{id, code, error, sources}` per calendar or item the command could not read, `[]` when there is none, in the order met. `id` SHALL be the item's id as the command prints ids, `null` when the backend named none, as for a listing the server truncated; `code` a code of the vocabulary or `null`; `error` the message; `sources` the backend's own reasons, outermost first. A non-empty `errors` SHALL make the command exit 3 once it printed its result. A listing that reads the whole calendar before cutting its page SHALL print its entries on the first page only; an item it listed but could not read (an iCalendar that does not parse, a pimdir body the store cannot serve) holds its place on a page, and its entry SHALL print on that page. `event list` SHALL count the events it lists, never an item it could not read.
 
 #### Scenario: An item that does not parse
 - GIVEN the vdir calendar `personal` holding the events `a` and `b` and one `.ics` file `c` that is no iCalendar
@@ -293,7 +298,13 @@ In the text output, each `errors` entry SHALL print as one `Error:` line, `<id> 
 ### Requirement: Calendar selection
 A unified command operating inside a calendar SHALL take it through the flattened `-k/--calendar` flag, resolved by the account: the flag wins, otherwise `calendar.default`, otherwise the command SHALL fail coded `calendar-default-missing`, ``No default calendar found, name one with `-k <CALENDAR-ID>` or set `calendar.default` ``, as a pimdir command naming no calendar does.
 
-`calendar delete` is the one exception and SHALL inline a mandatory `-k/--calendar`, never falling back to a default.
+A command acting on the calendar itself SHALL take it as an argument, as Himalaya's `mailbox delete <MAILBOX>` does, the former `-k/--calendar` kept as a hidden alias: `calendar update [CALENDAR]` resolves it as above, and `calendar delete <CALENDAR>` SHALL require it, never falling back to a default. `calendar create [ID] <NAME>` SHALL take the display name, and the id before it on the backends letting a client name a calendar: given none, vdir SHALL name the directory after the name, refused unless it is one directory name, and CalDAV SHALL mint a version 4 UUID for the URL segment, a display name holding what a path cannot; Google and Graph mint their own either way. `calendar create` and `calendar update` SHALL take `-d/--description` and `-C/--color`, as cardamum's `addressbook` commands do.
+
+#### Scenario: A calendar named alone
+- GIVEN a vdir account whose home holds no calendar
+- WHEN `calendula --json calendar create Work`, then `calendar update Work -n Job -C '#ff0000'`, then `calendar delete Work` run
+- THEN the first prints `{"id":"Work","name":"Work","queued":false}` and makes the directory `Work`, the second renames and paints it, the third removes it
+- AND `calendar delete -k Work` and `calendar create work Work` are read as before
 
 ### Requirement: Nested execute
 Each subcommand SHALL be a clap-derived struct carrying its own arguments, with an `execute(self, printer, client)` method, a unified command borrowing the client (`&mut CalendarClient`).
@@ -306,19 +317,18 @@ All data and errors SHALL go to stdout through the printer, with `--json` switch
 ### Requirement: Text output is plain text
 A text output SHALL be plain text: no border, no colour, no terminal escape, nothing sized to or truncated for the terminal, and it SHALL end with one newline; no command takes a width. Every string a server, a store or a file gave (an id, a name, a summary, a description, an error a record carries, the zone and the days the lines under `pimdir search` and `pimdir count` name) SHALL have its control and bidi characters replaced before it prints as text (pimalaya-cli `sanitize::text`); the JSON output SHALL carry it unchanged. The iCalendar `event read` and `item read` print SHALL keep its layout, CRLF read as LF, and have every other control character but tab and line feed (C0, DEL, C1) and every bidi embedding, override and isolate replaced with U+FFFD; their JSON `contents` SHALL carry the stored bytes unchanged, as text or as base64 ("An item's bytes are text or base64"), and their text view SHALL read bytes that are not valid UTF-8 as U+FFFD. The iCalendar a `build` prints, or writes to the file `-o` names, SHALL be the bytes it built.
 
-`event list` and `event find` SHALL print as Himalaya's `envelope list` does, through pimalaya-cli's `listing::Listing`. Above the events, `Account:` (the account name, then the backend it resolved to in parentheses), `Calendar:` and, for `event find`, `UID:`, then `Page:` (the page number, `all` for an unpaged listing, then the events the page holds, `event N` or `events N to M` followed by `, the last` when no page follows, or `empty`), and while a page follows `Next page:` and the `--page` reaching it, these values starting in one column, two spaces after `Next page:`; then a blank line. Then one line per event through pimalaya-cli's `Columns` with no header row: its item id, its start and its end (Columns follow the kind), then its summary, last, `-` for an empty cell. Under them SHALL print only the command's errors ("A command's errors print at its end"). The events `Page:` counts are the calendar's events, the resources a page holds: a series counts once, however many lines its overrides or its occurrences in a window print. `, the last` and `Next page:` SHALL be exact on every backend: the unified client asks for one item past the page. `-s 0` lists every item, unpaged.
+`event list` and `event search` SHALL print as Himalaya's `envelope list` does, through pimalaya-cli's `listing::Listing`. Above the events, `Account:` (the account name, then the backend it resolved to in parentheses), `Calendar:` and, for `event search`, `UID:`, then `Page:` (the page number, `all` for an unpaged listing, then the events the page holds, `event N` or `events N to M` followed by `, the last` when no page follows, or `empty`), and while a page follows `Next page:` and the `--page` reaching it, these values starting in one column, two spaces after `Next page:`; then a blank line. Then one line per event through pimalaya-cli's `Columns` with no header row: its item id, its start and its end (Columns follow the kind), then its summary, last, `-` for an empty cell. Under them SHALL print only the command's errors ("A command's errors print at its end"). The events `Page:` counts are the calendar's events, the resources a page holds: a series counts once, however many lines its overrides or its occurrences in a window print. `, the last` and `Next page:` SHALL be exact on every backend: the unified client asks for one item past the page. `-s 0` lists every item, unpaged.
 
-`item list` SHALL print the same header above one line per item: its entity tag, its size, then its id. `gcal instances` SHALL print it above one line per instance: its id, its status, its start and end as the server spells them, then its summary, `Event:` naming the series in the header, unpaged.
+`item list` SHALL print the same header above one line per item: its id first, as every listing of the family, then its size and its entity tag. `calendar list` SHALL print as Himalaya's `mailbox list` does: `Account:` alone above one line per calendar, its id, `default` for the one the server names so, its color, then its name, last; its description prints under `--json` alone. `pimdir queue list` SHALL print as Himalaya's and cardamum's do: `Account:` (the account name and `pimdir`), `Calendar:` (the calendar listed, `all` for every one) and, while it holds a row, `Cancel:` and the command cancelling one, above one line per row, its queue row, `queued`, `parked` or `unconfirmed`, when it was queued, its kind, its calendar, then its summary (the event an intent addresses when the store holds no summary) or why it was parked; `Nothing queued nor parked` when it holds none. `gcal instances` SHALL print it above one line per instance: its id, its status, its start and end as the server spells them, then its summary, `Event:` naming the series in the header, unpaged.
 
 A list whose items carry more than one value of unbounded length SHALL print through pimalaya-cli's `Records`, the way `git log` prints commits: per item, its id alone on a line, followed by its state words in parentheses, comma-separated, when it has any; its properties as `Fields` prints them; its free text after a blank line, each line indented by four spaces; one blank line between items. A field every item carries SHALL print even when empty, its label alone; a field only some items carry SHALL be left out where it is empty. These lists print as records:
 
-- `calendar list`: the calendar id; `default` for the one the server names so; `Name` and, when set, `Color`; the description.
 - `caldav list`: the collection id; `Name` and, when set, `Color`, `Ctag`, `Sync token` and `Components`; the description.
 - `gcal calendars`: the calendar id; `primary`; `Name` and, when set, `Role`, `Time zone`, `Color` and `Reminders`; the description.
 - `gcal free-busy`: the calendar id; `busy` or `free`, neither when the answer failed; `Busy`, one `<start> to <end>` line per period, and `Errors`.
 - `pimdir search`: the item id; `Start`, `End`, `Calendar` and, when a text term matched, `Matched`; the summary, then the snippet after a blank line. What the answer could not see prints after a blank line.
 
-Every other list SHALL print through pimalaya-cli's `Columns`: a header of uppercase labels, then one item per line, the cells two spaces apart and padded to the widest of their column, an empty cell as `-`, the free-text column last, several values in one cell joined with `,`: `vdir list` (ID, PATH, NAME), `gcal acl list` (ID, SCOPE, ROLE, VALUE), `gcal colors` (PALETTE, ID, BACKGROUND, FOREGROUND), and the calendars (ID, DOWNLOADED, QUEUED, NAME) and parked actions (ROW, ACTION, CALENDAR, ERROR) of `pimdir status`.
+Every other list SHALL print through pimalaya-cli's `Columns`: a header of uppercase labels, then one item per line, the cells two spaces apart and padded to the widest of their column, an empty cell as `-`, the free-text column last, several values in one cell joined with `,`: `vdir list` (ID, PATH, NAME), `gcal acl list` (ID, SCOPE, ROLE, VALUE), `gcal colors` (PALETTE, ID, BACKGROUND, FOREGROUND), and the calendars (ID, DOWNLOADED, QUEUED, NAME) and parked actions (ROW, KIND, CALENDAR, ERROR) of `pimdir status`.
 
 `account list` SHALL print pimalaya-cli's `account::AccountListOutput` text, as Himalaya does: one line per account through `Columns` with no header row, its name, its backends (each the build leaves out as `<name> (not built)`, comma-separated), then `default` for the account a command with no `-a` runs against, `-` otherwise.
 
@@ -339,12 +349,12 @@ The `event agenda` grid SHALL stay cal's drawing, with no attribute: no day is h
 - AND under `--json` its `contents` is the stored text, CRLF and controls included
 
 #### Scenario: A calendar list
-- GIVEN an account holding the calendars `personal`, described, and `work`
+- GIVEN the vdir account `perso` holding the calendars `personal`, the default, colored and described, and `work`
 - WHEN `calendula calendar list` prints them
-- THEN it prints `personal`, its `Name:` and `Color:` lines and its description indented by four spaces, a blank line, then `work` and its `Name:` line
+- THEN it prints `Account:    perso (vdir)`, a blank line, then `personal  default  #ff0000  Personal` and `work      -        -        Work`, aligned, the description left out
 
 ### Requirement: A page names the next one
-`event list` and `item list` SHALL print `nextPage` beside their rows: the number of the next page, as a string, while one follows, `null` otherwise, exact on every backend as the header's `Next page:` is. They SHALL take it back through pimalaya-cli's `--page-token`, which wins over `--page`, refusing a token that does not read as a page number before the backend is reached, `0` reading as 1 as `--page 0` does. An unpaged listing (`-s 0`, or `event list` over a window with no `-s`) SHALL ignore the token as it ignores `--page`. `event find`, which reads the calendar whole, SHALL print `nextPage` as `null` and takes no token.
+`event list` and `item list` SHALL print `nextPage` beside their rows: the number of the next page, as a string, while one follows, `null` otherwise, exact on every backend as the header's `Next page:` is. They SHALL take it back through pimalaya-cli's `--page-token`, which wins over `--page`, refusing a token that does not read as a page number before the backend is reached, `0` reading as 1 as `--page 0` does. An unpaged listing (`-s 0`, or `event list` over a window with no `-s`) SHALL ignore the token as it ignores `--page`. `event search` SHALL page the same way: it reads the calendar whole, then cuts its matches by `-s` and `-p` or the token, a page counting resources as `event list` does; with no `-s` every match is one page, `nextPage` `null`.
 
 #### Scenario: A listing resumed from its token
 - GIVEN the vdir account `perso` whose calendar `personal` holds the events `a`, `b` and `c`
@@ -402,7 +412,7 @@ Each command's doc comment SHALL be its help text: the first paragraph is what `
 The `--help` of each unified leaf reaching a backend SHALL end with a `Backends:` footer generated from the tables: per capability the leaf reaches, flag-dependent ones included, the backends grouped by level, then each detail with the backends it applies to. A `build` reaches no backend and SHALL carry none, `-h` SHALL show none, and the top-level help SHALL keep the Pimalaya footer.
 
 ### Requirement: Every data command returns a named output type
-A command answering with data SHALL hand the printer a `*Output` type deriving `Display`, `Serialize` and `JsonSchema`, named after its command path. A write with no payload of its own SHALL print a receipt rather than a sentence: a unified write `{id, queued}` (`WriteReceipt`), the id of the item acted on and whether a sync engine applies the write later, and a write in a protocol namespace `{id}` (`IdReceipt`), the id as it is after the write (a renamed collection's new one). The write arm of `event create`, `event update`, `item create` and `item update` SHALL print `{id, queued}` too, a queued create's `id` the link id it was staged under, and `calendar create` SHALL print `{id, name, queued}`, `name` the display name it was given. The sentence is the text form only.
+A command answering with data SHALL hand the printer a `*Output` type deriving `Display`, `Serialize` and `JsonSchema`, named after its command path. A write with no payload of its own SHALL print a receipt rather than a sentence: a unified write `{id, queued}` (`WriteReceipt`), the id of the item acted on and whether a sync engine applies the write later, and a write in a protocol namespace `{id}` (`IdReceipt`), the id as it is after the write (a renamed collection's new one). The write arm of `event add`, `event update`, `item add` and `item update` SHALL print `{id, queued}` too, a queued create's `id` the link id it was staged under, and `calendar create` SHALL print `{id, name, queued}`, `name` the display name it was given. The sentence is the text form only.
 
 A `create`, an `update` and a `build` answer data too: an abandoned edit is an outcome they have to report, so each SHALL return an untagged enum whose write arm serializes exactly as it would on its own, and whose abandoned arm carries nothing, as an empty object. A `build` writing to `-o` answers pimalaya-cli's `output::SavedOutput`, `{path, size}`, the file written and its size in bytes, having handed the data to it, its text `Saved <size> bytes to <path>`.
 
@@ -454,7 +464,7 @@ A command given neither a source nor `-i` has nothing to write and SHALL say so;
 The composer SHALL remain the complete authoring surface; the field flags cover the common fields only. A recurrence rule and an alarm are where a flag stops being ergonomic, and the documentation SHALL say so, so their absence reads as the boundary it is.
 
 ### Requirement: A source, the field flags and the composer stack
-`event build`, `event create` and `event update` SHALL take an iCalendar source, the field flags and `-i/--interactive` together, applied in that order: the source (or the minted seed, or for an update the item the backend holds) is the event to start from, each flag sets the property it names on its VEVENT, and `-i` opens the result in the composer. A command given no source, no field flag and no `-i` has nothing to write and SHALL say so.
+`event build`, `event add` and `event update` SHALL take an iCalendar source, the field flags and `-i/--interactive` together, applied in that order: the source (or the minted seed, or for an update the item the backend holds) is the event to start from, each flag sets the property it names on its VEVENT, and `-i` opens the result in the composer. A command given no source, no field flag and no `-i` has nothing to write and SHALL say so.
 
 A build or a create made from flags alone, with no source and no `-i`, SHALL be checked as a composed item is and refused naming the violations; a source given on the command line SHALL NOT be.
 
@@ -467,7 +477,7 @@ Writing a field flag SHALL drop every instance of the property it names on the V
 A line a flag writes longer than 75 octets SHALL be folded (RFC 5545 3.1), never inside a character. `--duration` SHALL take an RFC 5545 3.3.6 duration in any case, a leading `+` dropped, checked by ical-rs's validator; a negative one SHALL be refused.
 
 ### Requirement: A field flag adds or removes one attendee
-`event build`, `event create` and `event update` SHALL take `--add-attendee [NAME:]ADDRESS` and `--remove-attendee ADDRESS`, each repeatable and spelled as `--attendee` is. `--add-attendee` SHALL write one `ATTENDEE` with `PARTSTAT=NEEDS-ACTION` and `RSVP=TRUE`, and a `CN` when a name is given, after the event's last `ATTENDEE`, or where `--attendee` writes when the event has none. On `event build` and `event create` the two flags work on the source or the minted seed, as every field flag does. `--remove-attendee` SHALL drop the `ATTENDEE` carrying that address. Addresses SHALL be compared case-insensitively on the `mailto:` value.
+`event build`, `event add` and `event update` SHALL take `--add-attendee [NAME:]ADDRESS` and `--remove-attendee ADDRESS`, each repeatable and spelled as `--attendee` is. `--add-attendee` SHALL write one `ATTENDEE` with `PARTSTAT=NEEDS-ACTION` and `RSVP=TRUE`, and a `CN` when a name is given, after the event's last `ATTENDEE`, or where `--attendee` writes when the event has none. On `event build` and `event add` the two flags work on the source or the minted seed, as every field flag does. `--remove-attendee` SHALL drop the `ATTENDEE` carrying that address. Addresses SHALL be compared case-insensitively on the `mailto:` value.
 
 An address added that the event already carries, an address removed that it does not, an address given to both flags, and either flag given with `--attendee` SHALL each be refused naming the address or the flags, before anything is written.
 
@@ -482,13 +492,13 @@ An address added that the event already carries, an address removed that it does
 - THEN the update is refused naming `ann@example.org`, and the event is untouched
 
 ### Requirement: A backend without floating times anchors the time flags locally
-On a backend that cannot store a floating time (gcal, msgraph), `event create` and `event update` SHALL read a `--start` or `--end` naming no zone in the local zone (`TZ`, then the system's), as `--time-zone` naming that zone would, `TZID` and `VTIMEZONE` included. `--time-zone` SHALL win when given; a date, a `Z` time and a zone-prefixed time SHALL be left as they are. The other backends SHALL keep such a time floating. A local zone with no IANA name SHALL anchor nothing.
+On a backend that cannot store a floating time (gcal, msgraph), `event add` and `event update` SHALL read a `--start` or `--end` naming no zone in the local zone (`TZ`, then the system's), as `--time-zone` naming that zone would, `TZID` and `VTIMEZONE` included. `--time-zone` SHALL win when given; a date, a `Z` time and a zone-prefixed time SHALL be left as they are. The other backends SHALL keep such a time floating. A local zone with no IANA name SHALL anchor nothing.
 
 The local zone is the one calendula reads a floating time in, so the event lands at the wall-clock time `event list` will show it at.
 
 #### Scenario: A create on a Google account
 - GIVEN a gcal account and a system zone of `Europe/Madrid`
-- WHEN `calendula event create --start 2026-10-19T09:00 --end 2026-10-19T10:00` runs
+- WHEN `calendula event add --start 2026-10-19T09:00 --end 2026-10-19T10:00` runs
 - THEN the event is written with `DTSTART;TZID=Europe/Madrid:20261019T090000` and its `VTIMEZONE`, and Google accepts it
 
 ### Requirement: Flags apply to one event
@@ -501,12 +511,12 @@ An empty value given to `--summary`, `--description`, `--location`, `--url`, `--
 `event update` SHALL set `DTSTAMP` to the time of the write, in UTC (`YYYYMMDDTHHMMSSZ`), and `LAST-MODIFIED` to the same instant when the event carries one, whatever it writes: field flags, a source, or what `-i` hands back. Every VEVENT of the item is revised, one lacking a `DTSTAMP` getting one after its last property; every other line SHALL keep its bytes. The revision SHALL belong to the shared update pipeline, so every backend stores an event revised alike.
 
 ### Requirement: An online meeting can be asked for
-`--online-meeting` SHALL write `X-PIMDIR-ONLINE-MEETING:TRUE` on the VEVENT (pimdir STORAGE Annex B.1), replacing any instance it carried. On pimdir, which declares `online-meeting` `partial`, the write SHALL be refused before it is queued when no source declares `calendar.online-meeting` (see the backends capability); every other backend declares it `none`, so `event create` and `event update` SHALL refuse the flag there with `capability-missing`, before reaching the backend. `event build` reaches no backend and SHALL simply write the property.
+`--online-meeting` SHALL write `X-PIMDIR-ONLINE-MEETING:TRUE` on the VEVENT (pimdir STORAGE Annex B.1), replacing any instance it carried. On pimdir, which declares `online-meeting` `partial`, the write SHALL be refused before it is queued when no source declares `calendar.online-meeting` (see the backends capability); every other backend declares it `none`, so `event add` and `event update` SHALL refuse the flag there with `capability-missing`, before reaching the backend. `event build` reaches no backend and SHALL simply write the property.
 
 ### Requirement: A gcal write chooses who is mailed
-`event create`, `event update` and `event delete` SHALL take `--send-updates all|external-only|none`, which the gcal backend SHALL pass as the API's `sendUpdates` on the request it makes. Absent, update and delete SHALL omit `sendUpdates` and create SHALL choose as the Google Calendar backend requirement says, so nothing changes for a caller that does not give it.
+`event add`, `event update` and `event delete` SHALL take `--send-updates all|external-only|none`, which the gcal backend SHALL pass as the API's `sendUpdates` on the request it makes. Absent, update and delete SHALL omit `sendUpdates` and create SHALL choose as the Google Calendar backend requirement says, so nothing changes for a caller that does not give it.
 
-On `event create` the flag SHALL override that choice wherever the event is inserted. An event that is imported instead mails nobody: `none` SHALL pass, and `all` or `external-only` SHALL be refused, naming the event's `ORGANIZER`, which gcal's `partial` `scheduling.send-updates` says. Every other backend declares `scheduling.send-updates` `none`, so the three commands SHALL refuse the flag there with `capability-missing`, before reaching the backend. `event build` SHALL NOT take it.
+On `event add` the flag SHALL override that choice wherever the event is inserted. An event that is imported instead mails nobody: `none` SHALL pass, and `all` or `external-only` SHALL be refused, naming the event's `ORGANIZER`, which gcal's `partial` `scheduling.send-updates` says. Every other backend declares `scheduling.send-updates` `none`, so the three commands SHALL refuse the flag there with `capability-missing`, before reaching the backend. `event build` SHALL NOT take it.
 
 #### Scenario: A quiet fix
 - GIVEN a gcal event with an attendee
@@ -515,7 +525,7 @@ On `event create` the flag SHALL override that choice wherever the event is inse
 
 #### Scenario: An invitation stored for later
 - GIVEN a gcal account
-- WHEN `calendula event create --attendee ann@example.org --send-updates none …` runs
+- WHEN `calendula event add --attendee ann@example.org --send-updates none …` runs
 - THEN the event is inserted with `sendUpdates=none` and its `iCalUID`, and Ann is not mailed
 
 #### Scenario: Another backend
@@ -526,7 +536,7 @@ On `event create` the flag SHALL override that choice wherever the event is inse
 ### Requirement: A minted item carries an identity, and its family names its kind
 An item minted from nothing SHALL be a VCALENDAR carrying a PRODID and one VEVENT, carrying a UID minted as a fresh UUID, a DTSTAMP of now and a DTSTART of now, so the seed passes the check it will be held to the moment the composer hands it back. The values are placeholders, and an event with no time is not an event. An editor handed an empty file mints no identity, and the CalDAV resource name and the pimdir link id both derive from the UID.
 
-`item` names no component kind, so it SHALL mint nothing: `item build` and `item create` given no source SHALL bail, naming `calendula event` for an event, `unfog` for a to-do and `journal` for a journal entry.
+`item` names no component kind, so it SHALL mint nothing: `item build` and `item add` given no source SHALL bail, naming `calendula event` for an event, `unfog` for a to-do and `journal` for a journal entry.
 
 ### Requirement: An item can be built without an account
 `build` SHALL take the same iCalendar source and the same composer as `create`, apply them in the same order, and print the resulting iCalendar rather than sending it anywhere. It SHALL reach no backend.
@@ -545,11 +555,17 @@ A source that holds nothing but whitespace SHALL be refused, naming where it was
 `calendula json-schema` SHALL print the JSON Schema of a named command's `--json` payload, or write one file per command under `--dir`. The registry SHALL be gated by the same cargo features as the commands it names, so it stays coherent under any feature combination.
 
 ### Requirement: pimdir searches calendar items through the store's index
-`calendula pimdir search <query>...`, gated on the `pimdir` feature, SHALL answer the pimdir SEARCH query language (§8) from the store's search index, scoped to the account's events: the query is read as its conjuncts plus `kind:event`, `account:<account>` when the store groups the account under a name, and `collection:<id>` when `-k/--calendar` names a calendar, each a top-level conjunct. A group standing as a conjunct of the query given is read through under that scope (SEARCH §8.2), so `(collection:<id>) budget` has the scope and the coverage of `collection:<id> budget`. Without `-k` it SHALL search every calendar of the account, `calendar.default` not applied; a `-k` naming no calendar of the account SHALL be refused, naming those it holds. The words of the query are joined by spaces into one query. Calendula SHALL open the index read-only (io-pimdir `PimdirIndex::open_query`) and SHALL NOT create, rebuild nor refresh it: the store's owner, its sync engine, does. The answer SHALL be the store as of the owner's last refresh: a queued write is not listed nor folded in.
+`calendula pimdir search <query>...`, gated on the `pimdir` feature, SHALL answer the pimdir SEARCH query language (§8) from the store's search index, scoped to the account's events: the query is read as its conjuncts plus `kind:event`, `account:<account>` when the store groups the account under a name, and `collection:<id>` when `-k/--calendar` names a calendar, each a top-level conjunct. A group standing as a conjunct of the query given is read through under that scope (SEARCH §8.2), so `(collection:<id>) budget` has the scope and the coverage of `collection:<id> budget`. Without `-k` it SHALL search every calendar of the account, `calendar.default` not applied; a `-k` naming no calendar of the account SHALL be refused, naming those it holds. The words of the query are joined by spaces into one query. An option of `pimdir search` or `pimdir count` SHALL be read as the option wherever it stands, before the query or after it, `--json` included; a query word starting with `-`, a negated term, SHALL pass after `--` alone, a word starting with `-` before it being refused as an unknown option. Calendula SHALL open the index read-only (io-pimdir `PimdirIndex::open_query`) and SHALL NOT create, rebuild nor refresh it: the store's owner, its sync engine, does. The answer SHALL be the store as of the owner's last refresh: a queued write is not listed nor folded in.
 
 A `date:` term SHALL compare the occurrences the index expanded (SEARCH §7), its days, `today` and `yesterday` read in the zone `event list` reads times in (`TZ`, then the system's), stated to the index as an IANA name (SEARCH §8.1); a zone with no IANA name SHALL read them in UTC, with a warning.
 
 Each hit SHALL print as a record (Text output is plain text): its id, the public `seq`, which `event read` takes; its start and end as `event list` shows them (Columns follow the kind), from its summary when its body is not local; its calendar; what a text term matched (`body` or `summary`) when one did; then its summary and its snippet. `--sort date|name|relevance` orders the hits, `date` (latest first) by default, a series by its first occurrence, and `--page` and `--page-size` page them, the page size defaulting to `event list`'s. Under `--json` the page carries `hits`, `more` (whether hits follow it) and `coverage`, each hit the event projection plus `calendarId`, `matched` (`null` when only field terms matched) and `snippet`.
+
+#### Scenario: An option after the query
+- GIVEN a pimdir account
+- WHEN `calendula pimdir search budget --page-size 3 --json` runs
+- THEN it searches `budget`, three hits a page, and prints JSON
+- AND `calendula pimdir search -- budget -lisbon` searches `budget -lisbon`
 
 #### Scenario: A series found by a later occurrence
 - GIVEN an indexed pimdir calendar holding a weekly event begun on 2019-01-07, a Monday
