@@ -231,6 +231,24 @@ mod credentialed {
         assert_events(&json(&out, 0), 5);
     }
 
+    /// `event delete` reads the id first and lists the calendar only when
+    /// that read answers `item-not-found`, so a UID-shaped id Google never
+    /// issued must end as a clear miss: a 400 to the read would fail the
+    /// command coded otherwise. Nothing is deleted.
+    #[test]
+    #[ignore = "requires Google credentials and --ignored"]
+    fn gcal_event_delete_of_an_unknown_uid_is_not_found() {
+        let dir = TempDir::new().unwrap();
+        let config = write_gcal_account(dir.path());
+
+        let primary = subject();
+        let uid = "calendula-live-missing@example.org";
+        let args = ["--json", "event", "delete", "-k", &primary, uid];
+        let out = calendula(&config, token(), &args);
+        let error = json(&out, 1);
+        assert_eq!(error["code"], "item-not-found", "{error}");
+    }
+
     #[test]
     #[ignore = "requires Google credentials and --ignored"]
     fn caldav_account_check() {
