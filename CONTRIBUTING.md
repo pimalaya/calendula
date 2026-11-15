@@ -56,7 +56,7 @@ done
 
 ## Testing against a real provider
 
-tests/google.rs, tests/microsoft.rs and tests/fastmail.rs run the built binary against Google (Calendar API and CalDAV), Microsoft Graph and Fastmail CalDAV, each account taken from a provider section of config.sample.toml. Every test is ignored unless `--ignored` is given, and CI runs them on every push.
+tests/google.rs, tests/microsoft.rs and tests/fastmail.rs run the built binary against Google (Calendar API and CalDAV), Microsoft Graph and Fastmail CalDAV, each account taken from a provider section of config.sample.toml. Every test is ignored unless `--ignored` is given. CI never runs them on push: the `live` job of .github/workflows/tests.yml runs weekly (Mondays, 04:00 UTC) and by hand (`gh workflow run tests.yml`), and a release runs it by hand on the commit to tag.
 
 The `anonymous` tests use a made-up credential and touch no account:
 
