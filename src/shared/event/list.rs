@@ -56,10 +56,10 @@ use crate::{
 /// `Error:` line at the end, and the command exits 3.
 ///
 /// JSON output: `{"events": [{"id", "uid", "recurrenceId", "summary",
-/// "description", "location", "start", "end", "allDay", "startsAt",
-/// "endsAt", "timeZone", "recurring", "status", "transparency",
-/// "busyStatus", "organizer": {"email", "name"}, "attendees": [{"email",
-/// "name", "partstat", "role", "rsvp", "cutype"}], "onlineMeetingUrl"}],
+/// "description", "location", "start", "end", "allDay", "timeZone",
+/// "recurring", "status", "transparency", "busyStatus", "organizer":
+/// {"email", "name"}, "attendees": [{"email", "name", "partstat", "role",
+/// "rsvp", "cutype"}], "onlineMeetingUrl"}],
 /// "nextPage"}`, `nextPage` being the number of the page following this
 /// one as a string, which `--page-token` takes back, or `null` once the
 /// listing is complete, and `errors` names each item it could not read,
@@ -191,7 +191,7 @@ impl fmt::Display for EventListOutput {
                 sanitize::text(&event.id).into_owned(),
                 sanitize::text(&start).into_owned(),
                 sanitize::text(&end).into_owned(),
-                sanitize::text(&event.summary).into_owned(),
+                sanitize::text(event.summary.as_deref().unwrap_or_default()).into_owned(),
             ]);
         }
 
@@ -216,11 +216,11 @@ pub(crate) fn local_zone() -> TimeZone {
 pub(crate) fn row_times(event: &Event, zone: &TimeZone) -> (String, String) {
     if event.all_day {
         let start = event
-            .starts_at
+            .start
             .clone()
-            .unwrap_or_else(|| event.start.clone());
+            .unwrap_or_else(|| event.wire_start.clone());
         let first = start.parse::<Date>().ok();
-        let end = match event.ends_at.as_deref().map(str::parse::<Date>) {
+        let end = match event.end.as_deref().map(str::parse::<Date>) {
             // NOTE: the JSON end is exclusive, the line's the last day,
             // never before the first: a zero-length whole day (DTEND equal
             // to DTSTART) ends on its start.
@@ -228,7 +228,7 @@ pub(crate) fn row_times(event: &Event, zone: &TimeZone) -> (String, String) {
                 let last = end.yesterday().unwrap_or(end);
                 first.map_or(last, |first| last.max(first)).to_string()
             }
-            _ => event.end.clone(),
+            _ => event.wire_end.clone(),
         };
         return (start, end);
     }
@@ -244,8 +244,8 @@ pub(crate) fn row_times(event: &Event, zone: &TimeZone) -> (String, String) {
     };
 
     (
-        local(event.start_secs, &event.start),
-        local(event.end_secs, &event.end),
+        local(event.start_secs, &event.wire_start),
+        local(event.end_secs, &event.wire_end),
     )
 }
 
@@ -268,8 +268,8 @@ mod tests {
     fn event(all_day: bool, start: &str, end: &str) -> Event {
         Event {
             all_day,
-            start: start.into(),
-            end: end.into(),
+            wire_start: start.into(),
+            wire_end: end.into(),
             ..Default::default()
         }
     }
@@ -304,14 +304,14 @@ mod tests {
     fn events_print_one_line_each_under_a_header() {
         let mut standup = event(false, "20261030T080000Z", "20261030T083000Z");
         standup.id = "standup.ics".into();
-        standup.summary = "Standup\x1b[2J".into();
+        standup.summary = Some("Standup\x1b[2J".into());
         standup.start_secs = Some(1_793_347_200);
         standup.end_secs = Some(1_793_349_000);
 
         let mut holiday = event(true, "20260519", "20260521");
         holiday.id = "holiday.ics".into();
-        holiday.starts_at = Some("2026-05-19".into());
-        holiday.ends_at = Some("2026-05-21".into());
+        holiday.start = Some("2026-05-19".into());
+        holiday.end = Some("2026-05-21".into());
 
         let mut output = EventListOutput {
             listing: listing(Some(1), 2, Some("2")),
@@ -363,7 +363,7 @@ Page:       3, empty
     fn the_errors_print_last_one_aligned_line_each() {
         let mut standup = event(false, "20261030T080000Z", "20261030T083000Z");
         standup.id = "standup.ics".into();
-        standup.summary = "Standup".into();
+        standup.summary = Some("Standup".into());
         standup.start_secs = Some(1_793_347_200);
         standup.end_secs = Some(1_793_349_000);
 
@@ -412,7 +412,7 @@ Error:  c  item-unreadable  Cannot parse item `c` as iCalendar
     fn an_unpaged_listing_holds_all_its_events() {
         let mut found = event(true, "20260519", "20260520");
         found.id = "a.ics".into();
-        found.summary = "Review".into();
+        found.summary = Some("Review".into());
 
         let mut listing = Listing::new("perso", Some("vdir"));
         listing.head("Calendar", "personal");
@@ -454,8 +454,8 @@ a.ics  20260519  20260520  Review
     #[test]
     fn a_whole_day_event_ends_on_its_last_day() {
         let mut event = event(true, "20260519", "20260521");
-        event.starts_at = Some("2026-05-19".into());
-        event.ends_at = Some("2026-05-21".into());
+        event.start = Some("2026-05-19".into());
+        event.end = Some("2026-05-21".into());
 
         assert_eq!(
             row_times(&event, &TimeZone::UTC),
@@ -466,8 +466,8 @@ a.ics  20260519  20260520  Review
     #[test]
     fn a_one_day_event_starts_and_ends_on_it() {
         let mut event = event(true, "20260519", "20260520");
-        event.starts_at = Some("2026-05-19".into());
-        event.ends_at = Some("2026-05-20".into());
+        event.start = Some("2026-05-19".into());
+        event.end = Some("2026-05-20".into());
 
         assert_eq!(
             row_times(&event, &TimeZone::UTC),
@@ -478,8 +478,8 @@ a.ics  20260519  20260520  Review
     #[test]
     fn a_zero_length_whole_day_ends_on_its_start() {
         let mut event = event(true, "20260519", "20260519");
-        event.starts_at = Some("2026-05-19".into());
-        event.ends_at = Some("2026-05-19".into());
+        event.start = Some("2026-05-19".into());
+        event.end = Some("2026-05-19".into());
 
         assert_eq!(
             row_times(&event, &TimeZone::UTC),

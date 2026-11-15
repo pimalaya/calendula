@@ -146,7 +146,7 @@ pub fn assert_events(list: &Value, size: usize) {
     assert!(next.is_string() || next.is_null(), "nextPage: {next}");
 
     for (i, event) in events.iter().enumerate() {
-        let strings = ["id", "uid", "summary", "start", "end"];
+        let strings = ["id"];
 
         for key in strings {
             assert!(event[key].is_string(), "event {i}: {key} not a string");
@@ -163,8 +163,10 @@ pub fn assert_events(list: &Value, size: usize) {
             "description",
             "location",
             "recurrenceId",
-            "startsAt",
-            "endsAt",
+            "uid",
+            "summary",
+            "start",
+            "end",
             "timeZone",
             "status",
             "transparency",

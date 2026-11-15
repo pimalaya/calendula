@@ -45,6 +45,8 @@ An ACL rule id is `<scope type>:<scope value>` (`default` for everyone), which t
 
 `free-busy` and `events instances` SHALL take `--from` / `--to` as inclusive days, as `event list` does, so one date spelling serves the whole CLI.
 
+`free-busy` SHALL print `{calendars: [{id, busy: [{start, end}], queryErrors}]}`, `queryErrors` the error objects the API answers for the calendar (`domain`, `reason`), raw, `[]` when none. It SHALL NOT print them under `errors`, the key of the item errors a listing names.
+
 ### Requirement: What the gcal family declines
 `channels` / `watch` SHALL NOT be exposed: a push channel delivers to an HTTPS endpoint the caller must host, which a CLI has not. `calendars.transferOwnership` SHALL NOT be exposed: it is an irreversible administrative act on a Workspace domain.
 
@@ -102,7 +104,7 @@ calendula SHALL be the events CLI: the unified API SHALL offer one projected fam
 ### Requirement: Columns follow the kind
 An event listing SHALL show each event's summary and its start and end.
 
-The start and end SHALL show for a person to read, `startsAt` and `endsAt` in the local zone (`TZ`, then the system's), the one a floating time is read in: `2026-10-30 09:00` for a timed event, the days for a whole-day one with the end as its last day (`2026-05-19`), never before its first, so a zero-length one (`DTEND` equal to `DTSTART`) ends on its start. A time that did not resolve SHALL show as iCalendar spells it. Nothing is truncated. The `--json` payload SHALL stay as it is, `start` and `end` iCalendar-spelled and a whole day's `endsAt` exclusive.
+The start and end SHALL show for a person to read, the JSON `start` and `end` in the local zone (`TZ`, then the system's), the one a floating time is read in: `2026-10-30 09:00` for a timed event, the days for a whole-day one with the end as its last day (`2026-05-19`), never before its first, so a zero-length one (`DTEND` equal to `DTSTART`) ends on its start. A time that did not resolve SHALL show as iCalendar spells it. Nothing is truncated. The `--json` payload SHALL stay as "The event projection" states it, a whole day's `end` exclusive.
 
 A property the event omits SHALL print as `-` rather than nothing, so the columns line up down the list.
 
@@ -118,7 +120,7 @@ Two events may legitimately start at the same moment: two unrelated meetings at 
 
 A view keyed by the instant alone shows the last one written and reports nothing, which loses exactly the event the store went to the trouble of keeping.
 
-The `--json` payload SHALL carry the same multiplicity, so a consumer reading it is not told there was one event where there were two: under `starts`, it maps each start datetime to the list of the labels starting at it, in the same order the text renders them, and under `errors` it lists the items the agenda could not read ("A listing names the items it could not read").
+The `--json` payload SHALL carry the same multiplicity, so a consumer reading it is not told there was one event where there were two: `{events, errors}`, `events` listing every event under the grid as `{id, start, label}`, in the same order the text renders them, `id` the item id `event read` takes, `start` the event's as "The event projection" prints it, `label` what the text prints, and `errors` it lists the items the agenda could not read ("A listing names the items it could not read").
 
 No second shape SHALL be kept beside it, since one that still dropped an event would leave the defect reachable.
 
@@ -127,7 +129,7 @@ The agenda SHALL read the events over the days its grid draws and SHALL expand a
 
 A series placed once at its first start leaves a yearly event out of every year but its first, so the agenda and a listing of the same days would disagree.
 
-The agenda SHALL stamp each event, and file it under its day, at its start in the local zone `event list` reads (`TZ`, then the system's), a timed event at its instant there, a whole-day one on its day, a floating one at its wall time; the text and the keys of `starts` alike.
+The agenda SHALL stamp each event, and file it under its day, at its start in the local zone `event list` reads (`TZ`, then the system's), a timed event at its instant there, a whole-day one on its day, a floating one at its wall time. Its JSON `start` SHALL stay the event's instant as "The event projection" prints it, whatever the local zone.
 
 #### Scenario: A yearly event created years ago
 - GIVEN a calendar holding a yearly event whose first start is in 2019
@@ -137,7 +139,7 @@ The agenda SHALL stamp each event, and file it under its day, at its start in th
 #### Scenario: A UTC event under a local zone
 - GIVEN `TZ=Europe/Paris` and an event `DTSTART:20261112T090000Z`
 - WHEN `calendula --json event agenda 11 2026` runs
-- THEN the event is under `starts` at `2026-11-12T10:00:00`, as `event list` prints it at `2026-11-12 10:00`
+- THEN the grid lists it at `Nov 12, 10:00`, as `event list` prints it at `2026-11-12 10:00`, and its JSON `start` is `2026-11-12T09:00:00Z`
 
 ### Requirement: An agenda names months and weekdays in the time locale
 The agenda SHALL draw month and weekday names, and stamp the events under its grid, in the locale `LC_ALL`, then `LC_TIME`, then `LANG` resolves to, as cal does. A locale that is unset, `C`, `POSIX` or unknown SHALL fall back to the English names of the POSIX locale. A month argument SHALL be read in English or in the language of that locale.
@@ -220,7 +222,7 @@ A time SHALL resolve through its `TZID` as the time-zone database names it (a wr
 Expansion SHALL move a UTC `UNTIL` onto the wall clock of a zoned `DTSTART` before the civil walk, and SHALL drop the instances a calendar-defined zone skips.
 
 ### Requirement: The event projection
-An event's JSON SHALL carry `id`, `etag` (the entity tag of its item, `null` when the backend has none), `uid`, `recurrenceId`, `summary`, `description` and `location` (`null` when the event carries none), `start` and `end` (iCalendar-spelled), `allDay`, `startsAt` and `endsAt` (RFC 3339 with the offset, a zero one spelled `Z` as pimalaya-cli's output contract and Himalaya spell UTC, or `YYYY-MM-DD` with an exclusive end for a whole day), `timeZone`, `zoneAssumed` (`true` when `DTSTART` or `DTEND` names a `TZID` neither the time-zone database nor the calendar defines, read in the local zone), `recurring`, `sequence` (its `SEQUENCE`, 0 when absent), `status`, `transparency`, `busyStatus` (Outlook's), `organizer` (`email`, `name`), `attendees` (`email`, `name`, `partstat` defaulting to `NEEDS-ACTION`, `role`, `rsvp`, `cutype`) and `onlineMeetingUrl` (`CONFERENCE`, then the vendors' properties). The end SHALL be `DTEND`, else the start plus `DURATION`, else a day for a date and the start for a time.
+An event's JSON SHALL carry `id`, `etag` (the entity tag of its item, `null` when the backend has none), `uid`, `recurrenceId`, `summary`, `description` and `location` (`null` when the event carries none, never `""`), `start` and `end` (RFC 3339 with the offset, a zero one spelled `Z` as pimalaya-cli's output contract and Himalaya spell UTC, or `YYYY-MM-DD` with an exclusive end for a whole day, `null` when the time does not resolve), `allDay`, `timeZone`, `zoneAssumed` (`true` when `DTSTART` or `DTEND` names a `TZID` neither the time-zone database nor the calendar defines, read in the local zone), `recurring`, `sequence` (its `SEQUENCE`, 0 when absent), `status`, `transparency`, `busyStatus` (Outlook's), `organizer` (`email`, `name`), `attendees` (`email`, `name`, `partstat` defaulting to `NEEDS-ACTION`, `role`, `rsvp`, `cutype`) and `onlineMeetingUrl` (`CONFERENCE`, then the vendors' properties). The end SHALL be `DTEND`, else the start plus `DURATION`, else a day for a date and the start for a time. A time SHALL print in that one form: its iCalendar spelling stays in the item's contents.
 
 `event read` SHALL print the item's bytes, and its JSON SHALL be the row of its item ("An item's bytes are text or base64") plus the projected `events`, or the one occurrence `-r/--recurrence-id` names.
 

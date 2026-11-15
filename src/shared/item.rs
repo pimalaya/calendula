@@ -206,7 +206,7 @@ impl CalendarItem {
             return true;
         };
 
-        events.iter().any(|event| range.contains(&event.start))
+        events.iter().any(|event| range.contains(&event.wire_start))
             || !Event::occurrences(self, Some(range)).is_empty()
     }
 }

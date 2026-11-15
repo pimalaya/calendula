@@ -8,7 +8,7 @@ use std::fmt;
 use anyhow::Result;
 use chrono::NaiveDate;
 use clap::Parser;
-use io_gcal::v3::rest::freebusy::{GcalFreeBusyRequest, GcalFreeBusyRequestItem};
+use io_gcal::v3::rest::freebusy::{GcalError, GcalFreeBusyRequest, GcalFreeBusyRequestItem};
 use pimalaya_cli::{
     fields::Fields,
     printer::Printer,
@@ -30,7 +30,8 @@ use crate::{
 /// none, the account's default calendar is queried.
 ///
 /// JSON output: `{"calendars": [{"id", "busy": [{"start", "end"}],
-/// "errors"}]}`.
+/// "queryErrors": [{"domain", "reason"}]}]}`, `queryErrors` being the
+/// error objects the API answered for the calendar, raw.
 #[derive(Debug, Parser)]
 pub struct GcalFreeBusyCommand {
     /// The calendars to query. Repeat the flag for several; falls back to
@@ -80,11 +81,7 @@ impl GcalFreeBusyCommand {
                         end: period.end.unwrap_or_default(),
                     })
                     .collect(),
-                errors: calendar
-                    .errors
-                    .into_iter()
-                    .filter_map(|error| error.reason)
-                    .collect(),
+                query_errors: calendar.errors,
             })
             .collect();
 
@@ -109,8 +106,11 @@ pub struct CalendarBusy {
     pub id: String,
     /// The periods during which it is busy.
     pub busy: Vec<BusyPeriod>,
-    /// Why the answer is incomplete, when it is.
-    pub errors: Vec<String>,
+    /// Why the answer is incomplete, when it is: the error objects the
+    /// API answered for the calendar (`domain`, `reason`), raw. Not the
+    /// item errors of a listing's `errors`.
+    #[schemars(with = "Vec<serde_json::Map<String, serde_json::Value>>")]
+    pub query_errors: Vec<GcalError>,
 }
 
 /// One busy period, as the RFC 3339 bounds the API reports.
@@ -140,11 +140,17 @@ impl fmt::Display for GcalFreeBusyOutput {
                 fields.push("Busy", periods.join("\n"));
             }
 
-            if !calendar.errors.is_empty() {
-                fields.push("Errors", sanitize::text(&calendar.errors.join(", ")));
+            let reasons: Vec<&str> = calendar
+                .query_errors
+                .iter()
+                .filter_map(|error| error.reason.as_deref())
+                .collect();
+
+            if !reasons.is_empty() {
+                fields.push("Errors", sanitize::text(&reasons.join(", ")));
             }
 
-            let state = match (periods.is_empty(), calendar.errors.is_empty()) {
+            let state = match (periods.is_empty(), calendar.query_errors.is_empty()) {
                 (false, _) => vec![String::from("busy")],
                 (true, true) => vec![String::from("free")],
                 (true, false) => Vec::new(),
@@ -159,5 +165,41 @@ impl fmt::Display for GcalFreeBusyOutput {
         }
 
         write!(f, "{records}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    /// The API's error objects print raw under `queryErrors`, so `errors`
+    /// keeps the one meaning it has across calendula, the item errors of
+    /// a listing.
+    #[test]
+    fn the_api_errors_print_raw_under_their_own_key() {
+        let output = GcalFreeBusyOutput {
+            rows: vec![CalendarBusy {
+                id: "nope@example.org".into(),
+                busy: Vec::new(),
+                query_errors: vec![GcalError {
+                    domain: Some("global".into()),
+                    reason: Some("notFound".into()),
+                }],
+            }],
+        };
+
+        assert_eq!(
+            serde_json::to_value(&output).unwrap(),
+            json!({
+                "calendars": [{
+                    "id": "nope@example.org",
+                    "busy": [],
+                    "queryErrors": [{"domain": "global", "reason": "notFound"}],
+                }],
+            })
+        );
+        assert_eq!(output.to_string(), "nope@example.org\nErrors:  notFound\n");
     }
 }

@@ -24,10 +24,7 @@ use clap::Parser;
 use jiff::tz::TimeZone;
 use pimalaya_cli::{error::ItemErrors, printer::Printer, sanitize};
 use schemars::{JsonSchema, Schema, SchemaGenerator};
-use serde::{
-    Serialize, Serializer,
-    ser::{SerializeMap, SerializeStruct},
-};
+use serde::{Serialize, Serializer, ser::SerializeStruct};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
@@ -63,10 +60,11 @@ const DEFAULT_REFORM_YEAR: i32 = 1752;
 /// An item whose iCalendar does not parse is named by an `Error:` line at
 /// the end, and the command exits 3.
 ///
-/// JSON output: `{"starts": {<datetime>: [<label>...]}, "errors": [{"id",
-/// "code", "error", "sources"}]}`, `starts` mapping each start datetime to
-/// the labels of every event starting at it, `errors` naming each item the
-/// agenda could not read.
+/// JSON output: `{"events": [{"id", "start", "label"}], "errors": [{"id",
+/// "code", "error", "sources"}]}`, `events` listing every event under the
+/// grid in the order the text prints them, its `start` spelled as
+/// `event list` prints it, `errors` naming each item the agenda could not
+/// read.
 #[derive(Debug, Parser)]
 pub struct EventAgendaCommand {
     #[command(flatten)]
@@ -914,6 +912,7 @@ fn collect_events(ctl: &mut CalControl, y: i32, m: u32, d: u32) {
             on_day.then(|| {
                 let collected = AgendaEvent {
                     id: event.id.clone(),
+                    start: event.start.clone(),
                     label: event.label().to_owned(),
                 };
 
@@ -1024,13 +1023,18 @@ fn yearly(grid: &mut String, ctl: &mut CalControl) -> fmt::Result {
 }
 
 /// One event the agenda collected while painting the grid.
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, JsonSchema)]
 struct AgendaEvent {
-    /// The id of the item the event was projected from.
+    /// The id of the item the event was projected from, as `event list`
+    /// prints it.
     ///
     /// Two resources of one calendar may carry one `UID`, so the id is
     /// what tells them apart.
     id: String,
+    /// The start, as `event list` prints it: RFC 3339 with its UTC
+    /// offset, `Z` for UTC, or `YYYY-MM-DD` for a whole day; `null` when
+    /// it does not resolve.
+    start: Option<String>,
     /// What the agenda prints for the event: its summary, falling back
     /// to its description.
     label: String,
@@ -1117,31 +1121,11 @@ impl Serialize for EventAgendaOutput {
     where
         S: Serializer,
     {
+        let events: Vec<&AgendaEvent> = self.events.values().flatten().collect();
         let mut agenda = serializer.serialize_struct("EventAgendaOutput", 2)?;
-        agenda.serialize_field("starts", &Starts(&self.events))?;
+        agenda.serialize_field("events", &events)?;
         agenda.serialize_field("errors", &self.errors)?;
         agenda.end()
-    }
-}
-
-/// The events of an agenda as its JSON maps them: each instant keyed to
-/// the labels of the events starting at it, in the order the text renders
-/// them.
-struct Starts<'a>(&'a BTreeMap<NaiveDateTime, Vec<AgendaEvent>>);
-
-impl Serialize for Starts<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map = serializer.serialize_map(Some(self.0.len()))?;
-
-        for (date, events) in self.0 {
-            let labels: Vec<&str> = events.iter().map(|event| event.label.as_str()).collect();
-            map.serialize_entry(date, &labels)?;
-        }
-
-        map.end()
     }
 }
 
@@ -1149,9 +1133,9 @@ impl Serialize for Starts<'_> {
 #[allow(dead_code)]
 #[derive(JsonSchema)]
 struct EventAgendaJson {
-    /// Each start datetime, mapped to the labels of every event starting
-    /// at it, in the order the text renders them.
-    starts: BTreeMap<String, Vec<String>>,
+    /// Every event under the grid, in the order the text prints them: by
+    /// start, then by label, then by id.
+    events: Vec<AgendaEvent>,
     /// The error of each item the agenda could not read, in the order met.
     errors: Vec<ItemError>,
 }
@@ -1189,6 +1173,7 @@ mod tests {
         for (start, id, label) in collected {
             let event = AgendaEvent {
                 id: id.into(),
+                start: Some(start.format("%Y-%m-%dT%H:%M:%SZ").to_string()),
                 label: label.into(),
             };
 
@@ -1282,7 +1267,10 @@ mod tests {
 
         assert_eq!(
             to_string(&agenda).unwrap(),
-            r#"{"starts":{"2026-08-14T09:00:00":["Pre demo MINIS","Pre demo woonies"]},"errors":[]}"#
+            concat!(
+                r#"{"events":[{"id":"2","start":"2026-08-14T09:00:00Z","label":"Pre demo MINIS"},"#,
+                r#"{"id":"1","start":"2026-08-14T09:00:00Z","label":"Pre demo woonies"}],"errors":[]}"#,
+            )
         );
     }
 
@@ -1311,7 +1299,7 @@ mod tests {
         assert_eq!(agenda.to_string(), "Aug 14, 09:00: Stand-up\n");
         assert_eq!(
             to_string(&agenda).unwrap(),
-            r#"{"starts":{"2026-08-14T09:00:00":["Stand-up"]},"errors":[]}"#
+            r#"{"events":[{"id":"1","start":"2026-08-14T09:00:00Z","label":"Stand-up"}],"errors":[]}"#
         );
     }
 
@@ -1340,7 +1328,7 @@ mod tests {
         );
 
         let json = serde_json::to_value(&agenda).unwrap();
-        assert_eq!(json["starts"]["2026-08-14T09:00:00"][0], "Stand-up");
+        assert_eq!(json["events"][0]["label"], "Stand-up");
         assert_eq!(json["errors"][0]["id"], "c");
         assert_eq!(json["errors"][0]["code"], "item-unreadable");
     }

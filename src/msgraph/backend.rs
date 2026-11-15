@@ -927,7 +927,7 @@ pub(crate) mod scripted {
 
         let days: Vec<String> = crate::shared::event::Event::occurrences(item, Some(&range))
             .into_iter()
-            .map(|event| event.start)
+            .map(|event| event.wire_start)
             .collect();
         let tuesday = tuesday.strftime("%Y%m%d").to_string();
         assert!(

@@ -95,7 +95,7 @@ impl EventFindCommand {
 
         let mut errors = listed.errors;
         let (mut events, _) = Event::read_all(&listed.items, &mut errors, Event::try_project);
-        events.retain(|event| event.uid == self.uid);
+        events.retain(|event| event.uid.as_deref() == Some(self.uid.as_str()));
 
         // NOTE: a page counts resources, the events of one item following
         // each other.

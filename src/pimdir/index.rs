@@ -546,7 +546,7 @@ fn event_hit(item: &CalendarItem, stored: Option<&PimdirItem>, title: String) ->
     else {
         return Event {
             id: item.id.clone(),
-            summary: title,
+            summary: (!title.is_empty()).then_some(title),
             ..Default::default()
         };
     };
@@ -576,8 +576,8 @@ fn event_hit(item: &CalendarItem, stored: Option<&PimdirItem>, title: String) ->
     Event {
         id: item.id.clone(),
         etag: None,
-        uid: summary.uid.clone().unwrap_or_default(),
-        summary: summary.summary.clone(),
+        uid: summary.uid.clone(),
+        summary: Some(summary.summary.clone()).filter(|summary| !summary.is_empty()),
         location: summary.location.clone(),
         recurring: summary.recurring.unwrap_or_default(),
         organizer: summary.organizer.as_ref().map(|organizer| EventPerson {
@@ -806,7 +806,7 @@ mod tests {
     /// The summaries of the hits of `text`, sorted.
     fn summaries(client: &PimdirClient, text: &str, calendar: Option<&str>) -> Vec<String> {
         let hits = page(client, text, calendar).hits;
-        let mut summaries: Vec<String> = hits.into_iter().map(|h| h.event.summary).collect();
+        let mut summaries: Vec<String> = hits.into_iter().filter_map(|h| h.event.summary).collect();
         summaries.sort();
         summaries
     }
@@ -831,8 +831,11 @@ mod tests {
         };
         let page = client.search_items(query(text), None, &options).unwrap();
 
-        let mut summaries: Vec<String> =
-            page.hits.into_iter().map(|hit| hit.event.summary).collect();
+        let mut summaries: Vec<String> = page
+            .hits
+            .into_iter()
+            .filter_map(|hit| hit.event.summary)
+            .collect();
         summaries.sort();
         summaries
     }
@@ -875,7 +878,10 @@ mod tests {
     fn a_hit_the_store_cannot_read_is_an_item_error() {
         let (dir, backend) = indexed_store();
         let found = page(&backend.client, "budget", None);
-        let offsite = found.hits.iter().find(|hit| hit.event.summary == "Offsite");
+        let offsite = found
+            .hits
+            .iter()
+            .find(|hit| hit.event.summary.as_deref() == Some("Offsite"));
         let offsite = offsite.unwrap().event.clone();
 
         // NOTE: a summary column of the wrong type, which the store's
@@ -894,7 +900,7 @@ mod tests {
         let summaries: Vec<&str> = found
             .hits
             .iter()
-            .map(|hit| hit.event.summary.as_str())
+            .filter_map(|hit| hit.event.summary.as_deref())
             .collect();
         assert_eq!(summaries, ["Planning"]);
 
@@ -913,7 +919,7 @@ mod tests {
         let hits = page(&backend.client, "quarter", None).hits;
         assert_eq!(hits.len(), 1);
         let hit = &hits[0];
-        assert_eq!(hit.event.summary, "Offsite");
+        assert_eq!(hit.event.summary.as_deref(), Some("Offsite"));
         assert_eq!(hit.event.location.as_deref(), Some("Lisbon"));
         assert_eq!(hit.calendar_id, "cal");
         assert_eq!(hit.matched, Some(PimdirCalendarMatched::Body));
@@ -921,7 +927,7 @@ mod tests {
             hit.snippet.as_deref().unwrap().contains("quarter"),
             "{hit:?}"
         );
-        assert_eq!(hit.event.starts_at.as_deref(), Some("2026-11-07T00:30:00Z"));
+        assert_eq!(hit.event.start.as_deref(), Some("2026-11-07T00:30:00Z"));
         let read = backend
             .client
             .reader
@@ -1063,16 +1069,10 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].matched, Some(PimdirCalendarMatched::Summary));
         assert_eq!(hits[0].calendar_id, "work");
-        assert_eq!(hits[0].event.summary, "Invoice review");
-        assert_eq!(hits[0].event.uid, "invoice@example.org");
-        assert_eq!(
-            hits[0].event.starts_at.as_deref(),
-            Some("2026-11-20T14:00:00Z")
-        );
-        assert_eq!(
-            hits[0].event.ends_at.as_deref(),
-            Some("2026-11-20T15:00:00Z")
-        );
+        assert_eq!(hits[0].event.summary.as_deref(), Some("Invoice review"));
+        assert_eq!(hits[0].event.uid.as_deref(), Some("invoice@example.org"));
+        assert_eq!(hits[0].event.start.as_deref(), Some("2026-11-20T14:00:00Z"));
+        assert_eq!(hits[0].event.end.as_deref(), Some("2026-11-20T15:00:00Z"));
         assert_eq!(invoice.coverage.bodiless, 1);
         assert!(!invoice.coverage.complete);
         assert!(

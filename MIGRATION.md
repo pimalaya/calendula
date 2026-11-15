@@ -154,7 +154,7 @@ pimdir.account = "example"
 - **Every list is plain text**, with no border, no colour and nothing sized to the terminal. A script cutting the 0.2 tables reads `--json` instead.
 - **`event list` prints one line per event**, `id  start  end  summary`, the times in the local zone (a whole-day event by its days) and an empty cell as `-`, under `Account:`, `Calendar:`, `Page:` and `Next page:` and a blank line. A listing that could not read an item prints one `Error:` line for it last, after the rows and a blank line. `item list` prints its id, size and entity tag the same way, `gcal events instances` its id, status, start, end and summary, and `pimdir search` its id, start, end, calendar, what matched and summary, its snippet under `--json` alone.
 - **Other lists print columns or records.** `calendar list` prints `Account:`, then one line per calendar, `id  default  color  name`, its description under `--json` alone; `vdir list`, `gcal acl list` and `gcal colors` print columns under an uppercase header, and `account list` one line per account with no header, `default` marking the default one; `caldav propfind`, `gcal calendars` and `gcal free-busy` print records the way `git log` prints commits; `account check`, `caldav discover`, `gcal settings` and `pimdir status` print `Label: value` lines.
-- **`event agenda` highlights no day.** Its grid writes no escape any more, today and the days holding an event included; the events listed under it name their days, the months and weekdays named in the time locale (`LC_ALL`, then `LC_TIME`, then `LANG`). An event stands at its local time, as `event list` shows it, where 0.2 stamped one written in UTC at its UTC time, so the keys of `--json` `starts` move with `TZ`.
+- **`event agenda` highlights no day.** Its grid writes no escape any more, today and the days holding an event included; the events listed under it name their days, the months and weekdays named in the time locale (`LC_ALL`, then `LC_TIME`, then `LANG`). An event stands at its local time, as `event list` shows it, where 0.2 stamped one written in UTC at its UTC time; its `--json` `start` stays the instant (see JSON output).
 - **Every string a server or a file gave is defused** of its control and bidi characters in the text output; `--json` keeps the stored text.
 - **A pimdir write says it is queued** (`Event <id> queued for the next sync`, `... update queued ...`, `... deletion queued ...`) rather than created, updated or deleted.
 - **`-w/--max-width` is gone** from `calendar list`, `event list` and `item list`: a command passing it now fails, so drop it.
@@ -165,7 +165,7 @@ The greps the 0.2 tables allowed read `--json` with jq:
 
 ```sh
 # id, start, end and summary, one event per line
-calendula event list --json | jq -r '.events[] | [.id, .startsAt, .endsAt, .summary] | @tsv'
+calendula event list --json | jq -r '.events[] | [.id, .start, .end, .summary] | @tsv'
 # the ids of the events whose summary mentions a meeting
 calendula event list --json | jq -r '.events[] | select(.summary // "" | test("meeting"; "i")) | .id'
 # the whole-day events of a week
@@ -184,7 +184,7 @@ calendula calendar list --json | jq -r '.calendars[].id'
   calendula event delete a.ics --json | jq -r 'if .queued then "queued for the next sync" else "deleted" end'
   ```
 
-- **An item prints as one row.** `item list`, `item read` and `event read` print `{id, calendarId, etag, contents, encoding}`, `event read` adding `events`. `contents` is the iCalendar text, `encoding` `utf-8`, or the base64 of bytes that are not valid UTF-8, `encoding` `base64`, both `null` in `item list` for an item carrying no bytes (a pimdir body not local yet), a read always carrying them. 0.2 printed `item list`'s `contents` as an array of integers, and the reads `{"contents": ...}`, a body that is not UTF-8 decoded lossily. An event's `description` and `location` are `null` when it carries none.
+- **An item prints as one row.** `item list`, `item read` and `event read` print `{id, calendarId, etag, contents, encoding}`, `event read` adding `events`. `contents` is the iCalendar text, `encoding` `utf-8`, or the base64 of bytes that are not valid UTF-8, `encoding` `base64`, both `null` in `item list` for an item carrying no bytes (a pimdir body not local yet), a read always carrying them. 0.2 printed `item list`'s `contents` as an array of integers, and the reads `{"contents": ...}`, a body that is not UTF-8 decoded lossily. An event's `uid`, `summary`, `description` and `location` are `null` when it carries none, where 0.2 printed `summary` `""`.
 
   ```sh
   # 0.2: {"contents":"BEGIN:VCALENDAR..."}
@@ -218,13 +218,29 @@ calendula calendar list --json | jq -r '.calendars[].id'
   printf '%s\n' "$out" | jq -r '.errors[] | "\(.id // "-") \(.code // "-") \(.error)"' >&2
   ```
 
-- **`event agenda --json` prints an object**: the map of start instants moves under `starts`, beside `errors`. Read `.starts` where you read the root.
+- **`event agenda --json` prints `{events, errors}`**: every event under the grid as `{id, start, label}`, in the order the text prints them, `id` the item `event read` takes and `start` as `event list --json` prints it (an instant with its offset, not a local time), where 0.2 printed a map of local start times to labels.
 
   ```sh
   # 0.2: {"2026-11-16T09:00:00":["Standup"]}
-  calendula event agenda --json | jq -r 'keys[]'
-  # next: {"starts":{"2026-11-16T09:00:00":["Standup"]},"errors":[]}
-  calendula event agenda --json | jq -r '.starts | keys[]'
+  calendula event agenda --json | jq -r 'to_entries[] | "\(.key) \(.value[])"'
+  # next: {"events":[{"id":"a.ics","start":"2026-11-16T08:00:00Z","label":"Standup"}],"errors":[]}
+  calendula event agenda --json | jq -r '.events[] | "\(.start) \(.label)"'
+  ```
+
+- **An event's `start` and `end` are instants**: RFC 3339 with the offset the time was written at (`Z` for UTC), or `YYYY-MM-DD` for a whole day with an exclusive end, `null` when the time does not resolve, where 0.2 printed them as iCalendar spells them. A script parsing `20261116T080000Z` parses an RFC 3339 time instead, or reads the iCalendar from `item read`. A development build's `startsAt` and `endsAt` are gone: read `start` and `end`.
+
+  ```sh
+  # 0.2: {"id":"a.ics","summary":"Standup","start":"20261116T080000Z","end":"20261116T083000Z"}
+  # next: {"id":"a.ics",...,"start":"2026-11-16T08:00:00Z","end":"2026-11-16T08:30:00Z","allDay":false,...}
+  calendula event list --json | jq -r '.events[] | select(.allDay | not) | [.id, .start, .end] | @tsv'
+  ```
+
+- **`gcal free-busy --json` prints the API's errors under `queryErrors`**, its `{domain, reason}` objects as the API answers them, where 0.2 printed their reasons as strings under `errors`.
+
+  ```sh
+  # 0.2: {"calendars":[{"id":"nope","busy":[],"errors":["notFound"]}]}
+  # next: {"calendars":[{"id":"nope","busy":[],"queryErrors":[{"domain":"global","reason":"notFound"}]}]}
+  calendula gcal free-busy -k nope --json | jq -r '.calendars[].queryErrors[].reason'
   ```
 
 - **A missing item or calendar fails coded** `item-not-found` or `calendar-not-found`, and a server's refusal `permission-denied`, `quota-exceeded`, `rate-limited` or `precondition-failed`, where the failure carried no code. An iCalendar the server refuses for its content is `item-invalid` (CalDAV, Google), where a CalDAV 403 whose plain body named the iCalendar read `permission-denied`: the item is what to fix.

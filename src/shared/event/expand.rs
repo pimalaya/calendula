@@ -643,16 +643,14 @@ impl<'a> Context<'a> {
         Event {
             id: item_id.to_owned(),
             etag: None,
-            uid: text(component, IcalPropKind::Uid).unwrap_or_default(),
+            uid: text(component, IcalPropKind::Uid),
             recurrence_id,
-            summary: text(component, IcalPropKind::Summary).unwrap_or_default(),
+            summary: text(component, IcalPropKind::Summary),
             description: text(component, IcalPropKind::Description),
             location: text(component, IcalPropKind::Location),
-            start: times.start.clone(),
-            end: times.end.clone(),
+            start: times.starts_at.clone(),
+            end: times.ends_at.clone(),
             all_day: times.all_day,
-            starts_at: times.starts_at.clone(),
-            ends_at: times.ends_at.clone(),
             time_zone: times.time_zone.clone(),
             zone_assumed: [IcalPropKind::DtStart, IcalPropKind::DtEnd]
                 .into_iter()
@@ -679,6 +677,8 @@ impl<'a> Context<'a> {
                 .collect(),
             online_meeting_url: meeting_url(component),
             alarms: component.components.iter().filter_map(alarm).collect(),
+            wire_start: times.start.clone(),
+            wire_end: times.end.clone(),
             start_secs: times.start_secs,
             end_secs: times.end_secs,
         }
@@ -1031,7 +1031,7 @@ fn alarm(component: &IcalComponent<'_>) -> Option<EventAlarm> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     use super::*;
 
@@ -1070,7 +1070,7 @@ mod tests {
     fn starts(events: &[Event]) -> Vec<&str> {
         events
             .iter()
-            .map(|event| event.starts_at.as_deref().unwrap())
+            .map(|event| event.start.as_deref().unwrap())
             .collect()
     }
 
@@ -1108,13 +1108,17 @@ mod tests {
             ids(&events),
             ["20261005T090000Z", "20261006T090000Z", "20261007T090000Z"]
         );
-        assert_eq!(events[2].ends_at.as_deref(), Some("2026-10-07T09:30:00Z"));
+        assert_eq!(events[2].end.as_deref(), Some("2026-10-07T09:30:00Z"));
         assert!(
             events
                 .iter()
                 .all(|event| event.id == "7" && event.recurring)
         );
-        assert!(events.iter().all(|event| event.summary == "Stand-up"));
+        assert!(
+            events
+                .iter()
+                .all(|event| event.summary.as_deref() == Some("Stand-up"))
+        );
     }
 
     #[test]
@@ -1205,13 +1209,13 @@ mod tests {
         let events = Event::occurrences(&item, Some(&days("2026-10-01", "2026-10-31")));
 
         assert_eq!(events.len(), 3);
-        assert_eq!(events[1].summary, "Sync (moved)");
-        assert_eq!(events[1].starts_at.as_deref(), Some("2026-10-06T15:00:00Z"));
-        assert_eq!(events[1].ends_at.as_deref(), Some("2026-10-06T15:30:00Z"));
+        assert_eq!(events[1].summary.as_deref(), Some("Sync (moved)"));
+        assert_eq!(events[1].start.as_deref(), Some("2026-10-06T15:00:00Z"));
+        assert_eq!(events[1].end.as_deref(), Some("2026-10-06T15:30:00Z"));
         assert_eq!(events[1].recurrence_id.as_deref(), Some("20261006T090000Z"));
 
         let read = Event::occurrence(&item, "20261006T090000Z").unwrap();
-        assert_eq!(read.summary, "Sync (moved)");
+        assert_eq!(read.summary.as_deref(), Some("Sync (moved)"));
         assert!(Event::occurrence(&item, "20261009T090000Z").is_none());
     }
 
@@ -1269,11 +1273,11 @@ mod tests {
                 "2026-06-03T14:00:00+02:00",
             ]
         );
-        assert_eq!(events[1].summary, "Sync (moved)");
+        assert_eq!(events[1].summary.as_deref(), Some("Sync (moved)"));
         assert_eq!(events[1].recurrence_id.as_deref(), Some("20260602T140000"));
 
         let read = Event::occurrence(&item, "20260602T140000").unwrap();
-        assert_eq!(read.summary, "Sync (moved)");
+        assert_eq!(read.summary.as_deref(), Some("Sync (moved)"));
     }
 
     #[test]
@@ -1315,8 +1319,8 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         assert!(events[0].all_day);
-        assert_eq!(events[0].starts_at.as_deref(), Some("2026-03-10"));
-        assert_eq!(events[0].ends_at.as_deref(), Some("2026-03-11"));
+        assert_eq!(events[0].start.as_deref(), Some("2026-03-10"));
+        assert_eq!(events[0].end.as_deref(), Some("2026-03-11"));
         assert_eq!(events[0].recurrence_id.as_deref(), Some("20260310"));
         assert_eq!(events[0].time_zone, None);
         assert!(Event::occurrences(&item, Some(&days("2026-03-11", "2026-03-11"))).is_empty());
@@ -1344,10 +1348,7 @@ mod tests {
                 "2026-11-02T09:00:00+01:00",
             ]
         );
-        assert_eq!(
-            events[1].ends_at.as_deref(),
-            Some("2026-10-26T10:00:00+01:00")
-        );
+        assert_eq!(events[1].end.as_deref(), Some("2026-10-26T10:00:00+01:00"));
     }
 
     #[test]
@@ -1467,11 +1468,9 @@ mod tests {
                 "summary": "Planning",
                 "description": "Agenda\nfirst",
                 "location": "Room 1",
-                "start": "20261005T090000Z",
-                "end": "20261005T094500Z",
+                "start": "2026-10-05T09:00:00Z",
+                "end": "2026-10-05T09:45:00Z",
                 "allDay": false,
-                "startsAt": "2026-10-05T09:00:00Z",
-                "endsAt": "2026-10-05T09:45:00Z",
                 "timeZone": "UTC",
                 "zoneAssumed": false,
                 "recurring": false,
@@ -1510,6 +1509,22 @@ mod tests {
                 "alarms": [],
             })
         );
+    }
+
+    /// An event carrying no `UID` nor `SUMMARY` prints both `null`, never
+    /// `""`; a whole day prints its dates, the end exclusive.
+    #[test]
+    fn absent_text_is_null_and_a_whole_day_prints_its_dates() {
+        let item = item("", &vevent(&["DTSTART;VALUE=DATE:20261005"]));
+
+        let events = Event::project(&item);
+        let value = serde_json::to_value(&events[0]).unwrap();
+
+        assert_eq!(value["uid"], Value::Null, "{value}");
+        assert_eq!(value["summary"], Value::Null, "{value}");
+        assert_eq!(value["start"], "2026-10-05", "{value}");
+        assert_eq!(value["end"], "2026-10-06", "{value}");
+        assert_eq!(value["allDay"], true, "{value}");
     }
 
     #[test]
@@ -1631,7 +1646,7 @@ mod tests {
         assert!(Event::project(&unknown)[0].zone_assumed);
         assert!(!Event::project(&known)[0].zone_assumed);
         assert_eq!(
-            Event::project(&known)[0].starts_at.as_deref(),
+            Event::project(&known)[0].start.as_deref(),
             Some("2026-10-19T09:00:00+02:00")
         );
         assert!(!Event::project(&floating)[0].zone_assumed);
@@ -1683,11 +1698,8 @@ mod tests {
 
         let event = &Event::project(&item)[0];
 
-        assert_eq!(
-            event.starts_at.as_deref(),
-            Some("2026-10-19T09:00:00+02:00")
-        );
-        assert_eq!(event.ends_at.as_deref(), Some("2026-10-19T10:00:00+02:00"));
+        assert_eq!(event.start.as_deref(), Some("2026-10-19T09:00:00+02:00"));
+        assert_eq!(event.end.as_deref(), Some("2026-10-19T10:00:00+02:00"));
         assert!(!event.zone_assumed);
     }
 

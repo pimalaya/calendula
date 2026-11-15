@@ -38,9 +38,9 @@ use crate::{
 /// A VEVENT projected out of a [`CalendarItem`]'s iCalendar bytes, or one
 /// occurrence of a recurring one.
 ///
-/// `start` and `end` keep the iCalendar wire spelling, so what a listing
-/// prints is what the calendar carries; `startsAt` and `endsAt` are the
-/// same times resolved, with their UTC offset, `Z` for UTC.
+/// `start` and `end` are its times resolved, RFC 3339 with their UTC
+/// offset (`Z` for UTC) or a date for a whole day; the iCalendar spelling
+/// stays in the item's contents.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Event {
@@ -49,30 +49,26 @@ pub struct Event {
     /// The entity tag of that item: the version a write to it can be
     /// gated on (`--if-match`), `null` when the backend has none.
     pub etag: Option<String>,
-    /// The event's `UID`, empty when it carries none.
-    pub uid: String,
+    /// The event's `UID`, `null` when it carries none.
+    pub uid: Option<String>,
     /// The instance identity of an occurrence, as a `RECURRENCE-ID`
     /// carries it: what addresses one occurrence beside `id`. `null` for
     /// an event that does not recur, and for a series listed whole.
     pub recurrence_id: Option<String>,
-    /// The event's SUMMARY, empty when it carries none.
-    pub summary: String,
+    /// The event's SUMMARY, `null` when it carries none.
+    pub summary: Option<String>,
     /// The event's DESCRIPTION, `null` when it carries none.
     pub description: Option<String>,
     /// The event's LOCATION, `null` when it carries none.
     pub location: Option<String>,
-    /// The start, iCalendar-spelled (`YYYYMMDD`, `YYYYMMDDTHHMMSS[Z]`).
-    pub start: String,
+    /// The start as RFC 3339 with its UTC offset, `Z` for UTC, or
+    /// `YYYY-MM-DD` for a whole day; `null` when it does not resolve.
+    pub start: Option<String>,
     /// The end, spelled as `start` is: `DTEND`, or the start plus the
-    /// `DURATION`.
-    pub end: String,
+    /// `DURATION`; a whole day's is exclusive.
+    pub end: Option<String>,
     /// Whether the event spans whole days (a `DATE` start).
     pub all_day: bool,
-    /// The start as RFC 3339 with its UTC offset, `Z` for UTC, or
-    /// `YYYY-MM-DD` for a whole day.
-    pub starts_at: Option<String>,
-    /// The end, spelled as `startsAt` is; a whole day's is exclusive.
-    pub ends_at: Option<String>,
     /// The zone the start is written in: its `TZID`, `UTC`, or the local
     /// zone a floating time is read in. `null` for a whole day.
     pub time_zone: Option<String>,
@@ -102,6 +98,14 @@ pub struct Event {
     pub online_meeting_url: Option<String>,
     /// Every `VALARM`, in document order.
     pub alarms: Vec<EventAlarm>,
+    /// The start, iCalendar-spelled (`YYYYMMDD`,
+    /// `YYYYMMDDTHHMMSS[Z]`), for windowing and for a time that does not
+    /// resolve.
+    #[serde(skip)]
+    pub(crate) wire_start: String,
+    /// The end, spelled as `wire_start` is.
+    #[serde(skip)]
+    pub(crate) wire_end: String,
     /// The start in Unix seconds, for windowing and ordering.
     #[serde(skip)]
     pub(crate) start_secs: Option<i64>,
@@ -231,11 +235,11 @@ impl Event {
 
     /// The label an agenda cell shows: the summary, then the description.
     pub fn label(&self) -> &str {
-        if self.summary.is_empty() {
-            self.description.as_deref().unwrap_or_default()
-        } else {
-            &self.summary
-        }
+        self.summary
+            .as_deref()
+            .filter(|summary| !summary.is_empty())
+            .or(self.description.as_deref())
+            .unwrap_or_default()
     }
 
     /// The event's start as a date-time on the wall clock of `zone`, as
@@ -246,7 +250,7 @@ impl Event {
         let instant = self.start_secs.filter(|_| !self.all_day);
 
         let Some(at) = instant.and_then(|secs| Timestamp::from_second(secs).ok()) else {
-            return parse_stamp(&self.start);
+            return parse_stamp(&self.wire_start);
         };
 
         let at = at.to_zoned(zone.clone()).datetime();
@@ -330,9 +334,10 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].id, "item-1");
-        assert_eq!(events[0].summary, "Stand-up");
-        assert_eq!(events[0].start, "20260814T090000Z");
-        assert_eq!(events[0].end, "20260814T100000Z");
+        assert_eq!(events[0].summary.as_deref(), Some("Stand-up"));
+        assert_eq!(events[0].start.as_deref(), Some("2026-08-14T09:00:00Z"));
+        assert_eq!(events[0].end.as_deref(), Some("2026-08-14T10:00:00Z"));
+        assert_eq!(events[0].wire_start, "20260814T090000Z");
     }
 
     #[test]
@@ -343,7 +348,7 @@ mod tests {
     #[test]
     fn the_label_falls_back_to_the_description() {
         let summarised = Event {
-            summary: "Stand-up".into(),
+            summary: Some("Stand-up".into()),
             description: Some("Daily".into()),
             ..Default::default()
         };
@@ -359,7 +364,7 @@ mod tests {
     #[test]
     fn both_stamp_shapes_parse_and_a_date_starts_at_midnight() {
         let zoned = Event {
-            start: "20260814T090000Z".into(),
+            wire_start: "20260814T090000Z".into(),
             ..Default::default()
         };
         let expected = NaiveDate::from_ymd_opt(2026, 8, 14)
@@ -369,7 +374,7 @@ mod tests {
         assert_eq!(zoned.start_at(&TimeZone::UTC), Some(expected));
 
         let all_day = Event {
-            start: "20260814".into(),
+            wire_start: "20260814".into(),
             ..Default::default()
         };
         let midnight = NaiveDate::from_ymd_opt(2026, 8, 14)
@@ -378,7 +383,7 @@ mod tests {
         assert_eq!(all_day.start_at(&TimeZone::UTC), Some(midnight));
 
         let broken = Event {
-            start: "nonsense".into(),
+            wire_start: "nonsense".into(),
             ..Default::default()
         };
         assert_eq!(broken.start_at(&TimeZone::UTC), None);
@@ -396,7 +401,7 @@ mod tests {
         };
 
         let utc = Event {
-            start: "20261120T090000Z".into(),
+            wire_start: "20261120T090000Z".into(),
             start_secs: Some(1_795_165_200),
             ..Default::default()
         };
@@ -404,7 +409,7 @@ mod tests {
         assert_eq!(utc.start_at(&TimeZone::UTC), at(9));
 
         let all_day = Event {
-            start: "20261120".into(),
+            wire_start: "20261120".into(),
             all_day: true,
             start_secs: Some(1_795_132_800),
             ..Default::default()

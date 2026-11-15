@@ -1185,7 +1185,7 @@ fn in_range(item: &CalendarItem, stored: &PimdirItem, range: &CalendarTimeRange)
             return true;
         };
 
-        return events.iter().any(|event| range.contains(&event.start))
+        return events.iter().any(|event| range.contains(&event.wire_start))
             || !Event::occurrences(item, Some(range)).is_empty();
     }
 
@@ -1465,9 +1465,9 @@ mod tests {
 
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].id, "1");
-        assert_eq!(events[0].summary, "Pre demo woonies");
+        assert_eq!(events[0].summary.as_deref(), Some("Pre demo woonies"));
         assert_eq!(events[1].id, "2");
-        assert_eq!(events[1].summary, "Pre demo MINIS");
+        assert_eq!(events[1].summary.as_deref(), Some("Pre demo MINIS"));
     }
 
     #[test]
@@ -2145,7 +2145,7 @@ mod tests {
         assert_eq!(items[0].id, ids[0]);
         assert_eq!(
             Event::occurrences(&items[0], Some(&range))[0]
-                .starts_at
+                .start
                 .as_deref(),
             Some("2026-10-12T09:00:00Z")
         );
@@ -3251,7 +3251,7 @@ mod tests {
         items
             .iter()
             .flat_map(Event::project)
-            .filter(|event| event.uid == uid)
+            .filter(|event| event.uid.as_deref() == Some(uid))
             .collect()
     }
 
@@ -3385,7 +3385,7 @@ mod tests {
             .items
             .iter()
             .flat_map(|item| Event::occurrences(item, Some(&week)))
-            .map(|event| event.summary)
+            .filter_map(|event| event.summary)
             .collect();
         for expected in ["Moved out", "Later instance", "Weekly", "Long", "All day"] {
             assert!(
@@ -3515,7 +3515,9 @@ mod tests {
         let kinds: Vec<_> = order.iter().map(kind_of).collect();
         let uid_of = |id: &String| {
             let item = backend.get_item("cal", id).unwrap();
-            Event::project(&item).first().map(|event| event.uid.clone())
+            Event::project(&item)
+                .first()
+                .and_then(|event| event.uid.clone())
         };
         let uids: Vec<_> = order.iter().map(uid_of).collect();
 

@@ -873,9 +873,9 @@ mod tests {
         let events = Event::project(&item_from("primary", &event, &[]));
 
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].summary, "Stand-up");
-        assert_eq!(events[0].start, "20260814T090000Z");
-        assert_eq!(events[0].end, "20260814T100000Z");
+        assert_eq!(events[0].summary.as_deref(), Some("Stand-up"));
+        assert_eq!(events[0].start.as_deref(), Some("2026-08-14T09:00:00Z"));
+        assert_eq!(events[0].end.as_deref(), Some("2026-08-14T10:00:00Z"));
     }
 
     /// An exception whose master the batch holds folds into it, one whose

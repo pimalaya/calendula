@@ -369,17 +369,23 @@ fn an_item_list_names_only_what_it_could_not_read() {
     }
 }
 
-/// The agenda's JSON maps its start instants under `starts`, beside the
-/// items it could not read under `errors`.
+/// The agenda's JSON lists its events under `events`, each with its item
+/// id, its start as `event list --json` prints it and its label, beside
+/// the items it could not read under `errors`.
 #[test]
-fn the_agenda_json_holds_its_starts_and_its_errors() {
+fn the_agenda_json_holds_its_events_and_its_errors() {
     let home = account();
     let args = ["--json", "event", "agenda", "11", "2026"];
     let json: Value = serde_json::from_str(&run(home.path(), &args)).unwrap();
 
-    let starts = json["starts"].as_object().unwrap();
-    assert_eq!(starts.len(), 3, "{json}");
-    assert_eq!(starts["2026-11-12T09:00:00"][0], "Standup", "{json}");
+    let events = json["events"].as_array().unwrap();
+    assert_eq!(events.len(), 3, "{json}");
+    let first = serde_json::json!({
+        "id": "a",
+        "start": "2026-11-12T09:00:00Z",
+        "label": "Standup",
+    });
+    assert_eq!(events[0], first, "{json}");
     assert_eq!(json["errors"], Value::Array(Vec::new()), "{json}");
 
     let (home, _) = unreadable_account();
@@ -392,7 +398,7 @@ fn the_agenda_json_holds_its_starts_and_its_errors() {
 }
 
 /// The agenda stamps a UTC event at its local time, as `event list` shows
-/// it, its JSON key the local time too.
+/// it, its JSON `start` the instant as `event list --json` prints it.
 #[test]
 fn the_agenda_stamps_an_event_in_the_local_zone() {
     let home = account();
@@ -414,8 +420,8 @@ fn the_agenda_stamps_an_event_in_the_local_zone() {
     };
 
     let json: Value = serde_json::from_str(&agenda("Europe/Paris", true)).unwrap();
-    let starts = json["starts"].as_object().unwrap();
-    assert_eq!(starts["2026-11-12T10:00:00"][0], "Standup", "{json}");
+    assert_eq!(json["events"][0]["start"], "2026-11-12T09:00:00Z", "{json}");
+    assert_eq!(json["events"][0]["label"], "Standup", "{json}");
 
     let text = agenda("America/New_York", false);
     assert!(text.contains("Nov 12, 04:00"), "{text}");

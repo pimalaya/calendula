@@ -49,8 +49,8 @@ impl PimdirPartstat {
 ///
 /// When several sources of the account can send it, pass `--source`.
 ///
-/// JSON output: `{"queued", "calendarId", "eventId", "recurrenceId", "partstat",
-/// "comment", "source"}`, `queued` being the queue row.
+/// JSON output: `{"row", "id", "calendarId", "recurrenceId", "partstat",
+/// "comment", "source"}`, `row` being the queue row and `id` the event.
 #[derive(Debug, Parser)]
 pub struct PimdirReplyCommand {
     /// Calendar holding the event; falls back to `calendar.default`.
@@ -114,7 +114,7 @@ impl PimdirReplyCommand {
 ///
 /// When several sources of the account can send it, pass `--source`.
 ///
-/// JSON output: `{"queued", "calendarId", "eventId", "recurrenceId", "partstat",
+/// JSON output: `{"row", "id", "calendarId", "recurrenceId", "partstat",
 /// "comment", "source"}`, `partstat` being `null`.
 #[derive(Debug, Parser)]
 pub struct PimdirCancelCommand {
@@ -168,12 +168,13 @@ impl PimdirCancelCommand {
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PimdirIntentOutput {
-    /// The queue row the intent was appended as.
-    pub queued: i64,
+    /// The queue row the intent was appended as, the row `pimdir queue
+    /// show` and `pimdir queue cancel` take.
+    pub row: i64,
+    /// The event the intent addresses, as `event list` prints it.
+    pub id: String,
     /// The calendar holding the event.
     pub calendar_id: String,
-    /// The event the intent addresses.
-    pub event_id: String,
     /// The occurrence it is limited to, `null` for the whole series.
     pub recurrence_id: Option<String>,
     /// The `PARTSTAT` a reply carries, `null` for a cancellation.
@@ -194,9 +195,9 @@ impl PimdirIntentOutput {
         comment: Option<String>,
     ) -> Self {
         Self {
-            queued: queued.row,
+            row: queued.row,
+            id: event_id,
             calendar_id,
-            event_id,
             recurrence_id,
             partstat: partstat.map(ToOwned::to_owned),
             comment,
@@ -207,12 +208,51 @@ impl PimdirIntentOutput {
 
 impl fmt::Display for PimdirIntentOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let id = sanitize::text(&self.event_id);
+        let id = sanitize::text(&self.id);
 
         match &self.partstat {
             Some(partstat) => write!(f, "Reply {partstat} to event `{id}`")?,
             None => write!(f, "Cancellation of event `{id}`")?,
         }
         writeln!(f, " queued; the next sync sends it")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    /// The queue row prints as `row`, the event as `id` beside its
+    /// `calendarId`, as every other queue and event output names them.
+    #[test]
+    fn a_queued_reply_prints_its_row_and_the_event_id() {
+        let queued = PimdirQueued {
+            row: 12,
+            seq: 7,
+            source: "caldav".into(),
+        };
+        let output = PimdirIntentOutput::new(
+            queued,
+            "personal".into(),
+            "7".into(),
+            None,
+            Some("ACCEPTED"),
+            None,
+        );
+
+        assert_eq!(
+            serde_json::to_value(&output).unwrap(),
+            json!({
+                "row": 12,
+                "id": "7",
+                "calendarId": "personal",
+                "recurrenceId": null,
+                "partstat": "ACCEPTED",
+                "comment": null,
+                "source": "caldav",
+            })
+        );
     }
 }

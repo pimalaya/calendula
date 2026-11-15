@@ -206,7 +206,9 @@ impl fmt::Display for PimdirSearchOutput {
                 line.push(matched.unwrap_or_default());
             }
 
-            line.push(sanitize::text(&hit.event.summary).into_owned());
+            line.push(
+                sanitize::text(hit.event.summary.as_deref().unwrap_or_default()).into_owned(),
+            );
             listing.items.push(line);
         }
 
@@ -262,12 +264,12 @@ mod tests {
             hits: vec![PimdirCalendarHit {
                 event: Event {
                     id: "7".into(),
-                    summary: "Budget review".into(),
-                    start: "20261110".into(),
-                    end: "20261111".into(),
+                    summary: Some("Budget review".into()),
+                    start: Some("2026-11-10".into()),
+                    end: Some("2026-11-11".into()),
                     all_day: true,
-                    starts_at: Some("2026-11-10".into()),
-                    ends_at: Some("2026-11-11".into()),
+                    wire_start: "20261110".into(),
+                    wire_end: "20261111".into(),
                     ..Default::default()
                 },
                 calendar_id: "cal".into(),

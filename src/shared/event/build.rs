@@ -216,8 +216,8 @@ mod tests {
         let event = &events[0];
         assert_eq!(event["uid"], "1@example.org");
         assert_eq!(event["summary"], "Review");
-        assert_eq!(event["startsAt"], "2026-10-19T09:00:00+02:00");
-        assert_eq!(event["endsAt"], "2026-10-19T10:30:00+02:00");
+        assert_eq!(event["start"], "2026-10-19T09:00:00+02:00");
+        assert_eq!(event["end"], "2026-10-19T10:30:00+02:00");
         assert_eq!(event["timeZone"], "Europe/Paris");
         assert_eq!(event["zoneAssumed"], false);
         assert_eq!(event["status"], "CONFIRMED");
