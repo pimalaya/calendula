@@ -17,7 +17,8 @@ use std::{
 use anyhow::{Result, anyhow};
 use io_gcal::v3::{
     client::{GcalClientStd, GcalClientStdError},
-    send::{GCAL_API_BASE, GcalApiError, GcalSendError},
+    query::append_query_pairs,
+    send::{GCAL_API_BASE, GcalApiError, GcalSend, GcalSendError, gcal_api_url},
 };
 use pimalaya_config::secret::SecretResolver;
 use pimalaya_stream::{
@@ -25,6 +26,8 @@ use pimalaya_stream::{
     tls::Tls,
 };
 use secrecy::ExposeSecret;
+use serde::Serialize;
+use serde_json::{Map, Value};
 use url::Url;
 
 use crate::{
@@ -54,6 +57,40 @@ impl GcalClient {
             inner,
             name,
             account,
+        }
+    }
+}
+
+impl GcalClient {
+    /// Every item of the listing at `segments` under the Calendar API,
+    /// queried by `params`, each as Google sent it: the pages followed
+    /// through `nextPageToken`, the items of each read from `items`, a
+    /// page leaving the key out holding none.
+    pub fn raw_items<P: Serialize>(&mut self, segments: &[&str], params: &P) -> Result<Vec<Value>> {
+        let mut base = gcal_api_url(segments)?;
+        append_query_pairs(&mut base, params);
+
+        let mut items = Vec::new();
+        let mut page_token: Option<String> = None;
+
+        loop {
+            let mut url = base.clone();
+
+            if let Some(token) = &page_token {
+                url.query_pairs_mut().append_pair("pageToken", token);
+            }
+
+            let send = GcalSend::<Map<String, Value>>::get(&self.inner.auth, url);
+            let mut page = self.inner.run(send)?.response;
+
+            if let Some(Value::Array(page_items)) = page.remove("items") {
+                items.extend(page_items);
+            }
+
+            match page.remove("nextPageToken") {
+                Some(Value::String(next)) => page_token = Some(next),
+                _ => return Ok(items),
+            }
         }
     }
 }

@@ -101,7 +101,7 @@ pimdir.account = "example"
 ### Commands and flags
 
 - **`event create`, `item create` and `event find` are `event add`, `item add` and `event search`**, the verbs of Himalaya. The old names stay hidden aliases, so a script keeps working; an MCP client calls the tools `event_add`, `item_add` and `event_search`, where it called `event_create`, `item_create` and `event_find`.
-- **`calendar delete` and `calendar update` take the calendar as an argument**, as Himalaya's `mailbox delete`; `-k` stays a hidden alias. `calendar create` takes the name alone, the id derived from it (the name on vdir, a UUID on CalDAV), and an id before the name as before.
+- **`calendar delete` and `calendar update` take the calendar as an argument**, as Himalaya's `mailbox delete`; `-k` stays a hidden alias. `calendar create` takes the name alone, the id derived from it (the name on vdir, a UUID on CalDAV), or given with `--id`: the id before the name, `calendar create <ID> <NAME>`, is refused (exit 2), clap reading no second positional.
 
   ```sh
   # 0.2
@@ -109,7 +109,7 @@ pimdir.account = "example"
   calendula calendar create work Work
   # next
   calendula calendar delete work
-  calendula calendar create Work
+  calendula calendar create Work --id work
   ```
 
 - **`-d` on `caldav mkcalendar` (formerly `caldav create`) and `vdir create` sets the description**, as on `calendar create`, where it set the display name: pass the display name with `-n`. `-D` still sets the description, and `--color` takes `-C` on every calendar command.
@@ -243,6 +243,18 @@ calendula calendar list --json | jq -r '.calendars[].id'
   calendula gcal free-busy -k nope --json | jq -r '.calendars[].queryErrors[].reason'
   ```
 
+- **`gcal calendars`, `gcal acl list`, `gcal events instances` and `gcal settings` print Google's items as Google sends them**, under the same keys (`calendars`, `rules`, `instances`, `settings`), where 0.2 printed rows calendula shaped. A calendar's title is `summary`, `summaryOverride` beside it when the user renamed it, its colour `backgroundColor`, its reminders `defaultReminders` objects (`{method, minutes}`), and `primary` and `selected` are absent rather than `false`; a rule's scope is `scope.type` and `scope.value`; an instance's times are `start` and `end` objects (`dateTime` or `date`, `timeZone`), its original start `originalStartTime`; every item carries the keys Google adds (`kind`, `etag` and the rest).
+
+  ```sh
+  # 0.2: {"calendars":[{"id":"work@example.org","summary":"Work","color":"#9fe1e7","primary":false,"defaultReminders":["10m"],...}]}
+  # next: {"calendars":[{"kind":"calendar#calendarListEntry","id":"work@example.org","summary":"Work","backgroundColor":"#9fe1e7","defaultReminders":[{"method":"popup","minutes":10}],...}]}
+  calendula gcal calendars --json | jq -r '.calendars[] | "\(.id) \(.summaryOverride // .summary)"'
+  # 0.2: {"rules":[{"id":"user:bob@example.org","scope":"user","value":"bob@example.org","role":"reader"}]}
+  calendula gcal acl list --json | jq -r '.rules[] | "\(.scope.type) \(.scope.value // "") \(.role)"'
+  # 0.2: {"instances":[{"id":"e1_20261112T090000Z","start":"2026-11-12T10:00:00+01:00",...}]}
+  calendula gcal events instances e1 --json | jq -r '.instances[] | "\(.id) \(.start.dateTime // .start.date)"'
+  ```
+
 - **A missing item or calendar fails coded** `item-not-found` or `calendar-not-found`, and a server's refusal `permission-denied`, `quota-exceeded`, `rate-limited` or `precondition-failed`, where the failure carried no code. An iCalendar the server refuses for its content is `item-invalid` (CalDAV, Google), where a CalDAV 403 whose plain body named the iCalendar read `permission-denied`: the item is what to fix.
 - **Account resolution fails coded**: an unknown `-a` name `account-missing`, no account marked default `account-default-missing`, several marked default `account-default-several`, where the failure carried no code.
 - **A CalDAV id prints decoded** where the decoding encodes back to the segment the server serves: a calendar served at `My%20Cal` lists as `My Cal`, an item `My%20Event.ics` as `My Event.ics`; a `%2F`, an escape of a byte sent raw such as `%40` and lowercase hex stay as served. An id 0.2 printed still addresses its calendar or item on every command. A script comparing an id it stored with a new listing reads the new spelling.
@@ -286,6 +298,15 @@ calendula calendar list --json | jq -r '.calendars[].id'
   calendula event update -k work <id> dup.ics
   ```
 
+- **A vdir `item update` or `event update` given an iCalendar for an id the calendar does not hold fails `item-not-found`**, writing nothing, where 0.2 created the item under that id and exited 0. Add the item instead.
+
+  ```sh
+  # 0.2: exit 0, `nope.ics` created
+  calendula item update nope event.ics
+  # next: exit 1, {"code":"item-not-found","error":"Item `nope` not found in calendar `personal`",...}
+  calendula item add event.ics
+  ```
+
 - **An Outlook recurring event whose `RRULE` Graph has no exact pattern for is refused** (a `BYMONTH` or a `BYMONTHDAY` the pattern has no field for, several numbered `BYDAY` elements, a weekday named twice), where 0.2 wrote it as another series.
 - **`event agenda` refuses an argument it cannot read**, naming it: a day that is not a number or not in the month, a month matching no name, a month number outside 1-12 or an unreadable year, where 0.2 drew the 1st, January or the current year. A lone month name draws that month of the current year, where 0.2 read it as a year.
 - **Creating a calendar that already exists fails `calendar-duplicate`**, writing nothing: on vdir, where 0.2 wrote its marker files over the existing calendar's and exited 0, `vdir create` included; on CalDAV and Microsoft Graph, where the server's refusal carried no code. Update the calendar instead, or create it once.
@@ -293,7 +314,7 @@ calendula calendar list --json | jq -r '.calendars[].id'
   ```sh
   # 0.2: exit 0, the display name of `work` overwritten
   calendula calendar create work Other
-  # next: exit 1, {"code":"calendar-duplicate","error":"Calendar `work` already exists",...}
+  # next: exit 1, {"code":"calendar-duplicate","error":"Cannot create calendar `work`: it exists already",...}
   calendula calendar update work -n Other
   ```
 

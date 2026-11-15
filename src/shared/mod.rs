@@ -16,7 +16,7 @@ pub mod composer;
 pub mod event;
 pub mod ical;
 pub mod item;
-#[cfg(feature = "msgraph")]
+#[cfg(any(feature = "gcal", feature = "msgraph"))]
 pub mod raw_json;
 pub mod receipt;
 pub mod uuid;

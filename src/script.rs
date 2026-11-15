@@ -1,8 +1,8 @@
 //! # Scripted server
 //!
 //! A stream answering each request a client writes with the next scripted
-//! response, for the tests of the protocol commands: io-webdav and
-//! io-msgraph clients take any `Read + Write`.
+//! response, for the tests of the protocol commands: io-webdav, io-gcal
+//! and io-msgraph clients take any `Read + Write`.
 
 use std::{
     collections::VecDeque,

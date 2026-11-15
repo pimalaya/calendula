@@ -6,26 +6,24 @@
 //! written once here rather than in each command.
 
 use anyhow::{Result, bail};
-use io_gcal::v3::rest::{
-    acl::{GcalAccessRole, GcalAclScopeType},
-    events::{GcalEventDateTime, GcalEventStatus},
-};
+use io_gcal::v3::rest::acl::{GcalAccessRole, GcalAclScopeType};
+use serde_json::Value;
 
-/// The wire spelling of an event status.
-pub fn event_status(status: &GcalEventStatus) -> &str {
-    match status {
-        GcalEventStatus::Confirmed => "confirmed",
-        GcalEventStatus::Tentative => "tentative",
-        GcalEventStatus::Cancelled => "cancelled",
-        GcalEventStatus::Unknown(status) => status,
-    }
+/// The string under `key` of an item as Google sent it, empty when it
+/// holds none.
+pub fn str_of<'a>(item: &'a Value, key: &str) -> &'a str {
+    item.get(key).and_then(Value::as_str).unwrap_or_default()
 }
 
-/// A boundary as one printable stamp: a timestamp, a date, or empty.
-pub fn boundary(boundary: Option<&GcalEventDateTime>) -> String {
-    boundary
-        .and_then(|boundary| boundary.date_time.clone().or_else(|| boundary.date.clone()))
-        .unwrap_or_default()
+/// The boundary under `key` of an event as Google sent it, one printable
+/// stamp: its `dateTime`, else its `date`, else empty.
+pub fn boundary_of<'a>(event: &'a Value, key: &str) -> &'a str {
+    let boundary = event.get(key).unwrap_or(&Value::Null);
+
+    match str_of(boundary, "dateTime") {
+        "" => str_of(boundary, "date"),
+        stamp => stamp,
+    }
 }
 
 /// The wire spelling of an access role.

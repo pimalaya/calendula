@@ -114,7 +114,13 @@ impl MsgraphBackend {
             name: MsgraphField::Set(name.to_owned()),
             ..Default::default()
         };
-        let created = self.client.calendar_create(&calendar)?.response;
+        let created = match self.client.calendar_create(&calendar) {
+            Ok(created) => created.response,
+            Err(err) if refusal_code(&err) == Some(ErrorCode::CalendarDuplicate) => {
+                return Err(error::existing_calendar(name, err));
+            }
+            Err(err) => return Err(err.into()),
+        };
 
         if let Some(id) = id.filter(|id| *id != created.id) {
             warn!(
@@ -240,7 +246,7 @@ impl MsgraphBackend {
     pub fn get_item(&mut self, calendar_id: &str, item_id: &str) -> Result<CalendarItem> {
         let event = self
             .event(item_id)
-            .with_context(|| format!("Read item `{item_id}` from calendar `{calendar_id}`"))?;
+            .map_err(|err| error::read_failed(err, item_id, calendar_id))?;
         let exceptions = self.exceptions(&event, read_within(None, today())?)?;
 
         Ok(item_from(calendar_id, &event, &exceptions))
@@ -735,6 +741,11 @@ pub(crate) mod scripted {
             Some(ErrorCode::CalendarDuplicate),
             "{err:#}"
         );
+        assert_eq!(
+            err.to_string(),
+            "Cannot create calendar `Work`: it exists already"
+        );
+        assert!(err.chain().count() > 1, "{err:#}");
     }
 
     #[test]

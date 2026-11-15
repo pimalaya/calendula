@@ -52,12 +52,12 @@ fn a_calendar_created_twice_is_a_duplicate() {
 
     let commands: &[(&[&str], &str)] = &[
         (
-            &["calendar", "create", "work", "Other"],
-            "Calendar `work` already exists",
+            &["calendar", "create", "Other", "--id", "work"],
+            "Cannot create calendar `work`: it exists already",
         ),
         (
             &["vdir", "create", "work", "-n", "Other"],
-            "Collection `work` already exists",
+            "Cannot create calendar `work`: it exists already",
         ),
     ];
 
@@ -75,6 +75,6 @@ fn a_calendar_created_twice_is_a_duplicate() {
     }
 
     // NOTE: a new id still makes its calendar.
-    let out = run(dir.path(), &["calendar", "create", "home", "Home"]);
+    let out = run(dir.path(), &["calendar", "create", "Home", "--id", "home"]);
     assert_eq!(out.status.code(), Some(0));
 }

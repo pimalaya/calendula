@@ -111,7 +111,7 @@ impl PimdirBackend {
                     item_id: addressed.item_id,
                     producer: queued.producer,
                     queued_at: queued.created_at,
-                    attempts: queued.attempts,
+                    attempts: u64::try_from(queued.attempts).unwrap_or_default(),
                     unconfirmed: false,
                     error: None,
                     summary: addressed.summary,
@@ -151,7 +151,7 @@ impl PimdirBackend {
                     item_id: addressed.item_id,
                     producer: parked.producer,
                     queued_at: parked.created_at,
-                    attempts: parked.attempts,
+                    attempts: u64::try_from(parked.attempts).unwrap_or_default(),
                     error: Some(parked.error),
                     summary: addressed.summary,
                 }

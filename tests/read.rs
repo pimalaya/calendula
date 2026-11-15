@@ -95,7 +95,8 @@ fn a_read_keeps_the_stored_bytes_in_json() {
 /// An id the calendar does not hold fails a read, an update or a delete
 /// with a failure object coded `item-not-found`, its sentence Himalaya's
 /// for a missing message, the event commands saying how an event is
-/// named.
+/// named; an update given a source creates nothing, and the backend's own
+/// answer is the one source under the sentence.
 #[test]
 fn an_unknown_id_is_coded_not_found() {
     let home = account();
@@ -106,10 +107,11 @@ fn an_unknown_id_is_coded_not_found() {
                  the id `event list` shows, `event search <UID>` finding it by its \
                  iCalendar UID";
 
-    // NOTE: a vdir `item update` given a source writes the file, whether
-    // or not it was there.
+    let ical = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n";
     let commands: &[(&[&str], &str)] = &[
         (&["item", "read", "nope"], item),
+        (&["item", "update", "nope", ical], item),
+        (&["event", "update", "nope", ical], event),
         (&["item", "delete", "nope"], item),
         (&["event", "read", "nope"], event),
         (&["event", "update", "nope", "--summary", "Bob"], event),
@@ -129,7 +131,13 @@ fn an_unknown_id_is_coded_not_found() {
         let json: Value = serde_json::from_str(&stdout).unwrap();
         assert_eq!(json["code"], "item-not-found", "{args:?}: {json}");
         assert_eq!(json["error"], *error, "{args:?}: {json}");
+
+        let sources = json["sources"].as_array().unwrap();
+        assert_eq!(sources.len(), 1, "{args:?}: {json}");
     }
+
+    let written = home.path().join("personal").join("nope.ics");
+    assert!(!written.exists(), "an update created the item");
 }
 
 /// A read always carries the item's bytes, as cardamum's card reads do: an

@@ -27,13 +27,12 @@ use io_webdav::{
     rfc4918::{collection_path, send::WebdavSendError, typed::WebdavUnreadableEntry},
 };
 use log::warn;
-use pimalaya_cli::error::with_code;
 use pimalaya_config::secret::SecretResolver;
 
 use crate::{
     caldav::client::{connect, item_refusal, refused, rejects_item, row_code},
     config::CaldavConfig,
-    error::{ErrorCode, ItemError, calendar_not_found, recoded},
+    error::{ErrorCode, ItemError, calendar_not_found, existing_calendar, recoded},
     shared::{
         calendar::{Calendar, CalendarDiff},
         client::window,
@@ -165,8 +164,7 @@ impl CaldavBackend {
             return err.into();
         }
 
-        let err = anyhow::Error::from(err).context(format!("Calendar `{id}` already exists"));
-        with_code(err, |_| Some(ErrorCode::CalendarDuplicate))
+        existing_calendar(id, err)
     }
 
     /// The listed calendar `id` addresses, if any.
@@ -244,7 +242,7 @@ impl CaldavBackend {
                 }
                 err => item_refusal(err),
             })
-            .with_context(|| format!("Read item `{item_id}` from calendar `{calendar_id}`"))?;
+            .map_err(|err| crate::error::read_failed(err, item_id, calendar_id))?;
 
         Ok(CalendarItem {
             id: item_id.to_owned(),
@@ -706,7 +704,10 @@ mod tests {
             let err = with_code(err, code);
 
             assert_eq!(code_of(&err), Some(ErrorCode::CalendarDuplicate), "{err:#}");
-            assert_eq!(err.to_string(), "Calendar `cal` already exists");
+            assert_eq!(
+                err.to_string(),
+                "Cannot create calendar `cal`: it exists already"
+            );
             assert!(err.chain().count() > 1, "{err:#}");
         }
     }
@@ -988,7 +989,7 @@ mod tests {
     fn a_read_answered_400_is_not_found_and_a_write_is_not() {
         let err = answering(400, "").get_item("cal", "nope").unwrap_err();
         assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
-        assert_eq!(err.to_string(), "Read item `nope` from calendar `cal`");
+        assert!(!format!("{err:#}").contains("Read item"), "{err:#}");
         assert!(format!("{err:#}").contains("HTTP 400"), "{err:#}");
 
         let err = answering(400, "")

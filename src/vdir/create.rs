@@ -49,8 +49,7 @@ impl VdirCollectionCreateCommand {
         }
 
         if collection_dir(client.root(), &self.id).is_some() {
-            let message = format!("Collection `{}` already exists", self.id);
-            return Err(calendar_duplicate(message));
+            return Err(calendar_duplicate(&self.id));
         }
 
         let path = VdirPath::new(client.root().as_str()).join(&self.id);

@@ -84,7 +84,7 @@ pub struct PimdirQueueRow {
     /// When the row was appended, stamped by the store's own clock.
     pub queued_at: String,
     /// How many times the sync engine tried the row.
-    pub attempts: i64,
+    pub attempts: u64,
     /// Whether the row's outcome is unknown: the engine sent its request
     /// and cannot tell whether it took effect, so it may have.
     pub unconfirmed: bool,
@@ -272,5 +272,15 @@ Calendar:   cal
 Nothing queued nor parked
 ";
         assert_eq!(output.to_string(), expected);
+    }
+
+    /// A row's tries are an unsigned count, as cardamum's and Himalaya's.
+    #[test]
+    fn the_attempts_are_an_unsigned_count() {
+        let schema = schemars::schema_for!(PimdirQueueRow);
+        let attempts = &schema.as_value()["properties"]["attempts"];
+
+        assert_eq!(attempts["format"], "uint64", "{attempts}");
+        assert_eq!(attempts["minimum"], 0, "{attempts}");
     }
 }

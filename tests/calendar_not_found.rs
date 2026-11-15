@@ -183,10 +183,10 @@ fn a_new_id_reaching_out_of_the_home_is_refused() {
     let before = tree(dir.path());
 
     let commands: &[&[&str]] = &[
-        &["calendar", "create", "..", "Escape"],
-        &["calendar", "create", "../keep", "Escape"],
-        &["calendar", "create", "../escape", "Escape"],
-        &["calendar", "create", "x/y", "Escape"],
+        &["calendar", "create", "Escape", "--id", ".."],
+        &["calendar", "create", "Escape", "--id", "../keep"],
+        &["calendar", "create", "Escape", "--id", "../escape"],
+        &["calendar", "create", "Escape", "--id", "x/y"],
         &["vdir", "create", ".."],
         &["vdir", "create", "../keep"],
         &["vdir", "create", "../escape"],

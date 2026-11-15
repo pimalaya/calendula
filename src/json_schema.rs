@@ -242,6 +242,10 @@ pub fn registry() -> JsonSchemaRegistry {
             "calendula-gcal-settings",
             crate::gcal::settings::GcalSettingsOutput
         );
+        insert!(
+            "calendula-gcal-request",
+            crate::shared::raw_json::RawJsonOutput
+        );
     }
 
     #[cfg(feature = "pimdir")]

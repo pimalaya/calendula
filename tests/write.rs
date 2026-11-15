@@ -79,7 +79,7 @@ fn every_write_receipt_says_whether_it_is_queued() {
     let updated = json(&run(home, &["--json", "item", "update", &id, &item]), 0);
     assert_eq!(updated, serde_json::json!({ "id": id, "queued": false }));
 
-    let args = ["--json", "calendar", "create", "work", "Work"];
+    let args = ["--json", "calendar", "create", "Work", "--id", "work"];
     let created = json(&run(home, &args), 0);
     let expected = serde_json::json!({ "id": "work", "name": "Work", "queued": false });
     assert_eq!(created, expected);
@@ -130,9 +130,9 @@ fn a_build_written_to_a_file_names_its_size() {
 }
 
 /// `calendar create` takes a name alone, the vdir directory named after
-/// it, and an id before the name as before; `calendar update` and
-/// `calendar delete` take the calendar as an argument, the former `-k`
-/// still read; `-C` sets the color.
+/// it, an id given with `--id`, the former id before the name refused;
+/// `calendar update` and `calendar delete` take the calendar as an
+/// argument, the former `-k` still read; `-C` sets the color.
 #[test]
 fn the_calendar_commands_take_the_calendar_as_an_argument() {
     let home = account("");
@@ -144,7 +144,7 @@ fn the_calendar_commands_take_the_calendar_as_an_argument() {
     assert!(home.join("Work").is_dir());
 
     let args = [
-        "--json", "calendar", "create", "team", "The team", "-C", "#00ff00",
+        "--json", "calendar", "create", "The team", "--id", "team", "-C", "#00ff00",
     ];
     let created = json(&run(home, &args), 0);
     assert_eq!(created["id"], "team", "{created}");
@@ -154,7 +154,15 @@ fn the_calendar_commands_take_the_calendar_as_an_argument() {
     let args = ["--json", "calendar", "create", "x/y"];
     let error = json(&run(home, &args), 1);
     let message = error["error"].as_str().unwrap_or_default();
-    assert!(message.contains("give the calendar an id"), "{message}");
+    assert!(
+        message.contains("give the calendar an id with `--id`"),
+        "{message}"
+    );
+
+    let args = ["--json", "calendar", "create", "crew", "Crew"];
+    let error = json(&run(home, &args), 2);
+    assert_eq!(error["code"], "usage-invalid", "{error}");
+    assert!(!home.join("crew").exists());
 
     let args = [
         "--json", "calendar", "update", "Work", "-n", "Job", "-C", "#ff0000",

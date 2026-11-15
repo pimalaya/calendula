@@ -17,25 +17,24 @@ use crate::{capability::Capability, shared::client::CalendarClient};
 /// The reported id is the one the backend assigned, and it is what later
 /// commands address the calendar by. Given only a name, vdir names the
 /// calendar's directory after it and CalDAV mints a UUID for its URL
-/// segment; an id given before the name is kept by both. Google and Graph
+/// segment; an id given with `--id` is kept by both. Google and Graph
 /// mint their own either way.
 ///
 /// JSON output: `{"id", "name", "queued"}`, the calendar created, the name
 /// it was given and whether a sync engine applies the write later.
 #[derive(Debug, Parser)]
-#[command(allow_missing_positional = true)]
 pub struct CalendarCreateCommand {
+    /// Human-readable display name.
+    #[arg(value_name = "NAME")]
+    pub name: String,
+
     /// Stable calendar identifier, on the backends letting a client name a
     /// calendar.
     ///
     /// Omitted, vdir takes the name, which must then be one directory
     /// name, and CalDAV a fresh UUID.
-    #[arg(value_name = "ID")]
+    #[arg(long, value_name = "ID")]
     pub id: Option<String>,
-
-    /// Human-readable display name.
-    #[arg(value_name = "NAME")]
-    pub name: String,
 
     /// Free-form description.
     #[arg(short, long, value_name = "TEXT")]

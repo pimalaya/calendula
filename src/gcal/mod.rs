@@ -10,7 +10,7 @@
 //!
 //! The [`cli`] family covers what the unified surface cannot: sharing rules,
 //! availability, recurrence expansion, server-side parsing, the colour
-//! palettes and the account settings.
+//! palettes and the account settings, and a raw request for the rest.
 //!
 //! [`GcalEvent::to_ical`]: io_gcal::v3::rest::events::GcalEvent::to_ical
 
@@ -23,4 +23,5 @@ pub mod colors;
 pub mod events;
 pub mod free_busy;
 pub mod render;
+pub mod request;
 pub mod settings;

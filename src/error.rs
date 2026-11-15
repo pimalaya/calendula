@@ -238,6 +238,30 @@ pub fn event_missing(err: Error, event_id: &str, calendar_id: &str) -> Error {
     })
 }
 
+/// `err`, a read of the item `item_id` of `calendar_id` failing, under
+/// that read, unless coded `item-not-found`: the not-found sentence then
+/// names it, the backend's answer its one source.
+#[cfg_attr(
+    not(any(
+        feature = "caldav",
+        feature = "gcal",
+        feature = "msgraph",
+        feature = "vdir"
+    )),
+    allow(dead_code)
+)]
+pub fn read_failed(err: impl Into<Error>, item_id: &str, calendar_id: &str) -> Error {
+    let err = err.into();
+
+    if code(&err) == Some(ErrorCode::ItemNotFound) {
+        return err;
+    }
+
+    err.context(format!(
+        "Read item `{item_id}` from calendar `{calendar_id}`"
+    ))
+}
+
 /// `err` under the not-found `sentence`, when coded `item-not-found`, one
 /// sentence whatever the backend: its code kept, the backend's own words
 /// under it as its sources. Any other failure is returned as it is.
@@ -265,11 +289,29 @@ pub fn calendar_not_found(message: impl Into<String>) -> Error {
     CodedError::new(ErrorCode::CalendarNotFound, message.into()).into()
 }
 
-/// A refusal under `calendar-duplicate`: a create names a calendar that
-/// already exists.
+/// The family sentence of a create naming the calendar `name` that exists
+/// already.
+#[cfg_attr(
+    not(any(feature = "caldav", feature = "msgraph", feature = "vdir")),
+    allow(dead_code)
+)]
+fn calendar_exists(name: &str) -> String {
+    format!("Cannot create calendar `{name}`: it exists already")
+}
+
+/// A refusal under `calendar-duplicate`: a create names the calendar
+/// `name` that the store holds already.
 #[cfg_attr(not(feature = "vdir"), allow(dead_code))]
-pub fn calendar_duplicate(message: impl Into<String>) -> Error {
-    CodedError::new(ErrorCode::CalendarDuplicate, message.into()).into()
+pub fn calendar_duplicate(name: &str) -> Error {
+    CodedError::new(ErrorCode::CalendarDuplicate, calendar_exists(name)).into()
+}
+
+/// The failure of a create naming the calendar `name` the server answered
+/// exists already, under `calendar-duplicate`, `cause` what it answered
+/// kept in `sources`.
+#[cfg_attr(not(any(feature = "caldav", feature = "msgraph")), allow(dead_code))]
+pub fn existing_calendar(name: &str, cause: impl Into<Error>) -> Error {
+    with_code(cause.into(), |_| Some(ErrorCode::CalendarDuplicate)).context(calendar_exists(name))
 }
 
 /// A refusal under `calendar-default-missing`: a command naming no calendar

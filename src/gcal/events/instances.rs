@@ -16,9 +16,13 @@ use pimalaya_cli::{
 };
 use schemars::JsonSchema;
 use serde::Serialize;
+use serde_json::{Map, Value};
 
 use crate::{
-    gcal::{client::GcalClient, render},
+    gcal::{
+        client::GcalClient,
+        render::{self, boundary_of, str_of},
+    },
     shared::item::CalendarTimeRange,
 };
 
@@ -33,8 +37,9 @@ use crate::{
 /// server spells them, then its summary, under a header naming the
 /// account, the calendar and the series and counting them.
 ///
-/// JSON output: `{"instances": [{"id", "summary", "start", "end",
-/// "status", "originalStart"}]}`.
+/// JSON output: `{"instances": [<event>...]}`, every instance of every
+/// page as Google sent it (`id`, `status`, `summary`, `start`, `end`,
+/// `originalStartTime` and the rest).
 #[derive(Debug, Parser)]
 pub struct GcalInstancesCommand {
     /// The calendar holding the series. Falls back to
@@ -67,49 +72,28 @@ impl GcalInstancesCommand {
         let time_min = range.start.as_deref().map(render::rfc3339);
         let time_max = range.end.as_deref().map(render::rfc3339);
 
-        let mut rows = Vec::new();
-        let mut page_token: Option<String> = None;
-
-        loop {
-            let params = GcalEventInstancesParams {
-                time_min: time_min.as_deref(),
-                time_max: time_max.as_deref(),
-                page_token: page_token.as_deref(),
-                show_deleted: self.show_deleted,
-                ..Default::default()
-            };
-            let page = client
-                .event_instances(&calendar_id, &self.event_id, &params)?
-                .response;
-
-            rows.extend(page.items.into_iter().map(|event| {
-                InstanceRow {
-                    id: event.id.unwrap_or_default(),
-                    summary: event.summary.unwrap_or_default(),
-                    start: render::boundary(event.start.as_ref()),
-                    end: render::boundary(event.end.as_ref()),
-                    status: event
-                        .status
-                        .as_ref()
-                        .map(|status| render::event_status(status).to_owned())
-                        .unwrap_or_default(),
-                    original_start: render::boundary(event.original_start_time.as_ref()),
-                }
-            }));
-
-            match page.next_page_token {
-                Some(next) => page_token = Some(next),
-                None => break,
-            }
-        }
+        let params = GcalEventInstancesParams {
+            time_min: time_min.as_deref(),
+            time_max: time_max.as_deref(),
+            show_deleted: self.show_deleted,
+            ..Default::default()
+        };
+        let segments = [
+            "calendars",
+            &calendar_id,
+            "events",
+            &self.event_id,
+            "instances",
+        ];
+        let instances = client.raw_items(&segments, &params)?;
 
         let mut listing = Listing::new(&client.name, Some("gcal"));
         listing.head("Calendar", &calendar_id);
         listing.head("Event", &self.event_id);
         let nouns = ["instance", "instances"];
-        listing.page(ListingPage::All, rows.len(), nouns, None);
+        listing.page(ListingPage::All, instances.len(), nouns, None);
 
-        printer.out(GcalInstancesOutput { listing, rows })
+        printer.out(GcalInstancesOutput { listing, instances })
     }
 }
 
@@ -120,43 +104,66 @@ pub struct GcalInstancesOutput {
     /// The header the instances print under, its page placed.
     #[serde(skip)]
     pub listing: Listing<'static>,
-    /// The occurrences of the series, one entry each.
-    #[serde(rename = "instances")]
-    pub rows: Vec<InstanceRow>,
-}
-
-/// One occurrence of a recurring series.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct InstanceRow {
-    /// The instance identifier, which addresses this occurrence alone.
-    pub id: String,
-    /// The title, inherited from the series unless overridden.
-    pub summary: String,
-    /// The start of the occurrence.
-    pub start: String,
-    /// The end of the occurrence.
-    pub end: String,
-    /// `confirmed`, `tentative` or `cancelled`.
-    pub status: String,
-    /// Where the recurrence rule placed it, set once it has been moved.
-    pub original_start: String,
+    /// The occurrences of the series, each as Google sent it.
+    #[schemars(with = "Vec<Map<String, Value>>")]
+    pub instances: Vec<Value>,
 }
 
 impl fmt::Display for GcalInstancesOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut listing = self.listing.clone();
 
-        for instance in &self.rows {
+        for instance in &self.instances {
             listing.items.push([
-                sanitize::text(&instance.id).into_owned(),
-                sanitize::text(&instance.status).into_owned(),
-                sanitize::text(&instance.start).into_owned(),
-                sanitize::text(&instance.end).into_owned(),
-                sanitize::text(&instance.summary).into_owned(),
+                sanitize::text(str_of(instance, "id")).into_owned(),
+                sanitize::text(str_of(instance, "status")).into_owned(),
+                sanitize::text(boundary_of(instance, "start")).into_owned(),
+                sanitize::text(boundary_of(instance, "end")).into_owned(),
+                sanitize::text(str_of(instance, "summary")).into_owned(),
             ]);
         }
 
         write!(f, "{listing}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    /// The instances print as Google sent them, the time pairs nested as
+    /// Google nests them, the text reading a timestamp or a date.
+    #[test]
+    fn the_instances_print_as_google_sent_them() {
+        let timed = json!({
+            "kind": "calendar#event",
+            "id": "e1_20261112T090000Z",
+            "status": "confirmed",
+            "summary": "Standup",
+            "start": {"dateTime": "2026-11-12T10:00:00+01:00", "timeZone": "Europe/Paris"},
+            "end": {"dateTime": "2026-11-12T10:15:00+01:00", "timeZone": "Europe/Paris"},
+            "originalStartTime": {"dateTime": "2026-11-12T10:00:00+01:00"},
+            "recurringEventId": "e1",
+        });
+        let whole = json!({
+            "id": "e2_20261113",
+            "status": "cancelled",
+            "start": {"date": "2026-11-13"},
+            "end": {"date": "2026-11-14"},
+        });
+        let output = GcalInstancesOutput {
+            listing: Listing::new("perso", Some("gcal")),
+            instances: vec![timed.clone(), whole.clone()],
+        };
+
+        let json = serde_json::to_value(&output).unwrap();
+        assert_eq!(json, json!({"instances": [timed, whole]}));
+
+        let text = output.to_string();
+        assert!(text.contains("2026-11-12T10:00:00+01:00"), "{text}");
+        assert!(text.contains("2026-11-13"), "{text}");
+        assert!(text.contains("cancelled"), "{text}");
     }
 }

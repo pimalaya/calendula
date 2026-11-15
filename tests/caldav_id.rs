@@ -160,7 +160,7 @@ fn a_new_calendar_id_out_of_the_home_is_refused() {
 
     for id in ["..", "", "/", "a/.."] {
         let error = format!("Calendar id `{id}` names no CalDAV collection");
-        let args = ["calendar", "create", id, "Work"];
+        let args = ["calendar", "create", "Work", "--id", id];
         refused(dir.path(), &args, Value::Null, &error);
         refused(dir.path(), &["caldav", "create", id], Value::Null, &error);
     }

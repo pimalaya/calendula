@@ -224,7 +224,7 @@ mod msgraph;
 #[cfg(feature = "pimdir")]
 mod pimdir;
 mod repl;
-#[cfg(all(test, any(feature = "caldav", feature = "msgraph")))]
+#[cfg(all(test, any(feature = "caldav", feature = "gcal", feature = "msgraph")))]
 mod script;
 mod session;
 mod shared;

@@ -17,6 +17,7 @@ use crate::gcal::{
         quick_add::GcalQuickAddCommand,
     },
     free_busy::GcalFreeBusyCommand,
+    request::GcalRequestCommand,
     settings::GcalSettingsCommand,
 };
 
@@ -24,8 +25,9 @@ use crate::gcal::{
 ///
 /// Direct access to the half of the Calendar API iCalendar cannot express:
 /// sharing, availability, recurrence expansion, server-side parsing and the
-/// palettes. Everything a calendar and its items have in common with the
-/// other backends stays in the unified API. Each command is named after the
+/// palettes, and a raw request for the endpoints no command covers.
+/// Everything a calendar and its items have in common with the other
+/// backends stays in the unified API. Each command is named after the
 /// API's resource, plural included.
 ///
 /// Push channels are not exposed: a channel delivers to an HTTPS endpoint
@@ -45,6 +47,7 @@ pub enum GcalCommand {
     Colors(GcalColorsCommand),
     #[command(alias = "setting")]
     Settings(GcalSettingsCommand),
+    Request(GcalRequestCommand),
 
     // NOTE: the former names, run as the `events` commands they became.
     #[command(hide = true, alias = "instance")]
@@ -64,6 +67,7 @@ impl GcalCommand {
             Self::Events(cmd) => cmd.execute(printer, client),
             Self::Colors(cmd) => cmd.execute(printer, client),
             Self::Settings(cmd) => cmd.execute(printer, client),
+            Self::Request(cmd) => cmd.execute(printer, client),
             Self::Instances(cmd) => cmd.execute(printer, client),
             Self::Move(cmd) => cmd.execute(printer, client),
             Self::QuickAdd(cmd) => cmd.execute(printer, client),

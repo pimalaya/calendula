@@ -16,9 +16,10 @@ use pimalaya_cli::{
 };
 use schemars::JsonSchema;
 use serde::Serialize;
+use serde_json::{Map, Value};
 
 use crate::{
-    gcal::{client::GcalClient, render},
+    gcal::{client::GcalClient, render::str_of},
     shared::calendar::list::body,
 };
 
@@ -29,9 +30,9 @@ use crate::{
 /// the time zone events expand in, and the default reminders a new event
 /// inherits.
 ///
-/// JSON output: `{"calendars": [{"id", "summary", "description",
-/// "timeZone", "accessRole", "primary", "selected", "color",
-/// "defaultReminders"}]}`.
+/// JSON output: `{"calendars": [<calendar list entry>...]}`, every entry
+/// of every page as Google sent it (`id`, `summary`, `accessRole`,
+/// `primary`, `defaultReminders` and the rest).
 #[derive(Debug, Parser)]
 pub struct GcalCalendarListCommand {
     /// Include the calendars hidden from the list.
@@ -41,45 +42,13 @@ pub struct GcalCalendarListCommand {
 
 impl GcalCalendarListCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: GcalClient) -> Result<()> {
-        let mut rows = Vec::new();
-        let mut page_token: Option<String> = None;
+        let params = GcalCalendarListListParams {
+            show_hidden: self.show_hidden,
+            ..Default::default()
+        };
+        let calendars = client.raw_items(&["users", "me", "calendarList"], &params)?;
 
-        loop {
-            let params = GcalCalendarListListParams {
-                page_token: page_token.as_deref(),
-                show_hidden: self.show_hidden,
-                ..Default::default()
-            };
-            let page = client.calendar_list_list(&params)?.response;
-
-            rows.extend(page.items.into_iter().map(|entry| {
-                CalendarRow {
-                    id: entry.id.unwrap_or_default(),
-                    summary: entry.summary_override.or(entry.summary).unwrap_or_default(),
-                    description: entry.description,
-                    time_zone: entry.time_zone,
-                    access_role: entry
-                        .access_role
-                        .as_ref()
-                        .map(|role| render::access_role(role).to_owned()),
-                    primary: entry.primary.unwrap_or(false),
-                    selected: entry.selected.unwrap_or(false),
-                    color: entry.background_color,
-                    default_reminders: entry
-                        .default_reminders
-                        .iter()
-                        .filter_map(|reminder| Some(format!("{}m", reminder.minutes?)))
-                        .collect(),
-                }
-            }));
-
-            match page.next_page_token {
-                Some(next) => page_token = Some(next),
-                None => break,
-            }
-        }
-
-        printer.out(GcalCalendarListOutput { rows })
+        printer.out(GcalCalendarListOutput { calendars })
     }
 }
 
@@ -87,78 +56,124 @@ impl GcalCalendarListCommand {
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GcalCalendarListOutput {
-    /// The calendars of the list, one entry each.
-    #[serde(rename = "calendars")]
-    pub rows: Vec<CalendarRow>,
-}
-
-/// One calendar list entry, with the properties only Google carries.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CalendarRow {
-    /// The calendar identifier, an address for a primary or secondary one.
-    pub id: String,
-    /// The title, this user's own overriding the calendar's.
-    pub summary: String,
-    /// The free-form description.
-    pub description: Option<String>,
-    /// The IANA time zone the calendar expands its events in.
-    pub time_zone: Option<String>,
-    /// The effective access role this account has: `owner`, `writer`,
-    /// `reader` or `freeBusyReader`.
-    pub access_role: Option<String>,
-    /// Whether this is the account's own primary calendar.
-    pub primary: bool,
-    /// Whether the calendar's contents show in the Google UI.
-    pub selected: bool,
-    /// The background colour, as `#rrggbb`.
-    pub color: Option<String>,
-    /// The default reminder lead times a new event inherits.
-    pub default_reminders: Vec<String>,
+    /// The entries of the calendar list, each as Google sent it.
+    #[schemars(with = "Vec<Map<String, Value>>")]
+    pub calendars: Vec<Value>,
 }
 
 impl fmt::Display for GcalCalendarListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut records = Records::default();
 
-        for calendar in &self.rows {
-            let mut fields = Fields::default();
-            fields.push("Name", sanitize::text(&calendar.summary));
+        for calendar in &self.calendars {
+            let name = match str_of(calendar, "summaryOverride") {
+                "" => str_of(calendar, "summary"),
+                name => name,
+            };
 
-            if let Some(role) = &calendar.access_role {
-                fields.push("Role", sanitize::text(role));
-            }
+            let mut fields = Fields::default();
+            fields.push("Name", sanitize::text(name));
 
             let optional = [
-                ("Time zone", calendar.time_zone.as_deref()),
-                ("Color", calendar.color.as_deref()),
+                ("Role", "accessRole"),
+                ("Time zone", "timeZone"),
+                ("Color", "backgroundColor"),
             ];
 
-            for (label, value) in optional {
-                if let Some(value) = value {
+            for (label, key) in optional {
+                if let Some(value) = calendar.get(key).and_then(Value::as_str) {
                     fields.push(label, sanitize::text(value));
                 }
             }
 
-            if !calendar.default_reminders.is_empty() {
-                fields.push("Reminders", calendar.default_reminders.join(", "));
+            let reminders: Vec<String> = calendar
+                .get("defaultReminders")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|reminder| reminder.get("minutes")?.as_i64())
+                .map(|minutes| format!("{minutes}m"))
+                .collect();
+
+            if !reminders.is_empty() {
+                fields.push("Reminders", reminders.join(", "));
             }
 
-            let state = match calendar.primary {
-                true => vec![String::from("primary")],
-                false => Vec::new(),
+            let state = match calendar.get("primary").and_then(Value::as_bool) {
+                Some(true) => vec![String::from("primary")],
+                _ => Vec::new(),
             };
 
-            let description = calendar.description.as_deref().unwrap_or_default();
-
             records.push(Record {
-                title: sanitize::text(&calendar.id).into_owned(),
+                title: sanitize::text(str_of(calendar, "id")).into_owned(),
                 state,
                 fields,
-                body: body(description),
+                body: body(str_of(calendar, "description")),
             });
         }
 
         write!(f, "{records}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use io_gcal::v3::client::GcalClientStd;
+    use pimalaya_cli::printer::CapturePrinter;
+    use serde_json::json;
+
+    use super::*;
+    use crate::{
+        account::context::Account,
+        script::{self, Script},
+    };
+
+    /// Every entry of every page prints as Google sent it, a key calendula
+    /// never read (`conferenceProperties`) kept, the second page asked by
+    /// the first's `nextPageToken`; the text reads the same entries.
+    #[test]
+    fn every_entry_prints_as_google_sent_it() {
+        let work = json!({
+            "kind": "calendar#calendarListEntry",
+            "id": "work@example.org",
+            "summary": "Work",
+            "summaryOverride": "Job",
+            "accessRole": "owner",
+            "primary": true,
+            "defaultReminders": [{"method": "popup", "minutes": 10}],
+            "conferenceProperties": {"allowedConferenceSolutionTypes": ["hangoutsMeet"]},
+        });
+        let home = json!({"id": "home@example.org", "summary": "Home"});
+        let first = json!({"items": [work], "nextPageToken": "p2"}).to_string();
+        let second = json!({"items": [home]}).to_string();
+
+        let (script, requests) = Script::new([
+            script::response(200, "application/json", &first),
+            script::response(200, "application/json", &second),
+        ]);
+        let client = GcalClient::new(
+            GcalClientStd::new(script, "made-up"),
+            "perso".into(),
+            Account::default(),
+        );
+
+        let mut printer = CapturePrinter::default();
+        let command = GcalCalendarListCommand { show_hidden: false };
+        command.execute(&mut printer, client).unwrap();
+
+        let json = printer.into_single().unwrap();
+        assert_eq!(json, json!({"calendars": [work, home]}));
+
+        let requests = requests.lock().unwrap();
+        let second = String::from_utf8_lossy(&requests[1]);
+        assert!(second.contains("pageToken=p2"), "{second}");
+
+        let output = GcalCalendarListOutput {
+            calendars: vec![work, home],
+        };
+        let text = output.to_string();
+        assert!(text.contains("Job"), "{text}");
+        assert!(text.contains("10m"), "{text}");
+        assert!(text.contains("primary"), "{text}");
     }
 }

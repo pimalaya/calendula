@@ -12,7 +12,7 @@
 
 use std::io;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Result, anyhow, bail};
 use ical::component::IcalComponentKind;
 use io_vdir::{
     client::{VdirClient, VdirClientError},
@@ -79,15 +79,13 @@ impl VdirBackend {
             Some(id) => id,
             None if !is_dir_name(name) => bail!(
                 "Calendar name `{name}` is not one directory name: give the calendar an id \
-                 before its name"
+                 with `--id`"
             ),
             None => name,
         };
 
         if collection_dir(&self.root, id).is_some() {
-            return Err(calendar_duplicate(format!(
-                "Calendar `{id}` already exists"
-            )));
+            return Err(calendar_duplicate(id));
         }
 
         let collection = VdirCollection {
@@ -187,7 +185,7 @@ impl VdirBackend {
             .client
             .get_item(path, item_id)
             .map_err(unreadable)
-            .with_context(|| format!("Read item `{item_id}` from calendar `{calendar_id}`"))?;
+            .map_err(|err| error::read_failed(err, item_id, calendar_id))?;
 
         Ok(item_from(calendar_id, item))
     }
@@ -201,7 +199,9 @@ impl VdirBackend {
         Ok(id)
     }
 
-    /// Overwrites an item's bytes.
+    /// Overwrites the bytes of an item the calendar holds, an id naming
+    /// none refused `item-not-found` as on every other backend, never
+    /// written.
     ///
     /// vdir carries no entity tag, so `if_match` cannot be honoured.
     pub fn update_item(
@@ -212,8 +212,9 @@ impl VdirBackend {
         _if_match: Option<&str>,
     ) -> Result<()> {
         let path = self.calendar_path(calendar_id)?;
+        let (_, kind) = self.client.locate_item(path.clone(), item_id)?;
         self.client
-            .store_item(path, Some(item_id.to_owned()), VdirItemKind::Ical, contents)?;
+            .store_item(path, Some(item_id.to_owned()), kind, contents)?;
         Ok(())
     }
 
@@ -320,6 +321,7 @@ mod tests {
 
         let err = backend.get_item("cal", "nope").unwrap_err();
         assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+        assert!(!format!("{err:#}").contains("Read item"), "{err:#}");
 
         let err = backend.delete_item("cal", "nope", None).unwrap_err();
         assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
@@ -330,6 +332,25 @@ mod tests {
         };
         let err = backend.update_calendar("nope", patch).unwrap_err();
         assert_eq!(code_of(&err), Some(ErrorCode::CalendarNotFound), "{err:#}");
+    }
+
+    /// An update naming no item of the calendar fails `item-not-found` and
+    /// writes nothing, where it created the item; one naming an item
+    /// overwrites it.
+    #[test]
+    fn an_update_of_a_missing_item_creates_nothing() {
+        let (home, mut backend) = backend();
+        let ical = b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n".to_vec();
+
+        let err = backend
+            .update_item("cal", "nope", ical.clone(), None)
+            .unwrap_err();
+        assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+        assert!(!home.path().join("cal").join("nope.ics").exists());
+
+        backend.update_item("cal", "a", ical.clone(), None).unwrap();
+        let stored = fs::read(home.path().join("cal").join("a.ics")).unwrap();
+        assert_eq!(stored, ical);
     }
 
     /// An item file located but not read fails its read as unreadable.

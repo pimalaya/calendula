@@ -220,7 +220,7 @@ fn a_pimdir_calendar_write_is_refused_before_opening_the_store() {
     let lines = format!("pimdir.root = {:?}\n", root.display().to_string());
     let config = write_config(dir.path(), &lines);
 
-    let args = ["--json", "calendar", "create", "work", "Work"];
+    let args = ["--json", "calendar", "create", "Work", "--id", "work"];
     refused(&run(&config, &args), "calendar.create");
 
     let args = ["--json", "calendar", "delete", "-k", "work"];
@@ -268,7 +268,9 @@ fn a_graph_calendar_description_is_refused_before_the_token_is_resolved() {
     );
     let config = write_config(dir.path(), &lines);
 
-    let args = ["--json", "calendar", "create", "work", "Work", "-d", "Mine"];
+    let args = [
+        "--json", "calendar", "create", "Work", "--id", "work", "-d", "Mine",
+    ];
     let message = refused(&run(&config, &args), "calendar.description");
     assert!(message.contains("msgraph backend"), "{message}");
 

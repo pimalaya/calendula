@@ -45,6 +45,8 @@ An ACL rule id is `<scope type>:<scope value>` (`default` for everyone), which t
 
 `free-busy` and `events instances` SHALL take `--from` / `--to` as inclusive days, as `event list` does, so one date spelling serves the whole CLI.
 
+`calendars`, `acl list`, `events instances` and `settings` SHALL read every page and print under `--json` every item as Google sent it, read as JSON and never through a type (pimalaya-cli output.md, *Protocol commands are raw-faithful*), under `calendars`, `rules`, `instances` and `settings`; their text reads the same items. `request <METHOD> <PATH> [JSON]` SHALL send any Calendar API request, the path joined onto the `v3/` base or a full URL, and print `{response}`, the JSON Google answered, as `msgraph request` and cardamum's `gpeople request` do.
+
 `free-busy` SHALL print `{calendars: [{id, busy: [{start, end}], queryErrors}]}`, `queryErrors` the error objects the API answers for the calendar (`domain`, `reason`), raw, `[]` when none. It SHALL NOT print them under `errors`, the key of the item errors a listing names.
 
 ### Requirement: What the gcal family declines
@@ -249,12 +251,13 @@ The listing query MAY carry a `UID`, which `event search` sets. A backend MAY le
 - THEN it fails coded `item-not-found`, naming `event search <UID>`, and `a.ics` stays
 
 ### Requirement: A missing item reads one sentence
-A unified command naming an item its calendar does not hold SHALL fail coded `item-not-found` with one sentence whatever the backend, Himalaya's for a missing message: `item read`, `item update` and `item delete` ``Item `<id>` not found in calendar `<calendar>` ``, and `event read`, `event update` and `event delete` ``Event `<id>` not found in calendar `<calendar>`; an event is named by the id `event list` shows, `event search <UID>` finding it by its iCalendar UID``. The backend's own words SHALL follow as its `sources`.
+A unified command naming an item its calendar does not hold SHALL fail coded `item-not-found` with one sentence whatever the backend, Himalaya's for a missing message: `item read`, `item update` and `item delete` ``Item `<id>` not found in calendar `<calendar>` ``, and `event read`, `event update` and `event delete` ``Event `<id>` not found in calendar `<calendar>`; an event is named by the id `event list` shows, `event search <UID>` finding it by its iCalendar UID``. The backend's own words SHALL follow as its `sources`, its one source: a read SHALL NOT list a ``Read item ...`` line beside them. A vdir `item update` or `event update` given an iCalendar for an id the calendar does not hold SHALL fail so, writing nothing, as every other backend does.
 
 #### Scenario: An unknown id on a vdir calendar
 - GIVEN the vdir calendar `personal` holding no item `nope`
 - WHEN `calendula --json item read nope` and `calendula --json event delete nope` run
-- THEN the first fails coded `item-not-found` with ``Item `nope` not found in calendar `personal` ``, the second with ``Event `nope` not found in calendar `personal`; ...``, each naming io-vdir's miss in `sources`
+- THEN the first fails coded `item-not-found` with ``Item `nope` not found in calendar `personal` ``, the second with ``Event `nope` not found in calendar `personal`; ...``, each naming io-vdir's miss in `sources` alone
+- AND `calendula --json item update nope <ICAL>` fails the same and writes no `nope.ics`
 
 ### Requirement: A delete can be gated on a version
 `event delete` and `item delete` SHALL take `--if-match <ETAG>`. CalDAV and gcal SHALL send it as `If-Match`, msgraph SHALL compare it with the event's `changeKey`, and pimdir SHALL check it as an update does. A backend that cannot gate a write (vdir) SHALL declare `item.update.if-match` and `item.remove.if-match` `none`, so `--if-match` on an update or a delete is refused with `capability-missing` rather than dropped.
@@ -350,13 +353,13 @@ In the text output, each `errors` entry SHALL print as one `Error:` line, `<id> 
 ### Requirement: Calendar selection
 A unified command operating inside a calendar SHALL take it through the flattened `-k/--calendar` flag, resolved by the account: the flag wins, otherwise `calendar.default`, otherwise the command SHALL fail coded `calendar-default-missing`, ``No default calendar found, name one with `-k <CALENDAR-ID>` or set `calendar.default` ``, as a pimdir command naming no calendar does.
 
-A command acting on the calendar itself SHALL take it as an argument, as Himalaya's `mailbox delete <MAILBOX>` does, the former `-k/--calendar` kept as a hidden alias: `calendar update [CALENDAR]` resolves it as above, and `calendar delete <CALENDAR>` SHALL require it, never falling back to a default. `calendar create [ID] <NAME>` SHALL take the display name, and the id before it on the backends letting a client name a calendar: given none, vdir SHALL name the directory after the name, refused unless it is one directory name, and CalDAV SHALL mint a version 4 UUID for the URL segment, a display name holding what a path cannot; Google and Graph mint their own either way. `calendar create` and `calendar update` SHALL take `-d/--description` and `-C/--color`, as cardamum's `addressbook` commands do.
+A command acting on the calendar itself SHALL take it as an argument, as Himalaya's `mailbox delete <MAILBOX>` does, the former `-k/--calendar` kept as a hidden alias: `calendar update [CALENDAR]` resolves it as above, and `calendar delete <CALENDAR>` SHALL require it, never falling back to a default. `calendar create <NAME> [--id <ID>]` SHALL take the display name, and `--id` on the backends letting a client name a calendar, the former id before the name refused (exit 2): given none, vdir SHALL name the directory after the name, refused unless it is one directory name, and CalDAV SHALL mint a version 4 UUID for the URL segment, a display name holding what a path cannot; Google and Graph mint their own either way. `calendar create` and `calendar update` SHALL take `-d/--description` and `-C/--color`, as cardamum's `addressbook` commands do.
 
 #### Scenario: A calendar named alone
 - GIVEN a vdir account whose home holds no calendar
 - WHEN `calendula --json calendar create Work`, then `calendar update Work -n Job -C '#ff0000'`, then `calendar delete Work` run
 - THEN the first prints `{"id":"Work","name":"Work","queued":false}` and makes the directory `Work`, the second renames and paints it, the third removes it
-- AND `calendar delete -k Work` and `calendar create work Work` are read as before
+- AND `calendar delete -k Work` is read as before, `calendar create Crew --id crew` makes the directory `crew`, and `calendar create crew Crew` exits 2 coded `usage-invalid`
 
 ### Requirement: A calendar update clears what it empties
 `calendar update -d ""` and `-C ""` SHALL clear the description and the colour on every backend serving them, never report success leaving them: a CalDAV `DAV:remove` of the property, an empty description sent to Google, which stores it as none, vdir clearing its own. A Google calendar always carries a colour, so clearing one stays refused by name.
@@ -396,7 +399,7 @@ Every other list SHALL print through pimalaya-cli's `Columns`: a header of upper
 
 A record SHALL print through pimalaya-cli's `Fields`: one `Label: value` line per field, the values aligned past the longest label: `account check` (pimalaya-cli's `account::AccountCheckOutput`: `Account:`, then one `<backend>:` line, `OK` or `FAIL (<why>)`), `caldav discover` (`Server`, `Principal`, `Calendar home-set`, `(unresolved)` for one it could not resolve), `msgraph calendars get`, `create` and `rename`, `msgraph events get`, `create` and `update`, `msgraph profile get`, `gcal settings` (one field per setting) and the head of `pimdir status` (`Reading account:`, `Grouped accounts:`).
 
-`msgraph request` SHALL print the JSON Graph answered, pretty, and nothing for a body Graph did not send (a 204).
+`msgraph request` SHALL print the JSON Graph answered, pretty, and nothing for a body Graph did not send (a 204). `gcal request` SHALL print the JSON Google answered, pretty, an empty body reading `{}` as io-gcal reads it.
 
 The `event agenda` grid SHALL stay cal's drawing, with no attribute: no day is highlighted, the events under it naming their days.
 

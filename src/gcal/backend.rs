@@ -16,7 +16,7 @@
 //!
 //! [`CalendarTimeRange`]: crate::shared::item::CalendarTimeRange
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use ical::component::IcalComponentKind;
 use io_gcal::v3::{
     client::GcalClientStd,
@@ -223,7 +223,7 @@ impl GcalBackend {
     pub fn get_item(&mut self, calendar_id: &str, item_id: &str) -> Result<CalendarItem> {
         let event = self
             .event(calendar_id, item_id)
-            .with_context(|| format!("Read item `{item_id}` from calendar `{calendar_id}`"))?;
+            .map_err(|err| crate::error::read_failed(err, item_id, calendar_id))?;
 
         let exceptions = self.exceptions(calendar_id, &event)?;
 
@@ -1099,7 +1099,7 @@ mod tests {
         let stub = r#"{"id":"e1","status":"cancelled","iCalUID":"e1@example.org"}"#;
         let err = backend(&[stub]).get_item("primary", "e1").unwrap_err();
         assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
-        assert_eq!(err.to_string(), "Read item `e1` from calendar `primary`");
+        assert!(!format!("{err:#}").contains("Read item"), "{err:#}");
     }
 
     /// A cleared description is sent empty, a field the PATCH leaves out
