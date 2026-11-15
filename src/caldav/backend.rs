@@ -4,10 +4,11 @@
 //! calendar home-set is already resolved. It projects RFC 4791
 //! calendars and calendar object resources onto the shared types.
 //!
-//! Item ids are the resource names the server returned verbatim, so an
-//! id a listing showed addresses the same resource on every verb. The
-//! server owns the query, so a [`CalendarTimeRange`] is pushed down as
-//! an RFC 4791 `time-range` filter rather than applied locally.
+//! Calendar and item ids are the segments the server returned, decoded
+//! where io-webdav reads them back into the same segment, so an id a
+//! listing showed addresses the same resource on every verb. The server
+//! owns the query, so a [`CalendarTimeRange`] is pushed down as an RFC
+//! 4791 `time-range` filter rather than applied locally.
 //!
 //! [`CalendarTimeRange`]: crate::shared::item::CalendarTimeRange
 
@@ -20,18 +21,16 @@ use ical::{
 use io_webdav::{
     client::{WebdavClientStd, WebdavClientStdError},
     rfc4791::{
-        calendar::{CALENDAR_COLOR, CALENDAR_DESCRIPTION, CaldavCalendar, property_set},
+        calendar::{CaldavCalendar, CaldavCalendarPatch},
         item::CaldavItemEntry,
     },
-    rfc4918::{
-        WebdavProperty, collection_path, send::WebdavSendError, typed::WebdavUnreadableEntry,
-    },
+    rfc4918::{collection_path, send::WebdavSendError, typed::WebdavUnreadableEntry},
 };
 use log::warn;
 use pimalaya_config::secret::SecretResolver;
 
 use crate::{
-    caldav::client::{connect, item_refusal, proppatch, rejects_item, row_code},
+    caldav::client::{connect, item_refusal, rejects_item, row_code},
     config::CaldavConfig,
     error::{ErrorCode, ItemError, calendar_not_found, recoded},
     shared::{
@@ -90,14 +89,12 @@ impl CaldavBackend {
         self.client.create_calendar(&calendar)?;
 
         // NOTE: a server may answer a MKCALENDAR as made yet drop a
-        // property it does not keep (iCloud, the colour): read it back.
+        // property it does not keep, the colour above all: read it back.
         // The calendar is made by then, so a read back that fails is said
         // and the create still succeeds.
         if let Some(color) = color {
-            match self.client.list_calendars() {
-                Ok(listed) => {
-                    let created = listed.into_iter().find(|calendar| calendar.id == id);
-
+            match self.listed(&id) {
+                Ok(created) => {
                     if created.and_then(|calendar| calendar.color).is_none() {
                         warn!("the server did not keep the colour {color} of calendar `{id}`");
                     }
@@ -113,60 +110,54 @@ impl CaldavBackend {
     /// the patch names alone.
     ///
     /// The colour is written first, on its own: a server may keep the
-    /// rest of a PROPPATCH while it ignores a colour (iCloud does), so a
-    /// refused colour leaves the calendar as it was.
+    /// rest of a PROPPATCH while it ignores a colour, so a refused colour
+    /// leaves the calendar as it was.
     pub fn update_calendar(&mut self, id: &str, patch: CalendarDiff) -> Result<()> {
-        if !self
-            .client
-            .list_calendars()?
-            .iter()
-            .any(|known| known.id == id)
-        {
+        if self.listed(id)?.is_none() {
             return Err(calendar_not_found(format!("Calendar `{id}` not found")));
         }
 
         if let Some(color) = patch.color {
-            let cleared = color.is_none().then_some(CALENDAR_COLOR);
-            let calendar = CaldavCalendar {
+            let colour = CaldavCalendarPatch {
                 id: id.to_owned(),
-                color,
+                color: Some(color),
                 ..Default::default()
             };
 
-            self.patch(&calendar, cleared.as_slice()).with_context(|| {
+            self.client.update_calendar(&colour).with_context(|| {
                 format!("Write the colour of calendar `{id}`, nothing else written")
             })?;
         }
 
-        let cleared = matches!(patch.description, Some(None)).then_some(CALENDAR_DESCRIPTION);
-        let calendar = CaldavCalendar {
+        let rest = CaldavCalendarPatch {
             id: id.to_owned(),
-            display_name: patch.name,
-            description: patch.description.flatten(),
+            display_name: patch.name.map(Some),
+            description: patch.description,
             ..Default::default()
         };
 
-        if calendar.display_name.is_some() || calendar.description.is_some() || cleared.is_some() {
-            self.patch(&calendar, cleared.as_slice())?;
+        if rest.display_name.is_some() || rest.description.is_some() {
+            self.client.update_calendar(&rest)?;
         }
 
         Ok(())
     }
 
-    /// Sets the properties `calendar` carries and removes `cleared`, in
-    /// one PROPPATCH.
-    fn patch(&mut self, calendar: &CaldavCalendar, cleared: &[WebdavProperty]) -> Result<()> {
-        if cleared.is_empty() {
-            self.client.update_calendar(calendar)?;
-            return Ok(());
-        }
-
-        let home = self.client.calendar_home_set.clone();
+    /// The listed calendar `id` addresses, if any.
+    ///
+    /// Ids compare by the path each addresses under the home set: a listed
+    /// id is decoded where it encodes back to the served segment, so the
+    /// listed `My Cal` and the served `My%20Cal` name one calendar, and a
+    /// segment kept as served (`a%2Fb`) is never found as `a/b`.
+    fn listed(&mut self, id: &str) -> Result<Option<CaldavCalendar>, WebdavClientStdError> {
+        let listed = self.client.list_calendars()?;
+        let home = self.client.calendar_home_set.as_ref();
         let home = home.ok_or(WebdavClientStdError::MissingCalendarHomeSet)?;
-        let path = collection_path(home.path(), &calendar.id);
-        proppatch(&mut self.client, &path, &property_set(calendar), cleared)?;
+        let path = collection_path(home.path(), id);
 
-        Ok(())
+        Ok(listed
+            .into_iter()
+            .find(|calendar| collection_path(home.path(), &calendar.id) == path))
     }
 
     /// Deletes a calendar collection and everything inside it.
@@ -455,12 +446,12 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 mod tests {
     use std::{
         collections::VecDeque,
-        io::{Read, Result as IoResult, Write},
+        io::{ErrorKind, Read, Result as IoResult, Write},
         sync::{Arc, Mutex},
     };
 
     use ical::component::IcalComponentKind;
-    use io_webdav::rfc4918::WebdavAuth;
+    use io_webdav::{client::WebdavStream, rfc4918::WebdavAuth};
     use pimalaya_cli::error::{code_of, with_code};
     use url::Url;
 
@@ -470,16 +461,21 @@ mod tests {
         shared::item::CalendarTimeRange,
     };
 
-    /// A stream answering its reads with the canned responses, in order.
+    /// A stream answering its reads with the canned responses, in order,
+    /// then reading the end of the stream, or a reset when `reset` is set.
     struct Scripted {
         responses: VecDeque<Vec<u8>>,
         written: Arc<Mutex<Vec<u8>>>,
+        reset: bool,
     }
 
     impl Read for Scripted {
         fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
             let Some(response) = self.responses.front_mut() else {
-                return Ok(0);
+                return match self.reset {
+                    true => Err(ErrorKind::ConnectionReset.into()),
+                    false => Ok(0),
+                };
             };
             let len = response.len().min(buf.len());
             buf[..len].copy_from_slice(&response[..len]);
@@ -511,6 +507,13 @@ mod tests {
     /// A backend whose server answers each `(status, body)` in turn, and
     /// what it writes to that server.
     fn scripted(answers: &[(u16, &str)]) -> (CaldavBackend, Arc<Mutex<Vec<u8>>>) {
+        let (stream, written) = stream(answers, false);
+        (backend(stream), written)
+    }
+
+    /// A stream answering each `(status, body)` in turn, then closed as
+    /// [`Scripted`] says, and what it is written.
+    fn stream(answers: &[(u16, &str)], reset: bool) -> (Scripted, Arc<Mutex<Vec<u8>>>) {
         let response = |(status, body): &(u16, &str)| {
             let len = body.len();
             format!(
@@ -523,25 +526,38 @@ mod tests {
         let stream = Scripted {
             responses: answers.iter().map(response).collect(),
             written: written.clone(),
+            reset,
         };
+
+        (stream, written)
+    }
+
+    /// A backend over `stream`, its home set already discovered.
+    fn backend(stream: Scripted) -> CaldavBackend {
         let home = Url::parse("https://dav.example.org/calendars/me/").unwrap();
         let mut client = WebdavClientStd::new(stream, WebdavAuth::None, home.clone());
         client.calendar_home_set = Some(home);
 
-        (CaldavBackend { client }, written)
+        CaldavBackend { client }
     }
 
     /// The calendar listing of a home holding `cal`, coloured `color`.
     fn calendars(color: Option<&str>) -> String {
+        calendar_at("cal", color)
+    }
+
+    /// The calendar listing of a home holding the calendar served at the
+    /// segment `segment`, coloured `color`.
+    fn calendar_at(segment: &str, color: Option<&str>) -> String {
         let color = color
-            .map(|color| format!("<i:calendar-color>{color}</i:calendar-color>"))
+            .map(|color| format!("<a:calendar-color>{color}</a:calendar-color>"))
             .unwrap_or_default();
 
         format!(
             r#"<?xml version="1.0"?>
-<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:i="http://inf-it.com/ns/ab/">
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/">
   <d:response>
-    <d:href>/calendars/me/cal/</d:href>
+    <d:href>/calendars/me/{segment}/</d:href>
     <d:propstat>
       <d:prop>
         <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
@@ -571,7 +587,7 @@ mod tests {
 
         format!(
             r#"<?xml version="1.0"?>
-<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:i="http://inf-it.com/ns/ab/">
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/">
   <d:response><d:href>/calendars/me/cal/</d:href>{propstats}</d:response>
 </d:multistatus>"#
         )
@@ -643,6 +659,126 @@ mod tests {
         let requests = requests(&written);
         assert!(requests.starts_with("MKCALENDAR "), "{requests}");
         assert_eq!(requests.matches("PROPFIND ").count(), 1, "{requests}");
+    }
+
+    const APPLE_ICAL: &str = "http://apple.com/ns/ical/";
+    const INFIT: &str = "http://inf-it.com/ns/ab/";
+
+    /// A colour is written as Apple's `calendar-color`, the one iCloud keeps,
+    /// never as the inf-it one: on create, and on update, set or cleared.
+    #[test]
+    fn a_colour_is_written_in_apples_namespace() {
+        let listing = calendars(Some("#00ff00"));
+        let (mut backend, written) = scripted(&[(201, ""), (207, &listing)]);
+        backend
+            .create_calendar(Some("cal"), "Cal", None, Some("#00ff00"))
+            .unwrap();
+
+        let created = requests(&written);
+        let mkcalendar = created.split("PROPFIND ").next().unwrap_or_default();
+        assert!(mkcalendar.contains(APPLE_ICAL), "{created}");
+        assert!(!mkcalendar.contains(INFIT), "{created}");
+
+        for color in [Some(String::from("#123456")), None] {
+            let listing = calendars(None);
+            let answer = patched(&[("a:calendar-color", 200)]);
+            let (mut backend, written) = scripted(&[(207, &listing), (207, &answer)]);
+
+            let patch = CalendarDiff {
+                color: Some(color.clone()),
+                ..Default::default()
+            };
+            backend.update_calendar("cal", patch).unwrap();
+
+            let requests = requests(&written);
+            let proppatch = requests.split("PROPPATCH ").nth(1).unwrap_or_default();
+            assert!(proppatch.contains(APPLE_ICAL), "{color:?}: {requests}");
+            assert!(!proppatch.contains(INFIT), "{color:?}: {requests}");
+            assert!(
+                proppatch.contains("calendar-color"),
+                "{color:?}: {requests}"
+            );
+        }
+    }
+
+    /// A clear goes through io-webdav's client, which sends it again on a
+    /// fresh connection when the server closed the one the listing used.
+    #[test]
+    fn a_clear_is_sent_again_on_a_fresh_connection() {
+        let listing = calendars(None);
+        let (closing, _) = stream(&[(207, &listing)], true);
+        let mut backend = backend(closing);
+
+        let answer = patched(&[("c:calendar-description", 200)]);
+        let (fresh, written) = stream(&[(207, &answer)], false);
+        let mut fresh = Some(fresh);
+        backend.client.set_reconnect(Box::new(move || {
+            let fresh = fresh.take().ok_or(ErrorKind::NotConnected)?;
+            Ok(Box::new(fresh) as Box<dyn WebdavStream>)
+        }));
+
+        let patch = CalendarDiff {
+            description: Some(None),
+            ..Default::default()
+        };
+        backend.update_calendar("cal", patch).unwrap();
+
+        let requests = requests(&written);
+        assert!(requests.starts_with("PROPPATCH "), "{requests}");
+        assert!(requests.contains("<D:remove>"), "{requests}");
+    }
+
+    /// A listed calendar id is decoded, and a calendar is found by its listed
+    /// id and by the segment the server serves alike, both addressing that
+    /// segment; a decoded `/` would address another path, so it is not.
+    #[test]
+    fn a_calendar_is_found_by_either_spelling() {
+        let listing = calendar_at("My%20Cal", None);
+        let listed = answering(207, &listing).list_calendars().unwrap();
+        assert_eq!(listed[0].id, "My Cal");
+
+        for id in ["My Cal", "My%20Cal"] {
+            let answer = patched(&[("d:displayname", 200)]);
+            let (mut backend, written) = scripted(&[(207, &listing), (207, &answer)]);
+
+            let patch = CalendarDiff {
+                name: Some(String::from("New")),
+                ..Default::default()
+            };
+            backend.update_calendar(id, patch).unwrap();
+
+            let requests = requests(&written);
+            let proppatch = requests.split("PROPPATCH ").nth(1).unwrap_or_default();
+            assert!(
+                proppatch.starts_with("/calendars/me/My%20Cal/ "),
+                "{id}: {requests}"
+            );
+        }
+
+        let listing = calendar_at("a%2Fb", None);
+        let patch = CalendarDiff {
+            name: Some(String::from("New")),
+            ..Default::default()
+        };
+        let err = answering(207, &listing)
+            .update_calendar("a/b", patch)
+            .unwrap_err();
+        assert_eq!(code(&err), Some(ErrorCode::CalendarNotFound), "{err:#}");
+    }
+
+    /// A listed item id is decoded when it encodes back to the segment the
+    /// server serves, kept as served otherwise.
+    #[test]
+    fn a_listed_item_id_is_decoded() {
+        let listing = LISTING
+            .replace("cal/e1.ics", "cal/My%20Event.ics")
+            .replace("cal/e2.ics", "cal/a%2Fb.ics");
+        let listed = answering(207, &listing)
+            .list_items("cal", CalendarItemQuery::default())
+            .unwrap();
+
+        assert_eq!(listed.items[0].id, "My Event.ics");
+        assert_eq!(listed.errors[0].id.as_deref(), Some("a%2Fb.ics"));
     }
 
     /// A `DAV:error` body naming the precondition `name` of `namespace`.

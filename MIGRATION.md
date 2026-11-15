@@ -229,6 +229,14 @@ calendula calendar list --json | jq -r '.calendars[].id'
 
 - **A missing item or calendar fails coded** `item-not-found` or `calendar-not-found`, and a server's refusal `permission-denied`, `quota-exceeded`, `rate-limited` or `precondition-failed`, where the failure carried no code. An iCalendar the server refuses for its content is `item-invalid` (CalDAV, Google), where a CalDAV 403 whose plain body named the iCalendar read `permission-denied`: the item is what to fix.
 - **Account resolution fails coded**: an unknown `-a` name `account-missing`, no account marked default `account-default-missing`, several marked default `account-default-several`, where the failure carried no code.
+- **A CalDAV id prints decoded** where the decoding encodes back to the segment the server serves: a calendar served at `My%20Cal` lists as `My Cal`, an item `My%20Event.ics` as `My Event.ics`; a `%2F`, an escape of a byte sent raw such as `%40` and lowercase hex stay as served. An id 0.2 printed still addresses its calendar or item on every command. A script comparing an id it stored with a new listing reads the new spelling.
+
+  ```sh
+  # 0.2: {"calendars":[{"id":"My%20Cal",...}]}
+  # next: {"calendars":[{"id":"My Cal",...}]}
+  calendula calendar update "My Cal" -n Work   # My%20Cal still names it
+  ```
+
 - **A failed `account check` prints its report and exits 3**, each backend carrying `ok`, its failure's `code` and `error`, where 0.2 exited 0 whatever failed. Read which backends passed from `backends`.
 
   ```sh

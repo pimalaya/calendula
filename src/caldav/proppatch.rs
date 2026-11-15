@@ -5,7 +5,7 @@
 
 use anyhow::{Result, bail};
 use clap::Parser;
-use io_webdav::rfc4791::calendar::CaldavCalendar;
+use io_webdav::rfc4791::calendar::CaldavCalendarPatch;
 use pimalaya_cli::printer::Printer;
 
 use crate::{caldav::client::CaldavClient, shared::receipt::IdReceipt};
@@ -50,16 +50,15 @@ impl CaldavProppatchCommand {
             bail!("Nothing to patch: pass at least one of --name, --description, --color or --tz");
         }
 
-        let calendar = CaldavCalendar {
+        let patch = CaldavCalendarPatch {
             id: self.id.clone(),
-            display_name: self.name,
-            description: self.description,
-            color: self.color,
-            tz: self.tz,
-            ..Default::default()
+            display_name: self.name.map(Some),
+            description: self.description.map(Some),
+            color: self.color.map(Some),
+            tz: self.tz.map(Some),
         };
 
-        client.update_calendar(&calendar)?;
+        client.update_calendar(&patch)?;
 
         printer.out(IdReceipt {
             id: self.id,

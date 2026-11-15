@@ -72,4 +72,4 @@ The `credentialed` tests only read the Pimalaya test accounts (`account check`, 
 
 ## Cairn
 
-This repository follows [Cairn](https://github.com/pimalaya/cairn): a change that affects behaviour is not done until the specification is updated and a log entry is written. See [AGENTS.md](./AGENTS.md) for the full stanza, and run `sh cairn/verify.sh` to check the structure.
+This repository follows [Cairn](https://github.com/pimalaya/cairn): a change that affects behaviour is not done until the specification is updated and a log entry is written, and a landed change moves to cairn/changes/archive/. See [AGENTS.md](./AGENTS.md) for the full stanza, and run `sh cairn/verify.sh` to check the structure.
