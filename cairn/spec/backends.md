@@ -121,11 +121,16 @@ A [`CalendarTimeRange`](#requirement-time-range-filtering) SHALL reach gcal as t
 An item whose iCalendar carries no VEVENT SHALL be refused by component name rather than emulated, since Google models neither VTODO nor VJOURNAL. How the VEVENT itself projects is the [projection](./projection.md) capability's business.
 
 ### Requirement: Microsoft Graph backend
-msgraph SHALL adapt io-msgraph's calendars and events. A calendar is a Graph calendar, its colour the read-only `hexColor`, and an item a lone event or a series master, keyed by the event id Graph returned, its `changeKey` as etag, its iCalendar contents synthesized by io-msgraph's `ical` projection with the exceptions of a series folded in, read from the instances of its own date range. Graph keeps no calendar description and names colours from a palette, so msgraph SHALL declare `calendar.description` and `calendar.color` `none`, a create or update naming either refused before connecting.
+msgraph SHALL adapt io-msgraph's calendars and events. A calendar is a Graph calendar, its colour the read-only `hexColor`, and an item a lone event or a series master, keyed by the event id Graph returned, its `changeKey` as etag, its iCalendar contents synthesized by io-msgraph's `ical` projection with the exceptions of a series folded in. The exceptions SHALL be read from the series' instances within the range the command lists, a day wider either side for the zones, or within five years either side of today when it lists none, cut by io-msgraph's `instance_windows` into windows Graph accepts: no `instances` request SHALL span five years or more. A window Graph refuses SHALL make its event an item error, never fail the listing. An update SHALL read its base over the range a read of the item does. Graph keeps no calendar description and names colours from a palette, so msgraph SHALL declare `calendar.description` and `calendar.color` `none`, a create or update naming either refused before connecting.
 
 A listing SHALL follow its pages through io-msgraph, which refuses a paging link leaving the Graph origin, the request it builds carrying the account's token.
 
 Graph narrows a listing by time only through the calendar view, which expands every series, so a range SHALL filter the listed items locally, as on vdir. Graph models a VEVENT and nothing else, so another kind SHALL be answered empty without a round-trip. Only the series master SHALL be written back: an exception edited here does not push, and an update naming an etag SHALL be refused when the master's `changeKey` moved.
+
+#### Scenario: An open-ended series older than five years
+- GIVEN a Microsoft 365 calendar holding a weekly series started six years ago with no end, one occurrence this week moved by a day
+- WHEN `event list` lists this week
+- THEN it succeeds, and lists the moved occurrence on its new day
 
 ### Requirement: vdir backend
 vdir SHALL adapt io-vdir. A collection directory is a calendar and its metadata marker files carry the display name, description and color; each `.ics` file inside is an item, and a `.vcf` file is not.

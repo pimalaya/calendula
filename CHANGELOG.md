@@ -123,6 +123,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Fixed a msgraph listing failing on a `numbered` recurring series: Graph fills its `endDate` with `0001-01-01`, which bounded the instances request before its start. The window now follows the range type. ([#10](https://github.com/pimalaya/calendula/issues/10))
 - Fixed msgraph listings dropping the cancelled occurrences of a series: Graph returns them only on a read of the master by id, so each master is now read so before projection. ([#11](https://github.com/pimalaya/calendula/issues/11))
 - Fixed msgraph listings repeating an event Graph returned on both sides of a page boundary; one id at two revisions is now an error. ([#12](https://github.com/pimalaya/calendula/issues/12))
+- Fixed a msgraph listing failing whole on a recurring series with no end or bounded over five years, Graph refusing an instances read past five years ([#31](https://github.com/pimalaya/calendula/issues/31)).
+
+  A series is read within the range listed, or five years either side of today without one, in windows Graph accepts (io-msgraph 0.9.1), so an old series' recent exceptions are read too. A window Graph refuses makes that series an `errors` entry.
 - Fixed a Google calendar or event id holding `#`, `?` or `/` naming another resource: the events of a subscribed calendar such as `en.usa#holiday@group.v.calendar.google.com` list and read (io-gcal 0.4).
 - Fixed a Google listing failing whole on one value calendula does not know: `gcal calendars`, `gcal acl list` and `gcal instances` print an access role, a scope type or a status they do not know as the API spells it, and an update leaves such a status, transparency or visibility as the server has it (io-gcal 0.4).
 - Fixed an update of a Google event whose reminders are off turning the calendar's default reminders back on (io-gcal 0.4).

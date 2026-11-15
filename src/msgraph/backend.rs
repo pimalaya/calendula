@@ -12,11 +12,10 @@
 //! locally, as on vdir.
 //!
 //! A series is one item: its master read by id, the only read Graph
-//! returns its cancelled occurrences on, and its exceptions read from the
-//! instances of its own date range. Only the series master is written
-//! back: an exception edited here does not push.
-//!
-//! [`CalendarTimeRange`]: crate::shared::item::CalendarTimeRange
+//! returns its cancelled occurrences on, and its exceptions read from its
+//! instances within the range listed, or [`HORIZON_YEARS`] either side of
+//! today when none is, in the windows Graph accepts. Only the series master
+//! is written back: an exception edited here does not push.
 
 use std::collections::BTreeMap;
 
@@ -34,7 +33,7 @@ use io_msgraph::v1::{
         },
     },
 };
-use jiff::{ToSpan, civil::Date, tz::TimeZone};
+use jiff::{Timestamp, ToSpan, civil::Date, tz::TimeZone};
 use log::warn;
 use pimalaya_config::secret::SecretResolver;
 use pimalaya_stream::proxy::Proxy;
@@ -48,15 +47,16 @@ use crate::{
     shared::{
         calendar::{Calendar, CalendarDiff},
         client::window,
-        item::{CalendarItem, CalendarItemList, CalendarItemQuery},
+        item::{CalendarItem, CalendarItemList, CalendarItemQuery, CalendarTimeRange},
     },
 };
 
 /// How many events to ask for per page.
 const PAGE_SIZE: u32 = 500;
 
-/// How far past its start an open-ended series is searched for exceptions.
-const OPEN_SERIES_YEARS: i16 = 5;
+/// How far either side of today a series is read for exceptions when no
+/// range is listed.
+const HORIZON_YEARS: i16 = 5;
 
 /// The shared-API glue over a connected Microsoft Graph client.
 pub struct MsgraphBackend {
@@ -196,11 +196,12 @@ impl MsgraphBackend {
             page = self.client.events_list_from_link(&next)?.response;
         }
 
+        let within = read_within(query.range, today())?;
         let mut items = Vec::new();
         let mut errors = Vec::new();
         for event in unique(events)? {
             let id = event.id.clone();
-            let (event, exceptions) = match self.reread(event) {
+            let (event, exceptions) = match self.reread(event, within) {
                 Ok(read) => read,
                 // NOTE: an event gone since the listing is left out.
                 Err(err) if code_of(&err) == Some(ErrorCode::ItemNotFound) => continue,
@@ -228,15 +229,19 @@ impl MsgraphBackend {
         })
     }
 
-    /// A listed event with its exceptions, a series master read again by
-    /// its id: a listing leaves out cancelledOccurrences, which Graph
-    /// returns only on such a read.
-    fn reread(&mut self, event: MsgraphEvent) -> Result<(MsgraphEvent, Vec<MsgraphEvent>)> {
+    /// A listed event with its exceptions within `within`, a series master
+    /// read again by its id: a listing leaves out cancelledOccurrences,
+    /// which Graph returns only on such a read.
+    fn reread(
+        &mut self,
+        event: MsgraphEvent,
+        within: (Date, Date),
+    ) -> Result<(MsgraphEvent, Vec<MsgraphEvent>)> {
         let event = match event.event_type {
             Some(MsgraphEventType::SeriesMaster) => self.event(&event.id)?,
             _ => event,
         };
-        let exceptions = self.exceptions(&event)?;
+        let exceptions = self.exceptions(&event, within)?;
         Ok((event, exceptions))
     }
 
@@ -245,7 +250,7 @@ impl MsgraphBackend {
         let event = self
             .event(item_id)
             .with_context(|| format!("Read item `{item_id}` from calendar `{calendar_id}`"))?;
-        let exceptions = self.exceptions(&event)?;
+        let exceptions = self.exceptions(&event, read_within(None, today())?)?;
 
         Ok(item_from(calendar_id, &event, &exceptions))
     }
@@ -279,7 +284,9 @@ impl MsgraphBackend {
             return Err(changed(item_id));
         }
 
-        let exceptions = self.exceptions(&current)?;
+        // NOTE: the base is read over the range `get_item` reads, so an
+        // exception outside it is in neither and the delta leaves it be.
+        let exceptions = self.exceptions(&current, read_within(None, today())?)?;
         let exceptions: Vec<&MsgraphEvent> = exceptions.iter().collect();
         let base = current.to_ical_series(&exceptions);
 
@@ -324,14 +331,23 @@ impl MsgraphBackend {
         Ok(event)
     }
 
-    /// The exceptions of a series, read from the instances of its own date
-    /// range; none for a lone event.
-    fn exceptions(&mut self, event: &MsgraphEvent) -> Result<Vec<MsgraphEvent>> {
+    /// The exceptions of a series, read from its instances within the days
+    /// `within`, the second excluded, a window Graph accepts at a time; none
+    /// for a lone event.
+    fn exceptions(
+        &mut self,
+        event: &MsgraphEvent,
+        within: (Date, Date),
+    ) -> Result<Vec<MsgraphEvent>> {
         if event.event_type != Some(MsgraphEventType::SeriesMaster) {
             return Ok(Vec::new());
         }
 
-        let Some((start, end)) = series_window(event) else {
+        let windows = event
+            .recurrence
+            .as_option()
+            .and_then(|recurrence| recurrence.instance_windows(within));
+        let Some(windows) = windows else {
             warn!(
                 "series `{}` has no readable range, its exceptions are skipped",
                 event.id
@@ -346,24 +362,27 @@ impl MsgraphBackend {
             select: Some(MSGRAPH_EVENT_ICAL_SELECT),
             ..Default::default()
         };
-        let mut page = self
-            .client
-            .event_instances(&event.id, &start, &end, &params)
-            .map_err(item_refusal)?
-            .response;
 
         let mut exceptions = Vec::new();
-        loop {
-            exceptions.extend(
-                page.value
-                    .into_iter()
-                    .filter(|instance| instance.event_type == Some(MsgraphEventType::Exception)),
-            );
+        for (start, end) in windows {
+            let mut page = self
+                .client
+                .event_instances(&event.id, &start, &end, &params)
+                .map_err(item_refusal)?
+                .response;
 
-            let Some(next) = page.next_link else {
-                break;
-            };
-            page = self.client.events_list_from_link(&next)?.response;
+            loop {
+                exceptions.extend(
+                    page.value.into_iter().filter(|instance| {
+                        instance.event_type == Some(MsgraphEventType::Exception)
+                    }),
+                );
+
+                let Some(next) = page.next_link else {
+                    break;
+                };
+                page = self.client.events_list_from_link(&next)?.response;
+            }
         }
 
         unique(exceptions)
@@ -462,21 +481,49 @@ fn item_refusal(err: MsgraphClientStdError) -> anyhow::Error {
     }
 }
 
-/// The window a series' exceptions fall in: its range, an open-ended one
-/// capped past its start.
-fn series_window(master: &MsgraphEvent) -> Option<(String, String)> {
-    let (start, end) = master.recurrence.as_option()?.bounds()?;
-    let end = match end {
-        Some(end) => end,
-        None => start.checked_add(OPEN_SERIES_YEARS.years()).ok()?,
+/// Today's date in UTC, the day [`HORIZON_YEARS`] counts from.
+fn today() -> Date {
+    Timestamp::now().to_zoned(TimeZone::UTC).date()
+}
+
+/// The days a series is read for exceptions within, as `instance_windows`
+/// takes them, the second excluded: those `range` lists, a day wider
+/// either side for the zones, a side it leaves open, or no range at all,
+/// reaching [`HORIZON_YEARS`] from today.
+fn read_within(range: Option<&CalendarTimeRange>, today: Date) -> Result<(Date, Date)> {
+    let day = |stamp: Option<&String>| -> Result<Option<Date>> {
+        let Some(stamp) = stamp else {
+            return Ok(None);
+        };
+        let day = stamp
+            .get(..8)
+            .and_then(|day| Date::strptime("%Y%m%d", day).ok())
+            .with_context(|| format!("Cannot read the day of `{stamp}`"))?;
+        Ok(Some(day))
     };
 
-    let instant = |date: Date| -> Option<String> {
-        let zoned = date.to_zoned(TimeZone::UTC).ok()?;
-        Some(zoned.timestamp().strftime("%Y-%m-%dT%H:%M:%SZ").to_string())
+    // NOTE: a range's days are UTC ones and an event's those of its own
+    // zone, so an instance a day past either side may still list.
+    let from = match day(range.and_then(|range| range.start.as_ref()))? {
+        Some(from) => Some(from.checked_sub(1.day())?),
+        None => None,
+    };
+    let to = match day(range.and_then(|range| range.end.as_ref()))? {
+        Some(to) => Some(to.checked_add(1.day())?),
+        None => None,
     };
 
-    Some((instant(start)?, instant(end.checked_add(1.day()).ok()?)?))
+    let years = HORIZON_YEARS.years();
+    let from = match from {
+        Some(from) => from,
+        None => to.unwrap_or(today).min(today).checked_sub(years)?,
+    };
+    let to = match to {
+        Some(to) => to,
+        None => from.max(today).checked_add(years)?,
+    };
+
+    Ok((from, to))
 }
 
 #[cfg(test)]
@@ -768,5 +815,170 @@ pub(crate) mod scripted {
             Some(ErrorCode::PreconditionFailed)
         );
         assert_eq!(requests(&mut backend).len(), 1, "no DELETE sent");
+    }
+
+    /// The Monday of this week, in UTC.
+    fn this_monday() -> Date {
+        let today = today();
+        let offset = today.weekday().to_monday_zero_offset();
+        today.checked_sub(i64::from(offset).days()).unwrap()
+    }
+
+    /// A weekly series master read by id, on the weekday of `start` at
+    /// 09:00 UTC, its range `noEnd`, or `endDate` given `end`.
+    fn series(id: &str, start: Date, end: Option<Date>) -> String {
+        let day = start.strftime("%Y-%m-%d");
+        let weekday = start.strftime("%A").to_string().to_lowercase();
+        let range = match end {
+            None => format!(r#""type":"noEnd","startDate":"{day}""#),
+            Some(end) => {
+                let end = end.strftime("%Y-%m-%d");
+                format!(r#""type":"endDate","startDate":"{day}","endDate":"{end}""#)
+            }
+        };
+        format!(
+            r#"{{"id":"{id}","changeKey":"k1","subject":"Weekly","type":"seriesMaster",
+            "start":{{"dateTime":"{day}T09:00:00.0000000","timeZone":"UTC"}},
+            "end":{{"dateTime":"{day}T10:00:00.0000000","timeZone":"UTC"}},
+            "recurrence":{{"pattern":{{"type":"weekly","interval":1,
+            "daysOfWeek":["{weekday}"]}},"range":{{{range}}}}}}}"#
+        )
+    }
+
+    /// The `startDateTime` and `endDateTime` of each `instances` request
+    /// `backend` sent.
+    fn instance_windows(backend: &mut MsgraphBackend) -> Vec<(Timestamp, Timestamp)> {
+        requests(backend)
+            .iter()
+            .filter(|line| line.contains("/instances"))
+            .map(|line| {
+                let path = line.split(' ').nth(1).unwrap();
+                let url = url::Url::parse(&format!("https://graph.example.org{path}")).unwrap();
+                let instant = |name: &str| -> Timestamp {
+                    let (_, value) = url.query_pairs().find(|(key, _)| key == name).unwrap();
+                    value.parse().unwrap()
+                };
+                (instant("startDateTime"), instant("endDateTime"))
+            })
+            .collect()
+    }
+
+    /// A weekly series with no end, started six years ago, lists this
+    /// week's occurrence moved from Monday to Tuesday on Tuesday: its
+    /// instances are read over the week listed, not from its start.
+    #[test]
+    fn an_open_series_older_than_five_years_lists_this_week_moved_occurrence() {
+        let monday = this_monday();
+        let tuesday = monday.checked_add(1.day()).unwrap();
+        let next_monday = monday.checked_add(1.week()).unwrap();
+        let started = monday.checked_sub(320.weeks()).unwrap();
+
+        let listing = r#"{"value":[{"id":"S1","changeKey":"k1","type":"seriesMaster"}]}"#;
+        let master = series("S1", started, None);
+        let instances = format!(
+            r#"{{"value":[{{"id":"S1-x","changeKey":"k1","subject":"Weekly moved",
+            "type":"exception","seriesMasterId":"S1",
+            "originalStart":"{monday}T09:00:00Z",
+            "start":{{"dateTime":"{tuesday}T09:00:00.0000000","timeZone":"UTC"}},
+            "end":{{"dateTime":"{tuesday}T10:00:00.0000000","timeZone":"UTC"}}}}]}}"#
+        );
+        let answers = [(200, listing), (200, &master[..]), (200, &instances[..])];
+
+        let stamp = |day: Date| format!("{}T000000Z", day.strftime("%Y%m%d"));
+        let range = CalendarTimeRange {
+            start: Some(stamp(monday)),
+            end: Some(stamp(next_monday)),
+        };
+        let query = CalendarItemQuery {
+            range: Some(&range),
+            ..Default::default()
+        };
+
+        let mut backend = answering(&answers);
+        let listed = backend.list_items("cal", query).unwrap();
+        assert!(listed.errors.is_empty(), "{:?}", listed.errors);
+        let [item] = &listed.items[..] else {
+            panic!("{:?}", listed.items);
+        };
+
+        let days: Vec<String> = crate::shared::event::Event::occurrences(item, Some(&range))
+            .into_iter()
+            .map(|event| event.start)
+            .collect();
+        let tuesday = tuesday.strftime("%Y%m%d").to_string();
+        assert!(
+            matches!(&days[..], [day] if day.starts_with(&tuesday)),
+            "{days:?}"
+        );
+
+        let at = |day: Date| day.to_zoned(TimeZone::UTC).unwrap().timestamp();
+        let windows = instance_windows(&mut backend);
+        assert!(
+            windows
+                .iter()
+                .any(|(start, end)| *start <= at(monday) && at(next_monday) <= *end),
+            "{windows:?}"
+        );
+    }
+
+    /// No `instances` request spans five years or more, whether the series
+    /// runs open past them or is bounded beyond them.
+    #[test]
+    fn no_instances_request_spans_five_years_or_more() {
+        let monday = this_monday();
+        let open = series("S1", monday.checked_sub(320.weeks()).unwrap(), None);
+        let bounded = series(
+            "S2",
+            monday.checked_sub(520.weeks()).unwrap(),
+            Some(monday.checked_add(104.weeks()).unwrap()),
+        );
+        let empty = r#"{"value":[]}"#;
+
+        for master in [&open, &bounded] {
+            let mut backend = answering(&[(200, master), (200, empty), (200, empty), (200, empty)]);
+            backend.get_item("cal", "S").unwrap();
+
+            let windows = instance_windows(&mut backend);
+            assert!(windows.len() > 1, "{windows:?}");
+            for (start, end) in windows {
+                let limit = start
+                    .to_zoned(TimeZone::UTC)
+                    .checked_add(5.years())
+                    .unwrap()
+                    .timestamp();
+                assert!(end < limit, "{start} to {end}");
+            }
+        }
+    }
+
+    /// One window of a series the server refuses makes that series an
+    /// entry coded by the refusal, the other events listed beside it.
+    #[test]
+    fn a_refused_window_lists_the_other_events_beside_the_error() {
+        let listing = r#"{"value":[
+            {"id":"S1","changeKey":"k1","type":"seriesMaster"},
+            {"id":"L","changeKey":"k1","subject":"Lone","type":"singleInstance"}
+        ]}"#;
+        let master = series("S1", this_monday().checked_sub(320.weeks()).unwrap(), None);
+        let empty = r#"{"value":[]}"#;
+        let denied = refusal("ErrorAccessDenied");
+        let answers = [
+            (200, listing),
+            (200, &master[..]),
+            (200, empty),
+            (403, &denied[..]),
+        ];
+
+        let listed = answering(&answers)
+            .list_items("cal", CalendarItemQuery::default())
+            .unwrap();
+        let ids: Vec<&str> = listed.items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(ids, ["L"]);
+
+        let [entry] = &listed.errors[..] else {
+            panic!("{:?}", listed.errors);
+        };
+        assert_eq!(entry.id.as_deref(), Some("S1"));
+        assert_eq!(entry.code, Some(ErrorCode::PermissionDenied));
     }
 }
