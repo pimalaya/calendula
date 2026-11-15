@@ -173,16 +173,12 @@ fn check_pimdir(config: crate::config::PimdirConfig) -> Result<()> {
 
 /// Connecting and resolving the calendar home-set exercises DNS,
 /// TLS, authentication and the discovery chain in one go. A pinned `home`
-/// skips discovery, so a PROPFIND Depth 0 on it exercises the credential.
+/// skips discovery, so a PROPFIND Depth 0 on it exercises the credential,
+/// through the client, sent again on a fresh connection when the server
+/// closed the one it was sent on.
 #[cfg(feature = "caldav")]
 fn check_caldav(config: crate::config::CaldavConfig, resolver: &mut SecretResolver) -> Result<()> {
-    use std::io::{Read, Write};
-
-    use io_webdav::{
-        client::WebdavClientStdError,
-        coroutine::{WebdavCoroutine, WebdavCoroutineState, WebdavYield},
-        rfc4918::{RESOURCETYPE, WebdavMultistatus, propfind::WebdavPropfind},
-    };
+    use io_webdav::rfc4918::{RESOURCETYPE, WebdavMultistatus, propfind::WebdavPropfind};
 
     let mut client = crate::caldav::client::connect(&config, resolver)?;
 
@@ -190,7 +186,7 @@ fn check_caldav(config: crate::config::CaldavConfig, resolver: &mut SecretResolv
         return Ok(());
     };
 
-    let mut propfind = WebdavPropfind::<WebdavMultistatus>::new(
+    let propfind = WebdavPropfind::<WebdavMultistatus>::new(
         &client.base_url,
         client.auth(),
         &client.user_agent,
@@ -198,24 +194,9 @@ fn check_caldav(config: crate::config::CaldavConfig, resolver: &mut SecretResolv
         0,
         &[RESOURCETYPE],
     );
-    let mut buf = [0; 16 * 1024];
-    let mut arg = None;
+    client.run(propfind)?;
 
-    loop {
-        match propfind.resume(arg.take()) {
-            WebdavCoroutineState::Yielded(WebdavYield::WantsWrite(bytes)) => {
-                client.stream.write_all(&bytes)?;
-            }
-            WebdavCoroutineState::Yielded(WebdavYield::WantsRead) => {
-                let n = client.stream.read(&mut buf)?;
-                arg = Some(&buf[..n]);
-            }
-            WebdavCoroutineState::Complete(result) => {
-                result.map_err(WebdavClientStdError::from)?;
-                return Ok(());
-            }
-        }
-    }
+    Ok(())
 }
 
 /// Listing the calendars is the check: it resolves the token secret,
@@ -413,15 +394,39 @@ mod caldav_tests {
         config::CaldavConfig,
     };
 
+    /// The multistatus of a home answering its PROPFIND.
+    const HOME: &str = "<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\">\
+        <d:response><d:href>/calendars/alice/</d:href><d:propstat><d:prop>\
+        <d:resourcetype><d:collection/></d:resourcetype></d:prop>\
+        <d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>\
+        </d:multistatus>";
+
     /// A local server answering every request with `status` and `body`, and
     /// the head of each request it read.
     fn answering(status: &'static str, body: &'static str) -> (String, Receiver<String>) {
+        serving(status, body, false)
+    }
+
+    /// A local server closing its first connection once it read the
+    /// request, unanswered, then answering as [`answering`] does.
+    fn closing_first(status: &'static str, body: &'static str) -> (String, Receiver<String>) {
+        serving(status, body, true)
+    }
+
+    /// A local server answering every request with `status` and `body`, the
+    /// one of the first connection too unless `close_first` is set, and the
+    /// head of each request it read.
+    fn serving(
+        status: &'static str,
+        body: &'static str,
+        close_first: bool,
+    ) -> (String, Receiver<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let (sender, heads) = mpsc::channel();
 
         thread::spawn(move || {
-            for stream in listener.incoming() {
+            for (n, stream) in listener.incoming().enumerate() {
                 let mut stream = BufReader::new(stream.unwrap());
                 let mut head = String::new();
                 let mut len = 0;
@@ -447,6 +452,12 @@ mod caldav_tests {
                 );
 
                 stream.read_exact(&mut vec![0; len]).unwrap();
+
+                if close_first && n == 0 {
+                    sender.send(head).unwrap();
+                    continue;
+                }
+
                 stream.get_mut().write_all(response.as_bytes()).unwrap();
                 sender.send(head).unwrap();
             }
@@ -492,17 +503,28 @@ mod caldav_tests {
     /// A home answering its PROPFIND passes the check.
     #[test]
     fn a_home_answering_its_propfind_passes() {
-        let multistatus = "<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\">\
-            <d:response><d:href>/calendars/alice/</d:href><d:propstat><d:prop>\
-            <d:resourcetype><d:collection/></d:resourcetype></d:prop>\
-            <d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>\
-            </d:multistatus>";
-        let (origin, heads) = answering("207 Multi-Status", multistatus);
+        let (origin, heads) = answering("207 Multi-Status", HOME);
 
         let home = check(format!("home = \"{origin}/calendars/alice/\""));
         assert!(home.ok, "{home:?}");
 
         let head = heads.recv().unwrap();
         assert!(head.starts_with("PROPFIND /calendars/alice/ "), "{head}");
+    }
+
+    /// A server closing the connection the check opened before answering
+    /// gets the PROPFIND again on a fresh one, as every io-webdav request
+    /// does, and the check passes.
+    #[test]
+    fn a_home_propfind_is_sent_again_on_a_fresh_connection() {
+        let (origin, heads) = closing_first("207 Multi-Status", HOME);
+
+        let home = check(format!("home = \"{origin}/calendars/alice/\""));
+        assert!(home.ok, "{home:?}");
+
+        for _ in 0..2 {
+            let head = heads.recv().unwrap();
+            assert!(head.starts_with("PROPFIND /calendars/alice/ "), "{head}");
+        }
     }
 }

@@ -5,14 +5,13 @@
 
 use std::{
     fmt, fs,
-    io::{Read, Write, stdin},
+    io::{Read, stdin},
     path::PathBuf,
 };
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser;
 use io_webdav::{
-    coroutine::{WebdavCoroutine, WebdavCoroutineState, WebdavYield},
     rfc4791::calendar::CALENDAR_DATA,
     rfc4918::{
         GETETAG, WebdavMultistatus, WebdavResponseEntry, collection_path, report::WebdavReport,
@@ -53,22 +52,28 @@ pub struct CaldavReportRawCommand {
 impl CaldavReportRawCommand {
     /// Runs the REPORT on the calendar's path, built as io-webdav builds it
     /// for its own requests: an id addressing another collection is
-    /// refused first, a relative one percent-encoded.
+    /// refused first, a relative one percent-encoded. It goes through the
+    /// client, sent again on a fresh connection when the server closed the
+    /// one it was sent on.
     pub fn execute(self, printer: &mut impl Printer, mut client: CaldavClient) -> Result<()> {
         check_calendar_id(&self.calendar_id)?;
         let body = read_xml(&self.xml)?;
 
         let home = client
             .calendar_home_set
-            .clone()
+            .as_ref()
             .ok_or_else(|| anyhow!("Calendar home-set is not resolved"))?;
         let path = collection_path(home.path(), &self.calendar_id);
-        let base_url = client.base_url.clone();
-        let user_agent = client.user_agent.clone();
-        let auth = client.auth().clone();
 
-        let coroutine = WebdavReport::new(&base_url, &auth, &user_agent, &path, self.depth, body);
-        let multistatus = run_report(&mut client, coroutine)?;
+        let coroutine = WebdavReport::<WebdavMultistatus>::new(
+            &client.base_url,
+            client.auth(),
+            &client.user_agent,
+            &path,
+            self.depth,
+            body,
+        );
+        let multistatus = client.run(coroutine)?;
 
         printer.out(CaldavReportRawOutput {
             sync_token: multistatus.sync_token,
@@ -103,25 +108,6 @@ fn read_xml(source: &str) -> Result<Vec<u8>> {
     }
 
     bail!("Source `{source}` is neither a readable file nor XML");
-}
-
-/// Pumps a [`WebdavReport`] coroutine over the client's stream.
-fn run_report(client: &mut CaldavClient, mut coroutine: WebdavReport) -> Result<WebdavMultistatus> {
-    let mut buf = [0u8; 8 * 1024];
-    let mut arg: Option<&[u8]> = None;
-
-    loop {
-        match coroutine.resume(arg.take()) {
-            WebdavCoroutineState::Complete(result) => return Ok(result?),
-            WebdavCoroutineState::Yielded(WebdavYield::WantsWrite(bytes)) => {
-                client.stream.write_all(&bytes)?;
-            }
-            WebdavCoroutineState::Yielded(WebdavYield::WantsRead) => {
-                let n = client.stream.read(&mut buf)?;
-                arg = Some(&buf[..n]);
-            }
-        }
-    }
 }
 
 /// Multistatus a raw REPORT answered.
@@ -201,14 +187,22 @@ impl fmt::Display for CaldavReportRawOutput {
 
 #[cfg(test)]
 mod tests {
-    use io_webdav::{client::WebdavClientStd, rfc4918::WebdavAuth};
-    use pimalaya_cli::{error::code_of, printer::CapturePrinter};
+    use std::io::ErrorKind;
+
+    use io_webdav::{
+        client::{WebdavClientStd, WebdavStream},
+        rfc4918::WebdavAuth,
+    };
+    use pimalaya_cli::{
+        error::{code_of, with_code},
+        printer::CapturePrinter,
+    };
     use url::Url;
 
     use super::CaldavReportRawCommand;
     use crate::{
         caldav::client::CaldavClient,
-        error::ErrorCode,
+        error::{ErrorCode, code},
         script::{self, Requests, Script},
     };
 
@@ -245,13 +239,22 @@ END:VCALENDAR&#13;
     /// A client whose home set is `/dav/`, over a server answering
     /// [`MULTISTATUS`], and the requests it receives.
     fn client() -> (CaldavClient, Requests) {
-        let response = script::response(207, "application/xml", MULTISTATUS);
-        let (script, requests) = Script::new([response]);
+        let (script, requests) = answering();
+        (over(script), requests)
+    }
+
+    /// A server answering [`MULTISTATUS`], and the requests it receives.
+    fn answering() -> (Script, Requests) {
+        Script::new([script::response(207, "application/xml", MULTISTATUS)])
+    }
+
+    /// A client whose home set is `/dav/`, over `script`.
+    fn over(script: Script) -> CaldavClient {
         let base = Url::parse("https://dav.example.org/").unwrap();
         let home = base.join("/dav/").unwrap();
         let inner =
             WebdavClientStd::from_parts(script, WebdavAuth::None, base, None, Some(home), None);
-        (CaldavClient::new(inner), requests)
+        CaldavClient::new(inner)
     }
 
     /// The command running a REPORT on `calendar_id`.
@@ -280,6 +283,52 @@ END:VCALENDAR&#13;
             request.starts_with("REPORT /dav/My%20Cal/ HTTP/1.1\r\n"),
             "{request}"
         );
+    }
+
+    /// A server that closed the connection after the previous request (an
+    /// idle keep-alive timing out) gets the REPORT again on a fresh one, as
+    /// every io-webdav request does, and its answer is printed.
+    #[test]
+    fn a_raw_report_is_sent_again_on_a_fresh_connection() {
+        let (closed, sent) = Script::new([]);
+        let mut client = over(closed);
+        let (fresh, resent) = answering();
+        let mut fresh = Some(fresh);
+        client.set_reconnect(Box::new(move || {
+            let fresh = fresh.take().ok_or(ErrorKind::NotConnected)?;
+            Ok(Box::new(fresh) as Box<dyn WebdavStream>)
+        }));
+
+        let mut printer = CapturePrinter::default();
+        report("My Cal").execute(&mut printer, client).unwrap();
+
+        let output = printer.into_single().unwrap();
+        assert_eq!(output["responses"][0]["dataBytes"], ITEM.len(), "{output}");
+
+        let sent = sent.lock().unwrap();
+        let resent = resent.lock().unwrap();
+        assert_eq!(*resent, *sent);
+        let request = String::from_utf8_lossy(&resent[0]);
+        assert!(
+            request.starts_with("REPORT /dav/My%20Cal/ HTTP/1.1\r\n"),
+            "{request}"
+        );
+    }
+
+    /// A refused REPORT carries the code of any CalDAV refusal, its message
+    /// the server's status.
+    #[test]
+    fn a_refused_raw_report_is_coded() {
+        let response = script::response(403, "text/plain", "Forbidden");
+        let (script, _) = Script::new([response]);
+        let mut printer = CapturePrinter::default();
+        let err = report("cal")
+            .execute(&mut printer, over(script))
+            .map_err(|err| with_code(err, code))
+            .unwrap_err();
+
+        assert_eq!(code_of(&err), Some(ErrorCode::PermissionDenied), "{err:#}");
+        assert!(err.to_string().contains("HTTP 403"), "{err:#}");
     }
 
     /// An id addressing the home set, its parent or the server root is
