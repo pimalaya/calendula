@@ -30,6 +30,7 @@ use crate::{
         ical::may_hold_kind,
         item::{CalendarItem, CalendarItemList, CalendarItemQuery},
     },
+    vdir::client::collection_dir,
 };
 
 /// The shared-API glue over a vdir home directory.
@@ -68,7 +69,7 @@ impl VdirBackend {
         color: Option<&str>,
     ) -> Result<String> {
         let collection = VdirCollection {
-            path: self.path(id),
+            path: self.root.join(id),
             display_name: Some(name.to_owned()),
             description: description.map(str::to_owned),
             color: color.map(str::to_owned),
@@ -83,7 +84,7 @@ impl VdirBackend {
     /// Reads the current ones first, so a field the patch leaves
     /// untouched survives.
     pub fn update_calendar(&mut self, id: &str, patch: CalendarDiff) -> Result<()> {
-        let path = self.path(id);
+        let path = self.calendar_path(id)?;
         let mut collection = self
             .client
             .list_collections()?
@@ -109,7 +110,7 @@ impl VdirBackend {
 
     /// Recursively removes the collection directory.
     pub fn delete_calendar(&mut self, id: &str) -> Result<()> {
-        self.client.delete_collection(self.path(id))?;
+        self.client.delete_collection(self.calendar_path(id)?)?;
         Ok(())
     }
 
@@ -124,7 +125,8 @@ impl VdirBackend {
         calendar_id: &str,
         query: CalendarItemQuery<'_>,
     ) -> Result<CalendarItemList> {
-        let (items, unread) = self.client.list_readable_items(self.path(calendar_id))?;
+        let path = self.calendar_path(calendar_id)?;
+        let (items, unread) = self.client.list_readable_items(path)?;
 
         let items: Vec<CalendarItem> = items
             .into_iter()
@@ -158,9 +160,10 @@ impl VdirBackend {
 
     /// Reads one item's bytes off disk.
     pub fn get_item(&mut self, calendar_id: &str, item_id: &str) -> Result<CalendarItem> {
+        let path = self.calendar_path(calendar_id)?;
         let item = self
             .client
-            .get_item(self.path(calendar_id), item_id)
+            .get_item(path, item_id)
             .map_err(unreadable)
             .with_context(|| format!("Read item `{item_id}` from calendar `{calendar_id}`"))?;
 
@@ -169,9 +172,10 @@ impl VdirBackend {
 
     /// Writes new bytes under a freshly minted id.
     pub fn create_item(&mut self, calendar_id: &str, contents: Vec<u8>) -> Result<String> {
-        let (id, _) =
-            self.client
-                .store_item(self.path(calendar_id), None, VdirItemKind::Ical, contents)?;
+        let path = self.calendar_path(calendar_id)?;
+        let (id, _) = self
+            .client
+            .store_item(path, None, VdirItemKind::Ical, contents)?;
         Ok(id)
     }
 
@@ -185,12 +189,9 @@ impl VdirBackend {
         contents: Vec<u8>,
         _if_match: Option<&str>,
     ) -> Result<()> {
-        self.client.store_item(
-            self.path(calendar_id),
-            Some(item_id.to_owned()),
-            VdirItemKind::Ical,
-            contents,
-        )?;
+        let path = self.calendar_path(calendar_id)?;
+        self.client
+            .store_item(path, Some(item_id.to_owned()), VdirItemKind::Ical, contents)?;
         Ok(())
     }
 
@@ -208,13 +209,16 @@ impl VdirBackend {
                 "The vdir backend has no ETag, so it cannot honour If-Match"
             ));
         }
-        self.client.delete_item(self.path(calendar_id), item_id)?;
+        let path = self.calendar_path(calendar_id)?;
+        self.client.delete_item(path, item_id)?;
         Ok(())
     }
 
-    /// The on-disk path of the collection named `id`.
-    fn path(&self, id: &str) -> VdirPath {
-        self.root.join(id)
+    /// The directory of the calendar `id`, refused `calendar-not-found` when
+    /// the home holds none of that name.
+    fn calendar_path(&self, id: &str) -> Result<VdirPath> {
+        collection_dir(&self.root, id)
+            .ok_or_else(|| calendar_not_found(format!("Calendar `{id}` not found")))
     }
 }
 

@@ -5,7 +5,6 @@
 
 use anyhow::Result;
 use clap::Parser;
-use io_vdir::path::VdirPath;
 use pimalaya_cli::printer::Printer;
 
 use crate::{shared::receipt::IdReceipt, vdir::client::VdirClient};
@@ -25,7 +24,7 @@ pub struct VdirCollectionDeleteCommand {
 
 impl VdirCollectionDeleteCommand {
     pub fn execute(self, printer: &mut impl Printer, client: VdirClient) -> Result<()> {
-        let path = VdirPath::new(client.root().as_str()).join(&self.id);
+        let path = client.collection_path(&self.id)?;
         client.delete_collection(path)?;
 
         printer.out(IdReceipt {

@@ -18,8 +18,9 @@ use crate::{backend::Backend, cli::resolve_account, config::AccountConfig, error
 ///
 /// Loads the configuration, picks the active account, then exercises
 /// every backend the `--backend` flag allows: a local backend is
-/// checked against the filesystem, CalDAV by opening the connection and
-/// resolving the calendar home-set, gcal by listing the calendars. Under
+/// checked against the filesystem, CalDAV by resolving the calendar
+/// home-set or, on a pinned `home`, by a PROPFIND on it, so a refused
+/// credential fails either way, gcal by listing the calendars. Under
 /// `auto`, a block of a backend this build leaves out fails its row with
 /// `backend-not-built`, naming the cargo feature bringing it back.
 ///
@@ -170,11 +171,50 @@ fn check_pimdir(config: crate::config::PimdirConfig) -> Result<()> {
 }
 
 /// Connecting and resolving the calendar home-set exercises DNS,
-/// TLS, authentication and the discovery chain in one go.
+/// TLS, authentication and the discovery chain in one go. A pinned `home`
+/// skips discovery, so a PROPFIND Depth 0 on it exercises the credential.
 #[cfg(feature = "caldav")]
 fn check_caldav(config: crate::config::CaldavConfig, resolver: &mut SecretResolver) -> Result<()> {
-    crate::caldav::client::connect(&config, resolver)?;
-    Ok(())
+    use std::io::{Read, Write};
+
+    use io_webdav::{
+        client::WebdavClientStdError,
+        coroutine::{WebdavCoroutine, WebdavCoroutineState, WebdavYield},
+        rfc4918::{RESOURCETYPE, WebdavMultistatus, propfind::WebdavPropfind},
+    };
+
+    let mut client = crate::caldav::client::connect(&config, resolver)?;
+
+    let Some(home) = config.home else {
+        return Ok(());
+    };
+
+    let mut propfind = WebdavPropfind::<WebdavMultistatus>::new(
+        &client.base_url,
+        client.auth(),
+        &client.user_agent,
+        home.path(),
+        0,
+        &[RESOURCETYPE],
+    );
+    let mut buf = [0; 16 * 1024];
+    let mut arg = None;
+
+    loop {
+        match propfind.resume(arg.take()) {
+            WebdavCoroutineState::Yielded(WebdavYield::WantsWrite(bytes)) => {
+                client.stream.write_all(&bytes)?;
+            }
+            WebdavCoroutineState::Yielded(WebdavYield::WantsRead) => {
+                let n = client.stream.read(&mut buf)?;
+                arg = Some(&buf[..n]);
+            }
+            WebdavCoroutineState::Complete(result) => {
+                result.map_err(WebdavClientStdError::from)?;
+                return Ok(());
+            }
+        }
+    }
 }
 
 /// Listing the calendars is the check: it resolves the token secret,
@@ -406,5 +446,115 @@ mod msgraph_tests {
 
         assert!(!check.ok);
         assert_eq!(check.code, Some(ErrorCode::PermissionDenied));
+    }
+}
+
+#[cfg(all(test, feature = "caldav"))]
+mod caldav_tests {
+    use std::{
+        io::{BufRead, BufReader, Read, Write},
+        net::TcpListener,
+        sync::mpsc::{self, Receiver},
+        thread,
+    };
+
+    use pimalaya_config::secret::SecretResolver;
+
+    use crate::{
+        account::check::{BackendCheck, check_caldav},
+        config::CaldavConfig,
+    };
+
+    /// A local server answering every request with `status` and `body`, and
+    /// the head of each request it read.
+    fn answering(status: &'static str, body: &'static str) -> (String, Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let (sender, heads) = mpsc::channel();
+
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = BufReader::new(stream.unwrap());
+                let mut head = String::new();
+                let mut len = 0;
+
+                loop {
+                    let mut line = String::new();
+                    if stream.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
+                        break;
+                    }
+
+                    let lower = line.to_ascii_lowercase();
+                    if let Some(value) = lower.strip_prefix("content-length:") {
+                        len = value.trim().parse().unwrap();
+                    }
+
+                    head.push_str(&line);
+                }
+
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/xml\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+
+                stream.read_exact(&mut vec![0; len]).unwrap();
+                stream.get_mut().write_all(response.as_bytes()).unwrap();
+                sender.send(head).unwrap();
+            }
+        });
+
+        (origin, heads)
+    }
+
+    /// The row of a check over `route`, a made-up password presented.
+    fn check(route: String) -> BackendCheck {
+        let document = format!(
+            "{route}\nauth.basic.username = \"alice\"\n\
+             auth.basic.password.raw = \"made-up\""
+        );
+        let config: CaldavConfig = toml::from_str(&document).unwrap();
+
+        BackendCheck::from("caldav", check_caldav(config, &mut SecretResolver::new()))
+    }
+
+    /// A credential the server refuses fails a pinned `home` as it fails
+    /// discovery, with the same code and error, on one PROPFIND Depth 0.
+    #[test]
+    fn a_refused_credential_fails_the_home_route_as_the_server_route() {
+        let (origin, heads) = answering("401 Unauthorized", "Unauthorized");
+
+        let server = check(format!("server = \"{origin}/\""));
+        assert!(!server.ok, "{server:?}");
+        assert!(heads.recv().unwrap().starts_with("PROPFIND / "));
+
+        let home = check(format!("home = \"{origin}/calendars/alice/\""));
+        assert!(!home.ok, "{home:?}");
+        assert_eq!(home.code, server.code, "{home:?}");
+        assert_eq!(home.error, server.error, "{home:?}");
+        assert!(home.error.unwrap().contains("HTTP 401"));
+
+        let head = heads.recv().unwrap();
+        let depth = head.to_ascii_lowercase().contains("\r\ndepth: 0\r\n");
+        assert!(head.starts_with("PROPFIND /calendars/alice/ "), "{head}");
+        assert!(depth, "{head}");
+        assert!(heads.try_recv().is_err());
+    }
+
+    /// A home answering its PROPFIND passes the check.
+    #[test]
+    fn a_home_answering_its_propfind_passes() {
+        let multistatus = "<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\">\
+            <d:response><d:href>/calendars/alice/</d:href><d:propstat><d:prop>\
+            <d:resourcetype><d:collection/></d:resourcetype></d:prop>\
+            <d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>\
+            </d:multistatus>";
+        let (origin, heads) = answering("207 Multi-Status", multistatus);
+
+        let home = check(format!("home = \"{origin}/calendars/alice/\""));
+        assert!(home.ok, "{home:?}");
+
+        let head = heads.recv().unwrap();
+        assert!(head.starts_with("PROPFIND /calendars/alice/ "), "{head}");
     }
 }

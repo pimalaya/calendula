@@ -5,7 +5,7 @@
 
 use std::{
     ops::{Deref, DerefMut},
-    path::PathBuf,
+    path::{Component, Path, PathBuf},
 };
 
 use anyhow::{Result, anyhow};
@@ -18,7 +18,11 @@ use io_vdir::{
     path::VdirPath,
 };
 
-use crate::{cli::resolve_account, config::VdirConfig, error::ErrorCode};
+use crate::{
+    cli::resolve_account,
+    config::VdirConfig,
+    error::{ErrorCode, calendar_not_found},
+};
 
 /// A vdir client rooted at the configured home directory.
 pub struct VdirClient {
@@ -37,6 +41,26 @@ impl VdirClient {
             inner: Inner::new(root),
         }
     }
+
+    /// The directory of the collection `id`, refused `calendar-not-found`
+    /// when the home holds none of that name.
+    pub fn collection_path(&self, id: &str) -> Result<VdirPath> {
+        collection_dir(self.root(), id)
+            .ok_or_else(|| calendar_not_found(format!("Collection `{id}` not found")))
+    }
+}
+
+/// The directory of the collection `id` under `root`, when `id` is one path
+/// segment, neither `.` nor `..`, naming a directory that exists.
+pub(crate) fn collection_dir(root: &VdirPath, id: &str) -> Option<VdirPath> {
+    let mut components = Path::new(id).components();
+    let segment = matches!(
+        (components.next(), components.next()),
+        (Some(Component::Normal(_)), None)
+    );
+    let path = root.join(id);
+
+    (segment && Path::new(path.as_str()).is_dir()).then_some(path)
 }
 
 impl Deref for VdirClient {

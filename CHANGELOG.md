@@ -100,6 +100,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed `account check` passing a CalDAV account whose `caldav.home` pins the home-set whatever its credential: the check opened the connection and sent nothing. It now sends a PROPFIND Depth 0 on the home, so a credential the server refuses fails the row with the error the `caldav.server` route gives.
+- Fixed a vdir calendar that does not exist read as an empty one: `event list -k nope` exited 0 listing nothing, `event create -k nope` created the calendar, and `calendar delete -k nope` failed with no code. Every command naming a calendar the vdir home does not hold, `vdir delete` and `vdir rename` included, now fails `calendar-not-found`, as on pimdir. An id that is not one directory name (empty, `.`, `..`, holding a separator) is not found either, where `calendar delete -k ..` removed the directory holding the home and `calendar delete -k ""` the home itself.
 - Fixed a credential command prompting for a password (`systemd-ask-password`) hanging the run: it now reads the terminal when calendula runs in one (pimalaya-config 0.4.1).
 - Fixed `event delete` reading a lookup the server refused (a 403, a 429, a dropped connection) as a missing id and falling back to a full listing: only `item-not-found` falls back, any other failure failing the command with its code.
 - Fixed `event read` and `item read` printing the stored iCalendar's control characters as is, which could drive the terminal: the text view replaces them and the bidi controls, keeping tabs and line feeds and reading CRLF as LF, and `--json` keeps the stored text.

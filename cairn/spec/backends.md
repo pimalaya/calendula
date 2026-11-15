@@ -85,6 +85,14 @@ A listing the server answers with anything but one whole multistatus (an HTML pa
 
 A listing SHALL name, in its `errors`, each row the server answered without the item's data and a listing the server truncated ("Each backend names the items it could not read"), on the first page only: the whole calendar is read before the page is cut, and such a row holds no place on a page.
 
+### Requirement: account check authenticates on a pinned CalDAV home
+`account check` on CalDAV SHALL send at least one authenticated request: on `server`, the principal and home-set discovery the client connects with; on `home`, which skips discovery, a PROPFIND Depth 0 on the pinned home-set asking its `DAV:resourcetype`. That PROPFIND SHALL be the check's alone: a unified command connecting on `home` sends nothing before its own first request, which a refused credential fails. A credential the server refuses SHALL fail the row on either route with the same code and error (`WebDAV server returned HTTP 401`, no code); a home answering anything but a multistatus fails it too.
+
+#### Scenario: A refused credential on a pinned home
+- GIVEN the account `test` whose `caldav.home` pins a home-set on a server answering 401 to its credential
+- WHEN `calendula --json account check` runs
+- THEN the `caldav` row reads `"ok": false`, `"code": null` and the error the same account gives on `caldav.server`, and the command exits 3
+
 ### Requirement: CalDAV pushes the time range down
 A [`CalendarTimeRange`](#requirement-time-range-filtering) SHALL reach CalDAV as an RFC 4791 `time-range` filter nested in a VEVENT `comp-filter`, so the server does the narrowing.
 
@@ -136,6 +144,16 @@ Graph narrows a listing by time only through the calendar view, which expands ev
 vdir SHALL adapt io-vdir. A collection directory is a calendar and its metadata marker files carry the display name, description and color; each `.ics` file inside is an item, and a `.vcf` file is not.
 
 vdir has no entity tag, so it SHALL declare `item.update.if-match` and `item.remove.if-match` `none`, `--if-match` refused before anything is read. An update SHALL read the current metadata before writing, so a field the patch leaves untouched survives.
+
+### Requirement: vdir refuses an unknown calendar
+A vdir calendar id SHALL name a calendar only when it is one path segment, neither `.` nor `..`, naming a directory under the home. Every vdir command naming another SHALL fail before anything is read or written, coded `calendar-not-found`: `calendar update`, `calendar delete` and every `event` and `item` read and write with ``Calendar `<id>` not found``, `vdir delete` and `vdir rename` with ``Collection `<id>` not found``.
+
+A write creates whatever directory it is handed, a listing of a missing one answers nothing and a delete removes whatever the path reaches, so without it a typo in `-k` would read as an empty calendar or invent one, and an id reaching out of the home would remove a directory there.
+
+#### Scenario: A typo in `-k`
+- GIVEN the account `test` whose vdir home holds the calendar `personal` alone
+- WHEN `calendula --json event list -k nope`, `event create -k nope` or `calendar delete -k ..` runs
+- THEN each exits 1 with the failure object coded `calendar-not-found`, and the home and the directory holding it are left as they were
 
 ### Requirement: pimdir backend
 pimdir SHALL adapt io-pimdir, the store and the sync engine in one crate. The store is an offline cache a sync engine fills, not a server: reads project the store's items and writes are queue actions a later sync applies and propagates.
