@@ -2708,12 +2708,7 @@ mod tests {
         assert_eq!(code_of(&foreign), Some(ErrorCode::StoreForeign));
         assert_eq!(code_of(&earlier), Some(ErrorCode::StoreVersion));
         assert_eq!(code_of(&newer), Some(ErrorCode::StoreVersion));
-        assert!(
-            earlier
-                .to_string()
-                .contains("neverest sync --reset --force"),
-            "{earlier}"
-        );
+        assert!(earlier.to_string().contains("neverest init"), "{earlier}");
         assert!(newer.to_string().contains("upgrade calendula"), "{newer}");
         for err in [uncreated, foreign, earlier, newer] {
             assert!(!err.to_string().contains("delete"), "{err}");

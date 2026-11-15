@@ -54,7 +54,8 @@ The pimdir backend follows pimdir storage-draft-11, sync-draft-11 and search-dra
 
 1. Run `neverest sync` with the neverest that wrote the store until nothing is queued: the writes calendula queued live in that store alone.
 2. Upgrade to a neverest following storage-draft-11.
-3. Run `neverest sync --reset --force -a <account>`, which moves the store aside into a sibling `<dir>.reset-<instant>` directory, deleting nothing, and syncs a new one.
+3. Move the store directory aside, deleting nothing: what it held that no server holds stays there.
+4. Run `neverest init`, then `neverest sync`, which builds a new store at the same path.
 
 The store keeps its path, so `pimdir.root` does not change. The new sync builds the search index `pimdir search` and `pimdir count` read; one an earlier draft built is refused with `index-version` until then.
 

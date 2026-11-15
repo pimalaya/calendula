@@ -208,9 +208,8 @@ fn version_message(found: Option<&str>, context: impl fmt::Display) -> String {
         true => format!(
             "{context}: the pimdir store is {found}, written by an earlier sync engine, and \
              calendula reads {FORMAT_VERSION} alone; a store is never migrated, so sync it \
-             with the neverest that wrote it until nothing is queued, then reinstall it \
-             with `neverest sync --reset --force -a <account>`, which moves it aside, \
-             deleting nothing, and syncs a new one"
+             with the neverest that wrote it until nothing is queued, upgrade neverest, \
+             move the store directory aside, then run `neverest init` and sync again"
         ),
         false => format!(
             "{context}: the pimdir store is {found}, written by a newer sync engine than \
@@ -290,10 +289,10 @@ mod tests {
             assert!(earlier.contains("earlier sync engine"), "{earlier}");
             assert!(earlier.contains("until nothing is queued"), "{earlier}");
             assert!(
-                earlier.contains("neverest sync --reset --force"),
+                earlier.contains("move the store directory aside"),
                 "{earlier}"
             );
-            assert!(earlier.contains("deleting nothing"), "{earlier}");
+            assert!(earlier.contains("neverest init"), "{earlier}");
         }
 
         for newer in [
