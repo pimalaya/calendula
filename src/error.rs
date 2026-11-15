@@ -58,6 +58,10 @@ pub enum ErrorCode {
     /// The calendar a command names does not exist: nothing was read or
     /// written.
     CalendarNotFound,
+    /// A create names a calendar that already exists: a vdir directory of
+    /// that name, a CalDAV collection at that URL, a Graph calendar of that
+    /// name. Nothing was written.
+    CalendarDuplicate,
     /// A command naming no calendar found no `calendar.default` either:
     /// the caller names one with `-k` or sets the key. Nothing was read.
     CalendarDefaultMissing,
@@ -259,6 +263,13 @@ fn missing(err: Error, sentence: impl FnOnce() -> String) -> Error {
 )]
 pub fn calendar_not_found(message: impl Into<String>) -> Error {
     CodedError::new(ErrorCode::CalendarNotFound, message.into()).into()
+}
+
+/// A refusal under `calendar-duplicate`: a create names a calendar that
+/// already exists.
+#[cfg_attr(not(feature = "vdir"), allow(dead_code))]
+pub fn calendar_duplicate(message: impl Into<String>) -> Error {
+    CodedError::new(ErrorCode::CalendarDuplicate, message.into()).into()
 }
 
 /// A refusal under `calendar-default-missing`: a command naming no calendar

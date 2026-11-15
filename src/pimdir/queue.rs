@@ -13,8 +13,9 @@ use anyhow::{Result, bail};
 use clap::Subcommand;
 use io_pimdir::{
     client::{PimdirError, PimdirStore, producer::PimdirActionStatus},
-    codec::PimdirAction,
+    codec::{PimdirAction, action_from_payload},
     intent::{PimdirIntentItem, PimdirInvitation},
+    object::PimdirHash,
     summary::{PimdirSummary, calendar::derive},
 };
 use pimalaya_cli::{error::CodedError, printer::Printer};
@@ -26,7 +27,7 @@ use crate::{
         client::store_error,
         queue::{
             cancel::PimdirQueueCancelCommand,
-            list::{PimdirParkedRow, PimdirQueueListCommand, PimdirQueuedRow},
+            list::{PimdirQueueListCommand, PimdirQueueRow},
             show::PimdirQueueShowCommand,
         },
     },
@@ -82,7 +83,7 @@ impl PimdirBackend {
     ///
     /// An update or a removal is left out: it addresses an item that
     /// already exists, which the listings show it on.
-    pub(crate) fn queued_rows(&self, calendar: Option<&str>) -> Result<Vec<PimdirQueuedRow>> {
+    pub(crate) fn queued_rows(&self, calendar: Option<&str>) -> Result<Vec<PimdirQueueRow>> {
         let mut rows = Vec::new();
 
         for collection in self.queue_calendars(calendar)? {
@@ -93,51 +94,38 @@ impl PimdirBackend {
                 .map_err(|err| store_error(err, "Read the pimdir queue"))?;
 
             for queued in pending {
-                let (link_id, item_id, summary) = match &queued.action {
-                    PimdirAction::Add {
-                        link_id, object, ..
-                    } => {
-                        let body = object
-                            .as_ref()
-                            .and_then(|hash| self.client.blobs.get(hash).ok().flatten());
-                        let summary = body.and_then(|body| title(derive(&body).summary?));
-                        (link_id.as_ref().map(|id| id.0.clone()), None, summary)
-                    }
-                    PimdirAction::Unknown { kind, payload, .. } => {
-                        match PimdirInvitation::from_payload(kind, payload).map(|it| it.item) {
-                            Ok(PimdirIntentItem::Seq(seq)) => {
-                                let id = seq.to_string();
-                                let stored = self.item(&collection, &id).ok();
-                                let summary = stored.and_then(|item| title(item.summary?));
-                                (None, Some(id), summary)
-                            }
-                            Ok(PimdirIntentItem::Link(link_id)) => (Some(link_id.0), None, None),
-                            Err(_) => (None, None, None),
-                        }
-                    }
-                    _ => continue,
-                };
+                if !matches!(
+                    queued.action,
+                    PimdirAction::Add { .. } | PimdirAction::Unknown { .. }
+                ) {
+                    continue;
+                }
 
-                rows.push(PimdirQueuedRow {
-                    id: queued.id,
-                    queued_at: queued.created_at,
-                    producer: queued.producer,
-                    collection: queued.collection,
+                let addressed = self.addressed(&collection, &queued.action);
+
+                rows.push(PimdirQueueRow {
+                    row: queued.id,
                     kind: queued.action.kind().to_owned(),
-                    link_id,
-                    item_id,
-                    summary,
+                    collection: queued.collection,
+                    link_id: addressed.link_id,
+                    item_id: addressed.item_id,
+                    producer: queued.producer,
+                    queued_at: queued.created_at,
+                    attempts: queued.attempts,
+                    unconfirmed: false,
+                    error: None,
+                    summary: addressed.summary,
                 });
             }
         }
 
-        rows.sort_by_key(|row| row.id);
+        rows.sort_by_key(|row| row.row);
         Ok(rows)
     }
 
     /// The rows the store's owner parked in `calendar`, or in every
     /// calendar of the account, in append order.
-    pub(crate) fn parked_rows(&self, calendar: Option<&str>) -> Result<Vec<PimdirParkedRow>> {
+    pub(crate) fn parked_rows(&self, calendar: Option<&str>) -> Result<Vec<PimdirQueueRow>> {
         let calendars = self.queue_calendars(calendar)?;
 
         Ok(self
@@ -147,17 +135,83 @@ impl PimdirBackend {
             .map_err(|err| store_error(err, "Read the pimdir queue"))?
             .into_iter()
             .filter(|parked| calendars.contains(&parked.collection))
-            .map(|parked| PimdirParkedRow {
-                unconfirmed: parked.unconfirmed().is_some(),
-                id: parked.id,
-                queued_at: parked.created_at,
-                producer: parked.producer,
-                collection: parked.collection,
-                kind: parked.action,
-                attempts: parked.attempts,
-                error: parked.error,
+            .map(|parked| {
+                // NOTE: a payload the store parked for not decoding
+                // addresses nothing calendula can name.
+                let addressed = action_from_payload(&parked.action, &parked.payload)
+                    .map(|action| self.addressed(&parked.collection, &action))
+                    .unwrap_or_default();
+
+                PimdirQueueRow {
+                    row: parked.id,
+                    unconfirmed: parked.unconfirmed().is_some(),
+                    kind: parked.action,
+                    collection: parked.collection,
+                    link_id: addressed.link_id,
+                    item_id: addressed.item_id,
+                    producer: parked.producer,
+                    queued_at: parked.created_at,
+                    attempts: parked.attempts,
+                    error: Some(parked.error),
+                    summary: addressed.summary,
+                }
             })
             .collect())
+    }
+
+    /// What a row of `collection` holding `action` addresses: the item it
+    /// creates by its link id, the stored item it acts on by its id, and
+    /// the summary of the body it pins, else of the item it addresses.
+    fn addressed(&self, collection: &str, action: &PimdirAction) -> Addressed {
+        let pinned = |hash: &PimdirHash| {
+            let body = self.client.blobs.get(hash).ok().flatten()?;
+            title(derive(&body).summary?)
+        };
+
+        let stored = |seq: i64| {
+            let id = seq.to_string();
+            let item = self.item(collection, &id).ok();
+            let summary = item.and_then(|item| title(item.summary?));
+
+            Addressed {
+                item_id: Some(id),
+                summary,
+                ..Default::default()
+            }
+        };
+
+        match action {
+            PimdirAction::Add {
+                link_id, object, ..
+            } => Addressed {
+                link_id: link_id.as_ref().map(|id| id.0.clone()),
+                summary: object.as_ref().and_then(pinned),
+                ..Default::default()
+            },
+            PimdirAction::Update { seq, object, .. } => {
+                let addressed = stored(*seq);
+
+                Addressed {
+                    summary: pinned(object).or(addressed.summary),
+                    ..addressed
+                }
+            }
+            PimdirAction::SetFlags { seq, .. }
+            | PimdirAction::Remove { seq, .. }
+            | PimdirAction::Move { seq, .. }
+            | PimdirAction::Copy { seq, .. } => stored(*seq),
+            PimdirAction::SetPerformer { .. } => Addressed::default(),
+            PimdirAction::Unknown { kind, payload, .. } => {
+                match PimdirInvitation::from_payload(kind, payload).map(|it| it.item) {
+                    Ok(PimdirIntentItem::Seq(seq)) => stored(seq),
+                    Ok(PimdirIntentItem::Link(link_id)) => Addressed {
+                        link_id: Some(link_id.0),
+                        ..Default::default()
+                    },
+                    Err(_) => Addressed::default(),
+                }
+            }
+        }
     }
 
     /// Where the queue row `id` stands, `Unknown` for a row of a calendar
@@ -240,6 +294,17 @@ impl PimdirBackend {
     }
 }
 
+/// What a queue row addresses, each `None` when it addresses none.
+#[derive(Debug, Default)]
+struct Addressed {
+    /// The link id of the item the row creates.
+    link_id: Option<String>,
+    /// The id of the stored item the row acts on.
+    item_id: Option<String>,
+    /// The summary of the body the row pins, else of the item.
+    summary: Option<String>,
+}
+
 /// The title a calendar summary carries, `None` when empty or when the
 /// summary is no calendar one.
 fn title(summary: PimdirSummary) -> Option<String> {
@@ -307,7 +372,7 @@ mod tests {
         assert_eq!(row.link_id.as_deref(), Some("standup@example.org"));
         assert_eq!(row.item_id, None);
         assert_eq!(row.summary.as_deref(), Some("Standup"));
-        let row = row.id;
+        let row = row.row;
 
         let status = backend.queue_row(row).unwrap();
         assert!(

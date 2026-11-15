@@ -442,7 +442,9 @@ fn changed(item_id: &str) -> anyhow::Error {
 
 /// The code of a Graph refusal in an error chain: Graph's
 /// `ErrorQuotaExceeded` or a 507 is `quota-exceeded`, a 429
-/// `rate-limited`, a 403 `permission-denied`, a 412 `precondition-failed`.
+/// `rate-limited`, a 403 `permission-denied`, a 412 `precondition-failed`,
+/// and `ErrorFolderExists`, Exchange keeping one calendar per name,
+/// `calendar-duplicate`.
 pub(crate) fn refusal_code(cause: &(dyn std::error::Error + 'static)) -> Option<ErrorCode> {
     let MsgraphClientStdError::Send(send) = cause.downcast_ref::<MsgraphClientStdError>()? else {
         return None;
@@ -451,6 +453,7 @@ pub(crate) fn refusal_code(cause: &(dyn std::error::Error + 'static)) -> Option<
 
     match (err.status, err.code.as_str()) {
         (_, "ErrorQuotaExceeded") | (507, _) => Some(ErrorCode::QuotaExceeded),
+        (_, "ErrorFolderExists") => Some(ErrorCode::CalendarDuplicate),
         (429, _) => Some(ErrorCode::RateLimited),
         (403, _) => Some(ErrorCode::PermissionDenied),
         (412, _) => Some(ErrorCode::PreconditionFailed),
@@ -716,6 +719,22 @@ pub(crate) mod scripted {
         let body = refusal("ErrorInternalServerError");
         let err = answering(&[(500, &body)]).list_calendars().unwrap_err();
         assert_eq!(crate::error::code(&err), None, "{err:#}");
+    }
+
+    /// A calendar created under a name the mailbox holds is a duplicate:
+    /// Exchange keeps one calendar per name, answering `ErrorFolderExists`.
+    #[test]
+    fn a_calendar_named_twice_is_a_duplicate() {
+        let body = refusal("ErrorFolderExists");
+        let err = answering(&[(409, &body)])
+            .create_calendar(None, "Work", None, None)
+            .unwrap_err();
+
+        assert_eq!(
+            crate::error::code(&err),
+            Some(ErrorCode::CalendarDuplicate),
+            "{err:#}"
+        );
     }
 
     #[test]

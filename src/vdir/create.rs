@@ -9,14 +9,17 @@ use io_vdir::{collection::VdirCollection, path::VdirPath};
 use pimalaya_cli::printer::Printer;
 
 use crate::{
+    error::calendar_duplicate,
     shared::receipt::IdReceipt,
-    vdir::client::{VdirClient, is_dir_name},
+    vdir::client::{VdirClient, collection_dir, is_dir_name},
 };
 
 /// Create a vdir collection directory.
 ///
 /// The directory is made under the configured home, and each metadata
-/// flag below writes the marker file vdir reads that value from.
+/// flag below writes the marker file vdir reads that value from. An id
+/// naming a collection of the home fails `calendar-duplicate`, nothing
+/// written.
 ///
 /// JSON output: `{"id"}`.
 #[derive(Debug, Parser)]
@@ -43,6 +46,11 @@ impl VdirCollectionCreateCommand {
     pub fn execute(self, printer: &mut impl Printer, client: VdirClient) -> Result<()> {
         if !is_dir_name(&self.id) {
             bail!("Collection id `{}` is not one directory name", self.id);
+        }
+
+        if collection_dir(client.root(), &self.id).is_some() {
+            let message = format!("Collection `{}` already exists", self.id);
+            return Err(calendar_duplicate(message));
         }
 
         let path = VdirPath::new(client.root().as_str()).join(&self.id);

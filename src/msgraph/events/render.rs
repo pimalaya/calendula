@@ -17,7 +17,8 @@ use serde::Serialize;
 ///
 /// The text prints each event by its id with its subject, start, end,
 /// location and organizer, while `--json` emits the raw Graph event
-/// objects plus any next-page link.
+/// objects; `nextPage` is Graph's `@odata.nextLink`, lifted out of the
+/// page, which `--page-token` takes back.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MsgraphEventsOutput {
@@ -25,9 +26,9 @@ pub struct MsgraphEventsOutput {
     #[serde(rename = "events")]
     #[schemars(with = "Vec<serde_json::Value>")]
     pub events: Vec<MsgraphEvent>,
-    /// The link to the next page, when the page was truncated.
-    #[serde(rename = "@odata.nextLink", skip_serializing_if = "Option::is_none")]
-    pub next_link: Option<String>,
+    /// Graph's `@odata.nextLink` resuming the listing, `null` on its
+    /// last page.
+    pub next_page: Option<String>,
 }
 
 impl fmt::Display for MsgraphEventsOutput {
@@ -45,12 +46,12 @@ impl fmt::Display for MsgraphEventsOutput {
 
         write!(f, "{records}")?;
 
-        if self.next_link.is_some() {
+        if let Some(cursor) = &self.next_page {
             if !records.items.is_empty() {
                 writeln!(f)?;
             }
 
-            writeln!(f, "(more events available: raise --top)")?;
+            writeln!(f, "Next page: {}", sanitize::text(cursor))?;
         }
 
         Ok(())
@@ -132,7 +133,7 @@ mod tests {
         .unwrap();
         let output = MsgraphEventsOutput {
             events: vec![event],
-            next_link: None,
+            next_page: None,
         };
 
         let expected = "\

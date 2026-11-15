@@ -27,10 +27,11 @@ use io_webdav::{
     rfc4918::{collection_path, send::WebdavSendError, typed::WebdavUnreadableEntry},
 };
 use log::warn;
+use pimalaya_cli::error::with_code;
 use pimalaya_config::secret::SecretResolver;
 
 use crate::{
-    caldav::client::{connect, item_refusal, rejects_item, row_code},
+    caldav::client::{connect, item_refusal, refused, rejects_item, row_code},
     config::CaldavConfig,
     error::{ErrorCode, ItemError, calendar_not_found, recoded},
     shared::{
@@ -86,7 +87,9 @@ impl CaldavBackend {
             ..Default::default()
         };
 
-        self.client.create_calendar(&calendar)?;
+        if let Err(err) = self.client.create_calendar(&calendar) {
+            return Err(self.mkcalendar_refusal(err, &id));
+        }
 
         // NOTE: a server may answer a MKCALENDAR as made yet drop a
         // property it does not keep, the colour above all: read it back.
@@ -141,6 +144,29 @@ impl CaldavBackend {
         }
 
         Ok(())
+    }
+
+    /// The failure of a MKCALENDAR of `id`: `calendar-duplicate` when the
+    /// server names its `DAV:resource-must-be-null` precondition (RFC 4791
+    /// §5.3.1.1), or answers 405 (RFC 4918 §9.3.1, a mapped URL) or 412
+    /// and lists a calendar `id`, the server's answer under it; any other
+    /// failure as it is.
+    ///
+    /// A 405 alone could also be a server that makes no calendar at all,
+    /// which the listing tells apart.
+    fn mkcalendar_refusal(&mut self, err: WebdavClientStdError, id: &str) -> anyhow::Error {
+        let duplicate = match refused(&err) {
+            Some((_, body)) if body.contains("resource-must-be-null") => true,
+            Some((405 | 412, _)) => matches!(self.listed(id), Ok(Some(_))),
+            _ => false,
+        };
+
+        if !duplicate {
+            return err.into();
+        }
+
+        let err = anyhow::Error::from(err).context(format!("Calendar `{id}` already exists"));
+        with_code(err, |_| Some(ErrorCode::CalendarDuplicate))
     }
 
     /// The listed calendar `id` addresses, if any.
@@ -659,6 +685,45 @@ mod tests {
         let requests = requests(&written);
         assert!(requests.starts_with("MKCALENDAR "), "{requests}");
         assert_eq!(requests.matches("PROPFIND ").count(), 1, "{requests}");
+    }
+
+    /// A MKCALENDAR naming a calendar the server holds fails
+    /// `calendar-duplicate`, the server's answer in `sources`: a body
+    /// naming `resource-must-be-null`, or a 405 the listing confirms.
+    #[test]
+    fn a_calendar_created_twice_is_a_duplicate() {
+        let precondition = r#"<?xml version="1.0"?>
+<d:error xmlns:d="DAV:"><d:resource-must-be-null/></d:error>"#;
+        let listing = calendars(None);
+
+        let answers: [&[(u16, &str)]; 2] = [&[(403, precondition)], &[(405, ""), (207, &listing)]];
+
+        for answers in answers {
+            let (mut backend, _) = scripted(answers);
+            let err = backend
+                .create_calendar(Some("cal"), "Cal", None, None)
+                .unwrap_err();
+            let err = with_code(err, code);
+
+            assert_eq!(code_of(&err), Some(ErrorCode::CalendarDuplicate), "{err:#}");
+            assert_eq!(err.to_string(), "Calendar `cal` already exists");
+            assert!(err.chain().count() > 1, "{err:#}");
+        }
+    }
+
+    /// A 405 the listing does not confirm is no duplicate: a server that
+    /// makes no calendar answers it too.
+    #[test]
+    fn a_refused_mkcalendar_of_a_new_calendar_is_no_duplicate() {
+        let listing = calendar_at("other", None);
+        let (mut backend, _) = scripted(&[(405, ""), (207, &listing)]);
+
+        let err = backend
+            .create_calendar(Some("cal"), "Cal", None, None)
+            .unwrap_err();
+        let err = with_code(err, code);
+
+        assert_ne!(code_of(&err), Some(ErrorCode::CalendarDuplicate), "{err:#}");
     }
 
     const APPLE_ICAL: &str = "http://apple.com/ns/ical/";

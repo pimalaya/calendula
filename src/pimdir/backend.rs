@@ -2573,6 +2573,47 @@ mod tests {
         assert!(parked.error.contains(&landed), "{}", parked.error);
     }
 
+    /// A parked row lists in the queue's one shape (pimalaya-cli's output
+    /// contract): the event it updates as `itemId`, the summary of the
+    /// body it pins, its attempts and why it was parked; a pending
+    /// creation its `linkId`, its attempts and `error` `null`.
+    #[test]
+    fn a_parked_and_a_pending_row_list_in_one_shape() {
+        let (dir, mut backend, ids) = store(&[ALONE]);
+        let mine = ALONE.replace("SUMMARY:Focus", "SUMMARY:Mine");
+        let theirs = ALONE.replace("SUMMARY:Focus", "SUMMARY:Theirs");
+
+        let etag = backend.get_item("cal", &ids[0]).unwrap().etag.unwrap();
+        backend
+            .update_item("cal", &ids[0], mine.into(), Some(&etag))
+            .unwrap();
+        land_and_drain(&dir, &backend, &theirs, false);
+
+        let fresh = ALONE.replace("alone@example.org", "fresh@example.org");
+        backend.create_item("cal", fresh.into()).unwrap();
+
+        let parked = backend.parked_rows(None).unwrap();
+        let [parked] = &parked[..] else {
+            panic!("{parked:?}");
+        };
+        assert_eq!(parked.kind, "update");
+        assert_eq!(parked.link_id, None);
+        assert_eq!(parked.item_id.as_deref(), Some(ids[0].as_str()));
+        assert_eq!(parked.summary.as_deref(), Some("Mine"));
+        assert!(!parked.unconfirmed);
+        assert!(parked.error.as_ref().is_some_and(|err| err.contains(&etag)));
+
+        let queued = backend.queued_rows(None).unwrap();
+        let [queued] = &queued[..] else {
+            panic!("{queued:?}");
+        };
+        assert_eq!(queued.kind, "add");
+        assert_eq!(queued.link_id.as_deref(), Some("fresh@example.org"));
+        assert_eq!(queued.item_id, None);
+        assert_eq!(queued.attempts, 0);
+        assert_eq!(queued.error, None);
+    }
+
     /// A delete gated on a version names the body it deletes (pimdir
     /// STORAGE §15.3): when the item holds another by the time the store's
     /// owner applies it, the owner parks it rather than delete a body

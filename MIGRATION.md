@@ -272,6 +272,14 @@ calendula calendar list --json | jq -r '.calendars[].id'
 
 - **An Outlook recurring event whose `RRULE` Graph has no exact pattern for is refused** (a `BYMONTH` or a `BYMONTHDAY` the pattern has no field for, several numbered `BYDAY` elements, a weekday named twice), where 0.2 wrote it as another series.
 - **`event agenda` refuses an argument it cannot read**, naming it: a day that is not a number or not in the month, a month matching no name, a month number outside 1-12 or an unreadable year, where 0.2 drew the 1st, January or the current year. A lone month name draws that month of the current year, where 0.2 read it as a year.
+- **Creating a calendar that already exists fails `calendar-duplicate`**, writing nothing: on vdir, where 0.2 wrote its marker files over the existing calendar's and exited 0, `vdir create` included; on CalDAV and Microsoft Graph, where the server's refusal carried no code. Update the calendar instead, or create it once.
+
+  ```sh
+  # 0.2: exit 0, the display name of `work` overwritten
+  calendula calendar create work Other
+  # next: exit 1, {"code":"calendar-duplicate","error":"Calendar `work` already exists",...}
+  calendula calendar update work -n Other
+  ```
 
 ### New
 

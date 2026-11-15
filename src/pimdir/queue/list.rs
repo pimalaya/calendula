@@ -30,10 +30,10 @@ use crate::pimdir::backend::PimdirBackend;
 /// or fix what parked it. One the engine sent without learning its outcome
 /// is listed `unconfirmed` instead: it may have taken effect.
 ///
-/// JSON output: `{"items": [{"row", "queuedAt", "producer", "collection",
-/// "kind", "linkId", "itemId", "summary"}], "parked": [{"row", "queuedAt",
-/// "producer", "collection", "kind", "attempts", "unconfirmed",
-/// "error"}]}`.
+/// JSON output: `{"items": [<row>], "parked": [<row>]}`, each row, pending
+/// or parked, `{"row", "kind", "collection", "linkId", "itemId",
+/// "producer", "queuedAt", "attempts", "unconfirmed", "error",
+/// "summary"}`, as every Pimalaya program prints a queue row.
 #[derive(Debug, Parser)]
 pub struct PimdirQueueListCommand {
     /// Calendar to list, every one of the account's when omitted.
@@ -57,58 +57,43 @@ impl PimdirQueueListCommand {
     }
 }
 
-/// One creation or intent waiting in the store's queue.
+/// One row of the store's queue, pending or parked, in the one shape
+/// every Pimalaya program prints it (pimalaya-cli's output contract, "A
+/// queue row keeps one shape"), every key printed.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct PimdirQueuedRow {
+pub struct PimdirQueueRow {
     /// The queue row id, which `pimdir queue show` and `cancel` take. It
-    /// names a pending action, not an item: a creation has no id until the
+    /// names a queued action, not an item: a creation has no id until the
     /// sync engine applies it.
-    #[serde(rename = "row")]
-    pub id: i64,
-    /// When the row was appended, stamped by the store's own clock.
-    pub queued_at: String,
-    /// The process that staged it.
-    pub producer: String,
-    /// The calendar the row is staged in.
-    pub collection: String,
-    /// The action kind: `add`, `calendar-reply` or `calendar-cancel`.
+    pub row: i64,
+    /// The row's action as the store holds it, never re-spelled: `add`,
+    /// `update`, `remove`, `calendar-reply`, `calendar-cancel`, ...
     pub kind: String,
-    /// The link id `event add` or `item add` reported, derived from the
-    /// item's `UID`, `null` for an intent naming a stored event.
+    /// The calendar the row is queued on.
+    pub collection: String,
+    /// The link id of the item the row creates, the one `event add` or
+    /// `item add` reported, `null` when the row creates none.
     pub link_id: Option<String>,
-    /// The event a reply or a cancellation addresses, `null` for a
-    /// creation.
+    /// The id of the stored item the row addresses (an update, a removal,
+    /// a reply or a cancellation of a stored event), as `item list` prints
+    /// it, `null` when it addresses none, a creation among them.
     pub item_id: Option<String>,
-    /// The summary of the item, from the body a creation pins or the
-    /// event an intent addresses, `null` when the store holds none.
-    pub summary: Option<String>,
-}
-
-/// One row the sync engine parked: it will not apply it again without an
-/// operator.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct PimdirParkedRow {
-    /// The queue row id, which `pimdir queue cancel` takes.
-    #[serde(rename = "row")]
-    pub id: i64,
+    /// The process that staged the row.
+    pub producer: String,
     /// When the row was appended, stamped by the store's own clock.
     pub queued_at: String,
-    /// The process that staged it.
-    pub producer: String,
-    /// The calendar the row targets.
-    pub collection: String,
-    /// The action kind: `add`, `update`, `remove`, `calendar-reply`, ...
-    pub kind: String,
-    /// How many times the engine tried it before parking it.
+    /// How many times the sync engine tried the row.
     pub attempts: i64,
-    /// Whether the row is unconfirmed: the engine sent its request and
-    /// cannot tell whether it took effect, so it may have.
+    /// Whether the row's outcome is unknown: the engine sent its request
+    /// and cannot tell whether it took effect, so it may have.
     pub unconfirmed: bool,
-    /// Why it was parked, as the store records it: an unconfirmed row's
-    /// starts with `unconfirmed: `.
-    pub error: String,
+    /// Why the row was parked, as the store records it, an unconfirmed
+    /// row's beginning `unconfirmed: `; `null` while the row is pending.
+    pub error: Option<String>,
+    /// The summary of the body the row pins, else of the item it
+    /// addresses, `null` when there is none to read.
+    pub summary: Option<String>,
 }
 
 /// The `pimdir queue list` output.
@@ -122,9 +107,9 @@ pub struct PimdirQueueListOutput {
     #[serde(skip)]
     pub calendar: Option<String>,
     /// The creations and the intents staged.
-    pub items: Vec<PimdirQueuedRow>,
+    pub items: Vec<PimdirQueueRow>,
     /// The parked rows, any kind.
-    pub parked: Vec<PimdirParkedRow>,
+    pub parked: Vec<PimdirQueueRow>,
 }
 
 impl fmt::Display for PimdirQueueListOutput {
@@ -135,29 +120,17 @@ impl fmt::Display for PimdirQueueListOutput {
 
         for queued in &self.items {
             let what = queued.summary.as_deref().or(queued.item_id.as_deref());
-
-            listing.items.push([
-                queued.id.to_string(),
-                String::from("queued"),
-                sanitize::text(&queued.queued_at).into_owned(),
-                sanitize::text(&queued.kind).into_owned(),
-                sanitize::text(&queued.collection).into_owned(),
-                sanitize::text(what.unwrap_or_default()).into_owned(),
-            ]);
+            listing.items.push(cells(queued, "queued", what));
         }
 
         for parked in &self.parked {
-            listing.items.push([
-                parked.id.to_string(),
-                String::from(match parked.unconfirmed {
-                    true => "unconfirmed",
-                    false => "parked",
-                }),
-                sanitize::text(&parked.queued_at).into_owned(),
-                sanitize::text(&parked.kind).into_owned(),
-                sanitize::text(&parked.collection).into_owned(),
-                sanitize::text(&parked.error).into_owned(),
-            ]);
+            let state = match parked.unconfirmed {
+                true => "unconfirmed",
+                false => "parked",
+            };
+            listing
+                .items
+                .push(cells(parked, state, parked.error.as_deref()));
         }
 
         if !listing.items.rows.is_empty() {
@@ -169,50 +142,70 @@ impl fmt::Display for PimdirQueueListOutput {
     }
 }
 
+/// The text cells of `row`: its id, its `state`, when it was queued, its
+/// kind, its calendar, then `last`.
+fn cells(row: &PimdirQueueRow, state: &str, last: Option<&str>) -> [String; 6] {
+    [
+        row.row.to_string(),
+        String::from(state),
+        sanitize::text(&row.queued_at).into_owned(),
+        sanitize::text(&row.kind).into_owned(),
+        sanitize::text(&row.collection).into_owned(),
+        sanitize::text(last.unwrap_or_default()).into_owned(),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{PimdirParkedRow, PimdirQueueListOutput, PimdirQueuedRow};
+    use serde_json::json;
+
+    use super::{PimdirQueueListOutput, PimdirQueueRow};
+
+    /// A row of `kind` in the calendar `cal`, pending.
+    fn row(row: i64, kind: &str) -> PimdirQueueRow {
+        PimdirQueueRow {
+            row,
+            kind: kind.into(),
+            collection: "cal".into(),
+            link_id: None,
+            item_id: None,
+            producer: "calendula".into(),
+            queued_at: "2026-11-15T09:00:00Z".into(),
+            attempts: 0,
+            unconfirmed: false,
+            error: None,
+            summary: None,
+        }
+    }
 
     /// The rows print one line each under the account and the calendar,
     /// the queued ones first, and the way to cancel one heads them; the
-    /// JSON keys a row by `row`, its kind kebab-case, as Himalaya and
-    /// cardamum do.
+    /// JSON prints a pending and a parked row in one shape, every key
+    /// present, as Himalaya and cardamum do.
     #[test]
     fn the_rows_print_under_the_way_to_cancel_one() {
         let output = PimdirQueueListOutput {
             account: "perso".into(),
             calendar: None,
             items: vec![
-                PimdirQueuedRow {
-                    id: 3,
-                    queued_at: "2026-11-15T09:00:00Z".into(),
-                    producer: "calendula".into(),
-                    collection: "cal".into(),
-                    kind: "add".into(),
+                PimdirQueueRow {
                     link_id: Some("standup@example.org".into()),
-                    item_id: None,
                     summary: Some("Standup".into()),
+                    ..row(3, "add")
                 },
-                PimdirQueuedRow {
-                    id: 4,
-                    queued_at: "2026-11-15T09:05:00Z".into(),
-                    producer: "calendula".into(),
-                    collection: "cal".into(),
-                    kind: "calendar-reply".into(),
-                    link_id: None,
+                PimdirQueueRow {
                     item_id: Some("7".into()),
-                    summary: None,
+                    queued_at: "2026-11-15T09:05:00Z".into(),
+                    ..row(4, "calendar-reply")
                 },
             ],
-            parked: vec![PimdirParkedRow {
-                id: 2,
+            parked: vec![PimdirQueueRow {
+                item_id: Some("5".into()),
                 queued_at: "2026-11-14T09:00:00Z".into(),
-                producer: "calendula".into(),
-                collection: "cal".into(),
-                kind: "update".into(),
                 attempts: 1,
-                unconfirmed: false,
-                error: "conflict".into(),
+                error: Some("conflict".into()),
+                summary: Some("Review".into()),
+                ..row(2, "update")
             }],
         };
 
@@ -228,11 +221,38 @@ Cancel:     calendula pimdir queue cancel <ROW>
         assert_eq!(output.to_string(), expected);
 
         let json = serde_json::to_value(&output).unwrap();
-        assert_eq!(json["items"][0]["row"], 3, "{json}");
-        assert_eq!(json["items"][0]["linkId"], "standup@example.org");
-        assert_eq!(json["items"][1]["itemId"], "7", "{json}");
-        assert_eq!(json["parked"][0]["row"], 2, "{json}");
-        assert_eq!(json["parked"][0]["collection"], "cal", "{json}");
+        assert_eq!(
+            json["items"][0],
+            json!({
+                "row": 3,
+                "kind": "add",
+                "collection": "cal",
+                "linkId": "standup@example.org",
+                "itemId": null,
+                "producer": "calendula",
+                "queuedAt": "2026-11-15T09:00:00Z",
+                "attempts": 0,
+                "unconfirmed": false,
+                "error": null,
+                "summary": "Standup",
+            })
+        );
+        assert_eq!(
+            json["parked"][0],
+            json!({
+                "row": 2,
+                "kind": "update",
+                "collection": "cal",
+                "linkId": null,
+                "itemId": "5",
+                "producer": "calendula",
+                "queuedAt": "2026-11-14T09:00:00Z",
+                "attempts": 1,
+                "unconfirmed": false,
+                "error": "conflict",
+                "summary": "Review",
+            })
+        );
     }
 
     /// An empty queue says so under its header.

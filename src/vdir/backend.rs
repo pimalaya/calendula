@@ -23,7 +23,7 @@ use io_vdir::{
 
 use crate::{
     config::VdirConfig,
-    error::{self, ErrorCode, calendar_not_found, recoded},
+    error::{self, ErrorCode, calendar_duplicate, calendar_not_found, recoded},
     shared::{
         calendar::{Calendar, CalendarDiff},
         client::window,
@@ -64,7 +64,9 @@ impl VdirBackend {
     /// directory named `id`, else `name`.
     ///
     /// An id that is not one directory name is refused, as it would reach
-    /// out of the home or below one of its calendars.
+    /// out of the home or below one of its calendars, and one naming a
+    /// calendar of the home `calendar-duplicate`, io-vdir writing its
+    /// markers over an existing directory.
     pub fn create_calendar(
         &mut self,
         id: Option<&str>,
@@ -81,6 +83,12 @@ impl VdirBackend {
             ),
             None => name,
         };
+
+        if collection_dir(&self.root, id).is_some() {
+            return Err(calendar_duplicate(format!(
+                "Calendar `{id}` already exists"
+            )));
+        }
 
         let collection = VdirCollection {
             path: self.root.join(id),

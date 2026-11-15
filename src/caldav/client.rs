@@ -135,7 +135,7 @@ fn build_auth(config: &CaldavAuthConfig, resolver: &mut SecretResolver) -> Resul
 
 /// The status and body of an answer that refused an exchange, wherever
 /// io-webdav surfaces it.
-fn refused(err: &WebdavClientStdError) -> Option<(u16, &str)> {
+pub(crate) fn refused(err: &WebdavClientStdError) -> Option<(u16, &str)> {
     match err {
         WebdavClientStdError::Send(WebdavSendError::HttpStatus { status, body })
         | WebdavClientStdError::WebdavSyncCollection(WebdavSyncCollectionError::Send(

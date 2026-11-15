@@ -17,7 +17,8 @@ use serde::Serialize;
 ///
 /// The text prints each calendar by its id with its name, colour, owner and
 /// whether it is the default one, while `--json` emits the raw Graph
-/// calendar objects plus any next-page link.
+/// calendar objects; `nextPage` is Graph's `@odata.nextLink`, lifted out
+/// of the page, which `--page-token` takes back.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MsgraphCalendarsOutput {
@@ -25,9 +26,9 @@ pub struct MsgraphCalendarsOutput {
     #[serde(rename = "calendars")]
     #[schemars(with = "Vec<serde_json::Value>")]
     pub calendars: Vec<MsgraphCalendar>,
-    /// The link to the next page, when the page was truncated.
-    #[serde(rename = "@odata.nextLink", skip_serializing_if = "Option::is_none")]
-    pub next_link: Option<String>,
+    /// Graph's `@odata.nextLink` resuming the listing, `null` on its
+    /// last page.
+    pub next_page: Option<String>,
 }
 
 impl fmt::Display for MsgraphCalendarsOutput {
@@ -50,12 +51,12 @@ impl fmt::Display for MsgraphCalendarsOutput {
 
         write!(f, "{records}")?;
 
-        if self.next_link.is_some() {
+        if let Some(cursor) = &self.next_page {
             if !records.items.is_empty() {
                 writeln!(f)?;
             }
 
-            writeln!(f, "(more calendars available: raise --top)")?;
+            writeln!(f, "Next page: {}", sanitize::text(cursor))?;
         }
 
         Ok(())

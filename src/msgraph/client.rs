@@ -115,6 +115,7 @@ pub fn is_missing(err: &MsgraphClientStdError) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use clap::Parser;
     use io_msgraph::v1::client::MsgraphClientStd;
     use pimalaya_cli::printer::CapturePrinter;
     use serde_json::json;
@@ -122,9 +123,12 @@ mod tests {
     use crate::{
         error::{self, ErrorCode},
         msgraph::{
-            calendars::get::MsgraphCalendarGetCommand,
+            calendars::{get::MsgraphCalendarGetCommand, list::MsgraphCalendarListCommand},
             client::MsgraphClient,
-            events::{delete::MsgraphEventDeleteCommand, get::MsgraphEventGetCommand},
+            events::{
+                delete::MsgraphEventDeleteCommand, delta::MsgraphEventDeltaCommand,
+                get::MsgraphEventGetCommand, list::MsgraphEventListCommand,
+            },
         },
         script::{self, Script},
     };
@@ -180,5 +184,95 @@ mod tests {
             .unwrap_err();
         let code = error::code(&err);
         assert_eq!(code, Some(ErrorCode::CalendarNotFound), "{err:#}");
+    }
+
+    const NEXT: &str = "https://graph.microsoft.com/v1.0/me/events?$skiptoken=X";
+    const DELTA: &str = "https://graph.microsoft.com/v1.0/me/calendarView/delta?$deltatoken=D";
+
+    /// The client over a Graph server answering each of `bodies` 200, and
+    /// the requests it receives.
+    fn answering(bodies: &[&str]) -> (MsgraphClient, script::Requests) {
+        let answers = bodies
+            .iter()
+            .map(|body| script::response(200, "application/json", body));
+        let (script, requests) = Script::new(answers);
+        let client = MsgraphClient::new(MsgraphClientStd::new(script, "token", Default::default()));
+        (client, requests)
+    }
+
+    /// The request line of the `n`th request.
+    fn request_line(requests: &script::Requests, n: usize) -> String {
+        let requests = requests.lock().unwrap();
+        let request = String::from_utf8_lossy(&requests[n]).into_owned();
+        request.lines().next().unwrap_or_default().to_owned()
+    }
+
+    /// A Graph listing prints Graph's `@odata.nextLink` as `nextPage`,
+    /// never beside it, and `--page-token` takes it back as is; the last
+    /// page prints `nextPage` `null` (pimalaya-cli output.md, *Paging
+    /// resumes*).
+    #[test]
+    fn a_graph_listing_pages_by_next_page() {
+        let first = format!(r#"{{"value":[{{"id":"E1"}}],"@odata.nextLink":"{NEXT}"}}"#);
+        let last = r#"{"value":[{"id":"E2"}]}"#;
+
+        let (client, _) = answering(&[&first]);
+        let mut printer = CapturePrinter::default();
+        let list = MsgraphEventListCommand::try_parse_from(["list"]).unwrap();
+        list.execute(&mut printer, client).unwrap();
+        let json = printer.into_single().unwrap();
+        assert_eq!(json["nextPage"], NEXT, "{json}");
+        assert!(json.get("@odata.nextLink").is_none(), "{json}");
+
+        let (client, requests) = answering(&[last]);
+        let mut printer = CapturePrinter::default();
+        let list = MsgraphEventListCommand::try_parse_from(["list", "--page-token", NEXT]).unwrap();
+        list.execute(&mut printer, client).unwrap();
+        let json = printer.into_single().unwrap();
+        assert_eq!(json["nextPage"], json!(null), "{json}");
+        assert!(request_line(&requests, 0).contains("skiptoken=X"));
+
+        // NOTE: the link carries the calendar and the query.
+        let both = ["list", "--page-token", NEXT, "-k", "cal"];
+        assert!(MsgraphEventListCommand::try_parse_from(both).is_err());
+
+        let calendars = first.replace("E1", "C1");
+        let (client, _) = answering(&[&calendars, last]);
+        let mut printer = CapturePrinter::default();
+        let list = MsgraphCalendarListCommand::try_parse_from(["list"]).unwrap();
+        list.execute(&mut printer, client).unwrap();
+        let json = printer.into_single().unwrap();
+        assert_eq!(json["nextPage"], NEXT, "{json}");
+        assert!(json.get("@odata.nextLink").is_none(), "{json}");
+        assert_eq!(json["calendars"][0]["id"], "C1", "{json}");
+    }
+
+    /// A delta page prints its `@odata.nextLink` as `nextPage`, resumed
+    /// through `--page-token`, and keeps the round's `@odata.deltaLink`
+    /// raw on its last page.
+    #[test]
+    fn a_graph_delta_pages_by_next_page_and_keeps_its_delta_link() {
+        let first = format!(r#"{{"value":[{{"id":"E1"}}],"@odata.nextLink":"{NEXT}"}}"#);
+        let last = format!(r#"{{"value":[{{"id":"E2"}}],"@odata.deltaLink":"{DELTA}"}}"#);
+
+        let args = ["delta", "--from", "2026-11-01", "--to", "2026-11-30"];
+        let (client, _) = answering(&[&first]);
+        let mut printer = CapturePrinter::default();
+        let delta = MsgraphEventDeltaCommand::try_parse_from(args).unwrap();
+        delta.execute(&mut printer, client).unwrap();
+        let json = printer.into_single().unwrap();
+        assert_eq!(json["nextPage"], NEXT, "{json}");
+        assert!(json.get("@odata.nextLink").is_none(), "{json}");
+        assert!(json.get("@odata.deltaLink").is_none(), "{json}");
+
+        let (client, requests) = answering(&[&last]);
+        let mut printer = CapturePrinter::default();
+        let args = ["delta", "--page-token", NEXT];
+        let delta = MsgraphEventDeltaCommand::try_parse_from(args).unwrap();
+        delta.execute(&mut printer, client).unwrap();
+        let json = printer.into_single().unwrap();
+        assert_eq!(json["nextPage"], json!(null), "{json}");
+        assert_eq!(json["@odata.deltaLink"], DELTA, "{json}");
+        assert!(request_line(&requests, 0).contains("skiptoken=X"));
     }
 }
