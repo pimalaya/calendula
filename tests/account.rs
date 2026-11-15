@@ -211,3 +211,20 @@ fn a_caldav_discover_key_is_refused_naming_server() {
         "{stdout}"
     );
 }
+
+/// `account list` prints pimalaya-cli's shared text, as Himalaya does: one
+/// line per account and no header row, the default marked `default`.
+#[cfg(all(feature = "vdir", feature = "pimdir"))]
+#[test]
+fn the_account_list_is_the_shared_text() {
+    let toml = "[accounts.work]\ndefault = true\npimdir.root = \"/nowhere\"\n\
+                [accounts.perso]\nvdir.home-dir = \"/nowhere\"\n";
+    let (_dir, path) = config(toml);
+
+    let out = run(&path, &["account", "list"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+
+    let expected = "perso  vdir    -\nwork   pimdir  default\n";
+    assert_eq!(stdout, expected);
+}

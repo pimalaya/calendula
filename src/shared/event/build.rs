@@ -273,7 +273,7 @@ mod tests {
         let out = build(&[source, "--location", ""]).unwrap();
 
         assert_eq!(out["contents"], source.replace("LOCATION:Room 1\r\n", ""));
-        assert_eq!(out["events"][0]["location"], "");
+        assert!(out["events"][0]["location"].is_null(), "{out}");
     }
 
     #[test]

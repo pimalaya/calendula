@@ -4,29 +4,39 @@
 //! client from a [`GcalConfig`].
 //!
 //! Resolves the bearer token, running its command when it is one, then opens
-//! the TLS connection through pimalaya-stream. There is no discovery step:
-//! the Calendar API lives at one well-known base URL.
+//! the TLS connection through pimalaya-stream and the proxy the account
+//! names. There is no discovery step: the Calendar API lives at one
+//! well-known base URL.
 
 use std::{
     ops::{Deref, DerefMut},
     path::PathBuf,
+    time::Duration,
 };
 
 use anyhow::{Result, anyhow};
 use io_gcal::v3::{
-    client::{GcalClientStd, GcalClientStdConnectOptions, GcalClientStdError},
-    send::{GcalApiError, GcalSendError},
+    client::{GcalClientStd, GcalClientStdError},
+    send::{GCAL_API_BASE, GcalApiError, GcalSendError},
 };
 use pimalaya_config::secret::SecretResolver;
-use pimalaya_stream::tls::Tls;
+use pimalaya_stream::{
+    stream::{Stream, TlsConnectOptions},
+    tls::Tls,
+};
 use secrecy::ExposeSecret;
+use url::Url;
 
 use crate::{
     account::context::Account,
     cli::resolve_account,
-    config::{GcalConfig, default_gcal_alpn},
+    config::{GcalConfig, ProxyConfig, default_gcal_alpn},
     error::{ErrorCode, recoded},
 };
+
+/// How long a read waits for the Calendar API, as io-gcal's own connect
+/// waits.
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A connected client bundled with the merged runtime [`Account`].
 pub struct GcalClient {
@@ -87,11 +97,24 @@ pub fn build_gcal_client(
 /// names too is spawned once.
 pub fn connect(config: &GcalConfig, resolver: &mut SecretResolver) -> Result<GcalClientStd> {
     let token = resolver.resolve(config.auth.token.clone())?;
-    let options = GcalClientStdConnectOptions {
+    let proxy = ProxyConfig::resolve(config.proxy.clone(), resolver)?;
+
+    // NOTE: io-gcal's own connect takes no proxy, so the stream is opened
+    // here as it opens it, through the proxy the account names.
+    let url = Url::parse(GCAL_API_BASE)?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| anyhow!("The Calendar API base `{url}` has no host"))?;
+    let options = TlsConnectOptions {
         tls: build_tls(config),
+        proxy,
+        ..Default::default()
     };
 
-    Ok(GcalClientStd::connect(token.expose_secret(), options)?)
+    let stream = Stream::connect_tls(host, url.port().unwrap_or(443), options)?;
+    stream.set_read_timeout(Some(READ_TIMEOUT))?;
+
+    Ok(GcalClientStd::new(stream, token.expose_secret()))
 }
 
 /// The TLS profile the backend connects with.

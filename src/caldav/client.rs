@@ -17,13 +17,13 @@ use io_webdav::{
     rfc6578::sync_collection::WebdavSyncCollectionError,
 };
 use pimalaya_config::secret::SecretResolver;
-use pimalaya_stream::{proxy::Proxy, tls::Tls};
+use pimalaya_stream::tls::Tls;
 use secrecy::ExposeSecret;
 use url::{ParseError, Url};
 
 use crate::{
     cli::resolve_account,
-    config::{CaldavAuthConfig, CaldavConfig, default_caldav_alpn},
+    config::{CaldavAuthConfig, CaldavConfig, ProxyConfig, default_caldav_alpn},
     error::{ErrorCode, recoded},
 };
 
@@ -63,12 +63,10 @@ impl DerefMut for CaldavClient {
 pub fn connect(config: &CaldavConfig, resolver: &mut SecretResolver) -> Result<WebdavClientStd> {
     let auth = build_auth(&config.auth, resolver)?;
     let tls = build_tls(config);
+    let proxy = ProxyConfig::resolve(config.proxy.clone(), resolver)?;
 
     if let Some(home) = &config.home {
-        let opts = WebdavClientStdConnectOptions {
-            tls,
-            proxy: Proxy::None,
-        };
+        let opts = WebdavClientStdConnectOptions { tls, proxy };
         let mut client = WebdavClientStd::connect(home, auth, opts)?;
         client.calendar_home_set = Some(home.clone());
         return Ok(client);
@@ -80,10 +78,7 @@ pub fn connect(config: &CaldavConfig, resolver: &mut SecretResolver) -> Result<W
         .ok_or_else(|| anyhow!("CalDAV config needs `server` or `home`"))?;
     let server = parse_server(server)?;
 
-    let opts = WebdavClientStdConnectOptions {
-        tls,
-        proxy: Proxy::None,
-    };
+    let opts = WebdavClientStdConnectOptions { tls, proxy };
     let mut client = WebdavClientStd::connect(&server, auth, opts)?;
     client.calendar_home_set()?;
 

@@ -36,13 +36,12 @@ use io_msgraph::v1::{
 use jiff::{Timestamp, ToSpan, civil::Date, tz::TimeZone};
 use log::warn;
 use pimalaya_config::secret::SecretResolver;
-use pimalaya_stream::proxy::Proxy;
 use secrecy::ExposeSecret;
 
 use pimalaya_cli::error::{CodedError, code_of};
 
 use crate::{
-    config::{MsgraphConfig, default_msgraph_alpn},
+    config::{MsgraphConfig, ProxyConfig, default_msgraph_alpn},
     error::{self, ErrorCode, recoded},
     shared::{
         calendar::{Calendar, CalendarDiff},
@@ -73,7 +72,7 @@ impl MsgraphBackend {
         let alpn = config.alpn.clone().unwrap_or_else(default_msgraph_alpn);
         let options = MsgraphClientStdConnectOptions {
             tls: config.tls.clone().into_tls(alpn),
-            proxy: Proxy::None,
+            proxy: ProxyConfig::resolve(config.proxy.clone(), resolver)?,
             user_id: config.user_id.clone(),
         };
         let client = MsgraphClientStd::connect(token.expose_secret(), options)

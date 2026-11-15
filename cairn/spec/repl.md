@@ -15,7 +15,7 @@ status: current
 Every command SHALL run over a session holding the unified client, built the first time a unified command needs it and kept for the commands after it. A command that fails SHALL drop the client it ran on, so the next command builds it again; the failed command SHALL NOT be retried. The protocol-specific commands SHALL build their own client each time. A one-shot run SHALL use a fresh session for its single command.
 
 ### Requirement: A session refuses what cannot finish inside it
-Inside a session, `repl` and `mcp` SHALL be refused with `Cannot start a session inside a session`, and the composer (`-i`, with or without `--composer`, on `event build`, `event create`, `event update`, `item build`, `item create` and `item update`) SHALL be refused by name, its editor needing the terminal the session reads its commands from. The session SHALL go on after each.
+Inside a session, `repl` and `mcp` SHALL be refused by pimalaya-cli's loop before calendula runs anything, with `Cannot start a session inside a session`, coded `usage-invalid`, and the composer (`-i`, with or without `--composer`, on `event build`, `event create`, `event update`, `item build`, `item create` and `item update`) SHALL be refused by name, its editor needing the terminal the session reads its commands from. The session SHALL go on after each.
 
 ### Requirement: A session never reads command input from stdin
 A command run inside the session that would read its input from stdin (an iCalendar source given as `-`) SHALL be refused with the code `stdin-taken`, its input given as text instead.
@@ -38,6 +38,14 @@ A line carrying `--json` SHALL print its answer as JSON, the lines after it keep
 
 ### Requirement: Session flags are refused by name
 A line clap cannot parse that sets a flag the session fixes when it starts, `-a`, `--account`, `-c`, `--config`, `--log-level`, `--log`, `--log-file`, `-b` or `--backend`, SHALL fail with ``Cannot set `<flag>` inside a session, start a new session with it instead`` in place of clap's error, the flag recognised alone, as `--<long>=<value>` or as a short flag with its value attached, before any `--`.
+
+### Requirement: A version line prints the version
+A `-V` or `--version` line SHALL print the version the command line prints, `-V` the short one and `--version` the long one, the `Command` enum carrying `#[command(version, long_version = long_version!())]` for pimalaya-cli's loop to read; the session SHALL go on after it.
+
+#### Scenario: The version in a text session
+- GIVEN a text session
+- WHEN the lines `-V` and `--version` are read
+- THEN stdout holds `calendula <version>`, then `calendula v<version> <features>` and the build lines
 
 ### Requirement: Help keeps JSON lines whole
 A line asking for help SHALL print clap's text on stdout in a text session, and on stderr when the session's `--json` or a `--json` word of the line before any `--` is set, so stdout keeps one JSON value per line. Its usage line SHALL name the binary before the command, as `Usage: calendula event list [OPTIONS]`.

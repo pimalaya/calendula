@@ -58,6 +58,9 @@ pub enum ErrorCode {
     /// The calendar a command names does not exist: nothing was read or
     /// written.
     CalendarNotFound,
+    /// A command naming no calendar found no `calendar.default` either:
+    /// the caller names one with `-k` or sets the key. Nothing was read.
+    CalendarDefaultMissing,
     /// The backend answered for an item calendula could not read: an
     /// `errors` entry, or the failure of a command reading that one item.
     ItemUnreadable,
@@ -100,14 +103,31 @@ pub enum ErrorCode {
     StoreForeign,
     /// The pimdir store's two version stamps disagree.
     StoreCorrupt,
+    /// The pimdir store holds no schema yet and the verb creates none: its
+    /// sync engine creates it.
+    StoreNotCurrent,
     /// The pimdir store names its bodies by a hash this calendula does not
     /// know: the caller upgrades calendula.
     StoreHashAlgo,
+    /// The pimdir store's sync state was written by another version of
+    /// its sync engine.
+    SyncVersion,
     /// Another process holds the pimdir store: the caller retries.
     StoreBusy,
+    /// A sync owns the pimdir store: the caller retries once it ends.
+    StoreOwned,
+    /// A producer is staging a body in the pimdir store: the caller
+    /// retries.
+    StoreStaging,
+    /// A pimdir store verb is between two of its chunks: the caller
+    /// retries.
+    StoreInFlight,
     /// A path of the pimdir store is a link or another user can reach it:
     /// the caller restricts it, a store being its user's alone.
     StoreExposed,
+    /// The pimdir store is not the one that answered a queue row's handle,
+    /// a copy restored since: nothing was done with the row.
+    StoreReset,
     /// The lock file of the pimdir store was removed or replaced under a
     /// write: nothing was queued, and the caller retries.
     LockReplaced,
@@ -117,6 +137,18 @@ pub enum ErrorCode {
     /// A queue action's payload is one its schema refuses: refused before
     /// anything is queued.
     ActionMalformed,
+    /// The pimdir conflict holds a body nobody has read: the caller
+    /// fetches it first.
+    ConflictUnread,
+    /// A source of the pimdir store does not support the write: nothing
+    /// was queued.
+    Unsupported,
+    /// No source of the pimdir store can perform the intent: nothing was
+    /// queued.
+    NoPerformer,
+    /// Several sources of the pimdir store can perform the intent and none
+    /// is chosen: nothing was queued.
+    AmbiguousPerformer,
     /// The pimdir store has no search index yet: its sync engine builds
     /// it.
     IndexMissing,
@@ -174,6 +206,14 @@ pub fn item_not_found(message: impl Into<String>) -> Error {
 )]
 pub fn calendar_not_found(message: impl Into<String>) -> Error {
     CodedError::new(ErrorCode::CalendarNotFound, message.into()).into()
+}
+
+/// A refusal under `calendar-default-missing`: a command naming no calendar
+/// found no `calendar.default` either.
+pub fn calendar_default_missing() -> Error {
+    let message = "No default calendar found, name one with `-k <CALENDAR-ID>` or set \
+                   `calendar.default`";
+    CodedError::new(ErrorCode::CalendarDefaultMissing, message).into()
 }
 
 /// A refusal under `backend-not-built`: the account's `backend` block

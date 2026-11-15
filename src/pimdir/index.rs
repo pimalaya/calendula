@@ -527,7 +527,7 @@ fn event_hit(item: &CalendarItem, stored: Option<&PimdirItem>, title: String) ->
         etag: None,
         uid: summary.uid.clone().unwrap_or_default(),
         summary: summary.summary.clone(),
-        location: summary.location.clone().unwrap_or_default(),
+        location: summary.location.clone(),
         recurring: summary.recurring.unwrap_or_default(),
         organizer: summary.organizer.as_ref().map(|organizer| EventPerson {
             email: organizer.address.clone(),
@@ -825,7 +825,7 @@ mod tests {
         assert_eq!(hits.len(), 1);
         let hit = &hits[0];
         assert_eq!(hit.event.summary, "Offsite");
-        assert_eq!(hit.event.location, "Lisbon");
+        assert_eq!(hit.event.location.as_deref(), Some("Lisbon"));
         assert_eq!(hit.calendar_id, "cal");
         assert_eq!(hit.matched, Some(PimdirCalendarMatched::Body));
         assert!(

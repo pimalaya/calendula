@@ -15,17 +15,16 @@
 //!
 //! [`JsonSchemaCommand`]: pimalaya_cli::clap::commands::json_schema::JsonSchemaCommand
 
-use pimalaya_cli::{clap::commands::json_schema::JsonSchemaRegistry, error::ErrorReport};
+use pimalaya_cli::{
+    clap::commands::json_schema::JsonSchemaRegistry, error::ErrorReport, output::SavedOutput,
+};
 use schemars::JsonSchema;
 
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "vdir"))]
 use crate::shared::receipt::IdReceipt;
 use crate::{
     error::{ErrorCode, ItemError},
-    shared::{
-        build::{IcalBuildOutput, SavedOutput},
-        receipt::WriteReceipt,
-    },
+    shared::{build::IcalBuildOutput, receipt::WriteReceipt},
 };
 
 /// Builds the command-to-schema registry consumed by `json-schema <DIR>`.
@@ -44,11 +43,11 @@ pub fn registry() -> JsonSchemaRegistry {
 
     insert!(
         "calendula-account-list",
-        crate::account::list::AccountListOutput
+        pimalaya_cli::account::AccountListOutput
     );
     insert!(
         "calendula-account-check",
-        crate::account::check::AccountCheckOutput
+        pimalaya_cli::account::AccountCheckOutput<ErrorCode>
     );
     insert!(
         "calendula-account-capability",
@@ -110,8 +109,12 @@ pub fn registry() -> JsonSchemaRegistry {
         crate::shared::item::update::ItemUpdateOutput
     );
 
-    for key in [
+    insert!(
         "calendula-calendar-create",
+        crate::shared::calendar::create::CalendarCreateOutput
+    );
+
+    for key in [
         "calendula-calendar-update",
         "calendula-calendar-delete",
         "calendula-event-delete",

@@ -56,10 +56,10 @@ pub struct Event {
     pub recurrence_id: Option<String>,
     /// The event's SUMMARY, empty when it carries none.
     pub summary: String,
-    /// The event's DESCRIPTION, empty when it carries none.
-    pub description: String,
-    /// The event's LOCATION, empty when it carries none.
-    pub location: String,
+    /// The event's DESCRIPTION, `null` when it carries none.
+    pub description: Option<String>,
+    /// The event's LOCATION, `null` when it carries none.
+    pub location: Option<String>,
     /// The start, iCalendar-spelled (`YYYYMMDD`, `YYYYMMDDTHHMMSS[Z]`).
     pub start: String,
     /// The end, spelled as `start` is: `DTEND`, or the start plus the
@@ -231,7 +231,7 @@ impl Event {
     /// The label an agenda cell shows: the summary, then the description.
     pub fn label(&self) -> &str {
         if self.summary.is_empty() {
-            &self.description
+            self.description.as_deref().unwrap_or_default()
         } else {
             &self.summary
         }
@@ -332,13 +332,13 @@ mod tests {
     fn the_label_falls_back_to_the_description() {
         let summarised = Event {
             summary: "Stand-up".into(),
-            description: "Daily".into(),
+            description: Some("Daily".into()),
             ..Default::default()
         };
         assert_eq!(summarised.label(), "Stand-up");
 
         let bare = Event {
-            description: "Daily".into(),
+            description: Some("Daily".into()),
             ..Default::default()
         };
         assert_eq!(bare.label(), "Daily");

@@ -12,7 +12,7 @@ use serde::Serialize;
 
 use crate::{
     capability::Capability,
-    shared::{arg::CalendarIdArg, client::CalendarClient},
+    shared::{arg::CalendarIdArg, client::CalendarClient, item::CalendarItem},
 };
 
 /// Read a single iCalendar item.
@@ -20,9 +20,11 @@ use crate::{
 /// The iCalendar prints as stored, CRLF read as LF and any character that
 /// could drive the terminal replaced.
 ///
-/// JSON output: `{"contents", "etag"}`, the raw iCalendar, its bytes
-/// kept, and the version a write can be gated on (`--if-match`), `null`
-/// when the backend has none.
+/// JSON output: the row `item list` prints, `{"id", "calendarId", "etag",
+/// "contents", "encoding"}`: the item's id, its calendar, the version a
+/// write can be gated on (`--if-match`), `null` when the backend has none,
+/// and the raw iCalendar, its bytes kept, as text (`encoding` `utf-8`) or
+/// as base64 when they are not valid UTF-8 (`encoding` `base64`).
 #[derive(Debug, Parser)]
 pub struct ItemReadCommand {
     #[command(flatten)]
@@ -39,33 +41,30 @@ impl ItemReadCommand {
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
         let item = client.get_item(&calendar_id, &self.item_id)?;
-        let contents = String::from_utf8_lossy(&item.contents).into_owned();
-        printer.out(ItemReadOutput {
-            contents,
-            etag: item.etag,
-        })
+
+        printer.out(ItemReadOutput { item })
     }
 }
 
-/// The read item, as the calendar stores it.
+/// The read item, as the calendar stores it: the row `item list` prints.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemReadOutput {
-    /// The raw iCalendar bytes, lossily decoded as UTF-8.
-    pub contents: String,
-    /// The entity tag of the version read, when the backend has one.
-    pub etag: Option<String>,
+    /// The item read.
+    #[serde(flatten)]
+    pub item: CalendarItem,
 }
 
 impl fmt::Display for ItemReadOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "{}", printable(&self.contents).trim_end())
+        writeln!(f, "{}", printable(&self.item.contents).trim_end())
     }
 }
 
-/// Defuses an iCalendar for a terminal, keeping its tabs and line breaks.
-pub fn printable(contents: &str) -> String {
-    let contents = contents.replace("\r\n", "\n");
+/// Defuses an iCalendar for a terminal, keeping its tabs and line breaks,
+/// bytes that are not valid UTF-8 read as U+FFFD.
+pub fn printable(contents: &[u8]) -> String {
+    let contents = String::from_utf8_lossy(contents).replace("\r\n", "\n");
 
     contents
         .chars()

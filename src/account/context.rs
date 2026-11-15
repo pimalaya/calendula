@@ -10,7 +10,10 @@
 use anyhow::{Result, bail};
 use pimalaya_config::command::CommandConfig;
 
-use crate::config::{AccountConfig, Config};
+use crate::{
+    config::{AccountConfig, Config},
+    error,
+};
 
 /// Page size every `list` command falls back to.
 const DEFAULT_LIST_PAGE_SIZE: u32 = 25;
@@ -55,13 +58,11 @@ impl Account {
 
     /// Resolves the calendar id an `event` or `item` command operates
     /// on: the `-k/--calendar` flag wins; otherwise the
-    /// `calendar.default` config is used; otherwise the command bails.
+    /// `calendar.default` config is used; otherwise the command fails coded
+    /// `calendar-default-missing`.
     pub fn calendar_id(&self, flag: Option<String>) -> Result<String> {
-        if let Some(id) = flag.or_else(|| self.calendar_default.clone()) {
-            return Ok(id);
-        }
-
-        bail!("Missing calendar id; pass -k/--calendar or set calendar.default")
+        flag.or_else(|| self.calendar_default.clone())
+            .ok_or_else(error::calendar_default_missing)
     }
 
     /// Resolves the composer an item is edited through.

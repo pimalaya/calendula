@@ -256,6 +256,7 @@ fn what_cannot_run_in_a_session_is_refused_and_the_session_goes_on() {
     for answer in &answers[..2] {
         let error = answer["error"].as_str().unwrap_or_default();
         assert_eq!(error, "Cannot start a session inside a session", "{answer}");
+        assert_eq!(answer["code"], "usage-invalid", "{answer}");
     }
 
     for answer in &answers[2..5] {
@@ -269,4 +270,25 @@ fn what_cannot_run_in_a_session_is_refused_and_the_session_goes_on() {
     let events = answers[7]["events"].as_array().unwrap();
     assert_eq!(events.len(), 1, "{events:?}");
     assert_eq!(events[0]["summary"], "Standup");
+}
+
+/// A version line prints the version the command line prints, `-V` the
+/// short one and `--version` the long one, and the session goes on.
+#[test]
+fn a_version_line_prints_the_version() {
+    let home = account();
+    let (stdout, _) = run(home.path(), &[], "-V\n--version\nevent list --json\n");
+
+    let version = concat!("calendula ", env!("CARGO_PKG_VERSION"));
+    let long = concat!("calendula v", env!("CARGO_PKG_VERSION"), " ");
+    let mut lines = stdout.lines();
+
+    assert_eq!(lines.next(), Some(version), "{stdout}");
+    assert!(
+        lines.next().unwrap_or_default().starts_with(long),
+        "{stdout}"
+    );
+
+    let last = values(stdout.lines().last().unwrap_or_default());
+    assert_eq!(last[0]["events"][0]["id"], "standup", "{stdout}");
 }

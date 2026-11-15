@@ -52,14 +52,6 @@ impl IcalFamily {
             Self::Item => None,
         }
     }
-
-    /// What the family calls what it writes, for a message about one.
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Event => "Event",
-            Self::Item => "Item",
-        }
-    }
 }
 
 /// Resolves an iCalendar source into raw bytes.

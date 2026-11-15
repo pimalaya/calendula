@@ -48,8 +48,6 @@ impl fmt::Display for WriteReceipt {
 /// A write a [`WriteReceipt`] reports.
 #[derive(Clone, Copy, Debug)]
 pub enum Write {
-    /// A creation.
-    Create,
     /// An update.
     Update,
     /// A deletion.
@@ -60,7 +58,6 @@ impl Write {
     /// The write as a noun, as in `deletion`.
     fn noun(self) -> &'static str {
         match self {
-            Self::Create => "creation",
             Self::Update => "update",
             Self::Delete => "deletion",
         }
@@ -69,7 +66,6 @@ impl Write {
     /// The write done, as in `deleted`.
     fn past(self) -> &'static str {
         match self {
-            Self::Create => "created",
             Self::Update => "updated",
             Self::Delete => "deleted",
         }

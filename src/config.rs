@@ -16,7 +16,9 @@
 //! domains having moved to unfog and journal, and the rendering tables
 //! (`table`, `account`, `calendar.list`, `event.list.table`,
 //! `item.list.table`), the output being plain text. So is the
-//! `caldav.discover` key, `caldav.server` naming the root instead.
+//! `caldav.discover` key, `caldav.server` naming the root instead. Each
+//! refusal is pimalaya-config's sentence (`removed_key!`), naming
+//! MIGRATION.md.
 
 use std::collections::HashMap;
 #[cfg(any(
@@ -29,16 +31,24 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
-use pimalaya_config::secret::Secret;
+use anyhow::{Result, bail};
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+use pimalaya_config::secret::{Secret, SecretResolver};
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use pimalaya_config::toml::opt_shell_expanded_path;
 #[cfg(any(feature = "vdir", feature = "pimdir"))]
 use pimalaya_config::toml::shell_expanded_path;
 #[cfg(feature = "caldav")]
 use pimalaya_config::toml::shell_expanded_string;
-use pimalaya_config::{command::CommandConfig, toml::TomlConfig};
+use pimalaya_config::{command::CommandConfig, removed_key, toml::TomlConfig};
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
-use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider, TlsServer};
+use pimalaya_stream::{
+    proxy::{Proxy, ProxyAuth},
+    tls::{Rustls, RustlsCrypto, Tls, TlsProvider, TlsServer},
+};
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+use secrecy::SecretString;
+use serde::Deserialize;
 #[cfg(not(all(
     feature = "vdir",
     feature = "caldav",
@@ -47,7 +57,6 @@ use pimalaya_stream::tls::{Rustls, RustlsCrypto, Tls, TlsProvider, TlsServer};
     feature = "msgraph"
 )))]
 use serde::de::IgnoredAny;
-use serde::{Deserialize, Deserializer, de::Error};
 #[cfg(feature = "caldav")]
 use url::Url;
 
@@ -102,7 +111,15 @@ impl TomlConfig for Config {
     }
 
     fn take_named_account(&mut self, name: &str) -> Option<(String, Self::Account)> {
-        self.accounts.remove_entry(name)
+        let entry = self.accounts.remove_entry(name);
+
+        #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+        let entry = entry.map(|(name, mut account)| {
+            account.inherit_proxy();
+            (name, account)
+        });
+
+        entry
     }
 }
 
@@ -135,6 +152,11 @@ pub struct AccountConfig {
     #[serde(default)]
     #[allow(dead_code)]
     pub journal: Option<JournalMovedConfig>,
+    /// Proxy every network backend of this account goes through, unless
+    /// its own block names one.
+    #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+    #[serde(default)]
+    pub proxy: Option<ProxyConfig>,
     /// vdir backend: one local directory per calendar.
     #[cfg(feature = "vdir")]
     pub vdir: Option<VdirConfig>,
@@ -170,6 +192,11 @@ pub struct AccountConfig {
     #[cfg(not(feature = "msgraph"))]
     #[serde(default)]
     pub msgraph: Option<IgnoredAny>,
+    /// The account proxy, loaded unread by a build with no network backend.
+    #[cfg(not(any(feature = "caldav", feature = "gcal", feature = "msgraph")))]
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub proxy: Option<IgnoredAny>,
 }
 
 impl AccountConfig {
@@ -205,6 +232,28 @@ impl AccountConfig {
         blocks
             .filter_map(|(name, built)| (!built).then_some(name))
             .collect()
+    }
+
+    /// Hands the account proxy to every network backend naming none of
+    /// its own.
+    #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+    fn inherit_proxy(&mut self) {
+        let Some(proxy) = &self.proxy else {
+            return;
+        };
+
+        let slots = [
+            #[cfg(feature = "caldav")]
+            self.caldav.as_mut().map(|c| &mut c.proxy),
+            #[cfg(feature = "gcal")]
+            self.gcal.as_mut().map(|c| &mut c.proxy),
+            #[cfg(feature = "msgraph")]
+            self.msgraph.as_mut().map(|c| &mut c.proxy),
+        ];
+
+        for slot in slots.into_iter().flatten() {
+            slot.get_or_insert_with(|| proxy.clone());
+        }
     }
 }
 
@@ -242,96 +291,60 @@ pub struct EventListConfig {
     pub table: Option<EventListTableRemovedConfig>,
 }
 
-/// The `todo` table, which no configuration holds any more.
-#[derive(Clone, Debug)]
-pub enum TodoMovedConfig {}
-
-impl<'de> Deserialize<'de> for TodoMovedConfig {
-    fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
-        Err(D::Error::custom(
-            "The `todo` table moved to `unfog`, the Pimalaya CLI for tasks; \
-             remove it from the calendula configuration",
-        ))
+removed_key! {
+    /// The `todo` table, refused by name, the to-dos having moved to unfog.
+    pub TodoMovedConfig: Table {
+        name: "todo",
+        why: "the to-dos having moved to unfog, the Pimalaya CLI for tasks",
+        instead: "delete it",
     }
-}
 
-/// The `journal` table, which no configuration holds any more.
-#[derive(Clone, Debug)]
-pub enum JournalMovedConfig {}
-
-impl<'de> Deserialize<'de> for JournalMovedConfig {
-    fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
-        Err(D::Error::custom(
-            "The `journal` table moved to `journal`, the Pimalaya CLI for \
-             journal entries; remove it from the calendula configuration",
-        ))
+    /// The `journal` table, refused by name, the journal entries having
+    /// moved to journal.
+    pub JournalMovedConfig: Table {
+        name: "journal",
+        why: "the journal entries having moved to journal, the Pimalaya CLI \
+              for journal entries",
+        instead: "delete it",
     }
-}
 
-/// The `table` table, which no configuration holds any more.
-#[derive(Clone, Debug)]
-pub enum TableRemovedConfig {}
-
-impl<'de> Deserialize<'de> for TableRemovedConfig {
-    fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
-        Err(D::Error::custom(
-            "The `table` table is gone, calendula printing plain text with \
-             no border or colour; remove it from the calendula configuration",
-        ))
+    /// The `table` table, refused by name, the output being plain text.
+    pub TableRemovedConfig: Table {
+        name: "table",
+        why: "calendula printing plain text with no border or colour",
+        instead: "delete it",
     }
-}
 
-/// The top-level `account` table, which no configuration holds any more.
-#[derive(Clone, Debug)]
-pub enum AccountRemovedConfig {}
-
-impl<'de> Deserialize<'de> for AccountRemovedConfig {
-    fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
-        Err(D::Error::custom(
-            "The `account` table is gone, `account list` printing plain text \
-             with no colour; remove it from the calendula configuration",
-        ))
+    /// The top-level `account` table, refused by name, `account list`
+    /// printing plain text.
+    pub AccountRemovedConfig: Table {
+        name: "account",
+        why: "`account list` printing plain text with no colour",
+        instead: "delete it",
     }
-}
 
-/// The `calendar.list` table, which no configuration holds any more.
-#[derive(Clone, Debug)]
-pub enum CalendarListRemovedConfig {}
-
-impl<'de> Deserialize<'de> for CalendarListRemovedConfig {
-    fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
-        Err(D::Error::custom(
-            "The `calendar.list` table is gone, `calendar list` printing \
-             plain text with no colour; remove it from the calendula \
-             configuration",
-        ))
+    /// The `calendar.list` table, refused by name, `calendar list`
+    /// printing plain text.
+    pub CalendarListRemovedConfig: Table {
+        name: "calendar.list",
+        why: "`calendar list` printing plain text with no colour",
+        instead: "delete it",
     }
-}
 
-/// The `event.list.table` table, which no configuration holds any more.
-#[derive(Clone, Debug)]
-pub enum EventListTableRemovedConfig {}
-
-impl<'de> Deserialize<'de> for EventListTableRemovedConfig {
-    fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
-        Err(D::Error::custom(
-            "The `event.list.table` table is gone, `event list` printing \
-             plain text with no colour; remove it from the calendula \
-             configuration",
-        ))
+    /// The `event.list.table` table, refused by name, `event list`
+    /// printing plain text.
+    pub EventListTableRemovedConfig: Table {
+        name: "event.list.table",
+        why: "`event list` printing plain text with no colour",
+        instead: "delete it",
     }
-}
 
-/// The `item.list.table` table, which no configuration holds any more.
-#[derive(Clone, Debug)]
-pub enum ItemListTableRemovedConfig {}
-
-impl<'de> Deserialize<'de> for ItemListTableRemovedConfig {
-    fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
-        Err(D::Error::custom(
-            "The `item.list.table` table is gone, `item list` printing plain \
-             text with no colour; remove it from the calendula configuration",
-        ))
+    /// The `item.list.table` table, refused by name, `item list` printing
+    /// plain text.
+    pub ItemListTableRemovedConfig: Table {
+        name: "item.list.table",
+        why: "`item list` printing plain text with no colour",
+        instead: "delete it",
     }
 }
 
@@ -429,6 +442,10 @@ pub struct CaldavConfig {
     /// ALPN identifiers offered during the TLS handshake, unset offering
     /// [`default_caldav_alpn`].
     pub alpn: Option<Vec<String>>,
+    /// Proxy the CalDAV connection goes through, overriding the account's
+    /// `proxy`, and then the `all_proxy` and `https_proxy` environment
+    /// variables.
+    pub proxy: Option<ProxyConfig>,
     /// Authentication configuration.
     pub auth: CaldavAuthConfig,
 }
@@ -440,20 +457,16 @@ pub fn default_caldav_alpn() -> Vec<String> {
     vec![String::from("http/1.1")]
 }
 
-/// The `caldav.discover` key, which no configuration holds any more.
-#[cfg(feature = "caldav")]
-#[derive(Clone, Debug)]
-pub enum CaldavDiscoverRemovedConfig {}
-
-#[cfg(feature = "caldav")]
-impl<'de> Deserialize<'de> for CaldavDiscoverRemovedConfig {
-    fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
-        Err(D::Error::custom(
-            "The `caldav.discover` key is removed, calendula resolving no domain: \
-             name the server in `caldav.server` instead (Fastmail's \
-             `https://caldav.fastmail.com/dav/`, Google's \
-             `https://apidata.googleusercontent.com/caldav/v2/`), see MIGRATION.md",
-        ))
+removed_key! {
+    /// The `caldav.discover` key, refused by name, calendula resolving no
+    /// domain.
+    #[cfg_attr(not(feature = "caldav"), allow(dead_code))]
+    pub CaldavDiscoverRemovedConfig: Key {
+        name: "caldav.discover",
+        why: "calendula resolving no domain",
+        instead: "name the server in `caldav.server` instead (Fastmail's \
+                  `https://caldav.fastmail.com/dav/`, Google's \
+                  `https://apidata.googleusercontent.com/caldav/v2/`)",
     }
 }
 
@@ -500,6 +513,10 @@ pub struct GcalConfig {
     /// negotiation and a non-empty one replaces the default. Only
     /// rustls reads it, native-tls ignoring ALPN altogether.
     pub alpn: Option<Vec<String>>,
+    /// Proxy the Google Calendar connection goes through, overriding the
+    /// account's `proxy`, and then the `all_proxy` and `https_proxy`
+    /// environment variables.
+    pub proxy: Option<ProxyConfig>,
     /// Authentication configuration.
     pub auth: GcalAuthConfig,
 }
@@ -546,6 +563,10 @@ pub struct MsgraphConfig {
     /// ALPN identifiers offered during the TLS handshake, unset offering
     /// [`default_msgraph_alpn`].
     pub alpn: Option<Vec<String>>,
+    /// Proxy the Microsoft Graph connection goes through, overriding the
+    /// account's `proxy`, and then the `all_proxy` and `https_proxy`
+    /// environment variables.
+    pub proxy: Option<ProxyConfig>,
     /// Authentication configuration.
     pub auth: MsgraphAuthConfig,
 }
@@ -572,6 +593,63 @@ pub struct MsgraphAuthConfig {
     /// The token, read from the configuration or from the standard output
     /// of a command, a token broker such as ortie.
     pub token: Secret,
+}
+
+/// Proxy configuration.
+///
+/// `url` is a `socks5://`, `socks5h://` or `http://` proxy URL. Its user
+/// info authenticates too, but `username` and `password` keep the secret
+/// out of the URL.
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ProxyConfig {
+    /// The proxy URL.
+    pub url: String,
+    /// The proxy username, required by `password`.
+    pub username: Option<String>,
+    /// The proxy password, read from the configuration or from the
+    /// standard output of a command.
+    pub password: Option<Secret>,
+}
+
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+impl ProxyConfig {
+    /// Resolves an optional configuration, an absent one reading the
+    /// environment at connect time.
+    pub fn resolve(config: Option<Self>, resolver: &mut SecretResolver) -> Result<Proxy> {
+        match config {
+            Some(config) => config.try_into_proxy(resolver),
+            None => Ok(Proxy::System),
+        }
+    }
+
+    /// Resolves the configuration into a runtime [`Proxy`], the password
+    /// going through `resolver`.
+    pub fn try_into_proxy(self, resolver: &mut SecretResolver) -> Result<Proxy> {
+        let mut proxy = Proxy::from_url(&self.url)?;
+
+        let auth = match (self.username, self.password) {
+            (None, None) => return Ok(proxy),
+            (None, Some(_)) => bail!("Proxy password requires a username"),
+            (Some(user), pass) => ProxyAuth {
+                user,
+                pass: match pass {
+                    Some(pass) => resolver.resolve(pass)?,
+                    None => SecretString::default(),
+                },
+            },
+        };
+
+        match &mut proxy {
+            Proxy::Socks5 { auth: slot, .. } | Proxy::Http { auth: slot, .. } => {
+                *slot = Some(auth);
+            }
+            Proxy::None | Proxy::System => {}
+        }
+
+        Ok(proxy)
+    }
 }
 
 /// SSL/TLS configuration.
@@ -736,7 +814,9 @@ mod tests {
         let document = "[todo.list]\npage-size = 50\n\n[accounts.personal]\n";
         let err = toml::from_str::<Config>(document).unwrap_err().to_string();
 
-        assert!(err.contains("`todo` table moved to `unfog`"), "{err}");
+        assert!(err.contains("The `todo` table is removed"), "{err}");
+        assert!(err.contains("unfog"), "{err}");
+        assert!(err.contains("see MIGRATION.md"), "{err}");
         assert!(err.contains("line 1"), "{err}");
     }
 
@@ -745,7 +825,9 @@ mod tests {
         let document = "[accounts.personal.journal]\nlist.page-size = 50\n";
         let err = toml::from_str::<Config>(document).unwrap_err().to_string();
 
-        assert!(err.contains("`journal` table moved to `journal`"), "{err}");
+        assert!(err.contains("The `journal` table is removed"), "{err}");
+        assert!(err.contains("moved to journal"), "{err}");
+        assert!(err.contains("see MIGRATION.md"), "{err}");
         assert!(err.contains("line 1"), "{err}");
     }
 
@@ -774,7 +856,7 @@ mod tests {
                 let err = toml::from_str::<Config>(&document).unwrap_err();
                 let err = err.to_string();
                 assert!(
-                    err.contains(&format!("The `{table}` table is gone")),
+                    err.contains(&format!("The `{table}` table is removed")),
                     "{err}"
                 );
             }
@@ -848,12 +930,13 @@ mod tests {
             "[accounts.a.table]\narrangement = \"disabled\"\n",
         ] {
             let err = toml::from_str::<Config>(document).unwrap_err().to_string();
-            assert!(err.contains("The `table` table is gone"), "{err}");
+            assert!(err.contains("The `table` table is removed"), "{err}");
+            assert!(err.contains("delete it, see MIGRATION.md"), "{err}");
         }
 
         let document = "[account.list.table]\nname-color = \"red\"\n[accounts]\n";
         let err = toml::from_str::<Config>(document).unwrap_err().to_string();
-        assert!(err.contains("The `account` table is gone"), "{err}");
+        assert!(err.contains("The `account` table is removed"), "{err}");
     }
 
     #[cfg(feature = "caldav")]
@@ -867,6 +950,58 @@ mod tests {
         let document = format!("{document}alpn = []\n");
         let config: CaldavConfig = toml::from_str(&document).unwrap();
         assert_eq!(config.alpn, Some(Vec::new()));
+    }
+
+    /// The account `proxy` reaches every network backend naming none of its
+    /// own, and a backend's own wins.
+    #[cfg(all(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+    #[test]
+    fn an_account_proxy_fills_every_backend_naming_none() {
+        use pimalaya_config::toml::TomlConfig;
+
+        let document = "[accounts.a]\n\
+                        proxy.url = \"socks5h://localhost:1080\"\n\
+                        caldav.server = \"example.org\"\n\
+                        caldav.auth = \"none\"\n\
+                        gcal.auth.token.raw = \"token\"\n\
+                        msgraph.auth.token.raw = \"token\"\n\
+                        msgraph.proxy.url = \"http://proxy.example.org:3128\"\n";
+        let mut config: Config = toml::from_str(document).unwrap();
+        let (_, account) = config.take_account(Some("a")).unwrap();
+
+        let caldav = account.caldav.unwrap().proxy.unwrap();
+        let gcal = account.gcal.unwrap().proxy.unwrap();
+        let msgraph = account.msgraph.unwrap().proxy.unwrap();
+
+        assert_eq!(caldav.url, "socks5h://localhost:1080");
+        assert_eq!(gcal.url, "socks5h://localhost:1080");
+        assert_eq!(msgraph.url, "http://proxy.example.org:3128");
+    }
+
+    /// A password needs a username, and both reach the runtime proxy, the
+    /// password through the resolver.
+    #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+    #[test]
+    fn a_proxy_password_needs_a_username() {
+        use pimalaya_config::secret::SecretResolver;
+        use pimalaya_stream::proxy::Proxy;
+
+        let proxy = |document: &str| {
+            let config: ProxyConfig = toml::from_str(document).unwrap();
+            config.try_into_proxy(&mut SecretResolver::new())
+        };
+
+        let url = "url = \"http://localhost:3128\"\n";
+        let err = proxy(&format!("{url}password.raw = \"secret\"\n")).unwrap_err();
+        assert!(err.to_string().contains("requires a username"), "{err}");
+
+        let document = format!("{url}username = \"alice\"\npassword.raw = \"secret\"\n");
+        match proxy(&document).unwrap() {
+            Proxy::Http {
+                auth: Some(auth), ..
+            } => assert_eq!(auth.user, "alice"),
+            other => panic!("{other:?}"),
+        }
     }
 
     /// Checks config.sample.toml: one `[accounts.example]` table and no
@@ -927,5 +1062,116 @@ mod tests {
                 "{context}: no backend declared"
             );
         }
+    }
+}
+
+/// Every network backend reaches its server through the proxy it names,
+/// checked against a local HTTP proxy that reads the `CONNECT` and refuses
+/// it, so nothing goes past it.
+#[cfg(all(test, any(feature = "caldav", feature = "gcal", feature = "msgraph")))]
+mod proxy_tests {
+    use std::{
+        io::{BufRead, BufReader, Write},
+        net::TcpListener,
+        sync::mpsc::{self, Receiver},
+        thread,
+    };
+
+    /// A proxy refusing the one tunnel it is asked for, its URL and the
+    /// request line it read.
+    fn refusing_proxy() -> (String, Receiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let (sender, lines) = mpsc::channel();
+
+        thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut stream = BufReader::new(stream);
+            let mut line = String::new();
+            stream.read_line(&mut line).unwrap();
+
+            let mut header = String::new();
+            while stream.read_line(&mut header).unwrap() > 2 {
+                header.clear();
+            }
+
+            let refusal = b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n";
+            stream.get_mut().write_all(refusal).unwrap();
+            sender.send(line).unwrap();
+        });
+
+        (url, lines)
+    }
+
+    /// The `[accounts.a]` block `lines` makes, its proxy taken.
+    fn account(lines: &str) -> crate::config::AccountConfig {
+        use pimalaya_config::toml::TomlConfig;
+
+        let document = format!("[accounts.a]\n{lines}");
+        let mut config: crate::config::Config = toml::from_str(&document).unwrap();
+        config.take_account(Some("a")).unwrap().1
+    }
+
+    #[cfg(feature = "caldav")]
+    #[test]
+    fn caldav_connects_through_the_account_proxy() {
+        use pimalaya_config::secret::SecretResolver;
+
+        let (url, lines) = refusing_proxy();
+        let account = account(&format!(
+            "proxy.url = \"{url}\"\ncaldav.home = \"http://calendars.invalid/alice/\"\n\
+             caldav.auth = \"none\"\n"
+        ));
+
+        let config = account.caldav.unwrap();
+        let result = crate::caldav::client::connect(&config, &mut SecretResolver::new());
+
+        assert!(result.is_err());
+        let line = lines.recv().unwrap();
+        assert!(line.starts_with("CONNECT calendars.invalid:80 "), "{line}");
+    }
+
+    #[cfg(feature = "gcal")]
+    #[test]
+    fn gcal_connects_through_its_own_proxy() {
+        use pimalaya_config::secret::SecretResolver;
+
+        let (url, lines) = refusing_proxy();
+        let account = account(&format!(
+            "proxy.url = \"http://127.0.0.1:9\"\ngcal.proxy.url = \"{url}\"\n\
+             gcal.auth.token.raw = \"made-up\"\n"
+        ));
+
+        let config = account.gcal.unwrap();
+        let result = crate::gcal::client::connect(&config, &mut SecretResolver::new());
+
+        assert!(result.is_err());
+        let line = lines.recv().unwrap();
+        assert!(
+            line.starts_with("CONNECT www.googleapis.com:443 "),
+            "{line}"
+        );
+    }
+
+    #[cfg(feature = "msgraph")]
+    #[test]
+    fn msgraph_connects_through_the_account_proxy() {
+        use pimalaya_config::secret::SecretResolver;
+
+        let (url, lines) = refusing_proxy();
+        let account = account(&format!(
+            "proxy.url = \"{url}\"\nmsgraph.auth.token.raw = \"made-up\"\n"
+        ));
+
+        let config = account.msgraph.unwrap();
+        let backend =
+            crate::msgraph::backend::MsgraphBackend::new(config, &mut SecretResolver::new());
+
+        assert!(backend.is_err());
+        let line = lines.recv().unwrap();
+        assert!(
+            line.starts_with("CONNECT graph.microsoft.com:443 "),
+            "{line}"
+        );
     }
 }

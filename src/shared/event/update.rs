@@ -48,7 +48,8 @@ use crate::{
 /// surface. `--online-meeting` asks a pimdir
 /// store's sync engine to create a meeting, and is refused elsewhere.
 ///
-/// JSON output: `{"id"}`, the event the backend updated.
+/// JSON output: `{"id", "queued"}`, the event the backend updated and
+/// whether a sync engine applies the write later.
 #[derive(Debug, Parser)]
 pub struct EventUpdateCommand {
     #[command(flatten)]
@@ -214,9 +215,7 @@ impl fmt::Display for EventUpdateOutput {
 pub struct EventUpdatedOutput {
     /// Backend-specific identifier of the updated event.
     pub id: String,
-    /// Whether the write was queued for a sync rather than made, which
-    /// only the wording tells.
-    #[serde(skip)]
+    /// Whether a sync engine applies the write later rather than now.
     pub queued: bool,
 }
 

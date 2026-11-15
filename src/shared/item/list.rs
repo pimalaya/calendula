@@ -37,12 +37,14 @@ use crate::{
 /// item the backend could not read is named by an `Error:` line at the
 /// end, and the command exits 3.
 ///
-/// JSON output: `{"items": [{"id", "calendarId", "etag", "contents"}],
-/// "nextPage", "errors"}`, `nextPage` being the number of the page
-/// following this one as a string, which `--page-token` takes back, or
-/// `null` once the listing is complete, and `errors` naming each item it
-/// could not read, and a listing the server cut short by a `null` id:
-/// `[{"id", "code", "error", "sources"}]`.
+/// JSON output: `{"items": [{"id", "calendarId", "etag", "contents",
+/// "encoding"}], "nextPage", "errors"}`, each item's raw iCalendar as text
+/// (`encoding` `utf-8`), as base64 when its bytes are not valid UTF-8
+/// (`encoding` `base64`), or `null` with no bytes, `nextPage` being the
+/// number of the page following this one as a string, which `--page-token`
+/// takes back, or `null` once the listing is complete, and `errors` naming
+/// each item it could not read, and a listing the server cut short by a
+/// `null` id: `[{"id", "code", "error", "sources"}]`.
 #[derive(Debug, Parser)]
 pub struct ItemListCommand {
     #[command(flatten)]

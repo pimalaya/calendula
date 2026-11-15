@@ -181,9 +181,17 @@ A time SHALL resolve through its `TZID` as the time-zone database names it (a wr
 Expansion SHALL move a UTC `UNTIL` onto the wall clock of a zoned `DTSTART` before the civil walk, and SHALL drop the instances a calendar-defined zone skips.
 
 ### Requirement: The event projection
-An event's JSON SHALL carry `id`, `etag` (the entity tag of its item, `null` when the backend has none), `uid`, `recurrenceId`, `summary`, `description`, `location`, `start` and `end` (iCalendar-spelled), `allDay`, `startsAt` and `endsAt` (RFC 3339 with offset, or `YYYY-MM-DD` with an exclusive end for a whole day), `timeZone`, `zoneAssumed` (`true` when `DTSTART` or `DTEND` names a `TZID` neither the time-zone database nor the calendar defines, read in the local zone), `recurring`, `sequence` (its `SEQUENCE`, 0 when absent), `status`, `transparency`, `busyStatus` (Outlook's), `organizer` (`email`, `name`), `attendees` (`email`, `name`, `partstat` defaulting to `NEEDS-ACTION`, `role`, `rsvp`, `cutype`) and `onlineMeetingUrl` (`CONFERENCE`, then the vendors' properties). The end SHALL be `DTEND`, else the start plus `DURATION`, else a day for a date and the start for a time.
+An event's JSON SHALL carry `id`, `etag` (the entity tag of its item, `null` when the backend has none), `uid`, `recurrenceId`, `summary`, `description` and `location` (`null` when the event carries none), `start` and `end` (iCalendar-spelled), `allDay`, `startsAt` and `endsAt` (RFC 3339 with offset, or `YYYY-MM-DD` with an exclusive end for a whole day), `timeZone`, `zoneAssumed` (`true` when `DTSTART` or `DTEND` names a `TZID` neither the time-zone database nor the calendar defines, read in the local zone), `recurring`, `sequence` (its `SEQUENCE`, 0 when absent), `status`, `transparency`, `busyStatus` (Outlook's), `organizer` (`email`, `name`), `attendees` (`email`, `name`, `partstat` defaulting to `NEEDS-ACTION`, `role`, `rsvp`, `cutype`) and `onlineMeetingUrl` (`CONFERENCE`, then the vendors' properties). The end SHALL be `DTEND`, else the start plus `DURATION`, else a day for a date and the start for a time.
 
-`event read` SHALL print the item's bytes, and its JSON SHALL add the projected `events`, or the one occurrence `-r/--recurrence-id` names.
+`event read` SHALL print the item's bytes, and its JSON SHALL be the row of its item ("An item's bytes are text or base64") plus the projected `events`, or the one occurrence `-r/--recurrence-id` names.
+
+### Requirement: An item's bytes are text or base64
+An item SHALL print as one row in `item list`, `item read` and `event read`: `{id, calendarId, etag, contents, encoding}`, `etag` `null` when the backend versions no item. `contents` SHALL be the iCalendar text when its bytes are valid UTF-8, `encoding` then `utf-8`, and the base64 of the bytes otherwise (RFC 4648 standard alphabet, padded), `encoding` then `base64`; both SHALL be `null` when the item carries no bytes. No output SHALL decode an item's bytes lossily under `--json`.
+
+#### Scenario: A body that is not UTF-8
+- GIVEN the vdir calendar `personal` holding `a.ics`, whose `SUMMARY` holds the Latin-1 byte 0xE9
+- WHEN `calendula --json item list`, `item read a` or `event read a` runs
+- THEN each prints the file's bytes in base64 as `contents` and `"encoding":"base64"`, and `calendula item read a` prints `SUMMARY:Caf` and U+FFFD
 
 ### Requirement: An event is found by its UID
 `event find <UID>` SHALL list, unexpanded, every VEVENT of the calendar carrying that `UID`, with the id the other `event` commands take.
@@ -197,7 +205,7 @@ The listing query MAY carry a `UID`, which `event find` sets. A backend MAY leav
 ### Requirement: A delete can be gated on a version
 `event delete` and `item delete` SHALL take `--if-match <ETAG>`. CalDAV and gcal SHALL send it as `If-Match`, msgraph SHALL compare it with the event's `changeKey`, and pimdir SHALL check it as an update does. A backend that cannot gate a write (vdir) SHALL declare `item.update.if-match` and `item.remove.if-match` `none`, so `--if-match` on an update or a delete is refused with `capability-missing` rather than dropped.
 
-`item read` SHALL add the `etag` of the version read to its JSON, `null` when the backend has none.
+`item read` SHALL print the row of its item ("An item's bytes are text or base64"), its `etag` the version read, `null` when the backend has none.
 
 ### Requirement: A JSON error carries a stable code
 A failure a caller is expected to act on SHALL carry a stable code, printed under `--json` as a `code` string beside `error`, `sources` and `backtrace`, and in an `errors` entry beside `id`, `error` and `sources`. The code SHALL be found anywhere in the error chain, so added context does not hide it, or read from the typed error of the protocol that refused ("A server's refusal carries its code") or from pimalaya-config's `AccountError` (config, "Account resolution failures name what is missing"). A failure with no code SHALL print `"code": null`. The plain output SHALL stay unchanged. Codes are kebab-case and never renamed; `error` stays free wording. Every code SHALL be declared in every build, whatever the backends compiled in.
@@ -212,6 +220,7 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 | `stdin-taken` | a command run inside a session (`repl`, `mcp`) would read its iCalendar from stdin, which carries the session's commands; nothing was read |
 | `item-not-found` | the item a command names is not in the calendar: the failure of `item read`, `item update`, `item delete`, `event read`, `event update` or `event delete` |
 | `calendar-not-found` | the calendar a command names does not exist; nothing was read or written |
+| `calendar-default-missing` | a unified or pimdir command names no calendar and the account sets no `calendar.default`; nothing was read |
 | `item-unreadable` | the backend answered for an item calendula could not read: its file could not be read (vdir), its iCalendar did not parse, the server refused it while it was read again (Graph), its body could not be read or is missing from the store (pimdir); an `errors` entry |
 | `permission-denied` | the server refused the request to the account (see "A server's refusal carries its code") |
 | `quota-exceeded` | the write would exceed the account's quota |
@@ -224,12 +233,22 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 | `store-version` | the pimdir store is of another format version than calendula's: an earlier sync engine's is reinstalled, a newer one's needs calendula upgraded |
 | `store-foreign` | the pimdir database is not a pimdir store: another program wrote it |
 | `store-corrupt` | the pimdir store's two version stamps disagree, or its schema is not the canonical one |
+| `store-not-current` | the pimdir store holds no schema yet and the verb creates none: its sync engine creates it |
 | `store-hash-algo` | the pimdir store names its bodies by a hash this calendula does not know: upgrade calendula |
+| `sync-version` | the pimdir store's sync state was written by another version of its sync engine |
 | `store-busy` | another process holds the pimdir store; retry |
+| `store-owned` | a sync owns the pimdir store; retry once it ends |
+| `store-staging` | a producer is staging a body in the pimdir store; retry |
+| `store-in-flight` | a pimdir store verb is between two of its chunks; retry |
 | `store-exposed` | a path of the pimdir store is a link or another user can reach it: restrict it |
+| `store-reset` | the pimdir store is not the one that answered a queue row's handle, a copy restored since; nothing was done with the row |
 | `lock-replaced` | the lock file of the pimdir store was removed or replaced under a write: nothing was queued; retry |
 | `flag-invalid` | a pimdir write carries a flag the store cannot hold |
 | `action-malformed` | a pimdir queue action's payload is one its schema refuses |
+| `conflict-unread` | the pimdir conflict holds a body nobody has read: fetch it first |
+| `unsupported` | a source of the pimdir store does not support the write (an online meeting, a scheduled event, a to-do among them); nothing was queued |
+| `no-performer` | no source of the pimdir store can perform the intent (`pimdir reply`, `pimdir cancel`); nothing was queued |
+| `ambiguous-performer` | several sources of the pimdir store can perform the intent and none is chosen; nothing was queued |
 | `index-missing` | the pimdir store has no search index yet: its sync engine builds it |
 | `index-outdated` | the pimdir search index was built otherwise or from another store: its sync engine rebuilds it |
 | `index-version` | the pimdir search index is of another draft or shape: its sync engine rebuilds an earlier draft's, and leaves any other |
@@ -272,7 +291,7 @@ The command line SHALL be parsed by pimalaya-cli's `clap::parse`: help and versi
 In the text output, each `errors` entry SHALL print as one `Error:` line, `<id>  <code>  <error>` with `-` for a null id or code, last in the command's output: after the items (rows, records or the agenda's lines) and one blank line, the `Error:` lines aligned among themselves as pimalaya-cli's `Columns` aligns cells, each value sanitized (pimalaya-cli `error::ItemErrors`). Nothing SHALL print, the blank line included, when `errors` is empty.
 
 ### Requirement: Calendar selection
-A unified command operating inside a calendar SHALL take it through the flattened `-k/--calendar` flag, resolved by the account: the flag wins, otherwise `calendar.default`, otherwise the command bails.
+A unified command operating inside a calendar SHALL take it through the flattened `-k/--calendar` flag, resolved by the account: the flag wins, otherwise `calendar.default`, otherwise the command SHALL fail coded `calendar-default-missing`, ``No default calendar found, name one with `-k <CALENDAR-ID>` or set `calendar.default` ``, as a pimdir command naming no calendar does.
 
 `calendar delete` is the one exception and SHALL inline a mandatory `-k/--calendar`, never falling back to a default.
 
@@ -285,7 +304,7 @@ Each subcommand SHALL be a clap-derived struct carrying its own arguments, with 
 All data and errors SHALL go to stdout through the printer, with `--json` switching every command to JSON; stderr SHALL carry the logs, the prompts and the welcome only, plus the REPL's help in a JSON session and the failures of the MCP server, whose stdout carries protocol messages only. A command SHALL return a `Serialize + Display` value to the printer rather than printing inline.
 
 ### Requirement: Text output is plain text
-A text output SHALL be plain text: no border, no colour, no terminal escape, nothing sized to or truncated for the terminal, and it SHALL end with one newline; no command takes a width. Every string a server, a store or a file gave (an id, a name, a summary, a description, an error a record carries, the zone and the days the lines under `pimdir search` and `pimdir count` name) SHALL have its control and bidi characters replaced before it prints as text (pimalaya-cli `sanitize::text`); the JSON output SHALL carry it unchanged. The iCalendar `event read` and `item read` print SHALL keep its layout, CRLF read as LF, and have every other control character but tab and line feed (C0, DEL, C1) and every bidi embedding, override and isolate replaced with U+FFFD; their JSON `contents` SHALL carry the stored text unchanged. The iCalendar a `build` prints, or writes to the file `-o` names, SHALL be the bytes it built.
+A text output SHALL be plain text: no border, no colour, no terminal escape, nothing sized to or truncated for the terminal, and it SHALL end with one newline; no command takes a width. Every string a server, a store or a file gave (an id, a name, a summary, a description, an error a record carries, the zone and the days the lines under `pimdir search` and `pimdir count` name) SHALL have its control and bidi characters replaced before it prints as text (pimalaya-cli `sanitize::text`); the JSON output SHALL carry it unchanged. The iCalendar `event read` and `item read` print SHALL keep its layout, CRLF read as LF, and have every other control character but tab and line feed (C0, DEL, C1) and every bidi embedding, override and isolate replaced with U+FFFD; their JSON `contents` SHALL carry the stored bytes unchanged, as text or as base64 ("An item's bytes are text or base64"), and their text view SHALL read bytes that are not valid UTF-8 as U+FFFD. The iCalendar a `build` prints, or writes to the file `-o` names, SHALL be the bytes it built.
 
 `event list` and `event find` SHALL print as Himalaya's `envelope list` does, through pimalaya-cli's `listing::Listing`. Above the events, `Account:` (the account name, then the backend it resolved to in parentheses), `Calendar:` and, for `event find`, `UID:`, then `Page:` (the page number, `all` for an unpaged listing, then the events the page holds, `event N` or `events N to M` followed by `, the last` when no page follows, or `empty`), and while a page follows `Next page:` and the `--page` reaching it, these values starting in one column, two spaces after `Next page:`; then a blank line. Then one line per event through pimalaya-cli's `Columns` with no header row: its item id, its start and its end (Columns follow the kind), then its summary, last, `-` for an empty cell. Under them SHALL print only the command's errors ("A command's errors print at its end"). The events `Page:` counts are the calendar's events, the resources a page holds: a series counts once, however many lines its overrides or its occurrences in a window print. `, the last` and `Next page:` SHALL be exact on every backend: the unified client asks for one item past the page. `-s 0` lists every item, unpaged.
 
@@ -299,9 +318,11 @@ A list whose items carry more than one value of unbounded length SHALL print thr
 - `gcal free-busy`: the calendar id; `busy` or `free`, neither when the answer failed; `Busy`, one `<start> to <end>` line per period, and `Errors`.
 - `pimdir search`: the item id; `Start`, `End`, `Calendar` and, when a text term matched, `Matched`; the summary, then the snippet after a blank line. What the answer could not see prints after a blank line.
 
-Every other list SHALL print through pimalaya-cli's `Columns`: a header of uppercase labels, then one item per line, the cells two spaces apart and padded to the widest of their column, an empty cell as `-`, the free-text column last, several values in one cell joined with `,`: `account list` (NAME, BACKENDS, DEFAULT), `vdir list` (ID, PATH, NAME), `gcal acl list` (ID, SCOPE, ROLE, VALUE), `gcal colors` (PALETTE, ID, BACKGROUND, FOREGROUND), and the calendars (ID, DOWNLOADED, QUEUED, NAME) and parked actions (ROW, ACTION, CALENDAR, ERROR) of `pimdir status`.
+Every other list SHALL print through pimalaya-cli's `Columns`: a header of uppercase labels, then one item per line, the cells two spaces apart and padded to the widest of their column, an empty cell as `-`, the free-text column last, several values in one cell joined with `,`: `vdir list` (ID, PATH, NAME), `gcal acl list` (ID, SCOPE, ROLE, VALUE), `gcal colors` (PALETTE, ID, BACKGROUND, FOREGROUND), and the calendars (ID, DOWNLOADED, QUEUED, NAME) and parked actions (ROW, ACTION, CALENDAR, ERROR) of `pimdir status`.
 
-A record SHALL print through pimalaya-cli's `Fields`: one `Label: value` line per field, the values aligned past the longest label: `account check` (`Account:`, then one `<backend>:` line, `OK` or `FAIL (<why>)`), `caldav discover`, `gcal settings` (one field per setting) and the head of `pimdir status` (`Reading account:`, `Grouped accounts:`).
+`account list` SHALL print pimalaya-cli's `account::AccountListOutput` text, as Himalaya does: one line per account through `Columns` with no header row, its name, its backends (each the build leaves out as `<name> (not built)`, comma-separated), then `default` for the account a command with no `-a` runs against, `-` otherwise.
+
+A record SHALL print through pimalaya-cli's `Fields`: one `Label: value` line per field, the values aligned past the longest label: `account check` (pimalaya-cli's `account::AccountCheckOutput`: `Account:`, then one `<backend>:` line, `OK` or `FAIL (<why>)`), `caldav discover`, `gcal settings` (one field per setting) and the head of `pimdir status` (`Reading account:`, `Grouped accounts:`).
 
 The `event agenda` grid SHALL stay cal's drawing, with no attribute: no day is highlighted, the events under it naming their days.
 
@@ -365,7 +386,7 @@ Under `auto`, a block of a backend the build leaves out SHALL be a failed verdic
 - THEN every row has `"backend": null` and `"level": "none"`, and the exit status is 0
 
 ### Requirement: An account names the backends left out of the build
-`account list` SHALL print, per account, `{"name", "default", "backends", "notBuilt"}`: `backends` the backends the account carries a block for and the build serves, `notBuilt` those it carries a block for and the build leaves out, each in the order `auto` tries them. The BACKENDS column SHALL list the first, then each of the second as `<name> (not built)`, comma-separated.
+`account list` SHALL print, per account, `{"name", "default", "backends", "notBuilt"}`: `backends` the backends the account carries a block for and the build serves, `notBuilt` those it carries a block for and the build leaves out, each in the order `auto` tries them. The backends cell of its text SHALL list the first, then each of the second as `<name> (not built)`, comma-separated.
 
 #### Scenario: A gcal block in a build without gcal
 - GIVEN a build without `gcal` and the account `test` carrying a `gcal` block alone
@@ -381,9 +402,9 @@ Each command's doc comment SHALL be its help text: the first paragraph is what `
 The `--help` of each unified leaf reaching a backend SHALL end with a `Backends:` footer generated from the tables: per capability the leaf reaches, flag-dependent ones included, the backends grouped by level, then each detail with the backends it applies to. A `build` reaches no backend and SHALL carry none, `-h` SHALL show none, and the top-level help SHALL keep the Pimalaya footer.
 
 ### Requirement: Every data command returns a named output type
-A command answering with data SHALL hand the printer a `*Output` type deriving `Display`, `Serialize` and `JsonSchema`, named after its command path. A write with no payload of its own SHALL print a receipt rather than a sentence: a unified write `{id, queued}` (`WriteReceipt`), the id of the item acted on and whether a sync engine applies the write later, and a write in a protocol namespace `{id}` (`IdReceipt`), the id as it is after the write (a renamed collection's new one). The sentence is the text form only.
+A command answering with data SHALL hand the printer a `*Output` type deriving `Display`, `Serialize` and `JsonSchema`, named after its command path. A write with no payload of its own SHALL print a receipt rather than a sentence: a unified write `{id, queued}` (`WriteReceipt`), the id of the item acted on and whether a sync engine applies the write later, and a write in a protocol namespace `{id}` (`IdReceipt`), the id as it is after the write (a renamed collection's new one). The write arm of `event create`, `event update`, `item create` and `item update` SHALL print `{id, queued}` too, a queued create's `id` the link id it was staged under, and `calendar create` SHALL print `{id, name, queued}`, `name` the display name it was given. The sentence is the text form only.
 
-A `create`, an `update` and a `build` answer data too: an abandoned edit is an outcome they have to report, so each SHALL return an untagged enum whose write arm serializes exactly as it would on its own, and whose abandoned arm carries nothing, as an empty object. A `build` writing to `-o` answers `{path, size}`, the file written and its size in bytes, having handed the data to it.
+A `create`, an `update` and a `build` answer data too: an abandoned edit is an outcome they have to report, so each SHALL return an untagged enum whose write arm serializes exactly as it would on its own, and whose abandoned arm carries nothing, as an empty object. A `build` writing to `-o` answers pimalaya-cli's `output::SavedOutput`, `{path, size}`, the file written and its size in bytes, having handed the data to it, its text `Saved <size> bytes to <path>`.
 
 Every runnable command SHALL be described in the `json-schema` registry, a command printing one of two types through both (`OneOf`), which a test checks over the clap command tree.
 

@@ -86,7 +86,11 @@ pub struct Cli {
 
 /// Every command calendula serves: the unified API, the
 /// protocol-specific escape hatches, then the meta commands.
+///
+/// The enum carries the version too, so a `--version` line of a session
+/// prints it as the command line does.
 #[derive(Debug, Subcommand)]
+#[command(version, long_version = long_version!())]
 pub enum Command {
     #[command(subcommand, visible_alias = "cal", alias = "calendars")]
     Calendar(CalendarCommand),

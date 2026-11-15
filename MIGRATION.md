@@ -92,7 +92,7 @@ pimdir.account = "example"
 
 - **Every list is plain text**, with no border, no colour and nothing sized to the terminal. A script cutting the 0.2 tables reads `--json` instead.
 - **`event list` prints one line per event**, `id  start  end  summary`, the times in the local zone (a whole-day event by its days) and an empty cell as `-`, under `Account:`, `Calendar:`, `Page:` and `Next page:` and a blank line. A listing that could not read an item prints one `Error:` line for it last, after the rows and a blank line. `item list` prints its entity tag, size and id the same way, and `gcal instances` its id, status, start, end and summary.
-- **Other lists print columns or records.** `account list`, `vdir list`, `gcal acl list` and `gcal colors` print columns under an uppercase header; `calendar list`, `caldav list`, `gcal calendars` and `gcal free-busy` print records the way `git log` prints commits; `account check`, `caldav discover`, `gcal settings` and `pimdir status` print `Label: value` lines.
+- **Other lists print columns or records.** `vdir list`, `gcal acl list` and `gcal colors` print columns under an uppercase header, and `account list` one line per account with no header, `default` marking the default one; `calendar list`, `caldav list`, `gcal calendars` and `gcal free-busy` print records the way `git log` prints commits; `account check`, `caldav discover`, `gcal settings` and `pimdir status` print `Label: value` lines.
 - **`event agenda` highlights no day.** Its grid writes no escape any more, today and the days holding an event included; the events listed under it name their days, the months and weekdays named in the time locale (`LC_ALL`, then `LC_TIME`, then `LANG`).
 - **Every string a server or a file gave is defused** of its control and bidi characters in the text output; `--json` keeps the stored text.
 - **A pimdir write says it is queued** (`Event <id> queued for the next sync`, `... update queued ...`, `... deletion queued ...`) rather than created, updated or deleted.
@@ -115,12 +115,22 @@ calendula calendar list --json | jq -r '.calendars[].id'
 
 ### JSON output
 
-- **Writes print a receipt.** The `{"message": ...}` confirmations are gone: `calendar create|update|delete` and `event|item delete` print `{id, queued}`, the item acted on and whether the write waits for a sync; `caldav create|delete`, `vdir create|rename|delete`, `gcal acl create|update|delete`, `gcal move` and `gcal quick-add` print `{id}`; `event|item build -o` prints `{path, size}`. A script checking the sentence checks the exit status instead, 0 on success; the text form keeps its sentence.
+- **Writes print a receipt.** The `{"message": ...}` confirmations are gone: `calendar update|delete` and `event|item delete` print `{id, queued}`, the item acted on and whether the write waits for a sync, and `calendar create` `{id, name, queued}`; `event|item create|update` print `{id, queued}` where 0.2 printed `{id}`, so a script comparing the whole object reads `.id`; `caldav create|delete`, `vdir create|rename|delete`, `gcal acl create|update|delete`, `gcal move` and `gcal quick-add` print `{id}`; `event|item build -o` prints `{path, size}`. A script checking the sentence checks the exit status instead, 0 on success; the text form keeps its sentence.
 
   ```sh
   # 0.2: {"message":"Event successfully deleted"}
   # next: {"id":"a.ics","queued":false}
   calendula event delete a.ics --json | jq -r 'if .queued then "queued for the next sync" else "deleted" end'
+  ```
+
+- **An item prints as one row.** `item list`, `item read` and `event read` print `{id, calendarId, etag, contents, encoding}`, `event read` adding `events`. `contents` is the iCalendar text, `encoding` `utf-8`, or the base64 of bytes that are not valid UTF-8, `encoding` `base64`, both `null` for an item carrying no bytes (a pimdir body not local yet). 0.2 printed `item list`'s `contents` as an array of integers, and the reads `{"contents": ...}`, a body that is not UTF-8 decoded lossily. An event's `description` and `location` are `null` when it carries none.
+
+  ```sh
+  # 0.2: {"contents":"BEGIN:VCALENDAR..."}
+  # next: {"id":"a.ics","calendarId":"personal","etag":"...","contents":"BEGIN:VCALENDAR...","encoding":"utf-8"}
+  calendula item read a.ics --json | jq -r 'if .encoding == "base64" then .contents | @base64d else .contents end'
+  # 0.2: "items":[{"id":"a.ics",...,"contents":[66,69,71,...]}]
+  calendula item list --json | jq -r '.items[] | select(.encoding == "utf-8") | .contents'
   ```
 
 - **Piped `--json` prints one value per line**, and every schema `json-schema` writes carries an `$id` naming the contract version.

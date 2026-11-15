@@ -13,7 +13,12 @@ use serde::Serialize;
 
 use crate::{
     capability::Capability,
-    shared::{arg::CalendarIdArg, client::CalendarClient, event::Event, item::read::printable},
+    shared::{
+        arg::CalendarIdArg,
+        client::CalendarClient,
+        event::Event,
+        item::{CalendarItem, read::printable},
+    },
 };
 
 /// Read a single event (its iCalendar).
@@ -24,10 +29,12 @@ use crate::{
 /// occurrence it names is projected as well, at its own times, an
 /// override applied.
 ///
-/// JSON output: `{"contents", "events": [...]}`, the raw iCalendar, its
-/// bytes kept, and its events shaped as `event list` prints them: every
-/// VEVENT the item carries, or the one occurrence `--recurrence-id`
-/// names.
+/// JSON output: `{"id", "calendarId", "etag", "contents", "encoding",
+/// "events": [...]}`, the row `item list` prints of the item holding the
+/// event (its raw iCalendar, its bytes kept, as text or as base64 when
+/// they are not valid UTF-8), and its events shaped as `event list`
+/// prints them: every VEVENT the item carries, or the one occurrence
+/// `--recurrence-id` names.
 #[derive(Debug, Parser)]
 pub struct EventReadCommand {
     #[command(flatten)]
@@ -63,23 +70,24 @@ impl EventReadCommand {
             }
         };
 
-        let contents = String::from_utf8_lossy(&item.contents).into_owned();
-        printer.out(EventReadOutput { contents, events })
+        printer.out(EventReadOutput { item, events })
     }
 }
 
-/// The read event, as the calendar stores it.
+/// The read event, as the calendar stores it: the row `item list` prints
+/// of its item, and its events.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EventReadOutput {
-    /// The raw iCalendar bytes, lossily decoded as UTF-8.
-    pub contents: String,
+    /// The item holding the event.
+    #[serde(flatten)]
+    pub item: CalendarItem,
     /// What the bytes project to, or the one occurrence asked for.
     pub events: Vec<Event>,
 }
 
 impl fmt::Display for EventReadOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "{}", printable(&self.contents).trim_end())
+        writeln!(f, "{}", printable(&self.item.contents).trim_end())
     }
 }

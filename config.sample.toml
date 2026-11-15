@@ -10,6 +10,11 @@ item.list.page-size = 25		# items per page without -s
 #item.composer = "$EDITOR"		# the shell line -i edits an item in, its path appended
 #item.composer = ["tcal", "edit"]	# a program and its arguments, the path appended
 
+#proxy.url = "socks5h://localhost:1080"	# a SOCKS5 proxy for every network backend
+#proxy.url = "http://localhost:3128"	# an HTTP one, all_proxy and https_proxy otherwise
+
+#proxy = { url = "socks5h://localhost:1080", username = "alice", password.command = "exit 127" }	# with credentials
+
 # CalDAV
 #
 #caldav.server = "https://caldav.example.org"		# the context root the principal walk starts from
@@ -26,6 +31,7 @@ item.list.page-size = 25		# items per page without -s
 ##caldav.tls.rustls.crypto = "ring"			# rustls on ring, the build's first otherwise
 ##caldav.tls.rustls.crypto = "aws"			# rustls on aws-lc-rs
 ##caldav.tls.cert = "/path/to/cert.pem"			# a PEM certificate to trust
+##caldav.proxy.url = "socks5h://localhost:1080"		# the proxy keys, for CalDAV alone
 
 # Google Calendar
 #
@@ -37,6 +43,7 @@ item.list.page-size = 25		# items per page without -s
 ##gcal.tls.provider = "native-tls"	# as caldav.tls
 ##gcal.tls.rustls.crypto = "aws"	# as caldav.tls.rustls
 ##gcal.tls.cert = "/path/to/cert.pem"	# as caldav.tls
+##gcal.proxy.url = "socks5h://localhost:1080"	# the proxy keys, for Google Calendar alone
 
 # Google CalDAV
 #
@@ -55,6 +62,7 @@ item.list.page-size = 25		# items per page without -s
 ##msgraph.tls.provider = "native-tls"		# as caldav.tls
 ##msgraph.tls.rustls.crypto = "aws"		# as caldav.tls.rustls
 ##msgraph.tls.cert = "/path/to/cert.pem"	# as caldav.tls
+##msgraph.proxy.url = "socks5h://localhost:1080"	# the proxy keys, for Graph alone
 
 # Fastmail
 #

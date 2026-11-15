@@ -13,7 +13,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use pimalaya_cli::{clap::parsers::path_parser, printer::Printer};
+use pimalaya_cli::{clap::parsers::path_parser, output::SavedOutput, printer::Printer};
 use pimalaya_config::command::CommandConfig;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -160,25 +160,6 @@ impl fmt::Display for IcalBuildOutput {
     }
 }
 
-/// What a build written to the file `-o` names prints.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SavedOutput {
-    /// The file written.
-    pub path: String,
-    /// How many bytes were written.
-    pub size: usize,
-    /// What the text form names, as in `Event`.
-    #[serde(skip)]
-    pub what: &'static str,
-}
-
-impl fmt::Display for SavedOutput {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "{} successfully written to {}", self.what, self.path)
-    }
-}
-
 /// Resolves the composer a `-i` build edits in.
 ///
 /// A `--composer` line names it on its own, and only its absence sends
@@ -219,6 +200,5 @@ fn emit(
     printer.out(SavedOutput {
         path: path.display().to_string(),
         size: item.len(),
-        what: family.label(),
     })
 }

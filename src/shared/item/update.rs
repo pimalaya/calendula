@@ -31,7 +31,8 @@ use crate::{
 /// With no source the item is read from the backend first, and the
 /// version it answered guards the write.
 ///
-/// JSON output: `{"id"}`, the item the backend updated.
+/// JSON output: `{"id", "queued"}`, the item the backend updated and
+/// whether a sync engine applies the write later.
 #[derive(Debug, Parser)]
 pub struct ItemUpdateCommand {
     #[command(flatten)]
@@ -154,9 +155,7 @@ impl fmt::Display for ItemUpdateOutput {
 pub struct ItemUpdatedOutput {
     /// Backend-specific identifier of the updated item.
     pub id: String,
-    /// Whether the write was queued for a sync rather than made, which
-    /// only the wording tells.
-    #[serde(skip)]
+    /// Whether a sync engine applies the write later rather than now.
     pub queued: bool,
 }
 

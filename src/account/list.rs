@@ -1,25 +1,26 @@
 //! # Account list
 //!
 //! The `account list` command, listing every account the configuration
-//! declares.
+//! declares, as pimalaya-cli's shared [`AccountListOutput`] prints it.
 
-use std::{fmt, path::PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::{columns::Columns, printer::Printer, sanitize};
+use pimalaya_cli::{
+    account::{AccountListOutput, AccountRow},
+    printer::Printer,
+};
 use pimalaya_config::toml::TomlConfig;
-use schemars::JsonSchema;
-use serde::Serialize;
 
-use crate::config::{AccountConfig, Config};
+use crate::config::Config;
 
 /// List the accounts declared in the configuration.
 ///
-/// Each row shows the account name, the backends it carries a
-/// configuration block for, and whether it is the default account. A
-/// backend this build leaves out shows as `<name> (not built)`, its block
-/// loading unread.
+/// One line per account: its name, the backends it carries a
+/// configuration block for, and `default` for the account a command with
+/// no `-a` runs against. A backend this build leaves out shows as
+/// `<name> (not built)`, its block loading unread.
 ///
 /// JSON output: `{"accounts": [{"name", "default", "backends",
 /// "notBuilt"}]}`, `backends` the ones this build serves.
@@ -35,74 +36,16 @@ impl AccountListCommand {
         let mut accounts: Vec<AccountRow> = config
             .accounts
             .iter()
-            .map(|(name, account)| AccountRow::from_account(name, account))
+            .map(|(name, account)| AccountRow {
+                name: name.to_owned(),
+                default: account.default,
+                backends: account.backends(),
+                not_built: account.not_built(),
+            })
             .collect();
         accounts.sort_by(|a, b| a.name.cmp(&b.name));
 
         printer.out(AccountListOutput { accounts })
-    }
-}
-
-/// One account's row in an [`AccountListOutput`].
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AccountRow {
-    /// The `[accounts.<name>]` table key.
-    pub name: String,
-    /// Whether the account is flagged `default = true`.
-    pub default: bool,
-    /// The backends the account carries a configuration block for and
-    /// this build serves.
-    pub backends: Vec<&'static str>,
-    /// The backends the account carries a configuration block for and
-    /// this build leaves out, which a command reaching them refuses with
-    /// `backend-not-built`.
-    pub not_built: Vec<&'static str>,
-}
-
-impl AccountRow {
-    fn from_account(name: &str, account: &AccountConfig) -> Self {
-        Self {
-            name: name.to_owned(),
-            default: account.default,
-            backends: account.backends(),
-            not_built: account.not_built(),
-        }
-    }
-}
-
-/// The account listing.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AccountListOutput {
-    /// One row per account, sorted by name.
-    pub accounts: Vec<AccountRow>,
-}
-
-/// The BACKENDS cell of `account`: the backends this build serves, then
-/// the ones it leaves out, marked.
-fn backends(account: &AccountRow) -> String {
-    let not_built = account
-        .not_built
-        .iter()
-        .map(|name| format!("{name} (not built)"));
-    let names = account.backends.iter().map(ToString::to_string);
-    names.chain(not_built).collect::<Vec<_>>().join(",")
-}
-
-impl fmt::Display for AccountListOutput {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut columns = Columns::new(["NAME", "BACKENDS", "DEFAULT"]);
-
-        for account in &self.accounts {
-            columns.push([
-                sanitize::text(&account.name).into_owned(),
-                backends(account),
-                String::from(if account.default { "yes" } else { "" }),
-            ]);
-        }
-
-        write!(f, "{columns}")
     }
 }
 
@@ -113,7 +56,7 @@ mod tests {
     use pimalaya_cli::{clap::args::JsonFlag, printer::StdoutPrinter};
     use pimalaya_config::toml::ConfigMissingError;
 
-    use crate::account::list::{AccountListCommand, AccountListOutput, AccountRow};
+    use crate::account::list::AccountListCommand;
 
     /// Listing takes no account, but a missing configuration still names
     /// the path it looked at.
@@ -130,28 +73,5 @@ mod tests {
         let missing = err.downcast_ref::<ConfigMissingError>().unwrap();
         assert_eq!(missing.path, paths[0]);
         assert!(err.to_string().contains(&paths[0].display().to_string()));
-    }
-
-    #[test]
-    fn accounts_print_as_columns() {
-        let row = |name: &str, default, backends, not_built| AccountRow {
-            name: name.into(),
-            default,
-            backends,
-            not_built,
-        };
-        let output = AccountListOutput {
-            accounts: vec![
-                row("perso", true, vec!["vdir", "caldav"], vec![]),
-                row("work", false, vec!["gcal"], vec!["msgraph"]),
-            ],
-        };
-
-        let expected = "\
-NAME   BACKENDS                  DEFAULT
-perso  vdir,caldav               yes
-work   gcal,msgraph (not built)  -
-";
-        assert_eq!(output.to_string(), expected);
     }
 }

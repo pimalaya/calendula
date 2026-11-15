@@ -137,41 +137,68 @@ fn resolve_account(reader: &PimdirReader, configured: Option<String>) -> Result<
     }
 }
 
+/// The pimdir codes calendula relays, by io-pimdir's spelling, which
+/// serialises each: Himalaya's, but `tag-refused`, which only a mail tag
+/// raises.
+const PIMDIR_CODES: &[(&str, ErrorCode)] = &[
+    ("store-version", ErrorCode::StoreVersion),
+    ("store-uncreated", ErrorCode::StoreUncreated),
+    ("store-foreign", ErrorCode::StoreForeign),
+    ("store-corrupt", ErrorCode::StoreCorrupt),
+    ("store-not-current", ErrorCode::StoreNotCurrent),
+    ("store-hash-algo", ErrorCode::StoreHashAlgo),
+    ("sync-version", ErrorCode::SyncVersion),
+    ("store-busy", ErrorCode::StoreBusy),
+    ("store-owned", ErrorCode::StoreOwned),
+    ("store-staging", ErrorCode::StoreStaging),
+    ("store-in-flight", ErrorCode::StoreInFlight),
+    ("store-exposed", ErrorCode::StoreExposed),
+    ("store-reset", ErrorCode::StoreReset),
+    ("lock-replaced", ErrorCode::LockReplaced),
+    ("item-duplicate", ErrorCode::ItemDuplicate),
+    ("flag-invalid", ErrorCode::FlagInvalid),
+    ("action-malformed", ErrorCode::ActionMalformed),
+    ("conflict-unread", ErrorCode::ConflictUnread),
+    ("unsupported", ErrorCode::Unsupported),
+    ("no-performer", ErrorCode::NoPerformer),
+    ("ambiguous-performer", ErrorCode::AmbiguousPerformer),
+    ("index-missing", ErrorCode::IndexMissing),
+    ("index-outdated", ErrorCode::IndexOutdated),
+    ("index-version", ErrorCode::IndexVersion),
+    ("index-zone-unknown", ErrorCode::IndexZoneUnknown),
+    ("index-fts5-missing", ErrorCode::IndexFts5Missing),
+    ("query-refused", ErrorCode::QueryRefused),
+    ("query-unanswerable", ErrorCode::QueryUnanswerable),
+];
+
+impl ErrorCode {
+    /// The code of a pimdir failure, `None` for one the caller cannot act
+    /// on (an SQL, I/O or JSON failure).
+    pub fn of_pimdir(err: &PimdirError) -> Option<Self> {
+        let code = err.code();
+        PIMDIR_CODES
+            .iter()
+            .find(|(pimdir, _)| *pimdir == code)
+            .map(|(_, ours)| *ours)
+    }
+}
+
 /// The error of a failed store operation, `context` naming it, carrying
 /// the code of [`ErrorCode`] that io-pimdir's own stable one maps to.
 ///
-/// Only the failures a caller acts on get one: a store its sync engine
-/// has to create, one of another format version, a database another
-/// program wrote, one whose two version stamps disagree, one naming its
-/// bodies by a hash calendula does not know, one another process holds,
-/// one another user can reach, one whose lock file was replaced under a
-/// write, an action or a flag the store refuses before anything is
-/// queued, a search index state, and a search query refused or
-/// unanswered. The message is io-pimdir's, but for a store of
-/// another format version: a store is never migrated (pimdir STORAGE §6),
-/// so one an earlier sync engine wrote is reinstalled by the engine that
-/// owns it, which moves it aside, and one a newer engine wrote needs a
-/// newer calendula. No message advises deleting the store.
+/// Only the failures a caller acts on get one, the ones Himalaya relays
+/// (`PIMDIR_CODES`): a store state, a sync or a producer holding it, a
+/// write a source or the store refuses before anything is queued, an
+/// intent no source or several can perform, a search index state, and a
+/// search query refused or unanswered; an SQL, I/O or JSON failure gets
+/// none. The message is io-pimdir's, but for a store of another format
+/// version: a store is never migrated (pimdir STORAGE §6), so one an
+/// earlier sync engine wrote is reinstalled by the engine that owns it,
+/// which moves it aside, and one a newer engine wrote needs a newer
+/// calendula. No message advises deleting the store.
 pub(crate) fn store_error(err: PimdirError, context: impl fmt::Display) -> anyhow::Error {
-    let code = match err.code() {
-        "store-uncreated" => ErrorCode::StoreUncreated,
-        "store-version" => ErrorCode::StoreVersion,
-        "store-foreign" => ErrorCode::StoreForeign,
-        "store-corrupt" => ErrorCode::StoreCorrupt,
-        "store-hash-algo" => ErrorCode::StoreHashAlgo,
-        "store-busy" => ErrorCode::StoreBusy,
-        "store-exposed" => ErrorCode::StoreExposed,
-        "lock-replaced" => ErrorCode::LockReplaced,
-        "flag-invalid" => ErrorCode::FlagInvalid,
-        "action-malformed" => ErrorCode::ActionMalformed,
-        "index-missing" => ErrorCode::IndexMissing,
-        "index-outdated" => ErrorCode::IndexOutdated,
-        "index-version" => ErrorCode::IndexVersion,
-        "index-zone-unknown" => ErrorCode::IndexZoneUnknown,
-        "index-fts5-missing" => ErrorCode::IndexFts5Missing,
-        "query-refused" => ErrorCode::QueryRefused,
-        "query-unanswerable" => ErrorCode::QueryUnanswerable,
-        _ => return anyhow!("{context}: {err}"),
+    let Some(code) = ErrorCode::of_pimdir(&err) else {
+        return anyhow!("{context}: {err}");
     };
 
     let message = match &err {
@@ -244,8 +271,31 @@ mod tests {
             PimdirError::HashAlgo {
                 found: "md5".into(),
             },
+            PimdirError::NotCurrent(io_pimdir::client::PimdirNotCurrent::Version { found: 0 }),
+            PimdirError::SyncVersion {
+                found: "sync-draft-07".into(),
+            },
             PimdirError::Busy,
             PimdirError::Exposed("/tmp/store".into()),
+            PimdirError::Owned("/tmp/store".into()),
+            PimdirError::Staging("/tmp/store".into()),
+            PimdirError::InFlight("/tmp/store".into()),
+            PimdirError::Unsupported(io_pimdir::capability::PimdirRefusal {
+                capability: "calendar.online-meeting".into(),
+                source: "caldav".into(),
+                detail: None,
+            }),
+            PimdirError::NoPerformer {
+                capability: "calendar.reply".into(),
+            },
+            PimdirError::Ambiguous {
+                capability: "calendar.reply".into(),
+                candidates: vec!["caldav".into(), "gcal".into()],
+            },
+            PimdirError::Unread {
+                collection: "cal".into(),
+                handle: "h".into(),
+            },
             PimdirError::LockReplaced("/tmp/store/objects.lock".into()),
             PimdirError::Flag("two words".into()),
             PimdirError::Action(PimdirActionError::MissingField("source")),
@@ -267,6 +317,14 @@ mod tests {
             let err = store_error(err, "Open pimdir store");
             let code: ErrorCode = code_of(&err).unwrap_or_else(|| panic!("no code for {shown}"));
             assert_eq!(serde_json::to_value(code).unwrap(), name, "{shown}");
+        }
+    }
+
+    /// The codes relayed keep io-pimdir's spelling, which is Himalaya's.
+    #[test]
+    fn a_relayed_pimdir_code_keeps_io_pimdirs_spelling() {
+        for (pimdir, ours) in super::PIMDIR_CODES {
+            assert_eq!(serde_json::to_value(ours).unwrap(), *pimdir);
         }
     }
 

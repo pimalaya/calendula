@@ -42,7 +42,8 @@ use crate::{
 /// The bytes are stored as given, so they carry the UID the event is
 /// addressed by afterwards.
 ///
-/// JSON output: `{"id"}`, the identifier the backend assigned.
+/// JSON output: `{"id", "queued"}`, the identifier the backend assigned
+/// and whether a sync engine applies the write later.
 #[derive(Debug, Parser)]
 pub struct EventCreateCommand {
     #[command(flatten)]
@@ -161,11 +162,11 @@ impl fmt::Display for EventCreateOutput {
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EventCreatedOutput {
-    /// Backend-assigned identifier of the new event.
+    /// Backend-assigned identifier of the new event; for a queued write, the
+    /// link id it was staged under, which no command addresses before a
+    /// sync applies it.
     pub id: String,
-    /// Whether the write was queued for a sync rather than made, which
-    /// only the wording tells.
-    #[serde(skip)]
+    /// Whether a sync engine applies the write later rather than now.
     pub queued: bool,
 }
 

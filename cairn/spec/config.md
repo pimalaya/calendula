@@ -55,7 +55,7 @@ calendula SHALL NOT write a configuration file: the user writes it, from the doc
 The top-level options SHALL be folded under the selected account, the account's own values overriding them field by field. A value set once at the top therefore applies everywhere it is not overridden.
 
 ### Requirement: Unknown fields
-Every block of the configuration, the top-level and account blocks included, SHALL set `deny_unknown_fields`, so a key calendula does not know fails the load naming it, a typo reported rather than ignored. The block of a backend the build leaves out SHALL load unread, so one file serves every build, and a command reaching it SHALL fail with `backend-not-built` (see "Backend selection order" in backends). A table calendula no longer reads SHALL be refused by name: `todo`, `journal`, `table`, the top-level `account`, `calendar.list`, `event.list.table` and `item.list.table`.
+Every block of the configuration, the top-level and account blocks included, SHALL set `deny_unknown_fields`, so a key calendula does not know fails the load naming it, a typo reported rather than ignored. The block of a backend the build leaves out SHALL load unread, so one file serves every build, and a command reaching it SHALL fail with `backend-not-built` (see "Backend selection order" in backends). The account `proxy` of a build with no network backend SHALL load unread too. A table calendula no longer reads SHALL be refused by name: `todo`, `journal`, `table`, the top-level `account`, `calendar.list`, `event.list.table` and `item.list.table`, and so SHALL the `caldav.discover` key, each through pimalaya-config's `removed_key!`, in the family sentence ``The `<name>` table is removed, <why>: delete it, see MIGRATION.md`` (`key` for a key).
 
 #### Scenario: A typo in an account
 - GIVEN `[accounts.a]` holding `defualt = true`
@@ -68,7 +68,7 @@ Every block of the configuration, the top-level and account blocks included, SHA
 - THEN it loads, the `gcal` block unread, and a unified command on that account fails coded `backend-not-built`, naming `--features gcal`
 
 ### Requirement: A leftover todo or journal table is refused by name
-A `todo` or `journal` table left in a configuration, at the top level or under an account, SHALL fail the load, naming the CLI that took the domain over (unfog, the Pimalaya CLI for tasks, for `todo`; journal, the Pimalaya CLI for journal entries, for `journal`) and saying to remove the table, as the family refuses its removed keys, rather than as unknown fields.
+A `todo` or `journal` table left in a configuration, at the top level or under an account, SHALL fail the load, naming the CLI that took the domain over and saying to delete the table, in the family sentence rather than as unknown fields: ``The `todo` table is removed, the to-dos having moved to unfog, the Pimalaya CLI for tasks: delete it, see MIGRATION.md`` and ``The `journal` table is removed, the journal entries having moved to journal, the Pimalaya CLI for journal entries: delete it, see MIGRATION.md``.
 
 #### Scenario: An upgraded configuration
 - GIVEN a configuration written for 0.2 with a `[todo.list]` table
@@ -81,19 +81,26 @@ A `todo` or `journal` table left in a configuration, at the top level or under a
 - THEN the command fails, the error naming journal
 
 ### Requirement: No colour or table is configured
-The configuration SHALL hold no colour and no table shape. A `table` table (`table.preset`, `table.arrangement`), at the top level or under an account, a top-level `account` table (`account.list.table`), and the `calendar.list`, `event.list.table` and `item.list.table` tables holding the `*-color` keys, at the top level or under an account, SHALL fail the load by name, saying the output is plain text and to remove it. `event.list.page-size` and `item.list.page-size` stay.
+The configuration SHALL hold no colour and no table shape. A `table` table (`table.preset`, `table.arrangement`), at the top level or under an account, a top-level `account` table (`account.list.table`), and the `calendar.list`, `event.list.table` and `item.list.table` tables holding the `*-color` keys, at the top level or under an account, SHALL fail the load by name in the family sentence, ``The `<table>` table is removed, <command> printing plain text with no colour: delete it, see MIGRATION.md`` (`calendula printing plain text with no border or colour` for `table`). `event.list.page-size` and `item.list.page-size` stay.
 
 #### Scenario: A colour key
 - GIVEN a configuration written for 0.2 with `event.list.table.id-color = "red"`
 - WHEN any calendula command loads it
-- THEN it fails naming the line and saying the `event.list.table` table is gone
+- THEN it fails naming the line and saying the `event.list.table` table is removed, pointing at MIGRATION.md
 
 ### Requirement: Backend blocks
 An account SHALL carry an optional block per compiled backend: `vdir` with a `home-dir`, `pimdir` with a `root` and an optional `account`, `caldav` with its endpoint, TLS, ALPN and authentication, `gcal` and `msgraph` with TLS, ALPN and authentication.
 
 An account MAY carry several; which one a unified command uses is the backend capability's business.
 
+An account MAY carry a `proxy`, and `caldav`, `gcal` and `msgraph` each one of their own ("A proxy is set per account and per backend").
+
 Every paged listing family SHALL additionally carry a block naming its default page size: `event.list` and `item.list`.
+
+### Requirement: A proxy is set per account and per backend
+An account's `proxy` SHALL apply to every network backend of that account (CalDAV, Google Calendar, Microsoft Graph) whose own block names no `proxy`, and a backend's own `proxy` SHALL win over it. With neither, the connection SHALL read the `all_proxy` and `https_proxy` environment variables, honouring `no_proxy`.
+
+`proxy.url` SHALL take `socks5://`, `socks5h://` or `http://`. `proxy.username` and `proxy.password` SHALL override the URL's user info, the password being a secret like any credential; a password without a username SHALL be rejected.
 
 ### Requirement: Credentials nest under `auth`
 Every backend that authenticates SHALL carry its credentials under an `auth` sub-block, so the same concept is spelled the same way across the Pimalaya CLIs: `caldav.auth.basic.password`, `gcal.auth.token`, as cardamum spells `people.auth.token` and `msgraph.auth.token`.

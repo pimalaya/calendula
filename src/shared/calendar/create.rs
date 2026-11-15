@@ -2,17 +2,15 @@
 //!
 //! The `calendar create` command, adding a calendar to the account.
 
+use std::fmt;
+
 use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::printer::Printer;
+use pimalaya_cli::{printer::Printer, sanitize};
+use schemars::JsonSchema;
+use serde::Serialize;
 
-use crate::{
-    capability::Capability,
-    shared::{
-        client::CalendarClient,
-        receipt::{Write, WriteReceipt},
-    },
-};
+use crate::{capability::Capability, shared::client::CalendarClient};
 
 /// Create a new calendar.
 ///
@@ -20,7 +18,8 @@ use crate::{
 /// commands address the calendar by. Every backend that lets a client name a
 /// collection keeps the id given here; Google and Graph mint their own.
 ///
-/// JSON output: `{"id", "queued"}`.
+/// JSON output: `{"id", "name", "queued"}`, the calendar created, the name
+/// it was given and whether a sync engine applies the write later.
 #[derive(Debug, Parser)]
 pub struct CalendarCreateCommand {
     /// Stable calendar identifier.
@@ -58,11 +57,54 @@ impl CalendarCreateCommand {
             self.color.as_deref(),
         )?;
 
-        printer.out(WriteReceipt {
+        printer.out(CalendarCreateOutput {
             id,
+            name: self.name,
             queued: client.queues_writes(),
-            what: "Calendar",
-            write: Write::Create,
         })
+    }
+}
+
+/// The calendar `calendar create` made.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarCreateOutput {
+    /// The id the backend assigned, which later commands address the
+    /// calendar by.
+    pub id: String,
+    /// The display name the calendar was given.
+    pub name: String,
+    /// Whether a sync engine applies the write later rather than now.
+    pub queued: bool,
+}
+
+impl fmt::Display for CalendarCreateOutput {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let id = sanitize::text(&self.id);
+
+        match self.queued {
+            true => writeln!(f, "Calendar `{id}` creation queued for the next sync"),
+            false => writeln!(f, "Calendar `{id}` successfully created"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::shared::calendar::create::CalendarCreateOutput;
+
+    #[test]
+    fn a_created_calendar_prints_its_id_name_and_queued() {
+        let output = CalendarCreateOutput {
+            id: "work".into(),
+            name: "Work".into(),
+            queued: false,
+        };
+
+        assert_eq!(output.to_string(), "Calendar `work` successfully created\n");
+        assert_eq!(
+            serde_json::to_string(&output).unwrap(),
+            r#"{"id":"work","name":"Work","queued":false}"#
+        );
     }
 }

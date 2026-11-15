@@ -1,18 +1,28 @@
 //! # Account check
 //!
-//! The `account check` command, testing each backend of an account.
+//! The `account check` command, testing each backend of an account, as
+//! pimalaya-cli's shared [`AccountCheckOutput`] prints it.
 
-use std::{fmt, path::PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{Result, bail};
 use clap::Parser;
-use pimalaya_cli::{error::PartialOutcome, fields::Fields, printer::Printer, sanitize};
+#[cfg(any(
+    feature = "vdir",
+    feature = "caldav",
+    feature = "pimdir",
+    feature = "gcal",
+    feature = "msgraph"
+))]
+use pimalaya_cli::error::with_code;
+use pimalaya_cli::{account::AccountCheckOutput, error::PartialOutcome, printer::Printer};
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use pimalaya_config::secret::SecretResolver;
-use schemars::JsonSchema;
-use serde::Serialize;
 
 use crate::{backend::Backend, cli::resolve_account, config::AccountConfig, error::ErrorCode};
+
+/// One backend's verdict, coded by calendula's vocabulary.
+pub type BackendCheck = pimalaya_cli::account::BackendCheck<ErrorCode>;
 
 /// Validate the account configuration.
 ///
@@ -82,51 +92,42 @@ fn check_account(account_config: &AccountConfig, backend: Backend) -> Vec<Backen
     if backend.allows_vdir()
         && let Some(config) = account_config.vdir.clone()
     {
-        checks.push(BackendCheck::from("vdir", check_vdir(config)));
+        checks.push(checked("vdir", check_vdir(config)));
     }
 
     #[cfg(feature = "pimdir")]
     if backend.allows_pimdir()
         && let Some(config) = account_config.pimdir.clone()
     {
-        checks.push(BackendCheck::from("pimdir", check_pimdir(config)));
+        checks.push(checked("pimdir", check_pimdir(config)));
     }
 
     #[cfg(feature = "caldav")]
     if backend.allows_caldav()
         && let Some(config) = account_config.caldav.clone()
     {
-        checks.push(BackendCheck::from(
-            "caldav",
-            check_caldav(config, &mut resolver),
-        ));
+        checks.push(checked("caldav", check_caldav(config, &mut resolver)));
     }
 
     #[cfg(feature = "msgraph")]
     if backend.allows_msgraph()
         && let Some(config) = account_config.msgraph.clone()
     {
-        checks.push(BackendCheck::from(
-            "msgraph",
-            check_msgraph(config, &mut resolver),
-        ));
+        checks.push(checked("msgraph", check_msgraph(config, &mut resolver)));
     }
 
     #[cfg(feature = "gcal")]
     if backend.allows_gcal()
         && let Some(config) = account_config.gcal.clone()
     {
-        checks.push(BackendCheck::from(
-            "gcal",
-            check_gcal(config, &mut resolver),
-        ));
+        checks.push(checked("gcal", check_gcal(config, &mut resolver)));
     }
 
     // NOTE: `auto` reports a backend this build leaves out rather than
     // skips it, as it does for a unified command.
     if backend == Backend::Auto {
         let not_built = account_config.not_built().into_iter();
-        checks.extend(not_built.map(BackendCheck::not_built));
+        checks.extend(not_built.map(left_out));
     }
 
     checks
@@ -235,81 +236,28 @@ fn check_gcal(config: crate::config::GcalConfig, resolver: &mut SecretResolver) 
     Ok(())
 }
 
-/// What `account check` reports.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AccountCheckOutput {
-    /// The account that was checked.
-    pub account: String,
-    /// One row per checked backend.
-    pub backends: Vec<BackendCheck>,
-}
-
-/// One backend's verdict.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct BackendCheck {
-    /// The backend name, as `--backend` spells it.
-    pub backend: &'static str,
-    /// Whether the backend answered.
-    pub ok: bool,
-    /// The stable code of the failure, `null` when it answered or the
-    /// failure carries none.
-    pub code: Option<ErrorCode>,
-    /// Why it did not, when it did not.
-    pub error: Option<String>,
-}
-
-impl BackendCheck {
-    /// The row of `backend`, a backend this build leaves out.
-    fn not_built(backend: &'static str) -> Self {
-        Self {
-            backend,
-            ok: false,
-            code: Some(ErrorCode::BackendNotBuilt),
-            error: Some(crate::backend::not_built(backend)),
-        }
-    }
-
-    #[cfg(any(
-        feature = "vdir",
-        feature = "caldav",
-        feature = "pimdir",
-        feature = "gcal",
-        feature = "msgraph"
-    ))]
-    fn from(backend: &'static str, result: Result<()>) -> Self {
-        match result {
-            Ok(()) => Self {
-                backend,
-                ok: true,
-                code: None,
-                error: None,
-            },
-            Err(err) => Self {
-                backend,
-                ok: false,
-                code: crate::error::code(&err),
-                error: Some(format!("{err:#}")),
-            },
-        }
+/// The row of `backend`, a backend this build leaves out.
+fn left_out(backend: &'static str) -> BackendCheck {
+    BackendCheck {
+        backend,
+        ok: false,
+        code: Some(ErrorCode::BackendNotBuilt),
+        error: Some(crate::backend::not_built(backend)),
     }
 }
 
-impl fmt::Display for AccountCheckOutput {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut fields = Fields::default();
-        fields.push("Account", sanitize::text(&self.account));
-
-        for check in &self.backends {
-            match &check.error {
-                None => fields.push(check.backend, "OK"),
-                Some(err) => fields.push(check.backend, format!("FAIL ({})", sanitize::text(err))),
-            }
-        }
-
-        write!(f, "{fields}")
-    }
+/// The row of `backend` that `result` checked, coded by calendula's chain
+/// walk, which reads a server refusal off its typed error.
+#[cfg(any(
+    feature = "vdir",
+    feature = "caldav",
+    feature = "pimdir",
+    feature = "gcal",
+    feature = "msgraph"
+))]
+fn checked(backend: &'static str, result: Result<()>) -> BackendCheck {
+    let result = result.map_err(|err| with_code(err, crate::error::code));
+    BackendCheck::new(backend, result)
 }
 
 #[cfg(all(test, feature = "vdir"))]
@@ -432,7 +380,7 @@ mod pimdir_tests {
 #[cfg(all(test, feature = "msgraph"))]
 mod msgraph_tests {
     use crate::{
-        account::check::BackendCheck,
+        account::check::checked,
         error::ErrorCode,
         msgraph::backend::scripted::{answering, refusal},
     };
@@ -442,7 +390,7 @@ mod msgraph_tests {
     fn a_refused_backend_row_carries_the_refusal_code() {
         let denied = refusal("ErrorAccessDenied");
         let result = answering(&[(403, &denied)]).list_calendars().map(|_| ());
-        let check = BackendCheck::from("msgraph", result);
+        let check = checked("msgraph", result);
 
         assert!(!check.ok);
         assert_eq!(check.code, Some(ErrorCode::PermissionDenied));
@@ -461,7 +409,7 @@ mod caldav_tests {
     use pimalaya_config::secret::SecretResolver;
 
     use crate::{
-        account::check::{BackendCheck, check_caldav},
+        account::check::{BackendCheck, check_caldav, checked},
         config::CaldavConfig,
     };
 
@@ -515,7 +463,7 @@ mod caldav_tests {
         );
         let config: CaldavConfig = toml::from_str(&document).unwrap();
 
-        BackendCheck::from("caldav", check_caldav(config, &mut SecretResolver::new()))
+        checked("caldav", check_caldav(config, &mut SecretResolver::new()))
     }
 
     /// A credential the server refuses fails a pinned `home` as it fails

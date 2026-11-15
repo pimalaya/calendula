@@ -113,12 +113,9 @@ impl PimdirBackend {
     }
 
     /// The calendar a `pimdir` command operates on: the `-k/--calendar`
-    /// flag, then `calendar.default`.
+    /// flag, then `calendar.default`, else coded `calendar-default-missing`.
     pub fn calendar_id(&self, flag: Option<String>) -> Result<String> {
-        flag.or_else(|| self.account.calendar_default.clone())
-            .ok_or_else(|| {
-                anyhow!("Missing calendar id; pass -k/--calendar or set calendar.default")
-            })
+        self.account.calendar_id(flag)
     }
 
     /// Lists the calendar collections.
@@ -365,7 +362,12 @@ impl PimdirBackend {
             Some(seq) => self.client.reader.item_capabilities(calendar_id, seq),
             None => self.client.reader.capabilities(calendar_id),
         }
-        .map_err(|err| anyhow!("Read the capabilities of `{calendar_id}`: {err}"))?;
+        .map_err(|err| {
+            store_error(
+                err,
+                format_args!("Read the capabilities of `{calendar_id}`"),
+            )
+        })?;
 
         let support = |source: &PimdirSourceCapabilities| {
             let declared = source.declared.as_ref()?;
@@ -760,37 +762,60 @@ impl PimdirBackend {
     ) -> Result<PimdirQueued> {
         let mut producer = self.client.producer()?;
 
-        let syncing = producer
-            .capabilities(calendar_id)
-            .map_err(|err| anyhow!("Read the capabilities of `{calendar_id}`: {err}"))?;
+        let syncing = producer.capabilities(calendar_id).map_err(|err| {
+            store_error(
+                err,
+                format_args!("Read the capabilities of `{calendar_id}`"),
+            )
+        })?;
         let declared = syncing.iter().any(|source| source.declared.is_some());
 
         let performer = match (declared, source) {
             (false, Some(chosen)) => chosen.to_owned(),
             (false, None) => match syncing.as_slice() {
                 [only] => only.source.clone(),
-                [] => bail!(
-                    "No source syncs calendar `{calendar_id}` to perform {capability}: \
-                     name one with --source"
-                ),
-                several => bail!(
-                    "Several sources sync calendar `{calendar_id}` ({}): choose the one \
-                     to perform {capability} with --source",
-                    several
+                [] => {
+                    return Err(CodedError::new(
+                        ErrorCode::NoPerformer,
+                        format!(
+                            "No source syncs calendar `{calendar_id}` to perform \
+                             {capability}: name one with --source"
+                        ),
+                    )
+                    .into());
+                }
+                several => {
+                    let sources: Vec<&str> = several
                         .iter()
                         .map(|source| source.source.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                ),
+                        .collect();
+                    return Err(CodedError::new(
+                        ErrorCode::AmbiguousPerformer,
+                        format!(
+                            "Several sources sync calendar `{calendar_id}` ({}): choose the \
+                             one to perform {capability} with --source",
+                            sources.join(", "),
+                        ),
+                    )
+                    .into());
+                }
             },
             (true, chosen) => match producer.performer(calendar_id, capability, chosen) {
                 Ok(source) => source,
-                Err(PimdirError::Ambiguous { candidates, .. }) => bail!(
-                    "Several sources can perform {capability} for this account ({}): \
-                     choose one with --source",
-                    candidates.join(", "),
-                ),
-                Err(err) => bail!("Find who performs {capability}: {err}"),
+                Err(PimdirError::Ambiguous { candidates, .. }) => {
+                    return Err(CodedError::new(
+                        ErrorCode::AmbiguousPerformer,
+                        format!(
+                            "Several sources can perform {capability} for this account \
+                             ({}): choose one with --source",
+                            candidates.join(", "),
+                        ),
+                    )
+                    .into());
+                }
+                Err(err) => {
+                    return Err(store_error(err, format!("Find who performs {capability}")));
+                }
             },
         };
 
@@ -885,36 +910,39 @@ fn enqueue_with_body(
 /// What a write the store refuses to stage reads as, naming the way out
 /// where there is one.
 fn staging_error(err: PimdirError) -> anyhow::Error {
+    let unsupported = |message: String| -> anyhow::Error {
+        CodedError::new(ErrorCode::Unsupported, message).into()
+    };
+
     match err {
         PimdirError::Unsupported(refusal) if refusal.capability == CALENDAR_SCHEDULING => {
-            anyhow!(
+            unsupported(format!(
                 "Stage the pimdir action: {refusal}; to write it without notifying \
                  anyone, first mark its ORGANIZER and ATTENDEE with \
                  SCHEDULE-AGENT=NONE"
-            )
+            ))
         }
         PimdirError::Unsupported(refusal) if refusal.capability == CALENDAR_ONLINE_MEETING => {
             let who = match refusal.source.is_empty() {
                 true => "no source of this store declares it".to_owned(),
                 false => format!("source {} does not support it", refusal.source),
             };
-            anyhow!(
+            unsupported(format!(
                 "Stage the pimdir action: an online meeting (X-PIMDIR-ONLINE-MEETING) needs \
                  {}, and {who}; drop --online-meeting to write the event without one",
                 refusal.capability,
-            )
+            ))
         }
         PimdirError::Unsupported(refusal) if refusal.capability == CALENDAR_COMPONENT_VTODO => {
             let why = match &refusal.detail {
                 Some(detail) => format!(" ({detail})"),
                 None => String::new(),
             };
-            anyhow!(
+            unsupported(format!(
                 "Stage the pimdir action: this calendar takes no to-do, source {} \
                  states {} none{why}; store it in another calendar with -k/--calendar",
-                refusal.source,
-                refusal.capability,
-            )
+                refusal.source, refusal.capability,
+            ))
         }
         PimdirError::Duplicate {
             collection,
@@ -2145,10 +2173,11 @@ mod tests {
     fn an_online_meeting_in_an_undeclared_store_queues_nothing() {
         let (_dir, mut backend, ids) = store(&[ALONE]);
 
-        let err = backend
-            .create_item("cal", MEETING.into())
-            .unwrap_err()
-            .to_string();
+        let err = backend.create_item("cal", MEETING.into()).unwrap_err();
+        let code = pimalaya_cli::error::code_of(&err);
+        assert_eq!(code, Some(ErrorCode::Unsupported), "{err:#}");
+
+        let err = err.to_string();
         assert!(err.starts_with("Stage the pimdir action"), "{err}");
         assert!(err.contains("calendar.online-meeting"), "{err}");
         assert!(err.contains("no source of this store declares it"), "{err}");

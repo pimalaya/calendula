@@ -464,7 +464,8 @@ fn an_unknown_argument_is_a_tool_error() {
 }
 
 /// A value the schema lets through but the command refuses is a tool
-/// error coded `usage-invalid`.
+/// error coded `usage-invalid`, naming the argument as the tool does
+/// rather than as clap's usage text.
 #[test]
 fn a_value_the_command_refuses_is_a_usage_invalid_tool_error() {
     let home = account();
@@ -475,8 +476,8 @@ fn a_value_the_command_refuses_is_a_usage_invalid_tool_error() {
     );
 
     let error = refusal(&responses[0]);
-    assert!(error.contains("'someday'"), "{error}");
-    assert!(!error.starts_with("error:"), "{error}");
+    let named = error.starts_with("Invalid value `someday` for `from`: ");
+    assert!(named, "{error}");
     assert_eq!(report(&responses[0])["code"], "usage-invalid");
 }
 
