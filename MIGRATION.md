@@ -19,11 +19,32 @@ The text output changes everywhere, a few JSON outputs and exit codes move, and 
 - **Write a new configuration from the sample.** [config.sample.toml](./config.sample.toml), shipped as share/doc/calendula/config.sample.toml, holds one section per backend and provider: uncomment yours. Run at a terminal without a configuration, calendula prints the commands copying it in place; a script or a `--json` caller gets the error naming the path it looked at and the sample.
 - **The `wizard` cargo feature is gone.** Drop it from a build's `--features`.
 - **`-c` takes one path per flag.** A value is no longer split on `:`, so a Windows path stays whole. Repeat the flag to merge several files: `-c public.toml -c private.toml`, the first one the base.
+
+  ```sh
+  # 0.2
+  calendula -c public.toml:private.toml event list
+  # next
+  calendula -c public.toml -c private.toml event list
+  ```
+
 - **`CALENDULA_CONFIG` is no longer read.** Pass `-c "$CALENDULA_CONFIG"` for one path, and one `-c` per path for what was a `:`-separated list.
 - **Every default path is read, as layers.** $XDG_CONFIG_HOME/calendula/config.toml, $HOME/.config/calendula/config.toml and $HOME/.calendularc are each deep-merged on top of the ones before, where 0.2 read the first one found. An rc file left beside a config.toml now overrides it: delete the one you do not use.
 - **Several `default = true` accounts are refused**, naming them, where 0.2 took one at random. Keep the mark on one account across the merged files, or name the account with `-a <NAME>`.
 - **A `todo` or `journal` table is refused**, at the top level or under an account (`todo.list.page-size`, `[accounts.<name>.journal]`), naming the CLI that took it over: remove it.
 - **Table and colour keys are refused.** Remove the `table` table (`table.preset`, `table.arrangement`), at the top level or under an account, the top-level `account` table (`account.list.table`), and the `calendar.list`, `event.list.table` and `item.list.table` tables holding the `*-color` keys, at the top level or under an account, each refused by name. `event.list.page-size` and `item.list.page-size` stay.
+
+  ```toml
+  # 0.2
+  table.preset = "││──╞═╪╡┆    ┬┴┌┐└┘"
+  table.arrangement = "dynamic"
+  event.list.page-size = 50
+  event.list.table.summary-color = "green"
+  account.list.table.name-color = "green"
+
+  # next
+  event.list.page-size = 50
+  ```
+
 - **An unknown key fails the configuration**, at the top level and in an account too, naming the key, where 0.2 ignored it there: a misspelt `default` or `calendar` no longer loads silently. A block for a backend the build leaves out still loads, unread.
 - **CalDAV hosts are ASCII.** A `caldav.server` or `caldav.home` with an internationalised host is refused, `home` when the configuration loads and `server` when the account connects: write the host in Punycode (`https://xn--bcher-kva.example/` for `bücher.example`).
 
@@ -41,12 +62,20 @@ An update or a delete gated on a version (`--if-match`, or an update starting fr
 
 With `pimdir.account` unset, the backend reads the one account the store groups its collections under, and refuses a store several accounts share, naming them, where 0.2 merged their calendars: set `pimdir.account` to the one to read.
 
+```toml
+[accounts.example]
+pimdir.root = "~/.local/state/neverest"
+pimdir.account = "example"
+```
+
 ### Text output
 
 - **Every list is plain text**, with no border, no colour and nothing sized to the terminal. A script cutting the 0.2 tables reads `--json` instead.
 - **`event list` prints one line per event**, `id  start  end  summary`, the times in the local zone (a whole-day event by its days) and an empty cell as `-`, under `Account:`, `Calendar:`, `Page:` and `Next page:` and a blank line. A listing that could not read an item prints one `Error:` line for it last, after the rows and a blank line. `item list` prints its entity tag, size and id the same way, and `gcal instances` its id, status, start, end and summary.
 - **Other lists print columns or records.** `account list`, `vdir list`, `gcal acl list` and `gcal colors` print columns under an uppercase header; `calendar list`, `caldav list`, `gcal calendars` and `gcal free-busy` print records the way `git log` prints commits; `account check`, `caldav discover`, `gcal settings` and `pimdir status` print `Label: value` lines.
-- **`event agenda` highlights no day.** Its grid writes no escape any more, today and the days holding an event included; the events listed under it name their days.
+- **`event agenda` highlights no day.** Its grid writes no escape any more, today and the days holding an event included; the events listed under it name their days, the months and weekdays named in the time locale (`LC_ALL`, then `LC_TIME`, then `LANG`).
+- **Every string a server or a file gave is defused** of its control and bidi characters in the text output; `--json` keeps the stored text.
+- **A pimdir write says it is queued** (`Event <id> queued for the next sync`, `... update queued ...`, `... deletion queued ...`) rather than created, updated or deleted.
 - **`-w/--max-width` is gone** from `calendar list`, `event list` and `item list`: a command passing it now fails, so drop it.
 - **`-s 0` lists every item**, where it listed none.
 - **`--help` prints without colour**, each paragraph on one line for the terminal to fold.
@@ -66,21 +95,67 @@ calendula calendar list --json | jq -r '.calendars[].id'
 
 ### JSON output
 
-- **Writes print a receipt.** The `{"message": ...}` confirmations are gone: `calendar create|update|delete` and `event|item delete` print `{id, queued}`, the item acted on and whether the write waits for a sync; `caldav create|delete`, `vdir create|rename|delete`, `gcal acl create|update|delete`, `gcal move` and `gcal quick-add` print `{id}`; `event|item build -o` prints `{path, size}`.
+- **Writes print a receipt.** The `{"message": ...}` confirmations are gone: `calendar create|update|delete` and `event|item delete` print `{id, queued}`, the item acted on and whether the write waits for a sync; `caldav create|delete`, `vdir create|rename|delete`, `gcal acl create|update|delete`, `gcal move` and `gcal quick-add` print `{id}`; `event|item build -o` prints `{path, size}`. A script checking the sentence checks the exit status instead, 0 on success; the text form keeps its sentence.
+
+  ```sh
+  # 0.2: {"message":"Event successfully deleted"}
+  # next: {"id":"a.ics","queued":false}
+  calendula event delete a.ics --json | jq -r 'if .queued then "queued for the next sync" else "deleted" end'
+  ```
+
 - **Piped `--json` prints one value per line**, and every schema `json-schema` writes carries an `$id` naming the contract version.
 - **A failure carries a stable `code`** when a caller is expected to act on it (`capability-missing`, `precondition-failed`, `item-duplicate`, `body-pending`, the pimdir store and index codes), described by the `calendula-error` schema, and `null` otherwise. Match on the code, never on the message, which may be reworded.
-- **Listings say whether more follow.** `event list` and `item list` print `nextPage`, the next page number as a string, `null` once the listing is complete: give it back through `--page-token`.
-- **A listing names what it could not read in `errors` and exits 3.** `calendar list`, `event list`, `event find`, `event agenda` and `item list` print `errors` beside their items, one `{id, code, error, sources}` per calendar or item they could not read (`item-unreadable`, `permission-denied`...), `[]` when none, and exit 3 when it is not empty, where 0.2 skipped an item that does not parse, or failed the whole listing for a vdir file or a Graph event it could not read. Treat exit 3 as a result: read the items, then `errors`.
+- **Listings say whether more follow.** `event list`, `event find` and `item list` print `nextPage`, the next page number as a string, `null` once the listing is complete: give it back through `--page-token`.
+- **A listing names what it could not read in `errors` and exits 3.** `calendar list`, `event list`, `event find`, `event agenda` and `item list` print `errors` beside their items, one `{id, code, error, sources}` per calendar or item they could not read (`item-unreadable`, `permission-denied`...), `[]` when none, and exit 3 when it is not empty, where 0.2 skipped an item that does not parse, or failed the whole listing for a vdir file or a Graph event it could not read. Treat exit 3 as a result: read the items, then `errors`; under `set -e`, or where a script tested for a zero status, accept 3 too.
+
+  ```sh
+  # 0.2: exit 0, an item that does not parse skipped without a word
+  calendula event list --json | jq -r '.events[].id'
+
+  # next: exit 3 when errors is not empty
+  status=0
+  out=$(calendula event list --json) || status=$?
+  [ "$status" -eq 0 ] || [ "$status" -eq 3 ] || exit "$status"
+  printf '%s\n' "$out" | jq -r '.events[].id'
+  printf '%s\n' "$out" | jq -r '.errors[] | "\(.id // "-") \(.code // "-") \(.error)"' >&2
+  ```
+
 - **`event agenda --json` prints an object**: the map of start instants moves under `starts`, beside `errors`. Read `.starts` where you read the root.
+
+  ```sh
+  # 0.2: {"2026-11-16T09:00:00":["Standup"]}
+  calendula event agenda --json | jq -r 'keys[]'
+  # next: {"starts":{"2026-11-16T09:00:00":["Standup"]},"errors":[]}
+  calendula event agenda --json | jq -r '.starts | keys[]'
+  ```
+
 - **A missing item or calendar fails coded** `item-not-found` or `calendar-not-found`, and a server's refusal `permission-denied`, `quota-exceeded`, `rate-limited` or `precondition-failed`, where the failure carried no code.
 - **A failed `account check` prints its report and exits 3**, each backend carrying `ok`, its failure's `code` and `error`, where 0.2 exited 0 whatever failed. Read which backends passed from `backends`.
+
+  ```sh
+  # 0.2: exit 0, {"account":"example","backends":[{"backend":"pimdir","ok":false,"error":"..."}]}
+  # next: exit 3, each backend carrying its code
+  calendula account check --json | jq -r '.backends[] | select(.ok | not) | "\(.backend) \(.code // "-")"'
+  ```
+
 - **A command line clap refuses exits 2 as before, and under `--json` prints the failure object coded `usage-invalid` on stdout** rather than clap's text on stderr. Exit 1 is a failure object, 2 a refused command line, 3 a printed result that is not a full success.
+
+  ```sh
+  calendula --json event list --nope
+  # 0.2: clap's "error: unexpected argument '--nope' found" on stderr, exit 2
+  # next: {"code":"usage-invalid","error":"unexpected argument '--nope' found ...","sources":[],"backtrace":null} on stdout, exit 2
+  ```
+
 
 ### Commands that now fail earlier
 
 - **A verb or a flag the account's backend does not serve is refused before connecting**, with the `capability-missing` code, naming the backend of the account that serves it: a description or a colour on a Graph calendar, refused once its token command ran in 0.2, `calendar create|update|delete` on pimdir, refused once the store was open, and `--if-match` on a vdir `event update` or `item update`, which 0.2 ignored.
 - **`calendula account capability` lists what an account serves of the unified API**, one row per capability naming the backend serving it, its level and what the level leaves out (`--backend <name>` for another backend of the account), and each `calendar`, `event` and `item` command's `--help` ends with a `Backends:` section naming the backends serving it.
 - **pimdir writes are checked before they are queued**: a create whose `UID` the calendar holds or has queued (`item-duplicate`), an update or a delete naming a version the item no longer has (`precondition-failed`), a to-do into a calendar whose source takes none, and a write no source of the store supports are refused, where 0.2 queued them for the sync engine to park or ignored the version.
+- **A CalDAV listing the server answers with anything but one whole multistatus fails** (an HTML page, a cut document, an empty body), where 0.2 read it as a shorter or an empty listing, and so does a delete answered by a multistatus naming failed members.
+- **A CalDAV `server` that does not parse as a URL is refused** (an out-of-range port, a space in the host), where 0.2 read it as a bare authority and sent it to host `https`.
+- **An Outlook recurring event whose `RRULE` Graph has no exact pattern for is refused** (a `BYMONTH` or a `BYMONTHDAY` the pattern has no field for, several numbered `BYDAY` elements, a weekday named twice), where 0.2 wrote it as another series.
+- **`event agenda` refuses an argument it cannot read**, naming it: a day that is not a number or not in the month, a month matching no name, a month number outside 1-12 or an unreadable year, where 0.2 drew the 1st, January or the current year. A lone month name draws that month of the current year, where 0.2 read it as a year.
 
 ### New
 
