@@ -108,12 +108,19 @@ Every configured filesystem path SHALL be shell-expanded by the deserializer tha
 
 `vdir.home-dir`, `pimdir.root` and `tls.cert` are the paths concerned; the optional one goes through a local deserializer until pimalaya-config ships an optional variant of its own.
 
-### Requirement: CalDAV locates its home-set three ways
-The `caldav` block SHALL offer exactly three mutually exclusive routes, from most to least discovery. `discover` resolves a bare domain through RFC 6764 SRV records and the `.well-known` path.
+### Requirement: CalDAV locates its home-set two ways
+The `caldav` block SHALL offer exactly two mutually exclusive routes, `server` and `home`, and calendula SHALL resolve no domain through DNS.
 
 `server` names the context root the principal and home-set walk starts from, taking a full URL, a bare domain or `domain:port` with `https` assumed for a bare authority, and is parsed when it is used rather than when it is read. A string that fails to parse as a URL for any reason other than lacking a scheme SHALL be refused rather than read as a bare authority. `home` pins the home-set outright.
 
-A block carrying none of the three SHALL be rejected by name.
+A block carrying neither SHALL be rejected by name.
+
+A `caldav.discover` key, the RFC 6764 route an earlier calendula offered, SHALL fail the load by name in a build with the `caldav` feature (one without it loads the block unread), as the family refuses its removed keys, the message naming `caldav.server` with a provider root as example and MIGRATION.md, rather than as an unknown field.
+
+#### Scenario: A discover route left in a configuration
+- GIVEN a configuration written for 0.2 with `caldav.discover = "fastmail.com"`
+- WHEN any calendula command loads it
+- THEN it fails before reaching a backend, naming the line, saying the `caldav.discover` key is removed and to set `caldav.server`, and pointing at MIGRATION.md
 
 ### Requirement: Secrets are read, never written
 A CalDAV password, a CalDAV token or a gcal token SHALL be a secret read from the configuration itself or from the standard output of a command.

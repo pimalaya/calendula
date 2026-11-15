@@ -15,7 +15,8 @@
 //! no longer reads are refused by name: `todo` and `journal`, their
 //! domains having moved to unfog and journal, and the rendering tables
 //! (`table`, `account`, `calendar.list`, `event.list.table`,
-//! `item.list.table`), the output being plain text.
+//! `item.list.table`), the output being plain text. So is the
+//! `caldav.discover` key, `caldav.server` naming the root instead.
 
 use std::collections::HashMap;
 #[cfg(any(
@@ -402,21 +403,18 @@ pub struct PimdirConfig {
 
 /// CalDAV backend configuration.
 ///
-/// Locating the calendar home-set takes one of three routes, from most
-/// to least discovery: `discover` resolves a bare domain, `server`
+/// Locating the calendar home-set takes one of two routes: `server`
 /// names the context root to walk from, `home` pins the home-set.
 #[cfg(feature = "caldav")]
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CaldavConfig {
-    /// Bare domain resolved to a context root through RFC 6764 SRV
-    /// records and the `.well-known` path.
-    ///
-    /// It costs DNS and HTTP round-trips on every run: prefer `server`
-    /// once the answer is known.
-    pub discover: Option<String>,
+    /// Refused: calendula resolves no domain, `server` names the root.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub discover: Option<CaldavDiscoverRemovedConfig>,
     /// DAV context root. Principal and calendar-home-set discovery
-    /// start here, skipping the `.well-known` step.
+    /// start here.
     ///
     /// Accepts a full URL, a bare domain or `domain:port`, a bare
     /// authority defaulting to `https`. The host is ASCII, an
@@ -440,6 +438,23 @@ pub struct CaldavConfig {
 #[cfg(feature = "caldav")]
 pub fn default_caldav_alpn() -> Vec<String> {
     vec![String::from("http/1.1")]
+}
+
+/// The `caldav.discover` key, which no configuration holds any more.
+#[cfg(feature = "caldav")]
+#[derive(Clone, Debug)]
+pub enum CaldavDiscoverRemovedConfig {}
+
+#[cfg(feature = "caldav")]
+impl<'de> Deserialize<'de> for CaldavDiscoverRemovedConfig {
+    fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+        Err(D::Error::custom(
+            "The `caldav.discover` key is removed, calendula resolving no domain: \
+             name the server in `caldav.server` instead (Fastmail's \
+             `https://caldav.fastmail.com/dav/`, Google's \
+             `https://apidata.googleusercontent.com/caldav/v2/`), see MIGRATION.md",
+        ))
+    }
 }
 
 /// CalDAV authentication configuration.

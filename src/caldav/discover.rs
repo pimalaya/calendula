@@ -1,7 +1,7 @@
 //! # CalDAV discover
 //!
-//! The `calendula caldav discover` command, walking the RFC 6764
-//! discovery chain and printing every URL it resolves.
+//! The `calendula caldav discover` command, walking the discovery chain
+//! from the configured server and printing every URL it resolves.
 
 use std::fmt;
 
@@ -15,9 +15,8 @@ use crate::caldav::client::CaldavClient;
 
 /// Run the CalDAV discovery chain.
 ///
-/// Walks the RFC 6764 `.well-known/caldav` path, then the
-/// current-user-principal, then the calendar home-set, printing each
-/// URL it resolves.
+/// Walks from `caldav.server` to the current-user-principal, then the
+/// calendar home-set, printing each URL it resolves.
 ///
 /// JSON output: `{"principal", "calendarHomeSet"}`.
 #[derive(Debug, Parser)]

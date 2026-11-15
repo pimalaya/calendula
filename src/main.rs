@@ -18,8 +18,7 @@
 //! producer queueing writes and its search index.
 //!
 //! [`io_http`] is the request and response state machines WebDAV and the REST
-//! clients run on, `io_pim_discovery` the RFC 6764 CalDAV discovery behind
-//! `caldav.discover`, and `ical` the iCalendar parser and editor.
+//! clients run on, and `ical` the iCalendar parser and editor.
 //!
 //! The `pimalaya_cli`, `pimalaya_config` and `pimalaya_stream` toolkits supply
 //! the clap scaffolding, the printer and its plain text shapes, the welcome,
@@ -171,8 +170,8 @@
 //! command reaching it, `account capability` included, fails with
 //! `backend-not-built`, and `account list` names it as left out. A table
 //! calendula no longer reads (`todo`, `journal`, `table`, the top-level
-//! `account`, `calendar.list`, `event.list.table`, `item.list.table`) is
-//! refused by name, saying where it went.
+//! `account`, `calendar.list`, `event.list.table`, `item.list.table`) or key
+//! (`caldav.discover`) is refused by name, saying where it went.
 //!
 //! ## Output
 //!

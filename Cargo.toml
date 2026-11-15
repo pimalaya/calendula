@@ -13,10 +13,10 @@ repository = "https://github.com/pimalaya/calendula"
 
 [features]
 default = ["rustls-ring", "caldav", "gcal", "msgraph", "vdir", "pimdir", "vendored"]
-native-tls = ["pimalaya-stream/native-tls", "io-pim-discovery?/native-tls", "io-webdav?/native-tls", "io-gcal?/native-tls", "io-msgraph?/native-tls"]
-rustls-aws = ["pimalaya-stream/rustls-aws", "io-pim-discovery?/rustls-aws", "io-webdav?/rustls-aws", "io-gcal?/rustls-aws", "io-msgraph?/rustls-aws"]
-rustls-ring = ["pimalaya-stream/rustls-ring", "io-pim-discovery?/rustls-ring", "io-webdav?/rustls-ring", "io-gcal?/rustls-ring", "io-msgraph?/rustls-ring"]
-caldav = ["dep:io-webdav", "dep:io-http", "dep:io-pim-discovery", "dep:secrecy", "url/serde"]
+native-tls = ["pimalaya-stream/native-tls", "io-webdav?/native-tls", "io-gcal?/native-tls", "io-msgraph?/native-tls"]
+rustls-aws = ["pimalaya-stream/rustls-aws", "io-webdav?/rustls-aws", "io-gcal?/rustls-aws", "io-msgraph?/rustls-aws"]
+rustls-ring = ["pimalaya-stream/rustls-ring", "io-webdav?/rustls-ring", "io-gcal?/rustls-ring", "io-msgraph?/rustls-ring"]
+caldav = ["dep:io-webdav", "dep:io-http", "dep:secrecy", "url/serde"]
 gcal = ["dep:io-gcal", "dep:secrecy", "io-gcal/ical"]
 msgraph = ["dep:io-msgraph", "dep:secrecy", "io-msgraph/client", "io-msgraph/ical"]
 vdir = ["dep:io-vdir"]
@@ -30,11 +30,11 @@ strip = "symbols"
 panic = "abort"
 
 [build-dependencies]
-pimalaya-cli = { version = "0.4", default-features = false, features = ["build"] }
+pimalaya-cli = { version = "0.5", default-features = false, features = ["build"] }
 
 [dev-dependencies]
 io-oauth = { version = "0.7", default-features = false, features = ["client", "jwt-bearer", "rustls-ring"] }
-pimalaya-config = { version = "0.4", default-features = false, features = ["sample"] }
+pimalaya-config = { version = "0.5", default-features = false, features = ["sample"] }
 tempfile = { version = "3", default-features = false }
 toml = { version = "1.1", default-features = false, features = ["parse", "serde"] }
 
@@ -47,17 +47,16 @@ getrandom = { version = "0.4", default-features = false }
 humansize = { version = "2", default-features = false }
 ical-rs = { version = "0.7", default-features = false, features = ["parser", "tzdb"] }
 idna_adapter = { version = "=1.0.0", default-features = false }
-io-gcal = { version = "0.4", default-features = false, features = ["client"], optional = true }
+io-gcal = { version = "0.5", default-features = false, features = ["client"], optional = true }
 io-http = { version = "0.8", default-features = false, optional = true }
 io-msgraph = { version = "0.9", default-features = false, optional = true }
-io-pim-discovery = { version = "0.12", default-features = false, features = ["rfc6764", "stream"], optional = true }
 io-pimdir = { version = "0.12", default-features = false, features = ["client"], optional = true }
 io-vdir = { version = "0.3", default-features = false, features = ["client"], optional = true }
-io-webdav = { version = "0.8", default-features = false, features = ["client"], optional = true }
+io-webdav = { version = "0.9", default-features = false, features = ["client"], optional = true }
 jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-bundle-always"] }
 log = { version = "0.4", default-features = false }
-pimalaya-cli = { version = "0.4", default-features = false, features = ["mcp", "prompt", "repl", "terminal"] }
-pimalaya-config = { version = "0.4", default-features = false, features = ["toml", "secret"] }
+pimalaya-cli = { version = "0.5", default-features = false, features = ["mcp", "prompt", "repl", "terminal"] }
+pimalaya-config = { version = "0.5", default-features = false, features = ["toml", "secret"] }
 pimalaya-stream = { version = "0.4", default-features = false, features = ["std"] }
 schemars = { version = "1", default-features = false, features = ["derive"] }
 secrecy = { version = "0.10", default-features = false, optional = true }
@@ -66,10 +65,3 @@ serde_json = { version = "1", default-features = false, features = ["std"] }
 simd-cpu = { version = "0.1", default-features = false, features = ["std"] }
 unicode-width = { version = "0.2", default-features = false }
 url = { version = "2.5", default-features = false }
-
-[patch.crates-io]
-io-gcal = { git = "https://github.com/pimalaya/io-gcal", rev = "dbb4481cd77ef65ca451420cb4e087fdccfe6fdb" }
-io-pim-discovery = { git = "https://github.com/pimalaya/io-pim-discovery", rev = "d1f999ce582eb359b701caea4168edfdd76fa193" }
-io-webdav = { git = "https://github.com/pimalaya/io-webdav", rev = "777d34eea1b48f7d90635e3e82e1a96a9d57504e" }
-pimalaya-cli = { git = "https://github.com/pimalaya/cli", rev = "8190dc544e277aeeba6acc43817100179f19643b" }
-pimalaya-config = { git = "https://github.com/pimalaya/config", rev = "d5a33cba3fe9826b82f15a479043a7f79ca742ce" }

@@ -17,7 +17,7 @@ Each backend sits behind its own cargo feature, and a network backend needs one 
 
 | Feature       | What it pulls in                                                          |
 |---------------|---------------------------------------------------------------------------|
-| `caldav`      | io-webdav, io-http and io-pim-discovery: the CalDAV backend and `caldav.discover` |
+| `caldav`      | io-webdav and io-http: the CalDAV backend                                 |
 | `gcal`        | io-gcal: the Google Calendar API v3 backend and its iCalendar projection  |
 | `msgraph`     | io-msgraph: the Microsoft Graph calendar backend and its iCalendar projection |
 | `vdir`        | io-vdir: the local vdir home                                              |

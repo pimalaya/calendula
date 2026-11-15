@@ -11,10 +11,6 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use io_http::{rfc6750::bearer::HttpAuthBearer, rfc7617::basic::HttpAuthBasic};
-use io_pim_discovery::{
-    rfc6764::{client::DiscoveryWebdavClientStd, service::DiscoveryDavService},
-    shared::dns::system_resolver,
-};
 use io_webdav::{
     client::{WebdavClientStd, WebdavClientStdConnectOptions, WebdavClientStdError},
     rfc4918::{WebdavAuth, follow_redirects::WebdavFollowRedirectsError, send::WebdavSendError},
@@ -30,9 +26,6 @@ use crate::{
     config::{CaldavAuthConfig, CaldavConfig, default_caldav_alpn},
     error::{ErrorCode, recoded},
 };
-
-/// The DNS-over-TCP resolver used when the host exposes none.
-const DEFAULT_RESOLVER: &str = "tcp://1.1.1.1:53";
 
 /// A connected CalDAV client, for the protocol-specific subcommands.
 pub struct CaldavClient {
@@ -66,7 +59,7 @@ impl DerefMut for CaldavClient {
 ///
 /// Follows whichever route the config sets: `home` pins the home-set
 /// and skips discovery, `server` names the context root the principal
-/// walk starts from, `discover` resolves a bare domain to it (RFC 6764).
+/// walk starts from.
 pub fn connect(config: &CaldavConfig, resolver: &mut SecretResolver) -> Result<WebdavClientStd> {
     let auth = build_auth(&config.auth, resolver)?;
     let tls = build_tls(config);
@@ -81,16 +74,11 @@ pub fn connect(config: &CaldavConfig, resolver: &mut SecretResolver) -> Result<W
         return Ok(client);
     }
 
-    let server = match &config.server {
-        Some(server) => parse_server(server)?,
-        None => {
-            let domain = config
-                .discover
-                .as_ref()
-                .ok_or_else(|| anyhow!("CalDAV config needs `discover`, `server` or `home`"))?;
-            resolve_server(domain, &tls)?
-        }
-    };
+    let server = config
+        .server
+        .as_ref()
+        .ok_or_else(|| anyhow!("CalDAV config needs `server` or `home`"))?;
+    let server = parse_server(server)?;
 
     let opts = WebdavClientStdConnectOptions {
         tls,
@@ -117,21 +105,6 @@ pub fn parse_server(server: &str) -> Result<Url> {
         }
         Err(err) => Err(err.into()),
     }
-}
-
-/// Resolves a bare domain to a CalDAV context root through RFC 6764.
-///
-/// Queries the system resolver, so the domain is not leaked to a third
-/// party, falling back to the Cloudflare default on hosts exposing none.
-fn resolve_server(domain: &str, tls: &Tls) -> Result<Url> {
-    let resolver = system_resolver().unwrap_or_else(|| {
-        DEFAULT_RESOLVER
-            .parse()
-            .expect("DEFAULT_RESOLVER must be a valid URL")
-    });
-
-    let mut client = DiscoveryWebdavClientStd::new(resolver).with_tls(tls.clone());
-    Ok(client.resolve(domain, DiscoveryDavService::Caldav)?)
 }
 
 /// The TLS profile CalDAV connects with.

@@ -4,7 +4,7 @@
 
 The next release brings calendula onto the standards Himalaya, Ortie and cardamum share: it manages events alone, drops the configuration wizard, takes one configuration path per `-c`, prints plain text with no table nor colour, serves a unified API whose backends say what they serve, and adds a REPL and an MCP server.
 
-A 0.2 configuration loads as it is, unless it holds a `todo`, `journal`, `table` or top-level `account` table, a colour key, a key calendula does not know, a non-ASCII CalDAV host, or several default accounts.
+A 0.2 configuration loads as it is, unless it holds a `todo`, `journal`, `table` or top-level `account` table, a colour key, `caldav.discover`, a key calendula does not know, a non-ASCII CalDAV host, or several default accounts.
 
 The text output changes everywhere, a few JSON outputs and exit codes move, and some commands fail earlier. The CHANGELOG lists every change; these are the ones to act on.
 
@@ -57,6 +57,15 @@ The text output changes everywhere, a few JSON outputs and exit codes move, and 
 - **An unknown key fails the configuration**, at the top level and in an account too, naming the key, where 0.2 ignored it there: a misspelt `default` or `calendar` no longer loads silently. A block for a backend the build leaves out still loads, unread, so one file serves every build.
 - **A backend the build leaves out is named, never skipped.** Where 0.2 skipped the block of a backend the build leaves out and took the account's next backend, a command whose account resolves to it fails `backend-not-built`, naming the cargo feature: rebuild with it, or pin a built backend with `--backend <name>`, which the message names when the account carries one. `account check` fails that backend's row the same way, `account list` names it under `notBuilt` (`gcal (not built)` in the text), and `account capability` fails `backend-not-built` like the other commands.
 - **CalDAV hosts are ASCII.** A `caldav.server` or `caldav.home` with an internationalised host is refused, `home` when the configuration loads and `server` when the account connects: write the host in Punycode (`https://xn--bcher-kva.example/` for `bücher.example`).
+- **`caldav.discover` is gone**, and calendula resolves no domain through DNS any more: a configuration still holding it is refused by name. Set `caldav.server` to the CalDAV root of the server, which its provider documents (Fastmail's `https://caldav.fastmail.com/dav/`, Google's `https://apidata.googleusercontent.com/caldav/v2/`), or `caldav.home` to the calendar home set. Once `server` is set, `calendula caldav discover` prints the home set it walks to.
+
+  ```toml
+  # 0.2
+  caldav.discover = "fastmail.com"
+
+  # next
+  caldav.server = "https://caldav.fastmail.com/dav/"
+  ```
 
 ### pimdir store
 

@@ -52,7 +52,6 @@ CLI to manage calendars.
 | [5545] | iCalendar: parsing and editing events, and carrying any other component a calendar holds     |
 | [6578] | Collection synchronization, whose sync token a CalDAV calendar listing reports                |
 | [6750] | HTTP Bearer authentication, for a provider-issued or broker-refreshed API token               |
-| [6764] | CalDAV service discovery: the SRV records and the well-known path leading to a server        |
 | [7617] | HTTP Basic authentication                                                                     |
 | [7986] | iCalendar extensions: the conference property an event's online meeting link is read from     |
 
@@ -62,7 +61,6 @@ CLI to manage calendars.
 [5545]: https://www.rfc-editor.org/rfc/rfc5545
 [6578]: https://www.rfc-editor.org/rfc/rfc6578
 [6750]: https://www.rfc-editor.org/rfc/rfc6750
-[6764]: https://www.rfc-editor.org/rfc/rfc6764
 [7617]: https://www.rfc-editor.org/rfc/rfc7617
 [7986]: https://www.rfc-editor.org/rfc/rfc7986
 
@@ -133,7 +131,7 @@ The OAuth 2.0 sections read their token from `ortie token show`: calendula runs 
 
 Run without a configuration at a terminal, calendula welcomes you with the commands copying the shipped sample in place, or downloading it when none ships, then the first command to run. Under `--json` or in a script, it fails naming the path it looked at and the sample.
 
-The `caldav` block reaches its server one way: `caldav.server`, a URL or a bare authority to walk from, `caldav.discover`, a domain resolved through SRV records and `.well-known` on every run, or `caldav.home`, the calendar home set itself.
+The `caldav` block reaches its server one way: `caldav.server`, a URL or a bare authority to walk from, or `caldav.home`, the calendar home set itself. calendula resolves no domain through DNS: name the CalDAV root your provider documents, as the sections below do.
 
 It takes one authentication: `basic` with a `username` and a `password`, `bearer` with a `token`, or `caldav.auth = "none"` for a server asking for none. `gcal.auth` and `msgraph.auth` take a `token`. A secret is given as `raw` or as `command`, a shell string or an argument list printing it.
 
@@ -189,7 +187,7 @@ Google-only fields (the event colour, the guest permissions, working-location an
 
 Only events project: a VTODO or VJOURNAL is refused by name, since Google models neither.
 
-Google is also reachable over CalDAV, but only in a crippled form: bearer tokens are the sole authentication, `MKCALENDAR` is refused outright, and no `.well-known` path leads to the server, so `caldav.discover` finds nothing and `caldav.server` names the principal:
+Google is also reachable over CalDAV, but only in a crippled form: bearer tokens are the sole authentication, `MKCALENDAR` is refused outright, and no `.well-known` path leads to the server, so `caldav.server` names the principal:
 
 ```toml
 [accounts.example]

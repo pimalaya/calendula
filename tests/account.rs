@@ -4,7 +4,8 @@
 //! ways pimalaya-config refuses one, each coded under `--json`, `default`
 //! read as a name like any other, and the block of a backend this build
 //! leaves out, loaded so one file serves every build, then refused with
-//! `backend-not-built` by a command reaching it.
+//! `backend-not-built` by a command reaching it. A `caldav.discover` key is
+//! refused by name.
 
 use std::{
     fs,
@@ -174,4 +175,39 @@ fn auto_stops_on_a_backend_left_out_naming_the_built_one() {
 
     let out = run(&path, &["--json", "account", "capability"]);
     refused(&out, "backend-not-built", "(`--backend msgraph`)");
+}
+
+/// A `caldav.discover` an earlier calendula resolved through DNS is
+/// refused by name, the message naming `caldav.server` and the guide.
+#[cfg(feature = "caldav")]
+#[test]
+fn a_caldav_discover_key_is_refused_naming_server() {
+    let toml = "[accounts.test]\ndefault = true\ncaldav.discover = \"fastmail.com\"\n\
+                caldav.auth = \"none\"\n";
+    let (_dir, path) = config(toml);
+
+    let out = run(&path, &["--json", "account", "list"]);
+    let error = json(&out, 1);
+    let cause = error["sources"][0].as_str().unwrap_or_default();
+    assert!(
+        cause.contains("The `caldav.discover` key is removed"),
+        "{error}"
+    );
+    assert!(
+        cause.contains("name the server in `caldav.server`"),
+        "{error}"
+    );
+    assert!(
+        cause.contains("`https://caldav.fastmail.com/dav/`"),
+        "{error}"
+    );
+    assert!(cause.contains("MIGRATION.md"), "{error}");
+
+    let out = run(&path, &["event", "list"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(1), "{stdout}");
+    assert!(
+        stdout.contains("`caldav.discover` key is removed"),
+        "{stdout}"
+    );
 }

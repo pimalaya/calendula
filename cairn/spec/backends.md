@@ -75,6 +75,8 @@ A named value SHALL pin the command to that backend and bail when the account ca
 ### Requirement: CalDAV backend
 CalDAV SHALL adapt io-webdav's RFC 4791 surface over a connected client whose calendar home-set is already resolved.
 
+The client SHALL connect from `caldav.server` or `caldav.home` alone ("CalDAV locates its home-set two ways" in config), and SHALL NOT resolve a domain through DNS (RFC 6764 SRV records), so the backend links no resolver.
+
 Item ids SHALL be the resource names the server returned, verbatim: io-webdav neither appends nor strips a file extension, so an id a listing showed addresses the same resource on every verb.
 
 A create SHALL propose a resource name derived from the item's own UID when that UID is URL-safe, falling back to a content digest, and SHALL keep the id the server reports in its `Location` header when it names the resource itself, else the last segment of the URL io-webdav sent, percent-encoded, which is the form a listing returns.
