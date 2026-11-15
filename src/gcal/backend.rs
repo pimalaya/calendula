@@ -24,17 +24,19 @@ use io_gcal::v3::{
         calendar_list::{GcalCalendarListEntry, list::GcalCalendarListListParams},
         calendars::GcalCalendar,
         events::{
-            GcalEvent, GcalSendUpdates, ical::GcalEventIcalError, import::GcalEventImportParams,
-            insert::GcalEventInsertParams, list::GcalEventsListParams,
-            update::GcalEventUpdateParams,
+            GcalEvent, GcalEventStatus, GcalSendUpdates, ical::GcalEventIcalError,
+            import::GcalEventImportParams, insert::GcalEventInsertParams,
+            list::GcalEventsListParams, update::GcalEventUpdateParams,
         },
     },
 };
 use log::warn;
+use pimalaya_cli::error::CodedError;
 use pimalaya_config::secret::SecretResolver;
 
 use crate::{
     config::GcalConfig,
+    error::{ErrorCode, item_not_found},
     gcal::{
         client::{connect, item_refusal},
         render::rfc3339,
@@ -126,11 +128,14 @@ impl GcalBackend {
 
     /// Applies a partial update: title and description patch the calendar,
     /// colour patches the calendar list entry.
+    ///
+    /// A field a PATCH leaves out stays as it is, so a cleared description
+    /// is sent empty, which Google stores as none.
     pub fn update_calendar(&mut self, id: &str, patch: CalendarDiff) -> Result<()> {
         if patch.name.is_some() || patch.description.is_some() {
             let calendar = GcalCalendar {
                 summary: patch.name,
-                description: patch.description.flatten(),
+                description: patch.description.map(Option::unwrap_or_default),
                 ..Default::default()
             };
 
@@ -217,11 +222,8 @@ impl GcalBackend {
     /// Reads one event, with the exceptions of a series folded into it.
     pub fn get_item(&mut self, calendar_id: &str, item_id: &str) -> Result<CalendarItem> {
         let event = self
-            .client
-            .event_get(calendar_id, item_id, None, None)
-            .map_err(item_refusal)
-            .with_context(|| format!("Read item `{item_id}` from calendar `{calendar_id}`"))?
-            .response;
+            .event(calendar_id, item_id)
+            .with_context(|| format!("Read item `{item_id}` from calendar `{calendar_id}`"))?;
 
         let exceptions = self.exceptions(calendar_id, &event)?;
 
@@ -230,6 +232,25 @@ impl GcalBackend {
             &event,
             &exceptions.iter().collect::<Vec<_>>(),
         ))
+    }
+
+    /// The event `item_id` of `calendar_id`, `item-not-found` when Google
+    /// holds none or a cancelled one: a deleted event stays as a cancelled
+    /// stub its reads return and its listings leave out.
+    fn event(&mut self, calendar_id: &str, item_id: &str) -> Result<GcalEvent> {
+        let event = self
+            .client
+            .event_get(calendar_id, item_id, None, None)
+            .map_err(item_refusal)?
+            .response;
+
+        if event.status == Some(GcalEventStatus::Cancelled) {
+            return Err(item_not_found(format!(
+                "Google holds event `{item_id}` as cancelled, a deleted event"
+            )));
+        }
+
+        Ok(event)
     }
 
     /// The exceptions of a series: the events Google returns beside a
@@ -288,6 +309,10 @@ impl GcalBackend {
     /// A `send_updates` given replaces the `all` of an inserted event. An
     /// import mails nobody and takes no `sendUpdates`, so asking it to
     /// mail the attendees is refused, naming the organizer.
+    ///
+    /// A UID the calendar already holds is refused `item-duplicate`
+    /// before anything is written: an import matches on it and would
+    /// overwrite that event.
     pub fn create_item(
         &mut self,
         calendar_id: &str,
@@ -295,8 +320,19 @@ impl GcalBackend {
         send_updates: Option<SendUpdates>,
     ) -> Result<String> {
         let event = project(&contents)?;
+        let path = create_path(&event, calendar_id, send_updates)?;
 
-        let created = match create_path(&event, calendar_id, send_updates)? {
+        if let Some(uid) = event.ical_uid.as_deref().filter(|uid| !uid.is_empty())
+            && let Some(id) = self.holding(calendar_id, uid)?
+        {
+            let message = format!(
+                "Calendar `{calendar_id}` already holds `{uid}` as event `{id}`; update that \
+                 event instead"
+            );
+            return Err(CodedError::new(ErrorCode::ItemDuplicate, message).into());
+        }
+
+        let created = match path {
             CreatePath::Insert(send_updates) => {
                 let params = GcalEventInsertParams {
                     send_updates,
@@ -311,6 +347,40 @@ impl GcalBackend {
         };
 
         Ok(created.response.id.unwrap_or_default())
+    }
+
+    /// The id of the event of `calendar_id` carrying `uid`, the series
+    /// master when it holds one, `None` when it holds none.
+    ///
+    /// A listing filtered on the `iCalUID` leaves the deleted events out,
+    /// and may answer an empty page before the one holding a match.
+    fn holding(&mut self, calendar_id: &str, uid: &str) -> Result<Option<String>> {
+        let mut page_token: Option<String> = None;
+
+        loop {
+            let params = GcalEventsListParams {
+                max_results: Some(PAGE_SIZE),
+                page_token: page_token.as_deref(),
+                ical_uid: Some(uid),
+                ..Default::default()
+            };
+            let current = self.client.events_list(calendar_id, &params)?.response;
+
+            let master = current
+                .items
+                .iter()
+                .find(|event| event.recurring_event_id.is_none())
+                .or(current.items.first());
+
+            if let Some(event) = master {
+                return Ok(Some(event.id.clone().unwrap_or_default()));
+            }
+
+            match current.next_page_token {
+                Some(next) => page_token = Some(next),
+                None => return Ok(None),
+            }
+        }
     }
 
     /// Replaces an event from an iCalendar document, optionally gated on
@@ -328,11 +398,7 @@ impl GcalBackend {
         send_updates: Option<SendUpdates>,
     ) -> Result<()> {
         let projected = project(&contents)?;
-        let current = self
-            .client
-            .event_get(calendar_id, item_id, None, None)
-            .map_err(item_refusal)?
-            .response;
+        let current = self.event(calendar_id, item_id)?;
 
         let event = projected.merge(&current);
         let params = GcalEventUpdateParams {
@@ -484,6 +550,9 @@ fn invites(event: &GcalEvent, calendar_id: &str) -> bool {
 
 /// Projects a calendar list entry onto the shared [`Calendar`], preferring
 /// the title this user gave the calendar over its own.
+///
+/// The user's primary calendar is the default one, and an empty
+/// description, what a clear stores, is none.
 fn calendar_from(entry: GcalCalendarListEntry) -> Calendar {
     let id = entry.id.unwrap_or_default();
 
@@ -493,9 +562,9 @@ fn calendar_from(entry: GcalCalendarListEntry) -> Calendar {
             .or(entry.summary)
             .unwrap_or_else(|| id.clone()),
         id,
-        description: entry.description,
+        description: entry.description.filter(|text| !text.is_empty()),
         color: entry.background_color,
-        default: false,
+        default: entry.primary.unwrap_or_default(),
     }
 }
 
@@ -676,13 +745,38 @@ mod tests {
             lines.concat(),
         );
 
-        let mut backend = backend(&[r#"{"id":"minted"}"#]);
+        let mut backend = backend(&[r#"{"items":[]}"#, r#"{"id":"minted"}"#]);
         let id = backend.create_item("primary", calendar.into_bytes(), None);
         assert_eq!(id.unwrap(), "minted");
 
         let requests = written(&mut backend);
         assert!(requests.contains("X-LINE-0:"), "{requests}");
         assert!(!requests.contains("X-LINE-39:"), "{requests}");
+    }
+
+    /// An event carrying a UID the calendar holds is refused before
+    /// anything is written: `events.import` would overwrite it.
+    #[test]
+    fn a_create_naming_a_held_uid_is_refused_and_imports_nothing() {
+        use crate::error::code;
+
+        let calendar = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//x//y//EN\r\nBEGIN:VEVENT\r\n\
+                        UID:e1@example.org\r\nDTSTAMP:20260101T000000Z\r\n\
+                        DTSTART:20260814T090000Z\r\nDTEND:20260814T100000Z\r\n\
+                        SUMMARY:Another\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let held = r#"{"items":[{"id":"held1","iCalUID":"e1@example.org"}]}"#;
+
+        let mut backend = backend(&[r#"{"items":[],"nextPageToken":"2"}"#, held]);
+        let err = backend
+            .create_item("primary", calendar.as_bytes().to_vec(), None)
+            .unwrap_err();
+        assert_eq!(code(&err), Some(ErrorCode::ItemDuplicate), "{err:#}");
+        assert!(err.to_string().contains("as event `held1`"), "{err}");
+
+        let requests = written(&mut backend);
+        assert_eq!(requests.matches("GET ").count(), 2, "{requests}");
+        assert!(requests.contains("iCalUID=e1%40example.org"), "{requests}");
+        assert!(!requests.contains("POST "), "{requests}");
     }
 
     #[test]
@@ -944,5 +1038,54 @@ mod tests {
         let body = refusal(404, "notFound", "Not Found");
         let err = answering(&[(404, &body)]).list_calendars().unwrap_err();
         assert_eq!(code(&err), None, "a calendar request: {err:#}");
+    }
+
+    /// A deleted event, which Google keeps as a cancelled stub its read
+    /// returns, is not found, as on every other backend.
+    #[test]
+    fn a_cancelled_event_is_not_found() {
+        use crate::error::code;
+
+        let stub = r#"{"id":"e1","status":"cancelled","iCalUID":"e1@example.org"}"#;
+        let err = backend(&[stub]).get_item("primary", "e1").unwrap_err();
+        assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+        assert_eq!(err.to_string(), "Read item `e1` from calendar `primary`");
+    }
+
+    /// A cleared description is sent empty, a field the PATCH leaves out
+    /// staying as it was, and an empty one reads as none.
+    #[test]
+    fn a_cleared_description_is_sent_empty() {
+        let mut backend = backend(&[r#"{"id":"cal"}"#]);
+        let patch = CalendarDiff {
+            description: Some(None),
+            ..Default::default()
+        };
+        backend.update_calendar("cal", patch).unwrap();
+
+        let requests = written(&mut backend);
+        assert!(requests.starts_with("PATCH "), "{requests}");
+        assert!(requests.contains(r#""description":"""#), "{requests}");
+
+        let entry = GcalCalendarListEntry {
+            id: Some(String::from("cal")),
+            description: Some(String::new()),
+            ..Default::default()
+        };
+        assert_eq!(calendar_from(entry).description, None);
+    }
+
+    /// The user's primary calendar is the default one, as `gcal
+    /// calendars` marks it.
+    #[test]
+    fn the_primary_calendar_is_the_default() {
+        let list = r#"{"items":[{"id":"me@example.org","summary":"Me","primary":true},
+                                {"id":"other","summary":"Other"}]}"#;
+        let calendars = backend(&[list]).list_calendars().unwrap();
+        let defaults: Vec<(&str, bool)> = calendars
+            .iter()
+            .map(|calendar| (calendar.id.as_str(), calendar.default))
+            .collect();
+        assert_eq!(defaults, [("me@example.org", true), ("other", false)]);
     }
 }

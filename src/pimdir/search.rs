@@ -4,28 +4,26 @@
 
 use std::fmt;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use io_pimdir::client::search::{PimdirSearchOptions, PimdirSearchSort};
 use jiff::tz::TimeZone;
 use pimalaya_cli::{
-    fields::Fields,
+    clap::args::PageTokenArg,
+    listing::{Listing, ListingPage},
     printer::Printer,
-    records::{Record, Records},
     sanitize,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::{
+    error::{ItemError, partial_when},
     pimdir::{
         backend::PimdirBackend,
-        index::{
-            PimdirCalendarCoverage, PimdirCalendarHit, PimdirCalendarZones, parse_query,
-            search_clock,
-        },
+        index::{PimdirCalendarCoverage, PimdirCalendarHit, parse_query, search_clock},
     },
-    shared::event::list::{local_zone, row_times},
+    shared::event::list::{EVENT_NOUNS, local_zone, row_times},
 };
 
 /// Search the account's events with the pimdir query language.
@@ -40,15 +38,20 @@ use crate::{
 /// `yesterday` are read in the local zone (`TZ`, then the system's).
 ///
 /// The answer is the index as the sync engine last refreshed it: a queued
-/// write is not in it. Each hit prints as a record, its summary then its
-/// snippet as the body; a line under the hits says what the answer could
-/// not see, another names the index's zone when a `date:` term reads its
-/// days in another than the index read floating times in.
+/// write is not in it. Each hit prints on one line, as `event list` prints
+/// an event, its calendar and what a text term matched before its summary;
+/// an `Incomplete:` line above them says what the answer could not see, a
+/// `Zones:` line the index's zone when a `date:` term reads its days in
+/// another than the index read floating times in.
+///
+/// A page names the number of the next one, which `--page-token` takes;
+/// the last page names none. An event the store cannot read is an item
+/// error, printed after the others, and the command exits 3.
 ///
 /// JSON output: `{"hits": [{...the event projection, "calendarId",
-/// "matched", "snippet"}], "more", "coverage": {"complete", "bodiless",
-/// "missing", "unparseable", "unindexed", "behind", "since", "until",
-/// "filling", "horizonLeft", "cut", "zoneDiffers"}}`.
+/// "matched", "snippet"}], "nextPage", "coverage": {"complete",
+/// "bodiless", "missing", "unparseable", "unindexed", "behind", "since",
+/// "until", "filling", "horizonLeft", "cut", "zoneDiffers"}, "errors"}`.
 #[derive(Debug, Parser)]
 pub struct PimdirSearchCommand {
     /// Calendar to search alone; every calendar when omitted.
@@ -67,6 +70,9 @@ pub struct PimdirSearchCommand {
     #[arg(short = 's', long, value_name = "N")]
     pub page_size: Option<u32>,
 
+    #[command(flatten)]
+    pub page_token: PageTokenArg,
+
     /// The query, its words joined by spaces.
     ///
     /// An option is read wherever it stands, before the query or after
@@ -78,33 +84,61 @@ pub struct PimdirSearchCommand {
 
 impl PimdirSearchCommand {
     pub fn execute(self, printer: &mut impl Printer, backend: PimdirBackend) -> Result<()> {
+        let words = self.query.join(" ");
         let query = parse_query(&self.query, printer.is_json())?;
         if let Some(calendar) = &self.calendar {
             backend.known_collection(calendar)?;
         }
 
+        let page = match &self.page_token.token {
+            Some(token) => token
+                .parse::<u32>()
+                .ok()
+                .filter(|page| *page > 0)
+                .with_context(|| format!("Invalid page token `{token}`"))?,
+            None => self.page.unwrap_or(1).max(1),
+        };
+
         let account = &backend.account;
         let page_size = self.page_size.unwrap_or(account.events_list_page_size());
-        let limit = page_size.max(1) as usize;
-        let page = self.page.unwrap_or(1).max(1) as usize - 1;
+        let limit = page_size.max(1);
         let options = PimdirSearchOptions {
             sort: self.sort.into(),
-            limit,
-            offset: page.saturating_mul(limit),
+            limit: limit as usize,
+            offset: (page as usize - 1).saturating_mul(limit as usize),
             clock: search_clock(),
         };
 
-        let page = backend
+        let answer = backend
             .client
             .search_items(query, self.calendar.as_deref(), &options)?;
 
-        printer.out(PimdirSearchOutput {
+        let next_page = answer.more.then(|| (page + 1).to_string());
+
+        let mut listing = Listing::new(&backend.name, Some("pimdir"));
+        listing.head("Calendar", self.calendar.as_deref().unwrap_or("all"));
+        listing.head("Query", &words);
+        let held = ListingPage::Numbered {
+            page: page.into(),
+            size: limit.into(),
+        };
+        listing.page(held, answer.hits.len(), EVENT_NOUNS, next_page.as_deref());
+        answer.coverage.note(&mut listing);
+        if let Some(zones) = &answer.zones {
+            zones.note(&mut listing);
+        }
+
+        let output = PimdirSearchOutput {
+            listing,
             zone: local_zone(),
-            hits: page.hits,
-            more: page.more,
-            coverage: page.coverage,
-            zones: page.zones,
-        })
+            hits: answer.hits,
+            next_page,
+            coverage: answer.coverage,
+            errors: answer.errors,
+        };
+
+        printer.out(&output)?;
+        partial_when(&output.errors)
     }
 }
 
@@ -134,78 +168,63 @@ impl From<PimdirSearchSortArg> for PimdirSearchSort {
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PimdirSearchOutput {
+    /// The header the hits print under, its page placed.
+    #[serde(skip)]
+    pub listing: Listing<'static>,
     /// The zone a timed hit's start and end print in.
     #[serde(skip)]
     pub zone: TimeZone,
     /// The hits of this page.
     pub hits: Vec<PimdirCalendarHit>,
-    /// Whether hits follow this page.
-    pub more: bool,
+    /// The number of the page following this one, given back through
+    /// `--page-token`, `null` once the answer is complete.
+    pub next_page: Option<String>,
     /// What the answer could not see.
     pub coverage: PimdirCalendarCoverage,
-    /// The zones, when a date term is read in another than the index's.
-    #[serde(skip)]
-    pub zones: Option<PimdirCalendarZones>,
+    /// The error of each event the store could not read, in the order
+    /// met.
+    pub errors: Vec<ItemError>,
 }
 
 impl fmt::Display for PimdirSearchOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut records = Records::default();
+        let mut listing = self.listing.clone();
+        let matched = self.hits.iter().any(|hit| hit.matched.is_some());
 
         for hit in &self.hits {
             let (start, end) = row_times(&hit.event, &self.zone);
 
-            let mut fields = Fields::default();
-            fields.push("Start", sanitize::text(&start));
-            fields.push("End", sanitize::text(&end));
-            fields.push("Calendar", sanitize::text(&hit.calendar_id));
+            let mut line = vec![
+                sanitize::text(&hit.event.id).into_owned(),
+                sanitize::text(&start).into_owned(),
+                sanitize::text(&end).into_owned(),
+                sanitize::text(&hit.calendar_id).into_owned(),
+            ];
 
-            if let Some(matched) = hit.matched {
-                fields.push("Matched", matched);
+            if matched {
+                let matched = hit.matched.map(|matched| matched.to_string());
+                line.push(matched.unwrap_or_default());
             }
 
-            let snippet = one_line(hit.snippet.as_deref());
-            let body = [sanitize::text(&hit.event.summary), sanitize::text(&snippet)]
-                .into_iter()
-                .filter(|part| !part.is_empty())
-                .collect::<Vec<_>>()
-                .join("\n\n");
-
-            records.push(Record {
-                title: sanitize::text(&hit.event.id).into_owned(),
-                state: Vec::new(),
-                fields,
-                body,
-            });
+            line.push(sanitize::text(&hit.event.summary).into_owned());
+            listing.items.push(line);
         }
 
-        let mut notes = self.coverage.to_string();
-
-        if let Some(zones) = &self.zones {
-            notes.push_str(&zones.to_string());
+        for error in &self.errors {
+            listing.errors.push(error);
         }
 
-        write!(f, "{records}")?;
-
-        if !records.items.is_empty() && !notes.is_empty() {
-            writeln!(f)?;
-        }
-
-        f.write_str(&notes)
+        write!(f, "{listing}")
     }
-}
-
-/// A passage on one line, its whitespace runs collapsed.
-fn one_line(text: Option<&str>) -> String {
-    let words = text.unwrap_or_default().split_whitespace();
-    words.collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]
 mod tests {
     use jiff::tz::TimeZone;
+    use pimalaya_cli::listing::{Listing, ListingPage};
 
     use crate::{
+        error::{ErrorCode, ItemError},
         pimdir::{
             index::{
                 PimdirCalendarCoverage, PimdirCalendarHit, PimdirCalendarMatched,
@@ -213,14 +232,32 @@ mod tests {
             },
             search::PimdirSearchOutput,
         },
-        shared::event::Event,
+        shared::event::{Event, list::EVENT_NOUNS},
     };
 
-    /// A hit prints as a record, its summary then its snippet as the body,
-    /// and what the answer could not see a blank line under the records.
-    #[test]
-    fn hits_print_as_records_above_the_coverage_and_zones() {
-        let output = PimdirSearchOutput {
+    /// One hit on the first page of an incomplete answer naming its next
+    /// page, and an event the store could not read.
+    fn output() -> PimdirSearchOutput {
+        let coverage = PimdirCalendarCoverage {
+            bodiless: 1,
+            counts_bodiless: true,
+            ..Default::default()
+        };
+        let zones = PimdirCalendarZones {
+            index: "UTC".into(),
+            search: "Europe/Paris".into(),
+        };
+
+        let mut listing = Listing::new("perso", Some("pimdir"));
+        listing.head("Calendar", "all");
+        listing.head("Query", "budget");
+        let page = ListingPage::Numbered { page: 1, size: 1 };
+        listing.page(page, 1, EVENT_NOUNS, Some("2"));
+        coverage.note(&mut listing);
+        zones.note(&mut listing);
+
+        PimdirSearchOutput {
+            listing,
             zone: TimeZone::UTC,
             hits: vec![PimdirCalendarHit {
                 event: Event {
@@ -237,32 +274,49 @@ mod tests {
                 matched: Some(PimdirCalendarMatched::Summary),
                 snippet: Some("the\nbudget".into()),
             }],
-            more: false,
-            coverage: PimdirCalendarCoverage {
-                bodiless: 1,
-                counts_bodiless: true,
-                ..Default::default()
-            },
-            zones: Some(PimdirCalendarZones {
-                index: "UTC".into(),
-                search: "Europe/Paris".into(),
-            }),
-        };
+            next_page: Some("2".into()),
+            coverage,
+            errors: vec![ItemError {
+                id: Some("9".into()),
+                code: Some(ErrorCode::ItemUnreadable),
+                error: "Read item `9`".into(),
+                sources: vec!["Invalid column type".into()],
+            }],
+        }
+    }
 
+    /// A hit prints on one line under the account, the calendar, the
+    /// query, the page and what the answer could not see; an event the
+    /// store could not read prints after the hits.
+    #[test]
+    fn a_hit_prints_on_one_line_and_an_error_last() {
         let expected = "\
-7
-Start:     2026-11-10
-End:       2026-11-10
-Calendar:  cal
-Matched:   summary
+Account:     perso (pimdir)
+Calendar:    all
+Query:       budget
+Page:        1, event 1
+Next page:   --page 2
+Incomplete:  1 item(s) have no local body and matched on their summary alone
+Zones:       the index reads floating times and dates in UTC, this search reads days in Europe/Paris
 
-    Budget review
+7  2026-11-10  2026-11-10  cal  summary  Budget review
 
-    the budget
-
-Incomplete: 1 item(s) have no local body and matched on their summary alone
-The index reads floating times and dates in UTC, this search reads days in Europe/Paris
+Error:  9  item-unreadable  Read item `9`
 ";
-        assert_eq!(output.to_string(), expected);
+        assert_eq!(output().to_string(), expected);
+    }
+
+    /// The page names the next one, which `--page-token` takes, and its
+    /// errors, as every listing of the family: no `more`.
+    #[test]
+    fn a_page_names_the_next_and_its_errors() {
+        let json = serde_json::to_value(output()).unwrap();
+        let mut keys: Vec<&str> = json.as_object().unwrap().keys().map(|k| &**k).collect();
+        keys.sort();
+        assert_eq!(keys, ["coverage", "errors", "hits", "nextPage"]);
+        assert_eq!(json["nextPage"], "2");
+        assert_eq!(json["errors"][0]["id"], "9");
+        assert_eq!(json["errors"][0]["code"], "item-unreadable");
+        assert_eq!(json["hits"][0]["snippet"], "the\nbudget");
     }
 }

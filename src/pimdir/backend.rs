@@ -688,10 +688,18 @@ impl PimdirBackend {
         let stored = self.item(calendar_id, item_id)?;
         if let Some(contents) = self.body(calendar_id, &stored)? {
             if !names(&contents, "ORGANIZER") {
-                bail!(
+                return Err(invitation_missing(format!(
                     "Event `{item_id}` names no ORGANIZER, so it is not an invitation \
                      and there is nobody to reply to"
-                );
+                )));
+            }
+            // NOTE: the account answers as one of the attendees, and an
+            // event naming none is its own, or nobody's invitation.
+            if !names(&contents, "ATTENDEE") {
+                return Err(invitation_missing(format!(
+                    "Event `{item_id}` names no ATTENDEE, so nobody is invited to it \
+                     and there is no answer to give"
+                )));
             }
             check_occurrence(calendar_id, &stored, &contents, recurrence_id)?;
         }
@@ -729,10 +737,10 @@ impl PimdirBackend {
         let stored = self.item(calendar_id, item_id)?;
         if let Some(contents) = self.body(calendar_id, &stored)? {
             if !names(&contents, "ATTENDEE") {
-                bail!(
+                return Err(invitation_missing(format!(
                     "Event `{item_id}` names no ATTENDEE, so there is nobody to notify; \
                      remove it with `event delete` instead"
-                );
+                )));
             }
             check_occurrence(calendar_id, &stored, &contents, recurrence_id)?;
         }
@@ -1223,6 +1231,12 @@ pub struct PimdirQueued {
     pub source: String,
 }
 
+/// A refusal under `invitation-missing`: the event a reply or a cancel
+/// names invites nobody it could address.
+fn invitation_missing(message: String) -> anyhow::Error {
+    CodedError::new(ErrorCode::InvitationMissing, message).into()
+}
+
 /// Whether a VEVENT of `contents` carries the property `name`.
 ///
 /// A body that does not parse answers yes: refusing an intent is the
@@ -1678,13 +1692,40 @@ mod tests {
 
     #[test]
     fn an_event_with_nobody_to_answer_or_notify_queues_nothing() {
+        use pimalaya_cli::error::code_of;
+
         let (_dir, mut backend, ids) = store(&[ALONE]);
 
         let reply = backend.reply("cal", &ids[0], "ACCEPTED", None, None, None);
-        assert!(reply.unwrap_err().to_string().contains("ORGANIZER"));
+        let reply = reply.unwrap_err();
+        assert!(reply.to_string().contains("ORGANIZER"), "{reply}");
+        assert_eq!(code_of(&reply), Some(ErrorCode::InvitationMissing));
 
         let cancel = backend.cancel("cal", &ids[0], None, None, None);
-        assert!(cancel.unwrap_err().to_string().contains("event delete"));
+        let cancel = cancel.unwrap_err();
+        assert!(cancel.to_string().contains("event delete"), "{cancel}");
+        assert_eq!(code_of(&cancel), Some(ErrorCode::InvitationMissing));
+
+        assert!(queued(&backend).is_empty());
+    }
+
+    /// An event naming its organizer and no attendee, as Graph writes the
+    /// account's own, invites nobody to answer as: a reply is refused
+    /// before it is queued, never parked by the server after a sync.
+    #[test]
+    fn a_reply_to_an_event_inviting_nobody_queues_nothing() {
+        use pimalaya_cli::error::code_of;
+
+        let own = ALONE.replace(
+            "SUMMARY:Focus\r\n",
+            "SUMMARY:Focus\r\nORGANIZER:mailto:me@example.org\r\n",
+        );
+        let (_dir, mut backend, ids) = store(&[&own]);
+
+        let reply = backend.reply("cal", &ids[0], "ACCEPTED", None, None, None);
+        let reply = reply.unwrap_err();
+        assert!(reply.to_string().contains("names no ATTENDEE"), "{reply}");
+        assert_eq!(code_of(&reply), Some(ErrorCode::InvitationMissing));
 
         assert!(queued(&backend).is_empty());
     }

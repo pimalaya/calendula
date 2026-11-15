@@ -115,7 +115,6 @@ impl EventUpdateCommand {
         }
 
         self.fields.check_backend(client.backend_name())?;
-        self.fields.anchor_floating(client.backend_name());
 
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
 
@@ -129,6 +128,11 @@ impl EventUpdateCommand {
                 (item.contents, item.etag)
             }
         };
+
+        // NOTE: the event's own zone first, the local one only for an
+        // event naming none.
+        self.fields.inherit_zone(&base);
+        self.fields.anchor_floating(client.backend_name());
 
         let if_match = self.if_match.or(etag);
         let send_updates = self.send_updates.send_updates;

@@ -26,6 +26,7 @@ pub mod update;
 use anyhow::Result;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use ical::tree::error::IcalParseError;
+use jiff::{Timestamp, tz::TimeZone};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -237,9 +238,20 @@ impl Event {
         }
     }
 
-    /// The event's start as a date-time, midnight for a date-only DTSTART.
-    pub fn start_at(&self) -> Option<NaiveDateTime> {
-        parse_stamp(&self.start)
+    /// The event's start as a date-time on the wall clock of `zone`, as
+    /// `event list` shows it: a timed event at its instant there, a
+    /// date-only DTSTART at midnight, a start that did not resolve as
+    /// written.
+    pub fn start_at(&self, zone: &TimeZone) -> Option<NaiveDateTime> {
+        let instant = self.start_secs.filter(|_| !self.all_day);
+
+        let Some(at) = instant.and_then(|secs| Timestamp::from_second(secs).ok()) else {
+            return parse_stamp(&self.start);
+        };
+
+        let at = at.to_zoned(zone.clone()).datetime();
+        let date = NaiveDate::from_ymd_opt(at.year().into(), at.month() as u32, at.day() as u32)?;
+        date.and_hms_opt(at.hour() as u32, at.minute() as u32, at.second() as u32)
     }
 }
 
@@ -354,7 +366,7 @@ mod tests {
             .unwrap()
             .and_hms_opt(9, 0, 0)
             .unwrap();
-        assert_eq!(zoned.start_at(), Some(expected));
+        assert_eq!(zoned.start_at(&TimeZone::UTC), Some(expected));
 
         let all_day = Event {
             start: "20260814".into(),
@@ -363,12 +375,40 @@ mod tests {
         let midnight = NaiveDate::from_ymd_opt(2026, 8, 14)
             .unwrap()
             .and_time(NaiveTime::MIN);
-        assert_eq!(all_day.start_at(), Some(midnight));
+        assert_eq!(all_day.start_at(&TimeZone::UTC), Some(midnight));
 
         let broken = Event {
             start: "nonsense".into(),
             ..Default::default()
         };
-        assert_eq!(broken.start_at(), None);
+        assert_eq!(broken.start_at(&TimeZone::UTC), None);
+    }
+
+    /// A timed event stands at its instant on the local wall clock, as
+    /// `event list` shows it; a whole day stays on its day.
+    #[test]
+    fn a_timed_start_reads_on_the_local_clock() {
+        let paris = TimeZone::get("Europe/Paris").unwrap();
+        let at = |hour| {
+            NaiveDate::from_ymd_opt(2026, 11, 20)
+                .unwrap()
+                .and_hms_opt(hour, 0, 0)
+        };
+
+        let utc = Event {
+            start: "20261120T090000Z".into(),
+            start_secs: Some(1_795_165_200),
+            ..Default::default()
+        };
+        assert_eq!(utc.start_at(&paris), at(10));
+        assert_eq!(utc.start_at(&TimeZone::UTC), at(9));
+
+        let all_day = Event {
+            start: "20261120".into(),
+            all_day: true,
+            start_secs: Some(1_795_132_800),
+            ..Default::default()
+        };
+        assert_eq!(all_day.start_at(&paris), at(0));
     }
 }

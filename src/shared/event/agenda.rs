@@ -21,6 +21,7 @@ use std::{
 use anyhow::{Result, anyhow, bail};
 use chrono::{Datelike, Local, Locale, Months, NaiveDate, NaiveDateTime};
 use clap::Parser;
+use jiff::tz::TimeZone;
 use pimalaya_cli::{error::ItemErrors, printer::Printer, sanitize};
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{
@@ -35,7 +36,7 @@ use crate::{
     shared::{
         arg::CalendarIdArg,
         client::CalendarClient,
-        event::Event,
+        event::{Event, list::local_zone},
         ical::IcalFamily,
         item::{CalendarItemQuery, CalendarTimeRange},
     },
@@ -174,6 +175,7 @@ impl EventAgendaCommand {
                 start_month: 0,
             },
             names: Names::new(time_locale()),
+            zone: local_zone(),
             all_events: Vec::new(),
             events: BTreeMap::new(),
         };
@@ -343,6 +345,8 @@ struct CalControl {
     vertical: bool,
     req: CalRequest,
     names: Names,
+    /// The zone the events are stamped in, as `event list` shows them.
+    zone: TimeZone,
     all_events: Vec<Event>,
     events: BTreeMap<NaiveDateTime, Vec<AgendaEvent>>,
 }
@@ -905,7 +909,7 @@ fn collect_events(ctl: &mut CalControl, y: i32, m: u32, d: u32) {
         .all_events
         .iter()
         .filter_map(|event| {
-            let start = event.start_at()?;
+            let start = event.start_at(&ctl.zone)?;
             let on_day = start.year() == y && start.month() == m && start.day() == d;
             on_day.then(|| {
                 let collected = AgendaEvent {
@@ -1216,6 +1220,7 @@ mod tests {
                 start_month: 0,
             },
             names: Names::new(Locale::POSIX),
+            zone: TimeZone::UTC,
             all_events: Vec::new(),
             events: BTreeMap::new(),
         }

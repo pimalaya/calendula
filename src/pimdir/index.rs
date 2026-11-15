@@ -5,12 +5,15 @@
 
 use std::fmt;
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use ariadne::{Config, Label, Report, ReportKind, Source};
 use io_pimdir::{
     client::{
         reader::PimdirItem,
-        search::{PimdirIndex, PimdirSearchClock, PimdirSearchMatched, PimdirSearchOptions},
+        search::{
+            PimdirIndex, PimdirSearchClock, PimdirSearchHit, PimdirSearchMatched,
+            PimdirSearchOptions,
+        },
     },
     search::{
         coverage::{PimdirSearchCoverage, PimdirSearchTemporal, PimdirSearchUnread},
@@ -23,12 +26,12 @@ use io_pimdir::{
 };
 use jiff::tz::TimeZone;
 use log::warn;
-use pimalaya_cli::{error::CodedError, sanitize};
+use pimalaya_cli::{error::CodedError, listing::Listing, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::{
-    error::ErrorCode,
+    error::{ErrorCode, ItemError, unreadable},
     pimdir::client::{PimdirClient, store_error},
     shared::{
         event::{Event, EventPerson},
@@ -50,48 +53,68 @@ impl PimdirClient {
             .map_err(|err| store_error(err, "Search the pimdir index"))?;
 
         let mut hits = Vec::new();
+        let mut errors = Vec::new();
 
         for hit in answer.hits {
-            let placement = hit
-                .placements
-                .iter()
-                .find(|placement| Some(placement.collection.as_str()) == calendar)
-                .or(hit.placements.first());
-            let Some(calendar_id) = placement.map(|placement| placement.collection.clone()) else {
-                continue;
-            };
+            let id = hit.seq.to_string();
 
-            let stored = index
-                .reader()
-                .get_item(&calendar_id, hit.seq)
-                .map_err(|err| store_error(err, format_args!("Read item `{}`", hit.seq)))?;
-            let object = stored.as_ref().and_then(|stored| stored.object.as_ref());
-            let contents = match object {
-                Some(hash) => self.blobs.get(hash)?.unwrap_or_default(),
-                None => Vec::new(),
-            };
-            let item = CalendarItem {
-                id: hit.seq.to_string(),
-                calendar_id: calendar_id.clone(),
-                etag: object.map(|hash| hash.0.clone()),
-                contents,
-            };
-            let matched = hit.matched.map(PimdirCalendarMatched::from);
-
-            // NOTE: an item dropped since the refresh has no row, only a title.
-            hits.push(PimdirCalendarHit {
-                event: event_hit(&item, stored.as_ref(), hit.title),
-                calendar_id,
-                matched,
-                snippet: hit.snippet,
-            });
+            match self.calendar_hit(&index, hit, calendar) {
+                Ok(hit) => hits.push(hit),
+                Err(err) => errors.push(unreadable(Some(&id), err)),
+            }
         }
 
         Ok(PimdirCalendarPage {
             hits,
             more: answer.more,
+            errors,
             coverage: PimdirCalendarCoverage::from(&answer.coverage),
             zones: PimdirCalendarZones::of(&index, &options.clock, &answer.coverage)?,
+        })
+    }
+
+    /// A hit as calendula lists it: the event the store holds under it,
+    /// in the calendar `calendar` names when it holds one, else the first
+    /// placement's; an error when the store cannot read it.
+    fn calendar_hit(
+        &self,
+        index: &PimdirIndex,
+        hit: PimdirSearchHit,
+        calendar: Option<&str>,
+    ) -> Result<PimdirCalendarHit> {
+        let placement = hit
+            .placements
+            .iter()
+            .find(|placement| Some(placement.collection.as_str()) == calendar)
+            .or(hit.placements.first());
+        let Some(calendar_id) = placement.map(|placement| placement.collection.clone()) else {
+            bail!("Item `{}` has no calendar in the search index", hit.seq);
+        };
+
+        let read = || format!("Read item `{}`", hit.seq);
+        let stored = index
+            .reader()
+            .get_item(&calendar_id, hit.seq)
+            .map_err(|err| store_error(err, "Read the pimdir store"))
+            .with_context(read)?;
+        let object = stored.as_ref().and_then(|stored| stored.object.as_ref());
+        let contents = match object {
+            Some(hash) => self.blobs.get(hash).with_context(read)?.unwrap_or_default(),
+            None => Vec::new(),
+        };
+        let item = CalendarItem {
+            id: hit.seq.to_string(),
+            calendar_id: calendar_id.clone(),
+            etag: object.map(|hash| hash.0.clone()),
+            contents,
+        };
+
+        // NOTE: an item dropped since the refresh has no row, only a title.
+        Ok(PimdirCalendarHit {
+            event: event_hit(&item, stored.as_ref(), hit.title),
+            calendar_id,
+            matched: hit.matched.map(PimdirCalendarMatched::from),
+            snippet: hit.snippet,
         })
     }
 
@@ -228,6 +251,8 @@ pub struct PimdirCalendarPage {
     pub hits: Vec<PimdirCalendarHit>,
     /// Whether hits follow this page.
     pub more: bool,
+    /// The error of each hit the store could not read, in the order met.
+    pub errors: Vec<ItemError>,
     /// What the answer could not see.
     pub coverage: PimdirCalendarCoverage,
     /// The zones, when a date term is read in another than the index's.
@@ -276,7 +301,7 @@ impl PimdirCalendarZones {
     }
 }
 
-/// The line under a table.
+/// The line under a count.
 impl fmt::Display for PimdirCalendarZones {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
@@ -285,6 +310,18 @@ impl fmt::Display for PimdirCalendarZones {
             sanitize::text(&self.index),
             sanitize::text(&self.search)
         )
+    }
+}
+
+impl PimdirCalendarZones {
+    /// Adds the `Zones:` field above the items of `listing`, which the
+    /// listing sanitizes.
+    pub fn note(&self, listing: &mut Listing) {
+        let note = format!(
+            "the index reads floating times and dates in {}, this search reads days in {}",
+            self.index, self.search
+        );
+        listing.head("Zones", &note);
     }
 }
 
@@ -412,9 +449,27 @@ impl From<&PimdirSearchCoverage> for PimdirCalendarCoverage {
     }
 }
 
-/// The line under a table, empty when complete.
+/// The line under a count, empty when complete.
 impl fmt::Display for PimdirCalendarCoverage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.summary() {
+            Some(summary) => writeln!(f, "Incomplete: {summary}"),
+            None => Ok(()),
+        }
+    }
+}
+
+impl PimdirCalendarCoverage {
+    /// Adds the `Incomplete:` field above the items of `listing`, when the
+    /// answer is not whole.
+    pub fn note(&self, listing: &mut Listing) {
+        if let Some(summary) = self.summary() {
+            listing.header.push(("Incomplete", summary));
+        }
+    }
+
+    /// What the answer could not see, `None` when it is complete.
+    fn summary(&self) -> Option<String> {
         let day = |instant: &str| sanitize::text(instant.get(..10).unwrap_or(instant)).into_owned();
         let mut parts = Vec::new();
 
@@ -472,11 +527,7 @@ impl fmt::Display for PimdirCalendarCoverage {
             ));
         }
 
-        if !parts.is_empty() {
-            writeln!(f, "Incomplete: {}", parts.join("; "))?;
-        }
-
-        Ok(())
+        (!parts.is_empty()).then(|| parts.join("; "))
     }
 }
 
@@ -815,6 +866,44 @@ mod tests {
             .unwrap();
 
         (dir, backend)
+    }
+
+    /// A hit whose body the store cannot read is an item error coded
+    /// `item-unreadable`, the other hits listed, where the whole search
+    /// failed.
+    #[test]
+    fn a_hit_the_store_cannot_read_is_an_item_error() {
+        let (dir, backend) = indexed_store();
+        let found = page(&backend.client, "budget", None);
+        let offsite = found.hits.iter().find(|hit| hit.event.summary == "Offsite");
+        let offsite = offsite.unwrap().event.clone();
+
+        // NOTE: a summary column of the wrong type, which the store's
+        // CHECKs refuse unless told to ignore them, fails the item's read
+        // alone, the index answering from its own tables.
+        let conn = rusqlite::Connection::open(dir.path().join("pimdir.db")).unwrap();
+        conn.execute_batch("PRAGMA ignore_check_constraints = ON")
+            .unwrap();
+        let seq: i64 = offsite.id.parse().unwrap();
+        let sql = "UPDATE event_summary SET recurring = 'x' \
+                   WHERE item = (SELECT id FROM items WHERE seq = ?1)";
+        assert_eq!(conn.execute(sql, [seq]).unwrap(), 1);
+        drop(conn);
+
+        let found = page(&backend.client, "budget", None);
+        let summaries: Vec<&str> = found
+            .hits
+            .iter()
+            .map(|hit| hit.event.summary.as_str())
+            .collect();
+        assert_eq!(summaries, ["Planning"]);
+
+        let [error] = found.errors.as_slice() else {
+            panic!("{:?}", found.errors);
+        };
+        assert_eq!(error.id.as_deref(), Some(offsite.id.as_str()));
+        assert_eq!(error.code, Some(ErrorCode::ItemUnreadable));
+        assert_eq!(error.error, format!("Read item `{}`", offsite.id));
     }
 
     #[test]

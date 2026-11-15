@@ -195,3 +195,41 @@ fn create_still_adds() {
     let created = json(&run(home, &["--json", "item", "create", &item]), 0);
     assert_eq!(created["queued"], false, "{created}");
 }
+
+/// A `--start` naming no zone moves a zoned event on its own clock: it
+/// keeps its `TZID`, the end moving with it, rather than turning floating.
+#[test]
+fn a_local_start_keeps_the_zone_of_the_event() {
+    let home = account("calendar.default = \"personal\"\n");
+    let home = home.path();
+
+    let zoned = EVENT.replace(
+        "DTSTART:20261112T090000Z\r\n",
+        "DTSTART;TZID=Europe/Paris:20261112T090000\r\n\
+         DTEND;TZID=Europe/Paris:20261112T100000\r\n",
+    );
+    let created = json(&run(home, &["--json", "event", "add", &zoned]), 0);
+    let id = created["id"].as_str().unwrap().to_owned();
+
+    let args = [
+        "--json",
+        "event",
+        "update",
+        &id,
+        "--start",
+        "2026-11-26T11:00",
+    ];
+    json(&run(home, &args), 0);
+
+    let mut files = fs::read_dir(home.join("personal")).unwrap();
+    let file = files.next().unwrap().unwrap().path();
+    let stored = fs::read_to_string(file).unwrap();
+    assert!(
+        stored.contains("DTSTART;TZID=Europe/Paris:20261126T110000\r\n"),
+        "{stored}"
+    );
+    assert!(
+        stored.contains("DTEND;TZID=Europe/Paris:20261126T120000\r\n"),
+        "{stored}"
+    );
+}

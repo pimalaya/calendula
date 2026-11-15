@@ -41,7 +41,7 @@ It SHALL also cover `instances`, the occurrences a recurring event expands to; `
 
 An access role, a scope type or an event status the API returns and calendula does not know SHALL print as the API spells it, in text and in JSON, never fail the listing. The `acl` flags SHALL keep taking the values calendula knows alone.
 
-An ACL rule id is `<scope type>:<scope value>`, which the API mints, so `create` and `update` SHALL take the scope and the role as flags and derive it, and `delete` SHALL accept the id a listing showed.
+An ACL rule id is `<scope type>:<scope value>` (`default` for everyone), which the API mints, so `create` SHALL take the scope and the role as flags and derive it, `update` SHALL read the scope from the id it is given, its `--scope` and `--value` optional and refused `usage-invalid` before any request when they disagree with the id (the value compared case-insensitively), as an id naming no scope is, and `delete` SHALL accept the id a listing showed.
 
 `free-busy` and `instances` SHALL take `--from` / `--to` as inclusive days, as `event list` does, so one date spelling serves the whole CLI.
 
@@ -95,10 +95,17 @@ The agenda SHALL read the events over the days its grid draws and SHALL expand a
 
 A series placed once at its first start leaves a yearly event out of every year but its first, so the agenda and a listing of the same days would disagree.
 
+The agenda SHALL stamp each event, and file it under its day, at its start in the local zone `event list` reads (`TZ`, then the system's), a timed event at its instant there, a whole-day one on its day, a floating one at its wall time; the text and the keys of `starts` alike.
+
 #### Scenario: A yearly event created years ago
 - GIVEN a calendar holding a yearly event whose first start is in 2019
 - WHEN `calendula event agenda 2027` draws that year
 - THEN the event lists under the grid at the day it falls on in 2027
+
+#### Scenario: A UTC event under a local zone
+- GIVEN `TZ=Europe/Paris` and an event `DTSTART:20261112T090000Z`
+- WHEN `calendula --json event agenda 11 2026` runs
+- THEN the event is under `starts` at `2026-11-12T10:00:00`, as `event list` prints it at `2026-11-12 10:00`
 
 ### Requirement: An agenda names months and weekdays in the time locale
 The agenda SHALL draw month and weekday names, and stamp the events under its grid, in the locale `LC_ALL`, then `LC_TIME`, then `LANG` resolves to, as cal does. A locale that is unset, `C`, `POSIX` or unknown SHALL fall back to the English names of the POSIX locale. A month argument SHALL be read in English or in the language of that locale.
@@ -233,7 +240,8 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 | `body-pending` | a listed item's body is not local yet (pimdir); a sync brings it |
 | `precondition-failed` | a write's `--if-match` names a version the item no longer has, on any backend that takes one |
 | `occurrence-unsupported` | `pimdir reply` or `pimdir cancel` names an occurrence its performer cannot act on alone |
-| `item-duplicate` | a create names a `UID` its calendar holds: a CalDAV `no-uid-conflict`, a pimdir calendar holding or queuing it |
+| `invitation-missing` | `pimdir reply` names an event naming no `ORGANIZER` to answer or no `ATTENDEE` to answer as, or `pimdir cancel` one naming no `ATTENDEE` to notify; nothing was queued |
+| `item-duplicate` | a create names a `UID` its calendar holds: a CalDAV `no-uid-conflict` or 412, a gcal calendar holding it, a pimdir calendar holding or queuing it |
 | `store-uncreated` | the pimdir store has no schema yet: its sync engine creates it |
 | `store-version` | the pimdir store is of another format version than calendula's: an earlier sync engine's is reinstalled, a newer one's needs calendula upgraded |
 | `store-foreign` | the pimdir database is not a pimdir store: another program wrote it |
@@ -285,7 +293,7 @@ The command line SHALL be parsed by pimalaya-cli's `clap::parse`: help and versi
 - AND `calendula --nope calendar list` exits 2, printing clap's `error: unexpected argument '--nope' found` on stderr and nothing on stdout
 
 ### Requirement: A listing names the items it could not read
-`calendar list`, `event list`, `event search`, `event agenda` and `item list` SHALL print an `errors` list beside their items, under `--json` and in text: one pimalaya-cli item error `{id, code, error, sources}` per calendar or item the command could not read, `[]` when there is none, in the order met. `id` SHALL be the item's id as the command prints ids, `null` when the backend named none, as for a listing the server truncated; `code` a code of the vocabulary or `null`; `error` the message; `sources` the backend's own reasons, outermost first. A non-empty `errors` SHALL make the command exit 3 once it printed its result. A listing that reads the whole calendar before cutting its page SHALL print its entries on the first page only; an item it listed but could not read (an iCalendar that does not parse, a pimdir body the store cannot serve) holds its place on a page, and its entry SHALL print on that page. `event list` SHALL count the events it lists, never an item it could not read.
+`calendar list`, `event list`, `event search`, `event agenda`, `item list` and `pimdir search` SHALL print an `errors` list beside their items, under `--json` and in text: one pimalaya-cli item error `{id, code, error, sources}` per calendar or item the command could not read, `[]` when there is none, in the order met. `id` SHALL be the item's id as the command prints ids, `null` when the backend named none, as for a listing the server truncated; `code` a code of the vocabulary or `null`; `error` the message; `sources` the backend's own reasons, outermost first. A non-empty `errors` SHALL make the command exit 3 once it printed its result. A listing that reads the whole calendar before cutting its page SHALL print its entries on the first page only; an item it listed but could not read (an iCalendar that does not parse, a pimdir body the store cannot serve) holds its place on a page, and its entry SHALL print on that page. `event list` SHALL count the events it lists, never an item it could not read.
 
 #### Scenario: An item that does not parse
 - GIVEN the vdir calendar `personal` holding the events `a` and `b` and one `.ics` file `c` that is no iCalendar
@@ -305,6 +313,14 @@ A command acting on the calendar itself SHALL take it as an argument, as Himalay
 - WHEN `calendula --json calendar create Work`, then `calendar update Work -n Job -C '#ff0000'`, then `calendar delete Work` run
 - THEN the first prints `{"id":"Work","name":"Work","queued":false}` and makes the directory `Work`, the second renames and paints it, the third removes it
 - AND `calendar delete -k Work` and `calendar create work Work` are read as before
+
+### Requirement: A calendar update clears what it empties
+`calendar update -d ""` and `-C ""` SHALL clear the description and the colour on every backend serving them, never report success leaving them: a CalDAV `DAV:remove` of the property, an empty description sent to Google, which stores it as none, vdir clearing its own. A Google calendar always carries a colour, so clearing one stays refused by name.
+
+#### Scenario: A description cleared on CalDAV
+- GIVEN a CalDAV calendar `cal` described `Old`
+- WHEN `calendula calendar update cal -d ""` runs
+- THEN one PROPPATCH removes `C:calendar-description`, and the next `calendar list --json` reads its `description` `null`
 
 ### Requirement: Nested execute
 Each subcommand SHALL be a clap-derived struct carrying its own arguments, with an `execute(self, printer, client)` method, a unified command borrowing the client (`&mut CalendarClient`).
@@ -472,7 +488,7 @@ A build or a create made from flags alone, with no source and no `-i`, SHALL be 
 The field flags SHALL cover the fields `event list` renders and the few every calendar carries, and SHALL NOT grow to match what a composer models. Recurrence (`RRULE`, `RDATE`, `EXDATE`, overrides), alarms, conference links (`CONFERENCE`) and hand-written `VTIMEZONE`s are out; `--online-meeting` asks a sync engine to create a meeting and writes no link. The documentation SHALL say the composer is the complete surface.
 
 ### Requirement: A field flag sets its property and touches nothing else
-Writing a field flag SHALL drop every instance of the property it names on the VEVENT and write the flag's own, a repeated flag writing one instance per value. `--add-attendee` and `--remove-attendee` are the exception: each SHALL touch the one `ATTENDEE` it names (see [A field flag adds or removes one attendee](#requirement-a-field-flag-adds-or-removes-one-attendee)). Every other line SHALL keep its bytes. A time flag SHALL take a date, a local time, a `Z` time, or a time prefixed by an IANA zone (`Europe/Paris:2026-10-19T09:00`); `--time-zone` names the zone of the times that name none. A zone a flag names SHALL arrive with its `VTIMEZONE`, minted once from the time-zone database. On an update, `--start` given without `--end` or `--duration` SHALL move the end with it, keeping the event's length.
+Writing a field flag SHALL drop every instance of the property it names on the VEVENT and write the flag's own, a repeated flag writing one instance per value. `--add-attendee` and `--remove-attendee` are the exception: each SHALL touch the one `ATTENDEE` it names (see [A field flag adds or removes one attendee](#requirement-a-field-flag-adds-or-removes-one-attendee)). Every other line SHALL keep its bytes. A time flag SHALL take a date, a local time, a `Z` time, or a time prefixed by an IANA zone (`Europe/Paris:2026-10-19T09:00`); `--time-zone` names the zone of the times that name none, and on `event update` such a time is otherwise read in the event's own zone ("An update reads a zone-less time in the event's zone"). A zone a flag names SHALL arrive with its `VTIMEZONE`, minted once from the time-zone database. On an update, `--start` given without `--end` or `--duration` SHALL move the end with it, keeping the event's length.
 
 A line a flag writes longer than 75 octets SHALL be folded (RFC 5545 3.1), never inside a character. `--duration` SHALL take an RFC 5545 3.3.6 duration in any case, a leading `+` dropped, checked by ical-rs's validator; a negative one SHALL be refused.
 
@@ -500,6 +516,14 @@ The local zone is the one calendula reads a floating time in, so the event lands
 - GIVEN a gcal account and a system zone of `Europe/Madrid`
 - WHEN `calendula event add --start 2026-10-19T09:00 --end 2026-10-19T10:00` runs
 - THEN the event is written with `DTSTART;TZID=Europe/Madrid:20261019T090000` and its `VTIMEZONE`, and Google accepts it
+
+### Requirement: An update reads a zone-less time in the event's zone
+On `event update`, a `--start` or `--end` naming no zone SHALL be read in the zone the event's `DTSTART` names in its `TZID`, when the time-zone database knows it, so the event moves on its own clock rather than turning floating; `--time-zone` SHALL keep the last word, and an event whose start names no such zone SHALL keep the reading of "A backend without floating times anchors the time flags locally".
+
+#### Scenario: A zoned event moved by a local time
+- GIVEN an event `DTSTART;TZID=Europe/Paris:20261112T090000` ending at 10:00
+- WHEN `calendula event update <id> --start 2026-11-26T11:00` runs
+- THEN it is written `DTSTART;TZID=Europe/Paris:20261126T110000` and `DTEND;TZID=Europe/Paris:20261126T120000`
 
 ### Requirement: Flags apply to one event
 A source holding several VEVENTs SHALL be refused when a field flag is set, since a flag rewrites one event and the others would be dropped or left inconsistent. With no flag the source passes through as written.
@@ -559,7 +583,13 @@ A source that holds nothing but whitespace SHALL be refused, naming where it was
 
 A `date:` term SHALL compare the occurrences the index expanded (SEARCH §7), its days, `today` and `yesterday` read in the zone `event list` reads times in (`TZ`, then the system's), stated to the index as an IANA name (SEARCH §8.1); a zone with no IANA name SHALL read them in UTC, with a warning.
 
-Each hit SHALL print as a record (Text output is plain text): its id, the public `seq`, which `event read` takes; its start and end as `event list` shows them (Columns follow the kind), from its summary when its body is not local; its calendar; what a text term matched (`body` or `summary`) when one did; then its summary and its snippet. `--sort date|name|relevance` orders the hits, `date` (latest first) by default, a series by its first occurrence, and `--page` and `--page-size` page them, the page size defaulting to `event list`'s. Under `--json` the page carries `hits`, `more` (whether hits follow it) and `coverage`, each hit the event projection plus `calendarId`, `matched` (`null` when only field terms matched) and `snippet`.
+Each hit SHALL print on one line through pimalaya-cli's `Listing`: its id, the public `seq`, which `event read` takes; its start and end as `event list` shows them (Columns follow the kind), from its summary when its body is not local; its calendar; what a text term matched (`body` or `summary`), a column present when any hit of the page says; then its summary. The header SHALL name the account (`<name> (pimdir)`), the calendar (`-k`, else `all`), the query, the page and the next one (`Next page: --page <n>`), then the `Incomplete:` and `Zones:` fields when they apply. `--sort date|name|relevance` orders the hits, `date` (latest first) by default, a series by its first occurrence, and `--page` and `--page-size` page them, the page size defaulting to `event list`'s; pimalaya-cli's `--page-token`, a page number from 1, SHALL win over `--page`, a token that is not one refused, naming it. Under `--json` the page carries `hits`, `nextPage` (the next page number as a string, `null` on the last page), `coverage` and `errors`, each hit the event projection plus `calendarId`, `matched` (`null` when only field terms matched) and `snippet`. A hit the store cannot read (its row, its body, a hit no calendar holds) SHALL be an `errors` entry, its id the `seq`, coded by the store's refusal, else `item-unreadable`, ``Read item `<seq>` ``, the other hits listed, and the command SHALL exit 3.
+
+#### Scenario: A search resumed from its token
+- GIVEN an indexed pimdir calendar holding three events naming the budget
+- WHEN `calendula --json pimdir search -s 2 budget` runs, then `calendula --json pimdir search -s 2 --page-token 2 budget`
+- THEN the first prints two hits and `"nextPage":"2"`, the second one hit and `"nextPage":null`, neither printing `more`
+- AND `--page-token 0` or `--page-token two` fails naming the token
 
 #### Scenario: An option after the query
 - GIVEN a pimdir account
@@ -596,7 +626,7 @@ Each hit SHALL print as a record (Text output is plain text): its id, the public
 `calendula pimdir count <query>...` SHALL answer how many items the scoped query matches, with its coverage, under the same scope as `pimdir search`.
 
 ### Requirement: A pimdir calendar search says what it did not cover
-The output of `pimdir search` and `pimdir count` SHALL carry the coverage of the answer (SEARCH §8.2): `bodiless`, the items in scope whose body is not local, matched on their summary alone; `missing`, those whose body the index could not read, and `unparseable`, those whose body it could not parse, both indexed from their summary; the three counted whatever the query reads; `unindexed`, those whose last change the index has not folded in; `behind`, how many changes the store drew above the index, store-wide; `since` and `until`, the range below or above which the store is not known to hold every item; `filling`, whether a first round is still listing a calendar in scope; `horizonLeft`, whether the date range reaches outside the occurrences the index holds; `cut`, how many series stop their occurrences before the range's end; `zoneDiffers`, whether a date term reads its days in another zone than the index read floating times and dates in; and `complete`, io-pimdir's own judgement of SEARCH §8.2 (`PimdirSearchCoverage::is_complete`), the lag included: false when any of these holds, but for `zoneDiffers`, which leaves an answer complete, and for a `bodiless`, a `missing` or an `unparseable` count while no term of the query reads a calendar body (a text term, `date:`, `when:`, `has:attachment`). The members SHALL be flat and camelCase. The plain output SHALL print one line after its hits, a blank line apart, naming what left the answer incomplete, a `bodiless`, a `missing` or an `unparseable` count only while io-pimdir counts it against the answer (`PimdirSearchReads::kinds` and, for `bodiless`, `counts_bodiless`), and nothing when the answer is complete.
+The output of `pimdir search` and `pimdir count` SHALL carry the coverage of the answer (SEARCH §8.2): `bodiless`, the items in scope whose body is not local, matched on their summary alone; `missing`, those whose body the index could not read, and `unparseable`, those whose body it could not parse, both indexed from their summary; the three counted whatever the query reads; `unindexed`, those whose last change the index has not folded in; `behind`, how many changes the store drew above the index, store-wide; `since` and `until`, the range below or above which the store is not known to hold every item; `filling`, whether a first round is still listing a calendar in scope; `horizonLeft`, whether the date range reaches outside the occurrences the index holds; `cut`, how many series stop their occurrences before the range's end; `zoneDiffers`, whether a date term reads its days in another zone than the index read floating times and dates in; and `complete`, io-pimdir's own judgement of SEARCH §8.2 (`PimdirSearchCoverage::is_complete`), the lag included: false when any of these holds, but for `zoneDiffers`, which leaves an answer complete, and for a `bodiless`, a `missing` or an `unparseable` count while no term of the query reads a calendar body (a text term, `date:`, `when:`, `has:attachment`). The members SHALL be flat and camelCase. The plain output of `pimdir search` SHALL print an `Incomplete:` field above its hits, and `pimdir count` one `Incomplete:` line after its count, a blank line apart, naming what left the answer incomplete, a `bodiless`, a `missing` or an `unparseable` count only while io-pimdir counts it against the answer (`PimdirSearchReads::kinds` and, for `bodiless`, `counts_bodiless`), and nothing when the answer is complete.
 
 #### Scenario: A body the index could not read
 - GIVEN an index recording one event's body as missing
@@ -619,7 +649,7 @@ The output of `pimdir search` and `pimdir count` SHALL carry the coverage of the
 - THEN the coverage reports `horizonLeft` true and `complete` false
 
 ### Requirement: A pimdir search names an index read in another zone
-When the coverage of `pimdir search` or `pimdir count` reports a differing zone (SEARCH §8.2: the query holds a date term that can reach a calendar item, and the index reads floating times and dates in another zone than the one the search reads days in, SEARCH §7, `floating_zone`), the plain output SHALL say so after the hits or the count, naming both zones, and the JSON coverage SHALL carry `zoneDiffers` true. A query of no date term reads no day: it SHALL print no such line and carry `zoneDiffers` false.
+When the coverage of `pimdir search` or `pimdir count` reports a differing zone (SEARCH §8.2: the query holds a date term that can reach a calendar item, and the index reads floating times and dates in another zone than the one the search reads days in, SEARCH §7, `floating_zone`), the plain output SHALL say so, naming both zones, in a `Zones:` field above the hits of `pimdir search` and in a line after the count of `pimdir count`, and the JSON coverage SHALL carry `zoneDiffers` true. A query of no date term reads no day: it SHALL print no such line and carry `zoneDiffers` false.
 
 #### Scenario: An index read in another zone
 - GIVEN `TZ=Europe/Paris` and an index reading floating times in `UTC`

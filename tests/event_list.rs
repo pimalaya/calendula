@@ -390,3 +390,37 @@ fn the_agenda_json_holds_its_starts_and_its_errors() {
     assert_eq!(last["id"], "d", "{json}");
     assert_eq!(last["code"], "item-unreadable", "{json}");
 }
+
+/// The agenda stamps a UTC event at its local time, as `event list` shows
+/// it, its JSON key the local time too.
+#[test]
+fn the_agenda_stamps_an_event_in_the_local_zone() {
+    let home = account();
+    let config = home.path().join("config.toml");
+    let agenda = |tz: &str, json: bool| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_calendula"));
+        command.args(["-c", config.to_str().unwrap()]);
+        if json {
+            command.arg("--json");
+        }
+        let output = command
+            .args(["event", "agenda", "11", "2026"])
+            .env("TZ", tz)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        String::from_utf8(output.stdout).unwrap()
+    };
+
+    let json: Value = serde_json::from_str(&agenda("Europe/Paris", true)).unwrap();
+    let starts = json["starts"].as_object().unwrap();
+    assert_eq!(starts["2026-11-12T10:00:00"][0], "Standup", "{json}");
+
+    let text = agenda("America/New_York", false);
+    assert!(text.contains("Nov 12, 04:00"), "{text}");
+
+    let listed = output(home.path(), &["event", "list"]);
+    let listed = String::from_utf8(listed.stdout).unwrap();
+    assert!(listed.contains("2026-11-12 09:00"), "{listed}");
+}

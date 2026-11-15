@@ -389,6 +389,9 @@ impl MsgraphBackend {
 }
 
 /// Projects a Graph calendar onto the shared [`Calendar`].
+///
+/// Graph spells an unset colour as an empty `hexColor`, which reads as
+/// none, and names the account's default calendar itself.
 fn calendar_from(calendar: MsgraphCalendar) -> Calendar {
     Calendar {
         name: calendar
@@ -398,8 +401,8 @@ fn calendar_from(calendar: MsgraphCalendar) -> Calendar {
             .unwrap_or_else(|| calendar.id.clone()),
         id: calendar.id,
         description: None,
-        color: calendar.hex_color,
-        default: false,
+        color: calendar.hex_color.filter(|color| !color.is_empty()),
+        default: calendar.is_default_calendar.unwrap_or_default(),
     }
 }
 
@@ -584,6 +587,34 @@ mod tests {
         let written = &stream.downcast_mut::<Scripted>().unwrap().written;
         let written = String::from_utf8_lossy(written);
         assert!(!written.contains("graph.example.org"), "{written}");
+    }
+
+    /// An unset colour, which Graph spells `""`, reads as none, and the
+    /// calendar Graph names the default is the default.
+    #[test]
+    fn an_unset_colour_is_none_and_the_default_is_graphs() {
+        let page = r##"{"value":[{"id":"A","name":"Calendar","hexColor":"",
+                       "isDefaultCalendar":true},
+                      {"id":"B","name":"Other","hexColor":"#ff0000"}]}"##;
+        let len = page.len();
+        let response = format!("HTTP/1.1 200 OK\r\nContent-Length: {len}\r\n\r\n{page}");
+        let stream = Scripted {
+            responses: VecDeque::from([response.into_bytes()]),
+            written: Vec::new(),
+        };
+        let mut backend = MsgraphBackend {
+            client: MsgraphClientStd::new(stream, "made-up", Default::default()),
+        };
+
+        let calendars = backend.list_calendars().unwrap();
+        let read: Vec<(&str, Option<&str>, bool)> = calendars
+            .iter()
+            .map(|calendar| {
+                let color = calendar.color.as_deref();
+                (calendar.id.as_str(), color, calendar.default)
+            })
+            .collect();
+        assert_eq!(read, [("A", None, true), ("B", Some("#ff0000"), false)]);
     }
 
     fn event(id: &str, change_key: &str) -> MsgraphEvent {

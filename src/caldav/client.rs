@@ -5,6 +5,7 @@
 //! caches populated so a command runs no extra round-trip.
 
 use std::{
+    io::{Read, Write},
     ops::{Deref, DerefMut},
     path::PathBuf,
 };
@@ -13,7 +14,13 @@ use anyhow::{Result, anyhow};
 use io_http::{rfc6750::bearer::HttpAuthBearer, rfc7617::basic::HttpAuthBasic};
 use io_webdav::{
     client::{WebdavClientStd, WebdavClientStdConnectOptions, WebdavClientStdError},
-    rfc4918::{WebdavAuth, follow_redirects::WebdavFollowRedirectsError, send::WebdavSendError},
+    coroutine::{WebdavCoroutine, WebdavCoroutineState, WebdavYield},
+    rfc4918::{
+        WebdavAuth, WebdavPropValue, WebdavProperty,
+        follow_redirects::WebdavFollowRedirectsError,
+        proppatch::{WebdavProppatch, WebdavProppatchOk},
+        send::WebdavSendError,
+    },
     rfc6578::sync_collection::WebdavSyncCollectionError,
 };
 use pimalaya_config::secret::SecretResolver;
@@ -127,6 +134,77 @@ fn build_auth(config: &CaldavAuthConfig, resolver: &mut SecretResolver) -> Resul
             WebdavAuth::Bearer(HttpAuthBearer::new(token.expose_secret()))
         }
     })
+}
+
+/// Sets `set` and removes `remove` on the collection at `path` in one
+/// PROPPATCH, failing as io-webdav's own updates do when the server
+/// refuses a property or answers nothing of it (RFC 4918 §9.2.1).
+///
+/// io-webdav 0.9 updates a calendar by setting alone, so a clear is
+/// pumped here over the client's stream, which the crate opens for that.
+pub fn proppatch(
+    client: &mut WebdavClientStd,
+    path: &str,
+    set: &[(WebdavProperty, WebdavPropValue<'_>)],
+    remove: &[WebdavProperty],
+) -> Result<(), WebdavClientStdError> {
+    let base_url = client.base_url.clone();
+    let user_agent = client.user_agent.clone();
+    let mut coroutine =
+        WebdavProppatch::new(&base_url, client.auth(), &user_agent, path, set, remove);
+
+    let mut buf = [0u8; 16 * 1024];
+    let mut arg: Option<&[u8]> = None;
+
+    let out = loop {
+        match coroutine.resume(arg.take()) {
+            WebdavCoroutineState::Complete(out) => break out?,
+            WebdavCoroutineState::Yielded(WebdavYield::WantsWrite(bytes)) => {
+                client.stream.write_all(&bytes)?;
+            }
+            WebdavCoroutineState::Yielded(WebdavYield::WantsRead) => {
+                let n = client.stream.read(&mut buf)?;
+                arg = Some(&buf[..n]);
+            }
+        }
+    };
+
+    accepted(out)
+}
+
+/// The outcome of a PROPPATCH, as io-webdav reads its own: a property the
+/// server refused fails it, and so does one it never mentioned.
+fn accepted(out: WebdavProppatchOk) -> Result<(), WebdavClientStdError> {
+    let mut acknowledged = Vec::new();
+    let mut failures = Vec::new();
+
+    for response in out.multistatus.responses {
+        acknowledged.extend(response.props.into_iter().map(|prop| prop.local));
+        acknowledged.extend(
+            response
+                .failures
+                .iter()
+                .map(|failure| failure.property.clone()),
+        );
+        failures.extend(response.failures);
+    }
+
+    if !failures.is_empty() {
+        return Err(WebdavClientStdError::PropertiesRejected(failures));
+    }
+
+    let ignored: Vec<String> = out
+        .requested
+        .into_iter()
+        .filter(|local| !acknowledged.iter().any(|known| known == local))
+        .map(ToString::to_string)
+        .collect();
+
+    if !ignored.is_empty() {
+        return Err(WebdavClientStdError::PropertiesIgnored(ignored));
+    }
+
+    Ok(())
 }
 
 /// The status and body of an answer that refused an exchange, wherever

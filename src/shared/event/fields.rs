@@ -25,6 +25,7 @@ use ical::{
     tree::{
         codec::mode::Escaper,
         cst::{IcalCst, IcalItem},
+        param::tzid::TZID,
     },
     tzdb,
     validator::IcalValidateError,
@@ -342,6 +343,21 @@ impl EventFieldsArgs {
             .and_then(|tz| tz.iana_name().map(ToOwned::to_owned));
 
         self.anchor_floating_in(backend, local);
+    }
+
+    /// Reads the `--start` and `--end` naming no zone in the zone of the
+    /// event's own `DTSTART`, on an update: the event moves on its own
+    /// clock rather than turning floating.
+    ///
+    /// `--time-zone` keeps the last word, and a start naming no zone, or
+    /// one the time-zone database does not know, leaves the times as
+    /// given.
+    pub fn inherit_zone(&mut self, ical: &[u8]) {
+        let names_a_time = self.start.is_some() || self.end.is_some();
+
+        if names_a_time && self.time_zone.is_none() {
+            self.time_zone = start_zone(ical);
+        }
     }
 
     fn anchor_floating_in(&mut self, backend: &str, local: Option<String>) {
@@ -982,6 +998,23 @@ impl Moment {
 
         prop(kind, params, value)
     }
+}
+
+/// The IANA zone the `DTSTART` of the first VEVENT of `ical` names in its
+/// `TZID`, `None` for a date, a UTC or a floating time, or a zone the
+/// database does not know.
+fn start_zone(ical: &[u8]) -> Option<String> {
+    let cst = IcalCst::parse(ical).ok()?;
+    let vevent = cst.component::<VEVENT>()?;
+
+    let tzid = vevent.items.iter().find_map(|item| match item {
+        IcalItem::Prop(line) if line.name.get().eq_ignore_ascii_case("DTSTART") => {
+            line.param::<TZID>().map(|zone| zone.into_owned())
+        }
+        _ => None,
+    })?;
+
+    TimeZone::get(&tzid).is_ok().then_some(tzid)
 }
 
 /// The end an update moves with its new start, `None` when the event

@@ -12,18 +12,26 @@
 //! [`CalendarTimeRange`]: crate::shared::item::CalendarTimeRange
 
 use anyhow::{Context, Result};
-use ical::{component::vevent::VEVENT, prop::uid::UID, tree::cst::IcalCst};
-use io_webdav::{
-    client::WebdavClientStd,
-    rfc4791::{calendar::CaldavCalendar, item::CaldavItemEntry},
-    rfc4918::typed::WebdavUnreadableEntry,
+use ical::{
+    component::{vevent::VEVENT, vjournal::VJOURNAL, vtodo::VTODO},
+    prop::uid::UID,
+    tree::cst::IcalCst,
 };
+use io_webdav::{
+    client::{WebdavClientStd, WebdavClientStdError},
+    rfc4791::{
+        calendar::{CALENDAR_COLOR, CALENDAR_DESCRIPTION, CaldavCalendar, join_path, property_set},
+        item::CaldavItemEntry,
+    },
+    rfc4918::{WebdavProperty, send::WebdavSendError, typed::WebdavUnreadableEntry},
+};
+use log::warn;
 use pimalaya_config::secret::SecretResolver;
 
 use crate::{
-    caldav::client::{connect, item_refusal, row_code},
+    caldav::client::{connect, item_refusal, proppatch, row_code},
     config::CaldavConfig,
-    error::{ErrorCode, ItemError, calendar_not_found},
+    error::{ErrorCode, ItemError, calendar_not_found, recoded},
     shared::{
         calendar::{Calendar, CalendarDiff},
         client::window,
@@ -78,34 +86,84 @@ impl CaldavBackend {
         };
 
         self.client.create_calendar(&calendar)?;
+
+        // NOTE: a server may answer a MKCALENDAR as made yet drop a
+        // property it does not keep (iCloud, the colour): read it back.
+        // The calendar is made by then, so a read back that fails is said
+        // and the create still succeeds.
+        if let Some(color) = color {
+            match self.client.list_calendars() {
+                Ok(listed) => {
+                    let created = listed.into_iter().find(|calendar| calendar.id == id);
+
+                    if created.and_then(|calendar| calendar.color).is_none() {
+                        warn!("the server did not keep the colour {color} of calendar `{id}`");
+                    }
+                }
+                Err(err) => warn!("cannot read calendar `{id}` back for its colour: {err}"),
+            }
+        }
+
         Ok(id)
     }
 
-    /// Rewrites a calendar's properties through PROPPATCH.
+    /// Sets and clears a calendar's properties through PROPPATCH, those
+    /// the patch names alone.
     ///
-    /// Reads the current ones first, so a field the patch leaves
-    /// untouched is written back unchanged.
+    /// The colour is written first, on its own: a server may keep the
+    /// rest of a PROPPATCH while it ignores a colour (iCloud does), so a
+    /// refused colour leaves the calendar as it was.
     pub fn update_calendar(&mut self, id: &str, patch: CalendarDiff) -> Result<()> {
-        let mut calendar = self
+        if !self
             .client
             .list_calendars()?
-            .into_iter()
-            .find(|calendar| calendar.id == id)
-            .ok_or_else(|| calendar_not_found(format!("Calendar `{id}` not found")))?;
-
-        if let Some(name) = patch.name {
-            calendar.display_name = Some(name);
-        }
-
-        if let Some(description) = patch.description {
-            calendar.description = description;
+            .iter()
+            .any(|known| known.id == id)
+        {
+            return Err(calendar_not_found(format!("Calendar `{id}` not found")));
         }
 
         if let Some(color) = patch.color {
-            calendar.color = color;
+            let cleared = color.is_none().then_some(CALENDAR_COLOR);
+            let calendar = CaldavCalendar {
+                id: id.to_owned(),
+                color,
+                ..Default::default()
+            };
+
+            self.patch(&calendar, cleared.as_slice()).with_context(|| {
+                format!("Write the colour of calendar `{id}`, nothing else written")
+            })?;
         }
 
-        self.client.update_calendar(&calendar)?;
+        let cleared = matches!(patch.description, Some(None)).then_some(CALENDAR_DESCRIPTION);
+        let calendar = CaldavCalendar {
+            id: id.to_owned(),
+            display_name: patch.name,
+            description: patch.description.flatten(),
+            ..Default::default()
+        };
+
+        if calendar.display_name.is_some() || calendar.description.is_some() || cleared.is_some() {
+            self.patch(&calendar, cleared.as_slice())?;
+        }
+
+        Ok(())
+    }
+
+    /// Sets the properties `calendar` carries and removes `cleared`, in
+    /// one PROPPATCH.
+    fn patch(&mut self, calendar: &CaldavCalendar, cleared: &[WebdavProperty]) -> Result<()> {
+        if cleared.is_empty() {
+            self.client.update_calendar(calendar)?;
+            return Ok(());
+        }
+
+        let home = self.client.calendar_home_set.clone();
+        let home = home.ok_or(WebdavClientStdError::MissingCalendarHomeSet)?;
+        let path = join_path(home.path(), &calendar.id);
+        proppatch(&mut self.client, &path, &property_set(calendar), cleared)?;
+
         Ok(())
     }
 
@@ -153,11 +211,20 @@ impl CaldavBackend {
     }
 
     /// Reads one item's raw iCalendar bytes plus its entity tag.
+    ///
+    /// A 400 is a miss as a 404 is: a GET sends no body to refuse, and
+    /// iCloud answers one to a name it does not take (`<uid>` without
+    /// `.ics`), which names no item of it.
     pub fn get_item(&mut self, calendar_id: &str, item_id: &str) -> Result<CalendarItem> {
         let body = self
             .client
             .read_item(calendar_id, item_id)
-            .map_err(item_refusal)
+            .map_err(|err| match err {
+                WebdavClientStdError::Send(WebdavSendError::HttpStatus { status: 400, .. }) => {
+                    recoded(ErrorCode::ItemNotFound, err)
+                }
+                err => item_refusal(err),
+            })
             .with_context(|| format!("Read item `{item_id}` from calendar `{calendar_id}`"))?;
 
         Ok(CalendarItem {
@@ -171,11 +238,23 @@ impl CaldavBackend {
     /// PUTs a new resource.
     ///
     /// A server may name the resource itself, in which case the id it
-    /// reported wins over the one asked for.
+    /// reported wins over the one asked for. The PUT carries
+    /// `If-None-Match: *`, so a 412 answers a name the calendar holds,
+    /// derived from the same UID: `item-duplicate`.
     pub fn create_item(&mut self, calendar_id: &str, contents: Vec<u8>) -> Result<String> {
         let id = format!("{}.ics", new_resource_name(&contents));
-        let created = self.client.create_item(calendar_id, &id, contents)?;
-        Ok(created.id)
+
+        match self.client.create_item(calendar_id, &id, contents) {
+            Ok(created) => Ok(created.id),
+            Err(
+                err @ WebdavClientStdError::Send(WebdavSendError::HttpStatus {
+                    status: 412, ..
+                }),
+            ) => Err(recoded(ErrorCode::ItemDuplicate, err).context(format!(
+                "Calendar `{calendar_id}` already holds `{id}`; update that item instead"
+            ))),
+            Err(err) => Err(err.into()),
+        }
     }
 
     /// PUTs over an existing resource, optionally gated on `if_match`.
@@ -298,9 +377,13 @@ fn truncated() -> ItemError {
 /// `Location`, which io-webdav returns instead.
 fn new_resource_name(contents: &[u8]) -> String {
     let uid = IcalCst::parse(contents).ok().and_then(|cst| {
-        cst.components::<VEVENT>()
-            .next()
-            .and_then(|vevent| vevent.prop::<UID>())
+        let components = cst.components::<VEVENT>();
+        let mut components = components
+            .chain(cst.components::<VTODO>())
+            .chain(cst.components::<VJOURNAL>());
+
+        components
+            .find_map(|component| component.prop::<UID>())
             .map(|uid| uid.0.into_owned())
     });
 
@@ -338,6 +421,7 @@ mod tests {
     use std::{
         collections::VecDeque,
         io::{Read, Result as IoResult, Write},
+        sync::{Arc, Mutex},
     };
 
     use ical::component::IcalComponentKind;
@@ -353,6 +437,7 @@ mod tests {
     /// A stream answering its reads with the canned responses, in order.
     struct Scripted {
         responses: VecDeque<Vec<u8>>,
+        written: Arc<Mutex<Vec<u8>>>,
     }
 
     impl Read for Scripted {
@@ -372,6 +457,7 @@ mod tests {
 
     impl Write for Scripted {
         fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+            self.written.lock().unwrap().extend_from_slice(buf);
             Ok(buf.len())
         }
 
@@ -383,19 +469,144 @@ mod tests {
     /// A backend whose server answers `status` with `body`, its home set
     /// already discovered.
     fn answering(status: u16, body: &str) -> CaldavBackend {
-        let len = body.len();
-        let response = format!(
-            "HTTP/1.1 {status} Answer\r\nContent-Type: application/xml\r\n\
-             Content-Length: {len}\r\n\r\n{body}"
-        );
+        scripted(&[(status, body)]).0
+    }
+
+    /// A backend whose server answers each `(status, body)` in turn, and
+    /// what it writes to that server.
+    fn scripted(answers: &[(u16, &str)]) -> (CaldavBackend, Arc<Mutex<Vec<u8>>>) {
+        let response = |(status, body): &(u16, &str)| {
+            let len = body.len();
+            format!(
+                "HTTP/1.1 {status} Answer\r\nContent-Type: application/xml\r\n\
+                 Content-Length: {len}\r\n\r\n{body}"
+            )
+            .into_bytes()
+        };
+        let written = Arc::new(Mutex::new(Vec::new()));
         let stream = Scripted {
-            responses: VecDeque::from([response.into_bytes()]),
+            responses: answers.iter().map(response).collect(),
+            written: written.clone(),
         };
         let home = Url::parse("https://dav.example.org/calendars/me/").unwrap();
         let mut client = WebdavClientStd::new(stream, WebdavAuth::None, home.clone());
         client.calendar_home_set = Some(home);
 
-        CaldavBackend { client }
+        (CaldavBackend { client }, written)
+    }
+
+    /// The calendar listing of a home holding `cal`, coloured `color`.
+    fn calendars(color: Option<&str>) -> String {
+        let color = color
+            .map(|color| format!("<i:calendar-color>{color}</i:calendar-color>"))
+            .unwrap_or_default();
+
+        format!(
+            r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:i="http://inf-it.com/ns/ab/">
+  <d:response>
+    <d:href>/calendars/me/cal/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+        <d:displayname>Cal</d:displayname>
+        <c:calendar-description>Old</c:calendar-description>
+        {color}
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>"#
+        )
+    }
+
+    /// A PROPPATCH answer acknowledging each property of `props` with
+    /// `status`.
+    fn patched(props: &[(&str, u16)]) -> String {
+        let propstats: String = props
+            .iter()
+            .map(|(prop, status)| {
+                format!(
+                    "<d:propstat><d:prop><{prop}/></d:prop>\
+                     <d:status>HTTP/1.1 {status} Answer</d:status></d:propstat>"
+                )
+            })
+            .collect();
+
+        format!(
+            r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:i="http://inf-it.com/ns/ab/">
+  <d:response><d:href>/calendars/me/cal/</d:href>{propstats}</d:response>
+</d:multistatus>"#
+        )
+    }
+
+    /// The requests a scripted server received, as text.
+    fn requests(written: &Arc<Mutex<Vec<u8>>>) -> String {
+        String::from_utf8_lossy(&written.lock().unwrap()).into_owned()
+    }
+
+    /// A cleared description is removed (`DAV:remove`), never left out of
+    /// a set that writes nothing; a new name travels beside it.
+    #[test]
+    fn a_cleared_description_is_removed() {
+        let listing = calendars(None);
+        let answer = patched(&[("d:displayname", 200), ("c:calendar-description", 200)]);
+        let (mut backend, written) = scripted(&[(207, &listing), (207, &answer)]);
+
+        let patch = CalendarDiff {
+            name: Some(String::from("New")),
+            description: Some(None),
+            color: None,
+        };
+        backend.update_calendar("cal", patch).unwrap();
+
+        let requests = requests(&written);
+        let proppatch = requests.split("PROPPATCH ").nth(1).unwrap_or_default();
+        assert!(proppatch.contains("<D:remove>"), "{requests}");
+        assert!(proppatch.contains("calendar-description/>"), "{requests}");
+        assert!(proppatch.contains("New</D:displayname>"), "{requests}");
+        assert_eq!(requests.matches("PROPPATCH ").count(), 1, "{requests}");
+    }
+
+    /// The colour goes first and alone: a server ignoring it fails the
+    /// update before the name and the description are written.
+    #[test]
+    fn an_ignored_colour_writes_nothing_else() {
+        let listing = calendars(None);
+        let (mut backend, written) = scripted(&[(207, &listing), (207, &patched(&[]))]);
+
+        let patch = CalendarDiff {
+            name: Some(String::from("New")),
+            description: Some(Some(String::from("Text"))),
+            color: Some(Some(String::from("#123456"))),
+        };
+        let err = backend.update_calendar("cal", patch).unwrap_err();
+        assert!(format!("{err:#}").contains("calendar-color"), "{err:#}");
+        assert!(err.to_string().contains("nothing else written"), "{err}");
+
+        let requests = requests(&written);
+        assert_eq!(requests.matches("PROPPATCH ").count(), 1, "{requests}");
+        let proppatch = requests.split("PROPPATCH ").nth(1).unwrap_or_default();
+        assert!(proppatch.contains("#123456"), "{requests}");
+        assert!(!proppatch.contains("displayname"), "{requests}");
+        assert!(!proppatch.contains("Text"), "{requests}");
+    }
+
+    /// A colour the server drops on create is said, the calendar made.
+    #[test]
+    fn a_colour_dropped_on_create_is_read_back() {
+        let listing = calendars(None);
+        let (mut backend, written) = scripted(&[(201, ""), (207, &listing)]);
+
+        let id = backend
+            .create_calendar(Some("cal"), "Cal", None, Some("#00ff00"))
+            .unwrap();
+        assert_eq!(id, "cal");
+
+        let requests = requests(&written);
+        assert!(requests.starts_with("MKCALENDAR "), "{requests}");
+        assert_eq!(requests.matches("PROPFIND ").count(), 1, "{requests}");
     }
 
     /// A `DAV:error` body naming the precondition `name` of `namespace`.
@@ -448,6 +659,18 @@ mod tests {
             .unwrap_err();
         assert_eq!(code(&err), Some(ErrorCode::ItemDuplicate), "{err:#}");
 
+        // NOTE: the name is the UID, so a 412 to the create's
+        // `If-None-Match: *` is a UID the calendar holds.
+        let err = answering(412, "")
+            .create_item("cal", EVENT.to_vec())
+            .unwrap_err();
+        assert_eq!(code(&err), Some(ErrorCode::ItemDuplicate), "{err:#}");
+        assert_eq!(
+            err.to_string(),
+            "Calendar `cal` already holds `e1.ics`; update that item instead"
+        );
+        assert!(format!("{err:#}").contains("HTTP 412"), "{err:#}");
+
         let err = answering(412, "")
             .update_item("cal", "e1.ics", EVENT.to_vec(), Some("\"1\""))
             .unwrap_err();
@@ -468,6 +691,22 @@ mod tests {
             .delete_item("cal", "nope.ics", None)
             .unwrap_err();
         assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+    }
+
+    /// iCloud answers 400, not 404, to a GET of a name without `.ics`:
+    /// a read names no item then. A write answered 400 keeps no code, its
+    /// body being what the server refused.
+    #[test]
+    fn a_read_answered_400_is_not_found_and_a_write_is_not() {
+        let err = answering(400, "").get_item("cal", "nope").unwrap_err();
+        assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+        assert_eq!(err.to_string(), "Read item `nope` from calendar `cal`");
+        assert!(format!("{err:#}").contains("HTTP 400"), "{err:#}");
+
+        let err = answering(400, "")
+            .update_item("cal", "e1.ics", EVENT.to_vec(), None)
+            .unwrap_err();
+        assert_eq!(code(&err), None, "{err:#}");
     }
 
     /// A listing answering an item, a row refused whole, a row refusing its
@@ -632,6 +871,20 @@ END:VCALENDAR&#13;
             new_resource_name(calendar.as_bytes()),
             "event-1@example.org"
         );
+    }
+
+    /// A to-do and a journal entry are named after their UID as an event
+    /// is, never by a digest.
+    #[test]
+    fn a_todo_or_a_journal_is_named_after_its_uid() {
+        for kind in ["VTODO", "VJOURNAL"] {
+            let calendar = format!(
+                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//x//y//EN\r\nBEGIN:{kind}\r\n\
+                 UID:todo-1\r\nDTSTAMP:20260101T000000Z\r\nEND:{kind}\r\nEND:VCALENDAR\r\n"
+            );
+
+            assert_eq!(new_resource_name(calendar.as_bytes()), "todo-1", "{kind}");
+        }
     }
 
     #[test]

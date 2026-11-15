@@ -129,9 +129,9 @@ pimdir.account = "example"
 ### Text output
 
 - **Every list is plain text**, with no border, no colour and nothing sized to the terminal. A script cutting the 0.2 tables reads `--json` instead.
-- **`event list` prints one line per event**, `id  start  end  summary`, the times in the local zone (a whole-day event by its days) and an empty cell as `-`, under `Account:`, `Calendar:`, `Page:` and `Next page:` and a blank line. A listing that could not read an item prints one `Error:` line for it last, after the rows and a blank line. `item list` prints its id, size and entity tag the same way, and `gcal instances` its id, status, start, end and summary.
+- **`event list` prints one line per event**, `id  start  end  summary`, the times in the local zone (a whole-day event by its days) and an empty cell as `-`, under `Account:`, `Calendar:`, `Page:` and `Next page:` and a blank line. A listing that could not read an item prints one `Error:` line for it last, after the rows and a blank line. `item list` prints its id, size and entity tag the same way, `gcal instances` its id, status, start, end and summary, and `pimdir search` its id, start, end, calendar, what matched and summary, its snippet under `--json` alone.
 - **Other lists print columns or records.** `calendar list` prints `Account:`, then one line per calendar, `id  default  color  name`, its description under `--json` alone; `vdir list`, `gcal acl list` and `gcal colors` print columns under an uppercase header, and `account list` one line per account with no header, `default` marking the default one; `caldav list`, `gcal calendars` and `gcal free-busy` print records the way `git log` prints commits; `account check`, `caldav discover`, `gcal settings` and `pimdir status` print `Label: value` lines.
-- **`event agenda` highlights no day.** Its grid writes no escape any more, today and the days holding an event included; the events listed under it name their days, the months and weekdays named in the time locale (`LC_ALL`, then `LC_TIME`, then `LANG`).
+- **`event agenda` highlights no day.** Its grid writes no escape any more, today and the days holding an event included; the events listed under it name their days, the months and weekdays named in the time locale (`LC_ALL`, then `LC_TIME`, then `LANG`). An event stands at its local time, as `event list` shows it, where 0.2 stamped one written in UTC at its UTC time, so the keys of `--json` `starts` move with `TZ`.
 - **Every string a server or a file gave is defused** of its control and bidi characters in the text output; `--json` keeps the stored text.
 - **A pimdir write says it is queued** (`Event <id> queued for the next sync`, `... update queued ...`, `... deletion queued ...`) rather than created, updated or deleted.
 - **`-w/--max-width` is gone** from `calendar list`, `event list` and `item list`: a command passing it now fails, so drop it.
@@ -173,7 +173,14 @@ calendula calendar list --json | jq -r '.calendars[].id'
 
 - **Piped `--json` prints one value per line**, and every schema `json-schema` writes carries an `$id` naming the contract version.
 - **A failure carries a stable `code`** when a caller is expected to act on it (`capability-missing`, `precondition-failed`, `item-duplicate`, `body-pending`, the pimdir store and index codes), described by the `calendula-error` schema, and `null` otherwise. Match on the code, never on the message, which may be reworded.
-- **Listings say whether more follow.** `event list`, `event search` and `item list` print `nextPage`, the next page number as a string, `null` once the listing is complete: give it back through `--page-token`.
+- **Listings say whether more follow.** `event list`, `event search`, `item list` and `pimdir search` print `nextPage`, the next page number as a string, `null` once the listing is complete: give it back through `--page-token`. A development build's `pimdir search` printed `more` instead, and failed whole on an event the store could not read, now an `errors` entry with exit 3.
+
+  ```sh
+  # development build: {"hits":[...],"more":true,"coverage":{...}}
+  # next: {"hits":[...],"nextPage":"2","coverage":{...},"errors":[]}
+  next=$(calendula pimdir search budget --json | jq -r '.nextPage // empty')
+  [ -z "$next" ] || calendula pimdir search budget --page-token "$next" --json
+  ```
 - **A listing names what it could not read in `errors` and exits 3.** `calendar list`, `event list`, `event search`, `event agenda` and `item list` print `errors` beside their items, one `{id, code, error, sources}` per calendar or item they could not read (`item-unreadable`, `permission-denied`...), `[]` when none, and exit 3 when it is not empty, where 0.2 skipped an item that does not parse, or failed the whole listing for a vdir file or a Graph event it could not read. Treat exit 3 as a result: read the items, then `errors`; under `set -e`, or where a script tested for a zero status, accept 3 too.
 
   ```sh
@@ -223,6 +230,15 @@ calendula calendar list --json | jq -r '.calendars[].id'
 - **pimdir writes are checked before they are queued**: a create whose `UID` the calendar holds or has queued (`item-duplicate`), an update or a delete naming a version the item no longer has (`precondition-failed`), a to-do into a calendar whose source takes none, and a write no source of the store supports are refused, where 0.2 queued them for the sync engine to park or ignored the version.
 - **A CalDAV listing the server answers with anything but one whole multistatus fails** (an HTML page, a cut document, an empty body), where 0.2 read it as a shorter or an empty listing, and so does a delete answered by a multistatus naming failed members.
 - **A CalDAV `server` that does not parse as a URL is refused** (an out-of-range port, a space in the host), where 0.2 read it as a bare authority and sent it to host `https`.
+- **A Google create naming a `UID` the calendar holds fails `item-duplicate`**, naming the event holding it, where 0.2 imported it over that event and exited 0. Update that event instead.
+
+  ```sh
+  # 0.2: exit 0, the event holding the UID overwritten
+  calendula event create -k work dup.ics
+  # next: exit 1, {"code":"item-duplicate","error":"Calendar `work` already holds `<uid>` as event `<id>`; update that event instead",...}
+  calendula event update -k work <id> dup.ics
+  ```
+
 - **An Outlook recurring event whose `RRULE` Graph has no exact pattern for is refused** (a `BYMONTH` or a `BYMONTHDAY` the pattern has no field for, several numbered `BYDAY` elements, a weekday named twice), where 0.2 wrote it as another series.
 - **`event agenda` refuses an argument it cannot read**, naming it: a day that is not a number or not in the month, a month matching no name, a month number outside 1-12 or an unreadable year, where 0.2 drew the 1st, January or the current year. A lone month name draws that month of the current year, where 0.2 read it as a year.
 

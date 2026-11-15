@@ -36,17 +36,22 @@ A failure a server refused SHALL carry a code of the vocabulary Himalaya shares,
 | `permission-denied` | an HTTP 403 that is no rate limit (Google Calendar, Graph); a CalDAV 403 whose body names no precondition, or `need-privileges` (RFC 3744 §7.1.1) |
 | `quota-exceeded` | an HTTP 507; a CalDAV body naming `quota-not-exceeded` (RFC 4331 §6); Graph's `ErrorQuotaExceeded` |
 | `rate-limited` | an HTTP 429, or a Google Calendar 403 naming a rate limit or a quota; calendula retries nothing, so the first one met |
-| `item-not-found` | an item request answered 404 or 410 (CalDAV, Google Calendar), 404 or 400 `ErrorInvalidIdMalformed` (Graph); a vdir item file or a pimdir item that does not exist |
+| `item-not-found` | an item request answered 404 or 410 (CalDAV, Google Calendar), a CalDAV item read answered 400 (iCloud's answer to a name it does not take, without `.ics`), a Google event read cancelled (a deleted event's stub), 404 or 400 `ErrorInvalidIdMalformed` (Graph); a vdir item file or a pimdir item that does not exist |
 | `calendar-not-found` | a calendar named that does not exist (vdir, pimdir) |
 | `precondition-failed` | an HTTP 412 (CalDAV, Google Calendar, Graph), Graph's `--if-match` mismatch read before the write, a pimdir version that moved |
-| `item-duplicate` | a CalDAV create refused for `no-uid-conflict` (RFC 4791 §5.3.2), a pimdir create naming a `UID` its calendar holds or has queued |
+| `item-duplicate` | a CalDAV create refused for `no-uid-conflict` (RFC 4791 §5.3.2) or answered 412 to its `If-None-Match: *`, its resource name being derived from the UID; a gcal create whose UID the calendar holds; a pimdir create naming a `UID` its calendar holds or has queued |
 
-A refusal none of these name SHALL carry no code, its reason kept in `sources`. A CalDAV 403 naming another precondition (`valid-calendar-data`, `supported-calendar-component`) is an item the server would not take, no matter of rights, and SHALL carry none.
+A refusal none of these name SHALL carry no code, its reason kept in `sources`. A CalDAV write answered 400 SHALL carry none. Graph and vdir check no UID: a second create of one UID makes a second item there. A CalDAV 403 naming another precondition (`valid-calendar-data`, `supported-calendar-component`) is an item the server would not take, no matter of rights, and SHALL carry none.
 
 #### Scenario: A read-only Graph calendar
 - GIVEN a Graph calendar the account may read but not write
 - WHEN `calendula --json event delete <id>` runs
 - THEN it exits 1 printing a failure object coded `permission-denied`
+
+#### Scenario: An id iCloud does not take
+- GIVEN a CalDAV server answering 400 to a GET of `<calendar>/nope`
+- WHEN `calendula --json item read nope` or `event delete nope` runs
+- THEN it exits 1 coded `item-not-found`, the server's answer in `sources`
 
 ### Requirement: Each backend names the items it could not read
 A backend SHALL report an item it could not read as an `errors` entry and SHALL never drop it silently, with a warning alone, nor fail the listing for it:
@@ -79,11 +84,18 @@ The client SHALL connect from `caldav.server` or `caldav.home` alone ("CalDAV lo
 
 Item ids SHALL be the resource names the server returned, verbatim: io-webdav neither appends nor strips a file extension, so an id a listing showed addresses the same resource on every verb.
 
-A create SHALL propose a resource name derived from the item's own UID when that UID is URL-safe, falling back to a content digest, and SHALL keep the id the server reports in its `Location` header when it names the resource itself, else the last segment of the URL io-webdav sent, percent-encoded, which is the form a listing returns.
+A create SHALL propose a resource name derived from the UID of the item's first VEVENT, VTODO or VJOURNAL when that UID is URL-safe, falling back to a content digest, and SHALL keep the id the server reports in its `Location` header when it names the resource itself, else the last segment of the URL io-webdav sent, percent-encoded, which is the form a listing returns.
 
 A listing the server answers with anything but one whole multistatus (an HTML page, a cut document, an empty body) SHALL fail, never read as a shorter listing, and a delete answered by a multistatus naming failed members SHALL fail.
 
 A listing SHALL name, in its `errors`, each row the server answered without the item's data and a listing the server truncated ("Each backend names the items it could not read"), on the first page only: the whole calendar is read before the page is cut, and such a row holds no place on a page.
+
+`update_calendar` SHALL write only the properties the patch names, setting a given one and removing (`DAV:remove`) a cleared one, a clear sent over the client's stream as io-webdav's own PROPPATCH, read alike: a property the server refuses, or answers nothing of (RFC 4918 §9.2.1), fails the update. A colour SHALL go first, in a PROPPATCH of its own, so a server keeping the rest of a PROPPATCH while it ignores a colour (iCloud) leaves the calendar as it was: the update fails ``Write the colour of calendar `<id>`, nothing else written``. `create_calendar` given a colour SHALL read the calendars back and log a warning naming the colour when the server kept none.
+
+#### Scenario: A colour iCloud ignores
+- GIVEN a CalDAV server ignoring `calendar-color` in a PROPPATCH
+- WHEN `calendula calendar update cal -n New -d Text -C '#123456'` runs
+- THEN it exits 1 naming `calendar-color`, after one PROPPATCH holding the colour alone, and the name and the description are not written
 
 ### Requirement: account check authenticates on a pinned CalDAV home
 `account check` on CalDAV SHALL send at least one authenticated request: on `server`, the principal and home-set discovery the client connects with; on `home`, which skips discovery, a PROPFIND Depth 0 on the pinned home-set asking its `DAV:resourcetype`. That PROPFIND SHALL be the check's alone: a unified command connecting on `home` sends nothing before its own first request, which a refused credential fails. A credential the server refuses SHALL fail the row on either route with the same code and error (`WebDAV server returned HTTP 401`, no code); a home answering anything but a multistatus fails it too.
@@ -105,9 +117,13 @@ Item ids SHALL be the event ids the API returned, verbatim, and the id of a set 
 
 `create_item` SHALL use `events.insert` with `sendUpdates=all` when the projected event names at least one `ATTENDEE` and either no `ORGANIZER` or one whose address is the calendar id (case-insensitively), carrying its iCalendar UID as `iCalUID`, so the attendees are invited and the UID survives; a `--send-updates` given to the command SHALL replace that `all`. Otherwise it SHALL use `events.import` when the event carries a UID, so the UID survives, and `events.insert` when it carries none. `update_item` and `delete_item` SHALL honour `if_match` as the API's `If-Match` header, so the optimistic concurrency Google offers is not silently dropped. `update_item` and `delete_item` SHALL send `sendUpdates` only when the command was given `--send-updates`.
 
+Before it inserts or imports an event carrying a UID, `create_item` SHALL look the UID up (`events.list` filtered on the `iCalUID`, every page until one holds a match, a deleted event not listed) and SHALL refuse a UID the calendar holds with `item-duplicate`, ``Calendar `<cal>` already holds `<uid>` as event `<id>`; update that event instead``, `<id>` the series master's, sending no write: an import matches on the `iCalUID` and would overwrite that event.
+
+A read of an event Google holds as cancelled, a deleted event's stub, SHALL be `item-not-found` (`event read`, `item read`, the base an update reads), as a 404 is.
+
 `create_calendar` SHALL insert a secondary calendar. Google mints the id of a calendar it creates, so the requested id SHALL NOT be honoured and the [assigned one](#requirement-a-create-reports-the-identifier-it-was-given) SHALL be reported instead.
 
-`update_calendar` SHALL patch the calendar for the name and the description and the calendar list entry for the colour, since Google splits those across the two resources. A Google calendar always carries a colour, so clearing one SHALL be refused by name.
+`update_calendar` SHALL patch the calendar for the name and the description and the calendar list entry for the colour, since Google splits those across the two resources. A cleared description SHALL be sent as an empty string, a field a PATCH leaves out staying as it is, and an empty description SHALL read as none. A Google calendar always carries a colour, so clearing one SHALL be refused by name. The user's primary calendar (`primary` on its calendar list entry) SHALL be the `default` of `calendar list`.
 
 #### Scenario: An event created with attendees invites them
 - GIVEN a gcal calendar and an event naming an `ATTENDEE` and no `ORGANIZER`, or the calendar's own address as `ORGANIZER`
@@ -119,6 +135,11 @@ Item ids SHALL be the event ids the API returned, verbatim, and the id of a set 
 - WHEN it is created
 - THEN it is imported, and nobody is mailed
 
+#### Scenario: A UID the calendar holds
+- GIVEN a gcal calendar holding an event of UID `e1@example.org`
+- WHEN `calendula --json event add` of another event carrying that UID runs
+- THEN it exits 1 coded `item-duplicate` naming the held event, and neither `events.insert` nor `events.import` is sent
+
 ### Requirement: gcal pushes the time range down
 A [`CalendarTimeRange`](#requirement-time-range-filtering) SHALL reach gcal as the `timeMin` and `timeMax` parameters of `events.list`, so the server does the narrowing. The bounds SHALL be converted from their iCalendar UTC spelling to the RFC 3339 form the API takes.
 
@@ -129,7 +150,7 @@ A [`CalendarTimeRange`](#requirement-time-range-filtering) SHALL reach gcal as t
 An item whose iCalendar carries no VEVENT SHALL be refused by component name rather than emulated, since Google models neither VTODO nor VJOURNAL. How the VEVENT itself projects is the [projection](./projection.md) capability's business.
 
 ### Requirement: Microsoft Graph backend
-msgraph SHALL adapt io-msgraph's calendars and events. A calendar is a Graph calendar, its colour the read-only `hexColor`, and an item a lone event or a series master, keyed by the event id Graph returned, its `changeKey` as etag, its iCalendar contents synthesized by io-msgraph's `ical` projection with the exceptions of a series folded in. The exceptions SHALL be read from the series' instances within the range the command lists, a day wider either side for the zones, or within five years either side of today when it lists none, cut by io-msgraph's `instance_windows` into windows Graph accepts: no `instances` request SHALL span five years or more. A window Graph refuses SHALL make its event an item error, never fail the listing. An update SHALL read its base over the range a read of the item does. Graph keeps no calendar description and names colours from a palette, so msgraph SHALL declare `calendar.description` and `calendar.color` `none`, a create or update naming either refused before connecting.
+msgraph SHALL adapt io-msgraph's calendars and events. A calendar is a Graph calendar, its colour the read-only `hexColor`, and an item a lone event or a series master, keyed by the event id Graph returned, its `changeKey` as etag, its iCalendar contents synthesized by io-msgraph's `ical` projection with the exceptions of a series folded in. The exceptions SHALL be read from the series' instances within the range the command lists, a day wider either side for the zones, or within five years either side of today when it lists none, cut by io-msgraph's `instance_windows` into windows Graph accepts: no `instances` request SHALL span five years or more. A window Graph refuses SHALL make its event an item error, never fail the listing. An update SHALL read its base over the range a read of the item does. Graph keeps no calendar description and names colours from a palette, so msgraph SHALL declare `calendar.description` and `calendar.color` `none`, a create or update naming either refused before connecting. An empty `hexColor`, Graph's spelling of no colour, SHALL read as none, and the calendar Graph marks `isDefaultCalendar` SHALL be the `default` of `calendar list`.
 
 A listing SHALL follow its pages through io-msgraph, which refuses a paging link leaving the Graph origin, the request it builds carrying the account's token.
 
@@ -275,7 +296,12 @@ A payload its schema refuses SHALL be refused before anything is queued: a `part
 
 `-r/--recurrence-id` SHALL limit either to one occurrence, carried as `recurrence_id`, spelled as the `recurrenceId` an expanded listing shows (the series' `DTSTART` form). When the body is local, a value naming no occurrence of the series, or naming one in another spelling, SHALL be refused. A performer not declaring `calendar.reply.occurrence` or `calendar.cancel.occurrence`, and a store declaring nothing, SHALL be refused with the code `occurrence-unsupported` and an error starting `Occurrence not supported:`, naming the capability and the source, or saying no source of the store declares it; nothing is queued.
 
-A reply to an event naming no `ORGANIZER`, or a cancellation of one naming no `ATTENDEE`, SHALL be refused when its body is local, the latter pointing at `event delete`. An event naming an object whose blob is absent SHALL refuse both, as `get_item` refuses its read, rather than queue them unchecked.
+A reply to an event naming no `ORGANIZER` or no `ATTENDEE`, or a cancellation of one naming no `ATTENDEE`, SHALL be refused when its body is local, coded `invitation-missing`, the last pointing at `event delete`: an event naming no attendee is the account's own or invites nobody, and the account answers as one of its attendees. An event naming an object whose blob is absent SHALL refuse both, as `get_item` refuses its read, rather than queue them unchecked.
+
+#### Scenario: A reply to the account's own event
+- GIVEN a pimdir event whose `ORGANIZER` is the account and which names no `ATTENDEE`, as Graph writes one the account made
+- WHEN `calendula --json pimdir reply <id> accept` runs
+- THEN it exits 1 coded `invitation-missing` and nothing is queued
 
 ### Requirement: pimdir reads and retracts its queue
 `pimdir queue list`, `pimdir queue show <ROW>` and `pimdir queue cancel <ROW>` SHALL serve the store's queue as Himalaya's do. `queue list` (`ls`) SHALL list the calendar `-k/--calendar` names, refused `calendar-not-found` when the account holds none of that id, or every calendar of the account when it is omitted, as cardamum's lists its address books, and print `{items, parked}`: each creation and each intent waiting, the rows no listing shows (an update or a removal addresses an item a listing shows), as `{row, queuedAt, producer, collection, kind, linkId, itemId, summary}`, `linkId` the link id a creation was staged under, `itemId` the event an intent addresses, `summary` the summary of the body a creation pins or of the event an intent addresses, each `null` where it does not apply; then each parked row, any kind, as `{row, queuedAt, producer, collection, kind, attempts, unconfirmed, error}`. A kind SHALL print as the queue spells it, kebab-case (`add`, `calendar-reply`).

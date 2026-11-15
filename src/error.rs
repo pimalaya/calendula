@@ -87,6 +87,11 @@ pub enum ErrorCode {
     /// cannot act on alone: the caller acts on the whole series or not
     /// at all.
     OccurrenceUnsupported,
+    /// A reply or a cancel named an event that invites nobody it could
+    /// address: a reply one naming no `ORGANIZER` to answer or no
+    /// `ATTENDEE` to answer as, a cancel one naming no `ATTENDEE` to
+    /// notify. Nothing was queued.
+    InvitationMissing,
     /// A create names a `UID` its calendar already holds (a CalDAV
     /// `no-uid-conflict`, RFC 4791 §5.3.2) or, on pimdir, has queued: the
     /// caller updates that item rather than creates it again.
