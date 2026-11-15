@@ -47,6 +47,7 @@ use crate::{
     capability::{self, Capability},
     cli::resolve_account,
     config::{AccountConfig, Config},
+    error,
     mcp::sending_closed,
     shared::{
         arg::SendUpdates,
@@ -81,34 +82,34 @@ pub struct CalendarClient {
 
 /// The backend the unified commands run against: the first one the account
 /// configures that `backend` allows, in priority order (vdir, pimdir,
-/// CalDAV, gcal, msgraph).
-pub fn resolve_backend(account_config: &AccountConfig, backend: Backend) -> Option<Backend> {
-    #[cfg(feature = "vdir")]
-    if backend.allows_vdir() && account_config.vdir.is_some() {
-        return Some(Backend::Vdir);
+/// CalDAV, gcal, msgraph), `None` when it configures none.
+///
+/// `auto` stops on the block of a backend this build leaves out, returned
+/// as the error, rather than falls through to the next one: a configuration
+/// reaches the same backend in every build, or fails saying why.
+pub fn resolve_backend(
+    account_config: &AccountConfig,
+    backend: Backend,
+) -> Result<Option<Backend>, &'static str> {
+    for (name, built) in account_config.blocks() {
+        if !built {
+            if backend == Backend::Auto {
+                return Err(name);
+            }
+
+            continue;
+        }
+
+        let Ok(named) = name.parse::<Backend>() else {
+            continue;
+        };
+
+        if backend == Backend::Auto || backend == named {
+            return Ok(Some(named));
+        }
     }
 
-    #[cfg(feature = "pimdir")]
-    if backend.allows_pimdir() && account_config.pimdir.is_some() {
-        return Some(Backend::Pimdir);
-    }
-
-    #[cfg(feature = "caldav")]
-    if backend.allows_caldav() && account_config.caldav.is_some() {
-        return Some(Backend::Caldav);
-    }
-
-    #[cfg(feature = "gcal")]
-    if backend.allows_gcal() && account_config.gcal.is_some() {
-        return Some(Backend::Gcal);
-    }
-
-    #[cfg(feature = "msgraph")]
-    if backend.allows_msgraph() && account_config.msgraph.is_some() {
-        return Some(Backend::Msgraph);
-    }
-
-    None
+    Ok(None)
 }
 
 /// The configuration of the backend a [`CalendarClient`] speaks to.
@@ -179,7 +180,10 @@ impl CalendarClient {
     ) -> Result<Self> {
         let configured = account_config.backends();
 
-        let selected = match resolve_backend(&account_config, backend) {
+        let resolved = resolve_backend(&account_config, backend)
+            .map_err(|name| error::backend_not_built(name, &configured))?;
+
+        let selected = match resolved {
             #[cfg(feature = "vdir")]
             Some(Backend::Vdir) => account_config.vdir.take().map(BackendConfig::Vdir),
             #[cfg(feature = "pimdir")]

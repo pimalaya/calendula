@@ -38,7 +38,7 @@ CLI to manage calendars.
 - **Full client**: TLS via Rustls (`rustls-ring` default, `rustls-aws`) or Native TLS (`native-tls`).
 
 > [!TIP]
-> Each backend sits behind its own cargo feature (`caldav`, `gcal`, `msgraph`, `vdir`, `pimdir`), all enabled by default. Build with `--no-default-features` and pick the ones you need.
+> Each backend sits behind its own cargo feature (`caldav`, `gcal`, `msgraph`, `vdir`, `pimdir`), all enabled by default. Build with `--no-default-features` and pick the ones you need. One configuration serves every build: the block of a backend the build leaves out still loads, and a command reaching it fails with `backend-not-built`, naming the feature to rebuild with.
 >
 > The default `vendored` feature builds SQLite, and OpenSSL under `native-tls`, from source; leave it out to link the system ones.
 
@@ -145,7 +145,7 @@ A configuration is loaded from every existing path among the following, each one
 - $HOME/.config/calendula/config.toml
 - $HOME/.calendularc
 
-At most one account may be marked `default = true` across them: several are refused, naming them, and so is an unknown `-a <NAME>`, naming the accounts the configuration holds.
+At most one account may be marked `default = true` across them, the one a command takes without `-a`: several are refused, naming them, and so is an unknown `-a <NAME>`, naming the accounts the configuration holds. `default` is a name like any other: `-a default` takes the account named `default`, not the one marked default.
 
 Override those paths with `-c <PATH>`. Repeat it to merge several files, such as `-c public.toml -c private.toml`: the first one is the base and the next ones are deep-merged on top. Each `-c` takes one path, never split, and no environment variable is read: a path kept in a shell variable goes through the flag, as `-c "$CALENDULA_CONFIG"`.
 

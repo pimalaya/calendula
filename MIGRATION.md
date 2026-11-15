@@ -30,6 +30,15 @@ The text output changes everywhere, a few JSON outputs and exit codes move, and 
 - **`CALENDULA_CONFIG` is no longer read.** Pass `-c "$CALENDULA_CONFIG"` for one path, and one `-c` per path for what was a `:`-separated list.
 - **Every default path is read, as layers.** $XDG_CONFIG_HOME/calendula/config.toml, $HOME/.config/calendula/config.toml and $HOME/.calendularc are each deep-merged on top of the ones before, where 0.2 read the first one found. An rc file left beside a config.toml now overrides it: delete the one you do not use.
 - **Several `default = true` accounts are refused**, naming them, where 0.2 took one at random. Keep the mark on one account across the merged files, or name the account with `-a <NAME>`.
+- **`-a default` names the account `default`**, where 0.2 read it as the account marked `default = true`. Omit `-a` to take the marked account; without an account named `default`, `-a default` fails `account-missing`, saying so.
+
+  ```sh
+  # 0.2: the account marked default
+  calendula -a default event list
+  # next
+  calendula event list
+  ```
+
 - **A `todo` or `journal` table is refused**, at the top level or under an account (`todo.list.page-size`, `[accounts.<name>.journal]`), naming the CLI that took it over: remove it.
 - **Table and colour keys are refused.** Remove the `table` table (`table.preset`, `table.arrangement`), at the top level or under an account, the top-level `account` table (`account.list.table`), and the `calendar.list`, `event.list.table` and `item.list.table` tables holding the `*-color` keys, at the top level or under an account, each refused by name. `event.list.page-size` and `item.list.page-size` stay.
 
@@ -45,7 +54,8 @@ The text output changes everywhere, a few JSON outputs and exit codes move, and 
   event.list.page-size = 50
   ```
 
-- **An unknown key fails the configuration**, at the top level and in an account too, naming the key, where 0.2 ignored it there: a misspelt `default` or `calendar` no longer loads silently. A block for a backend the build leaves out still loads, unread.
+- **An unknown key fails the configuration**, at the top level and in an account too, naming the key, where 0.2 ignored it there: a misspelt `default` or `calendar` no longer loads silently. A block for a backend the build leaves out still loads, unread, so one file serves every build.
+- **A backend the build leaves out is named, never skipped.** Where 0.2 skipped the block of a backend the build leaves out and took the account's next backend, a command whose account resolves to it fails `backend-not-built`, naming the cargo feature: rebuild with it, or pin a built backend with `--backend <name>`, which the message names when the account carries one. `account check` fails that backend's row the same way, `account list` names it under `notBuilt` (`gcal (not built)` in the text), and `account capability` fails `backend-not-built` like the other commands.
 - **CalDAV hosts are ASCII.** A `caldav.server` or `caldav.home` with an internationalised host is refused, `home` when the configuration loads and `server` when the account connects: write the host in Punycode (`https://xn--bcher-kva.example/` for `bücher.example`).
 
 ### pimdir store
@@ -131,6 +141,7 @@ calendula calendar list --json | jq -r '.calendars[].id'
   ```
 
 - **A missing item or calendar fails coded** `item-not-found` or `calendar-not-found`, and a server's refusal `permission-denied`, `quota-exceeded`, `rate-limited` or `precondition-failed`, where the failure carried no code.
+- **Account resolution fails coded**: an unknown `-a` name `account-missing`, no account marked default `account-default-missing`, several marked default `account-default-several`, where the failure carried no code.
 - **A failed `account check` prints its report and exits 3**, each backend carrying `ok`, its failure's `code` and `error`, where 0.2 exited 0 whatever failed. Read which backends passed from `backends`.
 
   ```sh

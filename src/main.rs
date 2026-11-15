@@ -106,9 +106,12 @@
 //! ## Backend selection
 //!
 //! The unified commands target the backend the global `--backend` flag picks
-//! ([`backend::Backend`]). Its default, `auto`, takes the first
-//! configured-and-compiled backend in calendula's priority order: vdir,
-//! pimdir, CalDAV, gcal, msgraph.
+//! ([`backend::Backend`]). Its default, `auto`, takes the first configured
+//! backend in calendula's priority order: vdir, pimdir, CalDAV, gcal,
+//! msgraph. A backend this build leaves out stops it with the
+//! `backend-not-built` code, naming the cargo feature, rather than falls
+//! through to the next: one configuration reaches the same backend in every
+//! build, or fails saying why.
 //!
 //! That order prefers a local read to a network round-trip, and a
 //! protocol-standard server to a vendor API. It skips no backend for a
@@ -146,8 +149,10 @@
 //! Configuration is loaded by pimalaya-config from every existing canonical
 //! path (the rc file last), or from the `-c` paths, one per flag, later
 //! paths deep-merged on top of the first. pimalaya-config also takes the
-//! account `-a` names or the default one, its typed errors naming what is
-//! missing.
+//! account `-a` names or, without `-a`, the one marked default, `default`
+//! being a name like any other; its typed errors naming what is missing
+//! are coded `account-missing`, `account-default-missing` and
+//! `account-default-several`.
 //!
 //! The schema is multi-account: a top-level block plus named account blocks,
 //! each carrying an optional sub-block per backend, and the global block is
@@ -162,10 +167,12 @@
 //! caller gets the error instead. A bare `calendula` prints the help.
 //!
 //! Every table refuses a key it does not know, the block of a backend left
-//! out of the build loading unread. A table calendula no longer reads
-//! (`todo`, `journal`, `table`, the top-level `account`, `calendar.list`,
-//! `event.list.table`, `item.list.table`) is refused by name, saying where
-//! it went.
+//! out of the build loading unread, so one file serves every build: a
+//! command reaching it, `account capability` included, fails with
+//! `backend-not-built`, and `account list` names it as left out. A table
+//! calendula no longer reads (`todo`, `journal`, `table`, the top-level
+//! `account`, `calendar.list`, `event.list.table`, `item.list.table`) is
+//! refused by name, saying where it went.
 //!
 //! ## Output
 //!

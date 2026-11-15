@@ -9,8 +9,9 @@
 //! overridden.
 //!
 //! Every block sets `deny_unknown_fields`, so a typo fails the load. The
-//! block of a backend left out of the build is an unread field of
-//! [`AccountConfig`], so one file serves every build. The tables calendula
+//! block of a backend left out of the build loads unread into
+//! [`AccountConfig`], so one file serves every build, and a command
+//! reaching it fails with `backend-not-built`. The tables calendula
 //! no longer reads are refused by name: `todo` and `journal`, their
 //! domains having moved to unfog and journal, and the rendering tables
 //! (`table`, `account`, `calendar.list`, `event.list.table`,
@@ -148,75 +149,61 @@ pub struct AccountConfig {
     /// Microsoft Graph backend, over the vendor API.
     #[cfg(feature = "msgraph")]
     pub msgraph: Option<MsgraphConfig>,
-    /// The vdir block, unread by a build without vdir.
+    /// The vdir block, loaded unread by a build without vdir.
     #[cfg(not(feature = "vdir"))]
     #[serde(default)]
-    #[allow(dead_code)]
     pub vdir: Option<IgnoredAny>,
-    /// The pimdir block, unread by a build without pimdir.
+    /// The pimdir block, loaded unread by a build without pimdir.
     #[cfg(not(feature = "pimdir"))]
     #[serde(default)]
-    #[allow(dead_code)]
     pub pimdir: Option<IgnoredAny>,
-    /// The CalDAV block, unread by a build without CalDAV.
+    /// The CalDAV block, loaded unread by a build without CalDAV.
     #[cfg(not(feature = "caldav"))]
     #[serde(default)]
-    #[allow(dead_code)]
     pub caldav: Option<IgnoredAny>,
-    /// The Google Calendar block, unread by a build without gcal.
+    /// The Google Calendar block, loaded unread by a build without gcal.
     #[cfg(not(feature = "gcal"))]
     #[serde(default)]
-    #[allow(dead_code)]
     pub gcal: Option<IgnoredAny>,
-    /// The Microsoft Graph block, unread by a build without msgraph.
+    /// The Microsoft Graph block, loaded unread by a build without msgraph.
     #[cfg(not(feature = "msgraph"))]
     #[serde(default)]
-    #[allow(dead_code)]
     pub msgraph: Option<IgnoredAny>,
 }
 
 impl AccountConfig {
     /// The backends the account carries a block for, as `--backend`
-    /// spells them, in the order `auto` tries them.
+    /// spells them, in the order `auto` tries them, each with whether this
+    /// build serves it.
+    pub fn blocks(&self) -> Vec<(&'static str, bool)> {
+        let blocks = [
+            ("vdir", self.vdir.is_some(), cfg!(feature = "vdir")),
+            ("pimdir", self.pimdir.is_some(), cfg!(feature = "pimdir")),
+            ("caldav", self.caldav.is_some(), cfg!(feature = "caldav")),
+            ("gcal", self.gcal.is_some(), cfg!(feature = "gcal")),
+            ("msgraph", self.msgraph.is_some(), cfg!(feature = "msgraph")),
+        ];
+
+        let carried = blocks.into_iter().filter(|(_, carried, _)| *carried);
+        carried.map(|(name, _, built)| (name, built)).collect()
+    }
+
+    /// The backends the account carries a block for and this build serves,
+    /// in the order `auto` tries them.
     pub fn backends(&self) -> Vec<&'static str> {
-        #[cfg_attr(
-            not(any(
-                feature = "vdir",
-                feature = "caldav",
-                feature = "pimdir",
-                feature = "gcal",
-                feature = "msgraph"
-            )),
-            allow(unused_mut)
-        )]
-        let mut backends = Vec::new();
+        let blocks = self.blocks().into_iter();
+        blocks
+            .filter_map(|(name, built)| built.then_some(name))
+            .collect()
+    }
 
-        #[cfg(feature = "vdir")]
-        if self.vdir.is_some() {
-            backends.push("vdir");
-        }
-
-        #[cfg(feature = "pimdir")]
-        if self.pimdir.is_some() {
-            backends.push("pimdir");
-        }
-
-        #[cfg(feature = "caldav")]
-        if self.caldav.is_some() {
-            backends.push("caldav");
-        }
-
-        #[cfg(feature = "gcal")]
-        if self.gcal.is_some() {
-            backends.push("gcal");
-        }
-
-        #[cfg(feature = "msgraph")]
-        if self.msgraph.is_some() {
-            backends.push("msgraph");
-        }
-
-        backends
+    /// The backends the account carries a block for and this build leaves
+    /// out, in the order `auto` tries them.
+    pub fn not_built(&self) -> Vec<&'static str> {
+        let blocks = self.blocks().into_iter();
+        blocks
+            .filter_map(|(name, built)| (!built).then_some(name))
+            .collect()
     }
 }
 

@@ -186,7 +186,7 @@ mod tests {
 
 #[cfg(all(test, feature = "msgraph"))]
 mod msgraph_tests {
-    use pimalaya_cli::error::ErrorReport;
+    use pimalaya_cli::error::{ErrorReport, with_code};
 
     use crate::{
         error::{self, ErrorCode},
@@ -203,7 +203,7 @@ mod msgraph_tests {
         let mut client = CalendarClient::over_msgraph(answering(&[(403, &denied)]));
 
         let err = resolve(&mut client, "cal", "E1").unwrap_err();
-        let report = ErrorReport::<ErrorCode>::from(error::with_code(err));
+        let report = ErrorReport::<ErrorCode>::from(with_code(err, error::code));
         let json = serde_json::to_value(report).unwrap();
         assert_eq!(json["code"], "permission-denied", "{json}");
         assert_eq!(

@@ -200,10 +200,14 @@ The listing query MAY carry a `UID`, which `event find` sets. A backend MAY leav
 `item read` SHALL add the `etag` of the version read to its JSON, `null` when the backend has none.
 
 ### Requirement: A JSON error carries a stable code
-A failure a caller is expected to act on SHALL carry a stable code, printed under `--json` as a `code` string beside `error`, `sources` and `backtrace`, and in an `errors` entry beside `id`, `error` and `sources`. The code SHALL be found anywhere in the error chain, so added context does not hide it, or read from the typed error of the protocol that refused ("A server's refusal carries its code"). A failure with no code SHALL print `"code": null`. The plain output SHALL stay unchanged. Codes are kebab-case and never renamed; `error` stays free wording. Every code SHALL be declared in every build, whatever the backends compiled in.
+A failure a caller is expected to act on SHALL carry a stable code, printed under `--json` as a `code` string beside `error`, `sources` and `backtrace`, and in an `errors` entry beside `id`, `error` and `sources`. The code SHALL be found anywhere in the error chain, so added context does not hide it, or read from the typed error of the protocol that refused ("A server's refusal carries its code") or from pimalaya-config's `AccountError` (config, "Account resolution failures name what is missing"). A failure with no code SHALL print `"code": null`. The plain output SHALL stay unchanged. Codes are kebab-case and never renamed; `error` stays free wording. Every code SHALL be declared in every build, whatever the backends compiled in.
 
 | Code | Raised when |
 |---|---|
+| `account-missing` | no account has the name `-a` gives, `default` included; nothing was read |
+| `account-default-missing` | no `-a` names an account and none is marked `default = true`; nothing was read |
+| `account-default-several` | no `-a` names an account and several are marked `default = true`, the configuration layers merged; nothing was read |
+| `backend-not-built` | the account's backend is one this build leaves out, its block loaded unread: the message names the cargo feature bringing it back; nothing was read or connected |
 | `capability-missing` | the backend the account resolves to does not serve a capability the command reaches; nothing was read, opened or connected |
 | `stdin-taken` | a command run inside a session (`repl`, `mcp`) would read its iCalendar from stdin, which carries the session's commands; nothing was read |
 | `item-not-found` | the item a command names is not in the calendar: the failure of `item read`, `item update`, `item delete`, `event read`, `event update` or `event delete` |
@@ -339,6 +343,8 @@ A bare `calendula` SHALL print the help when a configuration exists, a broken on
 ### Requirement: account check fails when a backend fails
 `account check` SHALL exercise every backend of the account `--backend` allows and print one verdict per backend: under `--json`, `ok`, the stable `code` of a failure (the code vocabulary of "A JSON error carries a stable code", `null` when the backend passed or its failure carries none) and the error of a failed one; the text shows no code. When any fails, it SHALL still print the report and exit 3, the family's partial outcome (`pimalaya_cli::error::PartialOutcome`), so a script reads the outcome from the exit code alone and which backends passed from the report; when all pass, it SHALL exit 0. It mirrors Himalaya's `account check`.
 
+Under `auto`, a block of a backend the build leaves out SHALL be a failed verdict of that backend, after those of the built backends, coded `backend-not-built`, its error naming the cargo feature bringing it back, so the command exits 3. A named `--backend` reaches built backends alone.
+
 #### Scenario: One backend of two fails
 - GIVEN the account `test` whose vdir home exists and whose pimdir root does not
 - WHEN `calendula account check` runs
@@ -346,7 +352,7 @@ A bare `calendula` SHALL print the help when a configuration exists, a broken on
 - AND `calendula --json account check` prints the same report as its result, the pimdir verdict carrying `"code":"store-uncreated"` and the vdir one `"code":null`, and exits 3, and `calendula --backend vdir account check` exits 0
 
 ### Requirement: An account lists what it serves
-`account capability` SHALL print pimalaya-cli's `capability::AccountCapabilityOutput`, reading the configuration and the tables and connecting nowhere: `{"account", "capabilities": [{"name", "backend", "level", "detail"}]}`, one row per capability of the unified API, `backend` the backend the unified commands resolve to (the first the account configures that `--backend` allows, in the order `auto` tries them), `level` one of `full`, `partial`, `server` and `none`, `detail` what the level leaves out or `null` for a full one. `--backend <name>` SHALL read that backend of the account. When the account configures no backend `--backend` allows, every row SHALL read `backend` `null` and level `none`, and the command SHALL succeed. The text SHALL be a pimalaya-cli `listing::Listing` headed by `Account: <name>`, then a blank line and one line per capability with no column header: the name, the backend, the level and the detail.
+`account capability` SHALL print pimalaya-cli's `capability::AccountCapabilityOutput`, reading the configuration and the tables and connecting nowhere: `{"account", "capabilities": [{"name", "backend", "level", "detail"}]}`, one row per capability of the unified API, `backend` the backend the unified commands resolve to (the first the account configures that `--backend` allows, in the order `auto` tries them), `level` one of `full`, `partial`, `server` and `none`, `detail` what the level leaves out or `null` for a full one. `--backend <name>` SHALL read that backend of the account. When the account configures no backend `--backend` allows, every row SHALL read `backend` `null` and level `none`, and the command SHALL succeed. When the backend the unified commands resolve to is one the build leaves out, the command SHALL fail coded `backend-not-built` (exit 1), with the message a unified command gives (see "Backend selection order" in backends). The text SHALL be a pimalaya-cli `listing::Listing` headed by `Account: <name>`, then a blank line and one line per capability with no column header: the name, the backend, the level and the detail.
 
 #### Scenario: A vdir account
 - GIVEN the account `test` configuring a vdir home alone
@@ -357,6 +363,14 @@ A bare `calendula` SHALL print the help when a configuration exists, a broken on
 - GIVEN the account `test` configuring a vdir home alone
 - WHEN `calendula --json --backend pimdir account capability` runs
 - THEN every row has `"backend": null` and `"level": "none"`, and the exit status is 0
+
+### Requirement: An account names the backends left out of the build
+`account list` SHALL print, per account, `{"name", "default", "backends", "notBuilt"}`: `backends` the backends the account carries a block for and the build serves, `notBuilt` those it carries a block for and the build leaves out, each in the order `auto` tries them. The BACKENDS column SHALL list the first, then each of the second as `<name> (not built)`, comma-separated.
+
+#### Scenario: A gcal block in a build without gcal
+- GIVEN a build without `gcal` and the account `test` carrying a `gcal` block alone
+- WHEN `calendula --json account list` runs
+- THEN `test` reads `"backends": []` and `"notBuilt": ["gcal"]`, and the text row reads `gcal (not built)`
 
 ### Requirement: Help is the usage reference
 Each command's doc comment SHALL be its help text: the first paragraph is what `-h` shows, and the full text, ending with the command's JSON output shape, is what `--help` shows.

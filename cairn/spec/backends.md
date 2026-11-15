@@ -59,11 +59,18 @@ A backend SHALL report an item it could not read as an `errors` entry and SHALL 
 - CalDAV, Google Calendar: an answer or a page that fails SHALL fail the listing whole.
 
 ### Requirement: Backend selection order
-The unified commands SHALL target the backend the global `--backend` flag selects. Its default, `auto`, SHALL take the first configured-and-compiled backend in the order vdir, pimdir, CalDAV, gcal, msgraph, preferring a local read to a network round-trip and a protocol-standard server to a vendor API.
+The unified commands SHALL target the backend the global `--backend` flag selects. Its default, `auto`, SHALL take the first configured backend in the order vdir, pimdir, CalDAV, gcal, msgraph, preferring a local read to a network round-trip and a protocol-standard server to a vendor API.
+
+When that backend is one the build leaves out, its block loaded unread (config, "Unknown fields"), `auto` SHALL NOT fall through to the next: the command SHALL fail with `backend-not-built` before anything is read or connected, the message naming the backend and the cargo feature bringing it back, `--features gcal` for gcal, and, when the account configures a backend the build serves, the first of them and the `--backend` reaching it. One configuration therefore reaches the same backend in every build, or fails saying why. A `--backend` value naming a backend the build leaves out SHALL be refused by the command line (exit 2), naming the cargo feature.
 
 `auto` SHALL NOT skip a backend for a capability it lacks: every unified verb exchanges calendar or item ids the others take, so all resolve to that one backend, and a refusal names the backend of the account serving the capability.
 
 A named value SHALL pin the command to that backend and bail when the account carries no matching configuration block. The protocol-specific commands SHALL ignore the flag.
+
+#### Scenario: The first backend is left out of the build
+- GIVEN a build with `msgraph` and without `gcal`, and an account carrying a `gcal` and a `msgraph` block
+- WHEN `calendula --json calendar list` runs
+- THEN it exits 1 with the failure object coded `backend-not-built`, naming `--features gcal` and `--backend msgraph`, and nothing is connected
 
 ### Requirement: CalDAV backend
 CalDAV SHALL adapt io-webdav's RFC 4791 surface over a connected client whose calendar home-set is already resolved.

@@ -35,12 +35,18 @@ Otherwise the command SHALL fail naming the path it looked at and the sample, as
 - THEN stderr says `Welcome to Calendula, the CLI to manage calendars.`, names `~/.config/calendula/config.toml`, gives the `curl` command creating it and then `calendula event list`, and the command exits 1
 
 ### Requirement: Account resolution failures name what is missing
-The account SHALL be resolved through pimalaya-config's `TomlConfig::load` and `take_account`: the account `-a` names, else the one marked `default = true`. Several accounts marked default, layers and `-c` files merged, SHALL be refused, naming them sorted, never one taken at random; an unknown `-a` name SHALL be refused, listing the accounts the configuration holds; no default and no `-a` SHALL be refused, naming both ways of picking one. An account named with `-a` SHALL resolve whatever the defaults.
+The account SHALL be resolved through pimalaya-config's `TomlConfig::load` and `take_account`: the account `-a` names, `default` being a name like any other, else, `-a` absent or empty, the one marked `default = true`. Several accounts marked default, layers and `-c` files merged, SHALL be refused, naming them sorted, never one taken at random; an unknown `-a` name SHALL be refused, listing the accounts the configuration holds, and for the name `default` adding to omit `-a` to take the account marked default; no default and no `-a` SHALL be refused, naming both ways of picking one. An account named with `-a` SHALL resolve whatever the defaults. Under `--json`, the three refusals SHALL be coded `account-missing` (an unknown name), `account-default-missing` (no default) and `account-default-several` (several defaults).
 
 #### Scenario: Two defaults
 - GIVEN a configuration marking `work` and `perso` with `default = true`
 - WHEN `calendula event list` runs
 - THEN it fails with `Several accounts are marked default (perso, work)`, and `calendula -a work event list` runs on `work`
+
+#### Scenario: `-a default` names an account
+- GIVEN a configuration holding `work`, marked `default = true`, and no account named `default`
+- WHEN `calendula --json -a default event list` runs
+- THEN it fails coded `account-missing`, the message listing `work` and saying to omit `-a` to take the account marked default
+- AND once the configuration holds an account named `default`, the same command runs on it, whichever account is marked default
 
 ### Requirement: The configuration is never written
 calendula SHALL NOT write a configuration file: the user writes it, from the documented sample.
@@ -49,7 +55,7 @@ calendula SHALL NOT write a configuration file: the user writes it, from the doc
 The top-level options SHALL be folded under the selected account, the account's own values overriding them field by field. A value set once at the top therefore applies everywhere it is not overridden.
 
 ### Requirement: Unknown fields
-Every block of the configuration, the top-level and account blocks included, SHALL set `deny_unknown_fields`, so a key calendula does not know fails the load naming it, a typo reported rather than ignored. The block of a backend the build leaves out SHALL load unread, so one file serves every build. A table calendula no longer reads SHALL be refused by name: `todo`, `journal`, `table`, the top-level `account`, `calendar.list`, `event.list.table` and `item.list.table`.
+Every block of the configuration, the top-level and account blocks included, SHALL set `deny_unknown_fields`, so a key calendula does not know fails the load naming it, a typo reported rather than ignored. The block of a backend the build leaves out SHALL load unread, so one file serves every build, and a command reaching it SHALL fail with `backend-not-built` (see "Backend selection order" in backends). A table calendula no longer reads SHALL be refused by name: `todo`, `journal`, `table`, the top-level `account`, `calendar.list`, `event.list.table` and `item.list.table`.
 
 #### Scenario: A typo in an account
 - GIVEN `[accounts.a]` holding `defualt = true`
@@ -59,7 +65,7 @@ Every block of the configuration, the top-level and account blocks included, SHA
 #### Scenario: A backend left out of the build
 - GIVEN an account holding a `gcal` block, and a build without the `gcal` feature
 - WHEN the configuration is loaded
-- THEN it loads, the `gcal` block unread
+- THEN it loads, the `gcal` block unread, and a unified command on that account fails coded `backend-not-built`, naming `--features gcal`
 
 ### Requirement: A leftover todo or journal table is refused by name
 A `todo` or `journal` table left in a configuration, at the top level or under an account, SHALL fail the load, naming the CLI that took the domain over (unfog, the Pimalaya CLI for tasks, for `todo`; journal, the Pimalaya CLI for journal entries, for `journal`) and saying to remove the table, as the family refuses its removed keys, rather than as unknown fields.

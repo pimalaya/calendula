@@ -17,6 +17,7 @@ use crate::{
     backend::Backend,
     capability::{self, Capability, Support},
     cli::resolve_account,
+    error,
     shared::client::resolve_backend,
 };
 
@@ -31,6 +32,8 @@ const NO_BACKEND: Support = Support::None("the account configures no backend `--
 /// `partial`, `server` when the server decides, `none`) and what the
 /// level leaves out. Pass `--backend <name>` to read another backend of
 /// the account. Nothing is reached: this reads the configuration only.
+/// A backend this build leaves out fails it with `backend-not-built`, as
+/// it fails the unified commands.
 ///
 /// JSON output: `{"account", "capabilities": [{"name", "backend",
 /// "level", "detail"}]}`, `backend` `null` when the account configures
@@ -47,7 +50,9 @@ impl AccountCapabilityCommand {
         backend: Backend,
     ) -> Result<()> {
         let (_, name, account_config) = resolve_account(config_paths, account_name)?;
-        let backend = resolve_backend(&account_config, backend).map(|b| b.to_string());
+        let backend = resolve_backend(&account_config, backend)
+            .map_err(|left_out| error::backend_not_built(left_out, &account_config.backends()))?
+            .map(|backend| backend.to_string());
 
         let capabilities = Capability::ALL
             .into_iter()

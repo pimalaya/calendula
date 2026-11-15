@@ -19,7 +19,9 @@ use crate::{backend::Backend, cli::resolve_account, config::AccountConfig, error
 /// Loads the configuration, picks the active account, then exercises
 /// every backend the `--backend` flag allows: a local backend is
 /// checked against the filesystem, CalDAV by opening the connection and
-/// resolving the calendar home-set, gcal by listing the calendars.
+/// resolving the calendar home-set, gcal by listing the calendars. Under
+/// `auto`, a block of a backend this build leaves out fails its row with
+/// `backend-not-built`, naming the cargo feature bringing it back.
 ///
 /// The report is printed whole, each backend with its outcome and, when
 /// it failed, why, its stable code under `--json`. A failed backend exits
@@ -69,20 +71,7 @@ impl AccountCheckCommand {
 /// account whose CalDAV and gcal blocks name the same command unlocks a
 /// `pass` or `gpg` entry once rather than once per backend. It is
 /// dropped with the check, holding plaintext while it lives.
-fn check_account(
-    #[allow(unused_variables)] account_config: &AccountConfig,
-    #[allow(unused_variables)] backend: Backend,
-) -> Vec<BackendCheck> {
-    #[cfg_attr(
-        not(any(
-            feature = "vdir",
-            feature = "caldav",
-            feature = "pimdir",
-            feature = "gcal",
-            feature = "msgraph"
-        )),
-        allow(unused_mut)
-    )]
+fn check_account(account_config: &AccountConfig, backend: Backend) -> Vec<BackendCheck> {
     let mut checks = Vec::new();
 
     #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
@@ -130,6 +119,13 @@ fn check_account(
             "gcal",
             check_gcal(config, &mut resolver),
         ));
+    }
+
+    // NOTE: `auto` reports a backend this build leaves out rather than
+    // skips it, as it does for a unified command.
+    if backend == Backend::Auto {
+        let not_built = account_config.not_built().into_iter();
+        checks.extend(not_built.map(BackendCheck::not_built));
     }
 
     checks
@@ -225,6 +221,16 @@ pub struct BackendCheck {
 }
 
 impl BackendCheck {
+    /// The row of `backend`, a backend this build leaves out.
+    fn not_built(backend: &'static str) -> Self {
+        Self {
+            backend,
+            ok: false,
+            code: Some(ErrorCode::BackendNotBuilt),
+            error: Some(crate::backend::not_built(backend)),
+        }
+    }
+
     #[cfg(any(
         feature = "vdir",
         feature = "caldav",

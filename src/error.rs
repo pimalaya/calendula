@@ -11,12 +11,14 @@
 //! A server's refusal takes a code of the vocabulary Himalaya shares,
 //! `permission-denied`, `quota-exceeded` and `rate-limited`, read from the
 //! typed error of the protocol that answered it by that protocol's
-//! `refusal_code` reader: [`code`] walks the chain through them, and
-//! [`with_code`] hands the code to the failure object, which reads coded
-//! errors alone.
+//! `refusal_code` reader, and an account pimalaya-config could not take
+//! one of the `account-*` codes, read from its `AccountError`: [`code`]
+//! walks the chain through them, and pimalaya-cli's `with_code` hands the
+//! code to the failure object, which reads coded errors alone.
 
 use anyhow::Error;
-use pimalaya_cli::error::{CodedError, PartialOutcome, code_of};
+use pimalaya_cli::error::{CodedError, PartialOutcome, code_of, with_code};
+use pimalaya_config::toml::AccountError;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -29,6 +31,20 @@ use serde::Serialize;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ErrorCode {
+    /// No account of the configuration has the name `-a` gives, `default`
+    /// included: the caller names one the configuration holds, or omits
+    /// `-a` to take the account marked default.
+    AccountMissing,
+    /// No `-a` names an account and none is marked `default = true`: the
+    /// caller names one or marks one.
+    AccountDefaultMissing,
+    /// No `-a` names an account and several are marked `default = true`,
+    /// the configuration layers merged: the caller unmarks all but one.
+    AccountDefaultSeveral,
+    /// The account's backend is one this build leaves out, its block
+    /// loaded unread: the caller rebuilds with its cargo feature, or picks
+    /// another backend of the account with `--backend`.
+    BackendNotBuilt,
     /// The backend the account resolves to does not serve a capability
     /// the command reaches, refused before connecting: the caller picks
     /// another backend or leaves the option out.
@@ -130,7 +146,7 @@ pub type ItemError = pimalaya_cli::error::ItemError<ErrorCode>;
 /// The `errors` entry of the item `id` a listing could not read: coded by
 /// the refusal `err` carries, else `item-unreadable`.
 pub fn unreadable(id: Option<&str>, err: Error) -> ItemError {
-    let mut entry = ItemError::new(id, &with_code(err));
+    let mut entry = ItemError::new(id, &with_code(err, code));
     entry.code.get_or_insert(ErrorCode::ItemUnreadable);
     entry
 }
@@ -160,6 +176,21 @@ pub fn calendar_not_found(message: impl Into<String>) -> Error {
     CodedError::new(ErrorCode::CalendarNotFound, message.into()).into()
 }
 
+/// A refusal under `backend-not-built`: the account's `backend` block
+/// loaded unread, this build leaving that backend out, naming the first of
+/// the account's `built` backends, which `--backend` reaches instead.
+pub fn backend_not_built(backend: &str, built: &[&str]) -> Error {
+    let mut message = crate::backend::not_built(backend);
+
+    if let Some(other) = built.first() {
+        message.push_str(&format!(
+            "; this account's {other} backend is built (`--backend {other}`)"
+        ));
+    }
+
+    CodedError::new(ErrorCode::BackendNotBuilt, message).into()
+}
+
 /// A failure an item request met, carrying `code` while keeping the text
 /// of `err`, which a protocol reader cannot code alone: it does not know
 /// which request a refusal answered.
@@ -177,34 +208,26 @@ pub fn recoded(code: ErrorCode, err: impl std::fmt::Display) -> Error {
 }
 
 /// The code of `err`: the one a coded error in its chain carries, else
-/// the server refusal's under it.
+/// the one of the account pimalaya-config could not take, else the server
+/// refusal's under it.
 pub fn code(err: &Error) -> Option<ErrorCode> {
-    code_of(err).or_else(|| refusal_code(err))
+    code_of(err)
+        .or_else(|| account_code(err))
+        .or_else(|| refusal_code(err))
 }
 
-/// `err` carrying its [`code`] where the failure object reads it.
-///
-/// The failure object reads the code of a [`CodedError`] alone, which a
-/// server refusal is not: one a reader codes is rebuilt around such an
-/// error, each message of its chain kept, so its text and its `sources`
-/// print as before. Any other error is returned as it is.
-pub fn with_code(err: Error) -> Error {
-    if code_of::<ErrorCode>(&err).is_some() {
-        return err;
-    }
+/// The code of the [`AccountError`] in `err`'s chain: the account `-a`
+/// names, or the one marked default, pimalaya-config could not take.
+fn account_code(err: &Error) -> Option<ErrorCode> {
+    let err = err
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<AccountError>())?;
 
-    let Some(code) = refusal_code(&err) else {
-        return err;
-    };
-
-    let mut messages: Vec<String> = err.chain().map(ToString::to_string).collect();
-    let root = messages.pop().unwrap_or_default();
-    let root = Error::from(CodedError::new(code, root));
-
-    messages
-        .into_iter()
-        .rev()
-        .fold(root, |err, message| err.context(message))
+    Some(match err {
+        AccountError::Missing { .. } => ErrorCode::AccountMissing,
+        AccountError::NoDefault => ErrorCode::AccountDefaultMissing,
+        AccountError::SeveralDefaults(_) => ErrorCode::AccountDefaultSeveral,
+    })
 }
 
 /// A reader of one protocol's typed errors, coding the refusals it knows.
@@ -227,28 +250,4 @@ fn refusal_code(err: &Error) -> Option<ErrorCode> {
 
     err.chain()
         .find_map(|cause| refusals.iter().find_map(|refusal| refusal(cause)))
-}
-
-#[cfg(test)]
-mod tests {
-    use pimalaya_cli::error::ErrorReport;
-    use serde_json::json;
-
-    use super::*;
-
-    /// A coded error is the failure object's as it is, and an uncoded
-    /// one no reader knows stays uncoded.
-    #[test]
-    fn with_code_leaves_a_coded_or_an_unknown_error_alone() {
-        let err = with_code(item_not_found("Gone").context("Read item `a`"));
-        assert_eq!(code_of(&err), Some(ErrorCode::ItemNotFound));
-        assert_eq!(format!("{err:#}"), "Read item `a`: Gone");
-
-        let err = with_code(anyhow::anyhow!("boom").context("Read item `a`"));
-        let json = serde_json::to_value(ErrorReport::<ErrorCode>::from(err)).unwrap();
-        assert_eq!(
-            json,
-            json!({"code": null, "error": "Read item `a`", "sources": ["boom"], "backtrace": null})
-        );
-    }
 }

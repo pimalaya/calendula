@@ -15,6 +15,7 @@ use pimalaya_cli::{
             completion::CompletionCommand, json_schema::JsonSchemaCommand, manual::ManualCommand,
         },
     },
+    error::with_code,
     footer, long_version,
     mcp::exit_on_failure,
     printer::Printer,
@@ -71,8 +72,10 @@ pub struct Cli {
     /// With `auto`, the first configured backend wins, in calendula's
     /// priority order (vdir, pimdir, caldav, gcal, msgraph), whatever
     /// the command needs: one it does not serve is refused, naming the
-    /// backend of the account that does. Any other value pins that one,
-    /// and the command bails when the account carries no matching block.
+    /// backend of the account that does, and one this build leaves out is
+    /// refused, naming the cargo feature bringing it back. Any other value
+    /// pins that one, and the command bails when the account carries no
+    /// matching block.
     #[arg(short, long, global = true, default_value_t)]
     pub backend: Backend,
     #[command(flatten)]
@@ -169,11 +172,12 @@ impl Command {
     /// Runs the command over `session`, whose account the protocol
     /// commands resolve and whose unified client the unified ones keep.
     ///
-    /// A server's refusal it fails with carries its code to the failure
-    /// object ([`error::with_code`]), whoever prints it: the one-shot run,
-    /// the REPL or the MCP server.
+    /// A server's refusal or an account pimalaya-config could not take
+    /// carries its code to the failure object (pimalaya-cli's `with_code`),
+    /// whoever prints it: the one-shot run, the REPL or the MCP server.
     pub fn execute(self, printer: &mut impl Printer, session: &mut Session) -> Result<()> {
-        self.run(printer, session).map_err(error::with_code)
+        self.run(printer, session)
+            .map_err(|err| with_code(err, error::code))
     }
 
     /// Runs the command, its failure as the backend gave it.
@@ -214,7 +218,9 @@ impl Command {
                 match cmd.execute(session) {
                     Err(err) if err.is::<ConfigMissingError>() && is_wanted(&*printer) => Err(err),
                     result => {
-                        exit_on_failure::<ErrorCode, _>(result.map_err(error::with_code));
+                        exit_on_failure::<ErrorCode, _>(
+                            result.map_err(|err| with_code(err, error::code)),
+                        );
                         Ok(())
                     }
                 }

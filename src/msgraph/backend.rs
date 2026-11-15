@@ -741,7 +741,7 @@ pub(crate) mod scripted {
             .context("Delete event `E1`");
         let text = format!("{err:#}");
 
-        let err = crate::error::with_code(err);
+        let err = pimalaya_cli::error::with_code(err, crate::error::code);
         assert_eq!(format!("{err:#}"), text);
 
         let json = serde_json::to_value(ErrorReport::<ErrorCode>::from(err)).unwrap();

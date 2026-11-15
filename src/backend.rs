@@ -8,13 +8,22 @@ use std::{fmt, str::FromStr};
 use anyhow::{Error, bail};
 use clap::Parser;
 
+/// Every backend calendula knows, as `--backend` and its cargo feature
+/// spell it, in the order `auto` tries them.
+pub const ALL: [&str; 5] = ["vdir", "pimdir", "caldav", "gcal", "msgraph"];
+
+/// Why nothing reaches `backend`, one of [`ALL`] this build leaves out.
+pub fn not_built(backend: &str) -> String {
+    format!("This build leaves out the `{backend}` backend, rebuild with `--features {backend}`")
+}
+
 /// Selects which backend a cross-protocol command targets.
 ///
-/// [`Auto`](Self::Auto) takes the first configured and compiled backend
-/// of calendula's priority order (vdir, pimdir, CalDAV, gcal, msgraph): a
-/// local store before a network round-trip, a standard protocol before a
-/// vendor API, whatever capability the command needs. A named variant
-/// pins that one instead.
+/// [`Auto`](Self::Auto) takes the first configured backend of calendula's
+/// priority order (vdir, pimdir, CalDAV, gcal, msgraph): a local store
+/// before a network round-trip, a standard protocol before a vendor API,
+/// whatever capability the command needs, one this build leaves out
+/// refused. A named variant pins that one instead.
 #[derive(Clone, Copy, Debug, Default, Parser, PartialEq, Eq)]
 pub enum Backend {
     /// The first configured backend, in calendula's priority order.
@@ -85,6 +94,7 @@ impl FromStr for Backend {
             "pimdir" => Ok(Self::Pimdir),
             #[cfg(feature = "vdir")]
             "vdir" => Ok(Self::Vdir),
+            backend if ALL.contains(&backend) => bail!(not_built(backend)),
             backend => bail!("Invalid backend `{backend}`"),
         }
     }
@@ -153,5 +163,22 @@ mod tests {
         }
 
         assert!(Backend::from_str("nonsense").is_err());
+    }
+
+    /// A backend left out of the build is named with the feature bringing
+    /// it back, whichever it is.
+    #[test]
+    fn a_backend_left_out_names_its_feature() {
+        for backend in ALL {
+            match Backend::from_str(backend) {
+                Ok(parsed) => assert_eq!(parsed.to_string(), backend),
+                Err(err) => assert_eq!(err.to_string(), not_built(backend)),
+            }
+        }
+
+        assert_eq!(
+            not_built("gcal"),
+            "This build leaves out the `gcal` backend, rebuild with `--features gcal`"
+        );
     }
 }
