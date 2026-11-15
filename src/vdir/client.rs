@@ -50,17 +50,23 @@ impl VdirClient {
     }
 }
 
-/// The directory of the collection `id` under `root`, when `id` is one path
-/// segment, neither `.` nor `..`, naming a directory that exists.
+/// The directory of the collection `id` under `root`, when `id` is one
+/// directory name naming a directory that exists.
 pub(crate) fn collection_dir(root: &VdirPath, id: &str) -> Option<VdirPath> {
-    let mut components = Path::new(id).components();
-    let segment = matches!(
-        (components.next(), components.next()),
-        (Some(Component::Normal(_)), None)
-    );
     let path = root.join(id);
+    (is_dir_name(id) && Path::new(path.as_str()).is_dir()).then_some(path)
+}
 
-    (segment && Path::new(path.as_str()).is_dir()).then_some(path)
+/// Whether `id` is one directory name: a single normal path component that
+/// is the whole of `id`, so neither empty, `.` nor `..`, and holding no
+/// separator, a trailing one included.
+pub(crate) fn is_dir_name(id: &str) -> bool {
+    let mut components = Path::new(id).components();
+
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(name)), None) => name == id,
+        _ => false,
+    }
 }
 
 impl Deref for VdirClient {

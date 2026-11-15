@@ -146,14 +146,19 @@ vdir SHALL adapt io-vdir. A collection directory is a calendar and its metadata 
 vdir has no entity tag, so it SHALL declare `item.update.if-match` and `item.remove.if-match` `none`, `--if-match` refused before anything is read. An update SHALL read the current metadata before writing, so a field the patch leaves untouched survives.
 
 ### Requirement: vdir refuses an unknown calendar
-A vdir calendar id SHALL name a calendar only when it is one path segment, neither `.` nor `..`, naming a directory under the home. Every vdir command naming another SHALL fail before anything is read or written, coded `calendar-not-found`: `calendar update`, `calendar delete` and every `event` and `item` read and write with ``Calendar `<id>` not found``, `vdir delete` and `vdir rename` with ``Collection `<id>` not found``.
+A vdir calendar id SHALL name a calendar only when it is one directory name, one path segment that is neither `.` nor `..` and holds no separator (a trailing one included), naming a directory under the home. Every vdir command naming another SHALL fail before anything is read or written, coded `calendar-not-found`: `calendar update`, `calendar delete` and every `event` and `item` read and write with ``Calendar `<id>` not found``, `vdir delete` and `vdir rename` with ``Collection `<id>` not found``. A new id that is not one directory name SHALL be refused before anything is written: `calendar create` with ``Calendar id `<id>` is not one directory name`` and `vdir create` with ``Collection id `<id>` is not one directory name``, uncoded, the new name of `vdir rename` by io-vdir.
 
-A write creates whatever directory it is handed, a listing of a missing one answers nothing and a delete removes whatever the path reaches, so without it a typo in `-k` would read as an empty calendar or invent one, and an id reaching out of the home would remove a directory there.
+A write creates whatever directory it is handed, a listing of a missing one answers nothing and a delete removes whatever the path reaches, so without it a typo in `-k` would read as an empty calendar or invent one, an id reaching out of the home (`..`, `../keep`, `personal/..`) would remove a directory there and a create would write there.
 
 #### Scenario: A typo in `-k`
 - GIVEN the account `test` whose vdir home holds the calendar `personal` alone
 - WHEN `calendula --json event list -k nope`, `event create -k nope` or `calendar delete -k ..` runs
 - THEN each exits 1 with the failure object coded `calendar-not-found`, and the home and the directory holding it are left as they were
+
+#### Scenario: A new id reaching out of the home
+- GIVEN the account `test` whose vdir home `outer/home` holds the calendar `personal` alone, beside the directory `outer/keep`
+- WHEN `calendula --json calendar create .. Escape`, `calendar create ../keep Escape` or `vdir create x/y` runs
+- THEN each exits 1 with the failure object, its `code` null, and nothing is written in the home, `outer/keep` or `outer`
 
 ### Requirement: pimdir backend
 pimdir SHALL adapt io-pimdir, the store and the sync engine in one crate. The store is an offline cache a sync engine fills, not a server: reads project the store's items and writes are queue actions a later sync applies and propagates.

@@ -2,7 +2,8 @@
 //!
 //! The built binary naming a calendar its vdir home does not hold: every
 //! command fails coded `calendar-not-found` and exits 1, reading, creating
-//! and removing nothing, a path reaching out of the home included.
+//! and removing nothing, a path reaching out of the home included. A new
+//! calendar id that is not one directory name is refused, writing nothing.
 
 #![cfg(feature = "vdir")]
 
@@ -15,14 +16,16 @@ use std::{
 use serde_json::Value;
 use tempfile::TempDir;
 
-/// A directory holding the vdir home `home`, its calendar `personal` with
-/// the one event `a`, a directory `outside` beside the home, and the
-/// configuration file.
+/// A directory holding `outer`, which holds the vdir home `home`, its
+/// calendar `personal` with the one event `a`, and the directory `keep`
+/// beside the home with one file; and the configuration file.
 fn account() -> TempDir {
     let dir = TempDir::new().unwrap();
-    let calendar = dir.path().join("home").join("personal");
+    let outer = dir.path().join("outer");
+    let calendar = outer.join("home").join("personal");
     fs::create_dir_all(&calendar).unwrap();
-    fs::create_dir(dir.path().join("outside")).unwrap();
+    fs::create_dir(outer.join("keep")).unwrap();
+    fs::write(outer.join("keep").join("file"), "kept").unwrap();
 
     let ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n\
         BEGIN:VEVENT\r\nUID:a@example.org\r\nDTSTAMP:20261101T000000Z\r\n\
@@ -32,7 +35,7 @@ fn account() -> TempDir {
 
     let config = format!(
         "[accounts.perso]\ndefault = true\nvdir.home-dir = {:?}\n",
-        dir.path().join("home").display().to_string()
+        outer.join("home").display().to_string()
     );
     fs::write(dir.path().join("config.toml"), config).unwrap();
 
@@ -52,15 +55,28 @@ fn run(dir: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
-/// Fails unless `out` is the failure object coded `calendar-not-found`
-/// saying `error`, exiting 1.
-fn refused(out: &Output, error: &str) {
+/// The failure object `out` printed, once it exited 1.
+fn failure(out: &Output) -> Value {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let json: Value = serde_json::from_str(&stdout).unwrap_or_else(|_| panic!("{stdout}"));
 
     assert_eq!(out.status.code(), Some(1), "{json}");
+    json
+}
+
+/// Fails unless `out` is the failure object coded `calendar-not-found`
+/// saying `error`, exiting 1.
+fn refused(out: &Output, error: &str) {
+    let json = failure(out);
+
     assert_eq!(json["code"], "calendar-not-found", "{json}");
     assert_eq!(json["error"], error, "{json}");
+}
+
+/// Fails unless the file beside the home is still there.
+fn kept(dir: &Path) {
+    let file = dir.join("outer").join("keep").join("file");
+    assert_eq!(fs::read_to_string(&file).unwrap(), "kept");
 }
 
 /// The paths under `dir`, sorted, relative to it.
@@ -122,9 +138,20 @@ fn a_calendar_reaching_out_of_the_home_is_not_found() {
     let dir = account();
     let before = tree(dir.path());
 
-    for id in ["", ".", "..", "../outside", "personal/.."] {
+    let ids = [
+        "",
+        ".",
+        "..",
+        "../keep",
+        "personal/..",
+        "personal/",
+        "personal/.",
+    ];
+
+    for id in ids {
         let out = run(dir.path(), &["--json", "calendar", "delete", "-k", id]);
         refused(&out, &format!("Calendar `{id}` not found"));
+        kept(dir.path());
 
         let out = run(dir.path(), &["--json", "event", "list", "-k", id]);
         refused(&out, &format!("Calendar `{id}` not found"));
@@ -141,12 +168,44 @@ fn the_vdir_commands_refuse_an_unknown_collection() {
     let commands: &[&[&str]] = &[
         &["vdir", "delete", "nope"],
         &["vdir", "delete", ".."],
+        &["vdir", "delete", "../keep"],
+        &["vdir", "delete", "personal/"],
+        &["vdir", "delete", "personal/."],
         &["vdir", "rename", "nope", "renamed"],
+        &["vdir", "rename", "personal/", "renamed"],
     ];
 
     for args in commands {
         let out = run(dir.path(), &[&["--json"], *args].concat());
         refused(&out, &format!("Collection `{}` not found", args[2]));
+        kept(dir.path());
+    }
+
+    assert_eq!(tree(dir.path()), before);
+}
+
+#[test]
+fn a_new_id_reaching_out_of_the_home_is_refused() {
+    let dir = account();
+    let before = tree(dir.path());
+
+    let commands: &[&[&str]] = &[
+        &["calendar", "create", "..", "Escape"],
+        &["calendar", "create", "../keep", "Escape"],
+        &["calendar", "create", "../escape", "Escape"],
+        &["calendar", "create", "x/y", "Escape"],
+        &["vdir", "create", ".."],
+        &["vdir", "create", "../keep"],
+        &["vdir", "create", "../escape"],
+        &["vdir", "create", "x/y"],
+        &["vdir", "rename", "personal", ".."],
+        &["vdir", "rename", "personal", "../escape"],
+    ];
+
+    for args in commands {
+        let json = failure(&run(dir.path(), &[&["--json"], *args].concat()));
+        assert_eq!(json["code"], Value::Null, "{args:?}: {json}");
+        kept(dir.path());
     }
 
     assert_eq!(tree(dir.path()), before);

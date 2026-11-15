@@ -3,12 +3,15 @@
 //! The `calendula vdir create` command, making one collection
 //! directory under the configured home directory.
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::Parser;
 use io_vdir::{collection::VdirCollection, path::VdirPath};
 use pimalaya_cli::printer::Printer;
 
-use crate::{shared::receipt::IdReceipt, vdir::client::VdirClient};
+use crate::{
+    shared::receipt::IdReceipt,
+    vdir::client::{VdirClient, is_dir_name},
+};
 
 /// Create a vdir collection directory.
 ///
@@ -18,7 +21,8 @@ use crate::{shared::receipt::IdReceipt, vdir::client::VdirClient};
 /// JSON output: `{"id"}`.
 #[derive(Debug, Parser)]
 pub struct VdirCollectionCreateCommand {
-    /// Collection identifier (directory name).
+    /// Collection identifier, its directory name: not empty, `.` nor `..`,
+    /// and holding no `/`.
     #[arg(value_name = "ID")]
     pub id: String,
 
@@ -37,6 +41,10 @@ pub struct VdirCollectionCreateCommand {
 
 impl VdirCollectionCreateCommand {
     pub fn execute(self, printer: &mut impl Printer, client: VdirClient) -> Result<()> {
+        if !is_dir_name(&self.id) {
+            bail!("Collection id `{}` is not one directory name", self.id);
+        }
+
         let path = VdirPath::new(client.root().as_str()).join(&self.id);
         let collection = VdirCollection {
             path,

@@ -12,7 +12,7 @@
 
 use std::io;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use ical::component::IcalComponentKind;
 use io_vdir::{
     client::{VdirClient, VdirClientError},
@@ -30,7 +30,7 @@ use crate::{
         ical::may_hold_kind,
         item::{CalendarItem, CalendarItemList, CalendarItemQuery},
     },
-    vdir::client::collection_dir,
+    vdir::client::{collection_dir, is_dir_name},
 };
 
 /// The shared-API glue over a vdir home directory.
@@ -61,6 +61,9 @@ impl VdirBackend {
     }
 
     /// Creates the collection directory and its metadata markers.
+    ///
+    /// An id that is not one directory name is refused, as it would reach
+    /// out of the home or below one of its calendars.
     pub fn create_calendar(
         &mut self,
         id: &str,
@@ -68,6 +71,10 @@ impl VdirBackend {
         description: Option<&str>,
         color: Option<&str>,
     ) -> Result<String> {
+        if !is_dir_name(id) {
+            bail!("Calendar id `{id}` is not one directory name");
+        }
+
         let collection = VdirCollection {
             path: self.root.join(id),
             display_name: Some(name.to_owned()),
