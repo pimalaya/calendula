@@ -152,6 +152,20 @@ pub fn item_refusal(err: GcalClientStdError) -> anyhow::Error {
     }
 }
 
+/// The failure of an event write (`events.insert`, `events.import`,
+/// `events.update`) answered 400, coded `item-invalid`: calendula builds
+/// every parameter of that request, so a 400 refuses the event it sends,
+/// a field missing or a value Google does not take. The answer is handed
+/// back otherwise.
+pub fn invalid_event(err: GcalClientStdError) -> Result<anyhow::Error, GcalClientStdError> {
+    match &err {
+        GcalClientStdError::Send(send) if send.status() == Some(400) => {
+            Ok(recoded(ErrorCode::ItemInvalid, err))
+        }
+        _ => Err(err),
+    }
+}
+
 /// The code of a Google refusal: a 429, or a 403 naming a rate limit or a
 /// quota ([`throttles`]), is `rate-limited`; any other 403 is
 /// `permission-denied`.

@@ -73,7 +73,12 @@ impl Write {
 }
 
 /// The receipt of a write in a protocol namespace acting on one item.
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "vdir"))]
+#[cfg(any(
+    feature = "caldav",
+    feature = "gcal",
+    feature = "msgraph",
+    feature = "vdir"
+))]
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct IdReceipt {
     /// The id of the item acted on, as it is after the write.
@@ -83,7 +88,12 @@ pub struct IdReceipt {
     pub done: &'static str,
 }
 
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "vdir"))]
+#[cfg(any(
+    feature = "caldav",
+    feature = "gcal",
+    feature = "msgraph",
+    feature = "vdir"
+))]
 impl fmt::Display for IdReceipt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "{}: {}", self.done, sanitize::text(&self.id))

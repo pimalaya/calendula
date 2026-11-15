@@ -1,7 +1,7 @@
 //! # Instances
 //!
-//! The `calendula gcal instances` command, expanding a recurring event into
-//! its occurrences.
+//! The `calendula gcal events instances` command, expanding a recurring
+//! event into its occurrences (`events.instances`).
 
 use std::fmt;
 

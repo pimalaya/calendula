@@ -1,7 +1,7 @@
-//! # CalDAV discover
+//! # Discover command
 //!
-//! The `calendula caldav discover` command, walking the discovery chain
-//! from the configured server and printing every URL it resolves.
+//! The `calendula caldav discover` command, reporting the CalDAV endpoints
+//! the client resolves from the configured server.
 
 use std::fmt;
 
@@ -13,42 +13,59 @@ use serde::Serialize;
 
 use crate::caldav::client::CaldavClient;
 
-/// Run the CalDAV discovery chain.
+/// Report the resolved CalDAV endpoints for the active account.
 ///
-/// Walks from `caldav.server` to the current-user-principal, then the
-/// calendar home-set, printing each URL it resolves.
+/// The client resolves `current-user-principal` (RFC 5397) and
+/// `calendar-home-set` (RFC 4791) from its server. A `home`-configured
+/// account skips the principal walk, so an endpoint the server does not
+/// answer shows as unresolved rather than failing the command.
 ///
-/// JSON output: `{"principal", "calendarHomeSet"}`.
+/// JSON output: `{"server", "principal", "calendarHomeSet"}`, with
+/// unresolved endpoints as `null`.
 #[derive(Debug, Parser)]
 pub struct CaldavDiscoverCommand;
 
 impl CaldavDiscoverCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CaldavClient) -> Result<()> {
-        let principal = client.current_user_principal()?;
-        let home = client.calendar_home_set()?;
+        let server = client.base_url.to_string();
+        let principal = client
+            .current_user_principal()
+            .ok()
+            .map(|url| url.to_string());
+        let calendar_home_set = client.calendar_home_set().ok().map(|url| url.to_string());
 
         printer.out(CaldavDiscoverOutput {
-            principal: principal.to_string(),
-            calendar_home_set: home.to_string(),
+            server,
+            principal,
+            calendar_home_set,
         })
     }
 }
 
-/// The URLs the discovery chain resolved.
+/// The endpoints a CalDAV session runs against, `None` when unresolved.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CaldavDiscoverOutput {
-    /// The principal the server reports for these credentials.
-    pub principal: String,
-    /// The collection the principal files its calendars under.
-    pub calendar_home_set: String,
+    /// The DAV context root the session runs against.
+    pub server: String,
+    /// The principal the server reports for these credentials, `None`
+    /// when unresolved.
+    pub principal: Option<String>,
+    /// The collection the principal files its calendars under, `None`
+    /// when unresolved.
+    pub calendar_home_set: Option<String>,
 }
 
 impl fmt::Display for CaldavDiscoverOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let unresolved = "(unresolved)";
+        let principal = self.principal.as_deref().unwrap_or(unresolved);
+        let home = self.calendar_home_set.as_deref().unwrap_or(unresolved);
+
         let mut fields = Fields::default();
-        fields.push("Principal", sanitize::text(&self.principal));
-        fields.push("Calendar home-set", sanitize::text(&self.calendar_home_set));
+        fields.push("Server", sanitize::text(&self.server));
+        fields.push("Principal", sanitize::text(principal));
+        fields.push("Calendar home-set", sanitize::text(home));
         write!(f, "{fields}")
     }
 }

@@ -31,6 +31,7 @@ CLI to manage calendars.
 - **Unified API**: `calendar`, `event` and `item` serve the union of the backends, refusing what one does not serve.
 - **Remote backends**: CalDAV, the Google Calendar API, and Microsoft Graph for Outlook and Microsoft 365.
 - **Local stores**: a vdir home, or a pimdir store a sync engine fills, its writes queued and its index searched.
+- **Protocol-specific APIs**: `caldav` (the WebDAV methods), `msgraph`, `gcal`, `pimdir` and `vdir` each expose what only that backend has, down to a raw REPORT or request.
 - **Tested sample**: config.sample.toml holds a section per backend and provider, the first run printing how to copy it.
 - **REPL**: `calendula repl` runs commands over one account, the backend connecting once for the session.
 - **MCP server**: `calendula mcp` serves the unified API to an agent, read-only unless `--allow-write`.
@@ -285,7 +286,7 @@ calendula item read --calendar personal <ITEM-ID>
 calendula account capability
 calendula pimdir search budget date:2026-11
 calendula gcal free-busy --from 2026-11-16 --to 2026-11-20
-calendula gcal quick-add "Lunch with Ada tomorrow at noon"
+calendula gcal events quick-add "Lunch with Ada tomorrow at noon"
 ```
 
 The exit status is `0` on success and `1` on a failure, printed on stdout as the failure object under `--json`, its `code` naming it when a caller can act on it. `2` is a command line calendula refuses (an unknown flag, a missing argument, a bad value): clap's message goes to stderr, or, with `--json`, the failure object coded `usage-invalid` to stdout. `3` means the command printed its result without fully succeeding: an `account check` with a failed backend, or a `calendar list`, `event list`, `event search`, `event agenda` or `item list` whose `errors` names an item it could not read.

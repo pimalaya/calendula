@@ -1,7 +1,7 @@
 //! # Quick add
 //!
-//! The `calendula gcal quick-add` command, creating an event from a
-//! sentence Google parses server-side.
+//! The `calendula gcal events quick-add` command, creating an event from a
+//! sentence Google parses server-side (`events.quickAdd`).
 
 use anyhow::Result;
 use clap::Parser;

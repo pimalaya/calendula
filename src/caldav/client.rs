@@ -230,9 +230,10 @@ fn refused(err: &WebdavClientStdError) -> Option<(u16, &str)> {
 /// A 507, or a body naming `quota-not-exceeded` (RFC 4331 §6), is
 /// `quota-exceeded`; a 429 `rate-limited`; a 403 `permission-denied` when
 /// its body names `need-privileges` (RFC 3744 §7.1.1) or no precondition at
-/// all, any other 403 naming a precondition the written body failed (RFC
-/// 4791 §5.3.2), no matter of rights; a 412 `precondition-failed`; a
-/// `no-uid-conflict` (RFC 4791 §5.3.2) `item-duplicate`.
+/// all. A 400 or a 403 refusing the iCalendar written ([`rejects_item`]) is
+/// `item-invalid`; any other 403 names a precondition the written body
+/// failed (RFC 4791 §5.3.2.1), no matter of rights. A 412 is
+/// `precondition-failed`; a `no-uid-conflict` `item-duplicate`.
 pub(crate) fn refusal_code(cause: &(dyn std::error::Error + 'static)) -> Option<ErrorCode> {
     let err = cause.downcast_ref::<WebdavClientStdError>()?;
 
@@ -256,12 +257,32 @@ fn status_code(status: u16, body: &str) -> Option<ErrorCode> {
         _ if body.contains("quota-not-exceeded") => Some(ErrorCode::QuotaExceeded),
         507 => Some(ErrorCode::QuotaExceeded),
         429 => Some(ErrorCode::RateLimited),
-        403 if body.contains("need-privileges") || !names_precondition(body) => {
-            Some(ErrorCode::PermissionDenied)
-        }
+        403 if body.contains("need-privileges") => Some(ErrorCode::PermissionDenied),
+        _ if rejects_item(status, body) => Some(ErrorCode::ItemInvalid),
+        403 if !names_precondition(body) => Some(ErrorCode::PermissionDenied),
         412 => Some(ErrorCode::PreconditionFailed),
         _ => None,
     }
+}
+
+/// Whether a refusal of `status` answered with `body` refuses the
+/// iCalendar written rather than the request: a 400 or a 403 whose body
+/// names a precondition on its content (RFC 4791 §5.3.2.1:
+/// `supported-calendar-data`, `valid-calendar-data`,
+/// `valid-calendar-object-resource`, `supported-calendar-component`), or
+/// the iCalendar itself, as cardamum reads a refused vCard.
+pub(crate) fn rejects_item(status: u16, body: &str) -> bool {
+    let body = body.to_ascii_lowercase();
+    let names_item = [
+        "supported-calendar-data",
+        "valid-calendar-data",
+        "valid-calendar-object-resource",
+        "supported-calendar-component",
+        "icalendar",
+        "vcalendar",
+    ];
+
+    matches!(status, 400 | 403) && names_item.iter().any(|name| body.contains(name))
 }
 
 /// Whether a refusal's body is a `DAV:error` element, which names the

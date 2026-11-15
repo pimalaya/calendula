@@ -1,7 +1,7 @@
-//! # CalDAV calendar create
+//! # MKCALENDAR command
 //!
-//! The `calendula caldav create` command, issuing MKCALENDAR under the
-//! resolved calendar home-set.
+//! The `calendula caldav mkcalendar` command, creating a calendar
+//! collection under the resolved calendar home-set (RFC 4791 §5.3.1).
 
 use anyhow::Result;
 use clap::Parser;
@@ -10,24 +10,24 @@ use pimalaya_cli::printer::Printer;
 
 use crate::{caldav::client::CaldavClient, shared::receipt::IdReceipt};
 
-/// Create a CalDAV calendar under the resolved calendar home-set.
+/// MKCALENDAR: create a calendar collection (RFC 4791 §5.3.1).
 ///
 /// JSON output: `{"id"}`.
 #[derive(Debug, Parser)]
-pub struct CaldavCalendarCreateCommand {
-    /// Calendar identifier (last path segment of the calendar URL).
+pub struct CaldavMkcalendarCommand {
+    /// Identifier (last URL segment) of the calendar to create.
     #[arg(value_name = "ID")]
     pub id: String,
 
-    /// Human-readable display name.
-    #[arg(short = 'n', long, value_name = "NAME")]
-    pub display_name: Option<String>,
+    /// Optional human-readable name (DAV:displayname).
+    #[arg(short, long, alias = "display-name", value_name = "TEXT")]
+    pub name: Option<String>,
 
-    /// Free-form description.
+    /// Optional free-form description.
     #[arg(short, short_alias = 'D', long, value_name = "TEXT")]
     pub description: Option<String>,
 
-    /// Hex color (`#RRGGBB`).
+    /// Optional ASCII `#RRGGBB` color marker.
     #[arg(short = 'C', long, value_name = "HEX")]
     pub color: Option<String>,
 
@@ -44,11 +44,11 @@ pub struct CaldavCalendarCreateCommand {
     pub tz: Option<String>,
 }
 
-impl CaldavCalendarCreateCommand {
+impl CaldavMkcalendarCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CaldavClient) -> Result<()> {
         let calendar = CaldavCalendar {
             id: self.id.clone(),
-            display_name: self.display_name,
+            display_name: self.name,
             description: self.description,
             color: self.color,
             components: self.components.into_iter().collect(),

@@ -112,13 +112,13 @@ pimdir.account = "example"
   calendula calendar create Work
   ```
 
-- **`-d` on `caldav create` and `vdir create` sets the description**, as on `calendar create`, where it set the display name: pass the display name with `-n/--display-name`. `-D` still sets the description, and `--color` takes `-C` on every calendar command.
+- **`-d` on `caldav mkcalendar` (formerly `caldav create`) and `vdir create` sets the description**, as on `calendar create`, where it set the display name: pass the display name with `-n`. `-D` still sets the description, and `--color` takes `-C` on every calendar command.
 
   ```sh
   # 0.2
   calendula caldav create work -d Work -D "Team calendar"
   # next
-  calendula caldav create work -n Work -d "Team calendar"
+  calendula caldav mkcalendar work -n Work -d "Team calendar"
   ```
 
 - **`event delete` takes the event's id alone**, as `event read` and `event update` do: a `UID` fails `item-not-found`, where 0.2 listed the calendar to find the event carrying it. Look the id up with `event search` first.
@@ -127,20 +127,33 @@ pimdir.account = "example"
   # 0.2
   calendula event delete 1234@example.org
   # next
-  calendula event search 1234@example.org --json 
+  calendula event search 1234@example.org --json | jq -r '.events[0].id' | xargs calendula event delete
+  ```
+
 - **A `pimdir search` or `pimdir count` query word starting with `-` goes after `--`**, the options before it: an option is read wherever it stands, so `pimdir search budget --json` prints JSON where a development build searched `budget --json`.
 
   ```sh
   calendula pimdir search -s 5 -- budget -lisbon
   ```
-| jq -r '.events[0].id' | xargs calendula event delete
+
+- **`caldav`, `gcal` and `vdir` take cardamum's shape, and `msgraph` joins them.** `caldav` is the WebDAV methods: `caldav list` is `caldav propfind`, `caldav create` is `caldav mkcalendar`, beside the new `proppatch`, `report`, `get` and `put`, and `caldav delete` deletes an item as well as a calendar. `gcal instances`, `gcal move` and `gcal quick-add` are `gcal events instances`, `move` and `quick-add`, after the Calendar API's Events resource. **The old names still work**, hidden from the help, and print what they printed; only a JSON schema read by its name moves, `calendula-caldav-list` and `calendula-caldav-create` being `calendula-caldav-propfind` and `calendula-caldav-mkcalendar`. `caldav discover --json` adds `server`, an endpoint it cannot resolve reading `null` where the command failed. `msgraph` (calendars, events, the profile and raw requests) and `vdir item` are new.
+
+  ```sh
+  # 0.2, still accepted
+  calendula caldav list
+  calendula gcal quick-add "Lunch with Ada tomorrow at noon"
+  # next
+  calendula caldav propfind
+  calendula gcal events quick-add "Lunch with Ada tomorrow at noon"
+  # a schema read by its name: calendula-caldav-list in 0.2
+  calendula json-schema calendula-caldav-propfind
   ```
 
 ### Text output
 
 - **Every list is plain text**, with no border, no colour and nothing sized to the terminal. A script cutting the 0.2 tables reads `--json` instead.
-- **`event list` prints one line per event**, `id  start  end  summary`, the times in the local zone (a whole-day event by its days) and an empty cell as `-`, under `Account:`, `Calendar:`, `Page:` and `Next page:` and a blank line. A listing that could not read an item prints one `Error:` line for it last, after the rows and a blank line. `item list` prints its id, size and entity tag the same way, `gcal instances` its id, status, start, end and summary, and `pimdir search` its id, start, end, calendar, what matched and summary, its snippet under `--json` alone.
-- **Other lists print columns or records.** `calendar list` prints `Account:`, then one line per calendar, `id  default  color  name`, its description under `--json` alone; `vdir list`, `gcal acl list` and `gcal colors` print columns under an uppercase header, and `account list` one line per account with no header, `default` marking the default one; `caldav list`, `gcal calendars` and `gcal free-busy` print records the way `git log` prints commits; `account check`, `caldav discover`, `gcal settings` and `pimdir status` print `Label: value` lines.
+- **`event list` prints one line per event**, `id  start  end  summary`, the times in the local zone (a whole-day event by its days) and an empty cell as `-`, under `Account:`, `Calendar:`, `Page:` and `Next page:` and a blank line. A listing that could not read an item prints one `Error:` line for it last, after the rows and a blank line. `item list` prints its id, size and entity tag the same way, `gcal events instances` its id, status, start, end and summary, and `pimdir search` its id, start, end, calendar, what matched and summary, its snippet under `--json` alone.
+- **Other lists print columns or records.** `calendar list` prints `Account:`, then one line per calendar, `id  default  color  name`, its description under `--json` alone; `vdir list`, `gcal acl list` and `gcal colors` print columns under an uppercase header, and `account list` one line per account with no header, `default` marking the default one; `caldav propfind`, `gcal calendars` and `gcal free-busy` print records the way `git log` prints commits; `account check`, `caldav discover`, `gcal settings` and `pimdir status` print `Label: value` lines.
 - **`event agenda` highlights no day.** Its grid writes no escape any more, today and the days holding an event included; the events listed under it name their days, the months and weekdays named in the time locale (`LC_ALL`, then `LC_TIME`, then `LANG`). An event stands at its local time, as `event list` shows it, where 0.2 stamped one written in UTC at its UTC time, so the keys of `--json` `starts` move with `TZ`.
 - **Every string a server or a file gave is defused** of its control and bidi characters in the text output; `--json` keeps the stored text.
 - **A pimdir write says it is queued** (`Event <id> queued for the next sync`, `... update queued ...`, `... deletion queued ...`) rather than created, updated or deleted.
@@ -163,7 +176,7 @@ calendula calendar list --json | jq -r '.calendars[].id'
 
 ### JSON output
 
-- **Writes print a receipt.** The `{"message": ...}` confirmations are gone: `calendar update|delete` and `event|item delete` print `{id, queued}`, the item acted on and whether the write waits for a sync, and `calendar create` `{id, name, queued}`; `event|item create|update` print `{id, queued}` where 0.2 printed `{id}`, so a script comparing the whole object reads `.id`; `caldav create|delete`, `vdir create|rename|delete`, `gcal acl create|update|delete`, `gcal move` and `gcal quick-add` print `{id}`; `event|item build -o` prints `{path, size}`. A script checking the sentence checks the exit status instead, 0 on success; the text form keeps its sentence.
+- **Writes print a receipt.** The `{"message": ...}` confirmations are gone: `calendar update|delete` and `event|item delete` print `{id, queued}`, the item acted on and whether the write waits for a sync, and `calendar create` `{id, name, queued}`; `event|item create|update` print `{id, queued}` where 0.2 printed `{id}`, so a script comparing the whole object reads `.id`; `caldav mkcalendar|proppatch|delete`, `vdir create|rename|delete`, `gcal acl create|update|delete`, `gcal events move` and `gcal events quick-add` print `{id}`; `event|item build -o` prints `{path, size}`. A script checking the sentence checks the exit status instead, 0 on success; the text form keeps its sentence.
 
   ```sh
   # 0.2: {"message":"Event successfully deleted"}
@@ -214,7 +227,7 @@ calendula calendar list --json | jq -r '.calendars[].id'
   calendula event agenda --json | jq -r '.starts | keys[]'
   ```
 
-- **A missing item or calendar fails coded** `item-not-found` or `calendar-not-found`, and a server's refusal `permission-denied`, `quota-exceeded`, `rate-limited` or `precondition-failed`, where the failure carried no code.
+- **A missing item or calendar fails coded** `item-not-found` or `calendar-not-found`, and a server's refusal `permission-denied`, `quota-exceeded`, `rate-limited` or `precondition-failed`, where the failure carried no code. An iCalendar the server refuses for its content is `item-invalid` (CalDAV, Google), where a CalDAV 403 whose plain body named the iCalendar read `permission-denied`: the item is what to fix.
 - **Account resolution fails coded**: an unknown `-a` name `account-missing`, no account marked default `account-default-missing`, several marked default `account-default-several`, where the failure carried no code.
 - **A failed `account check` prints its report and exits 3**, each backend carrying `ok`, its failure's `code` and `error`, where 0.2 exited 0 whatever failed. Read which backends passed from `backends`.
 

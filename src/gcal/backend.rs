@@ -38,7 +38,7 @@ use crate::{
     config::GcalConfig,
     error::{ErrorCode, item_not_found},
     gcal::{
-        client::{connect, item_refusal},
+        client::{connect, invalid_event, item_refusal},
         render::rfc3339,
     },
     shared::{
@@ -338,11 +338,15 @@ impl GcalBackend {
                     send_updates,
                     ..Default::default()
                 };
-                self.client.event_insert(calendar_id, &event, &params)?
+                self.client
+                    .event_insert(calendar_id, &event, &params)
+                    .map_err(|err| invalid_event(err).unwrap_or_else(Into::into))?
             }
             CreatePath::Import => {
                 let params = GcalEventImportParams::default();
-                self.client.event_import(calendar_id, &event, &params)?
+                self.client
+                    .event_import(calendar_id, &event, &params)
+                    .map_err(|err| invalid_event(err).unwrap_or_else(Into::into))?
             }
         };
 
@@ -408,7 +412,7 @@ impl GcalBackend {
 
         self.client
             .event_update(calendar_id, item_id, &event, &params, if_match)
-            .map_err(item_refusal)?;
+            .map_err(|err| invalid_event(err).unwrap_or_else(item_refusal))?;
 
         Ok(())
     }
@@ -777,6 +781,52 @@ mod tests {
         assert_eq!(requests.matches("GET ").count(), 2, "{requests}");
         assert!(requests.contains("iCalUID=e1%40example.org"), "{requests}");
         assert!(!requests.contains("POST "), "{requests}");
+    }
+
+    /// An event write answered 400 refuses the event sent, every parameter
+    /// being calendula's: `item-invalid`, on an import, an insert and an
+    /// update alike; a calendar the write names that Google does not hold
+    /// keeps no code, and a listing answered 400 neither.
+    #[test]
+    fn an_event_write_answered_400_is_invalid() {
+        use crate::error::code;
+
+        let event = |uid: &str| {
+            format!(
+                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//x//y//EN\r\nBEGIN:VEVENT\r\n\
+                 {uid}DTSTAMP:20260101T000000Z\r\nDTSTART:20260814T090000Z\r\n\
+                 DTEND:20260814T080000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+            )
+            .into_bytes()
+        };
+        let refused = refusal(400, "timeRangeEmpty", "The specified time range is empty.");
+        let missing = refusal(404, "notFound", "Not Found");
+        let empty = r#"{"items":[]}"#;
+        let current = r#"{"id":"e1","etag":"\"1\"","iCalUID":"e1@example.org"}"#;
+
+        let err = answering(&[(200, empty), (400, &refused)])
+            .create_item("primary", event("UID:e1@example.org\r\n"), None)
+            .unwrap_err();
+        assert_eq!(code(&err), Some(ErrorCode::ItemInvalid), "{err:#}");
+        assert!(err.to_string().contains("time range is empty"), "{err}");
+
+        let err = answering(&[(400, &refused)])
+            .create_item("primary", event(""), None)
+            .unwrap_err();
+        assert_eq!(code(&err), Some(ErrorCode::ItemInvalid), "{err:#}");
+
+        let err = answering(&[(200, current), (400, &refused)])
+            .update_item("primary", "e1", event("UID:e1@example.org\r\n"), None, None)
+            .unwrap_err();
+        assert_eq!(code(&err), Some(ErrorCode::ItemInvalid), "{err:#}");
+
+        let err = answering(&[(404, &missing)])
+            .create_item("nope", event(""), None)
+            .unwrap_err();
+        assert_eq!(code(&err), None, "{err:#}");
+
+        let err = answering(&[(400, &refused)]).list_calendars().unwrap_err();
+        assert_eq!(code(&err), None, "{err:#}");
     }
 
     #[test]

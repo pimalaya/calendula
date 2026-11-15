@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 use anyhow::{Context, Result, bail};
 use ical::component::IcalComponentKind;
 use io_msgraph::v1::{
-    client::{MsgraphClientStd, MsgraphClientStdConnectOptions, MsgraphClientStdError},
+    client::{MsgraphClientStd, MsgraphClientStdError},
     field::MsgraphField,
     rest::users::{
         calendars::{MsgraphCalendar, list::MsgraphCalendarsListParams},
@@ -36,13 +36,13 @@ use io_msgraph::v1::{
 use jiff::{Timestamp, ToSpan, civil::Date, tz::TimeZone};
 use log::warn;
 use pimalaya_config::secret::SecretResolver;
-use secrecy::ExposeSecret;
 
 use pimalaya_cli::error::{CodedError, code_of};
 
 use crate::{
-    config::{MsgraphConfig, ProxyConfig, default_msgraph_alpn},
-    error::{self, ErrorCode, recoded},
+    config::MsgraphConfig,
+    error::{self, ErrorCode},
+    msgraph::client::{connect, event_refusal},
     shared::{
         calendar::{Calendar, CalendarDiff},
         client::window,
@@ -68,17 +68,9 @@ impl MsgraphBackend {
     /// The token is resolved through `resolver`, so an account naming one
     /// credential command from several of its backends spawns it once.
     pub fn new(config: MsgraphConfig, resolver: &mut SecretResolver) -> Result<Self> {
-        let token = resolver.resolve(config.auth.token.clone())?;
-        let alpn = config.alpn.clone().unwrap_or_else(default_msgraph_alpn);
-        let options = MsgraphClientStdConnectOptions {
-            tls: config.tls.clone().into_tls(alpn),
-            proxy: ProxyConfig::resolve(config.proxy.clone(), resolver)?,
-            user_id: config.user_id.clone(),
-        };
-        let client = MsgraphClientStd::connect(token.expose_secret(), options)
-            .context("Cannot connect to Microsoft Graph")?;
-
-        Ok(Self { client })
+        Ok(Self {
+            client: connect(&config, resolver)?,
+        })
     }
 
     /// Lists every calendar of the user.
@@ -292,7 +284,7 @@ impl MsgraphBackend {
         let patch = MsgraphEvent::update_from_ical(&contents, base.as_bytes())?;
         self.client
             .event_update(item_id, &patch)
-            .map_err(item_refusal)?;
+            .map_err(event_refusal)?;
 
         Ok(())
     }
@@ -312,7 +304,7 @@ impl MsgraphBackend {
         {
             return Err(changed(item_id));
         }
-        self.client.event_delete(item_id).map_err(item_refusal)?;
+        self.client.event_delete(item_id).map_err(event_refusal)?;
         Ok(())
     }
 
@@ -325,7 +317,7 @@ impl MsgraphBackend {
                 Some(MSGRAPH_EVENT_ICAL_SELECT),
                 Some(MSGRAPH_EVENT_STASH_EXPAND),
             )
-            .map_err(item_refusal)?
+            .map_err(event_refusal)?
             .response;
         Ok(event)
     }
@@ -367,7 +359,7 @@ impl MsgraphBackend {
             let mut page = self
                 .client
                 .event_instances(&event.id, &start, &end, &params)
-                .map_err(item_refusal)?
+                .map_err(event_refusal)?
                 .response;
 
             loop {
@@ -463,23 +455,6 @@ pub(crate) fn refusal_code(cause: &(dyn std::error::Error + 'static)) -> Option<
         (403, _) => Some(ErrorCode::PermissionDenied),
         (412, _) => Some(ErrorCode::PreconditionFailed),
         _ => None,
-    }
-}
-
-/// The failure of a request naming one event: a 404, or an id Graph reads
-/// as no id of its own (400 `ErrorInvalidIdMalformed`), is
-/// `item-not-found`.
-fn item_refusal(err: MsgraphClientStdError) -> anyhow::Error {
-    let missing = match &err {
-        MsgraphClientStdError::Send(send) => send.api().is_some_and(|api| {
-            api.status == 404 || (api.status == 400 && api.code == "ErrorInvalidIdMalformed")
-        }),
-        _ => false,
-    };
-
-    match missing {
-        true => recoded(ErrorCode::ItemNotFound, err),
-        false => err.into(),
     }
 }
 

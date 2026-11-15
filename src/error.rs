@@ -64,6 +64,13 @@ pub enum ErrorCode {
     /// The backend answered for an item calendula could not read: an
     /// `errors` entry, or the failure of a command reading that one item.
     ItemUnreadable,
+    /// The server refused the item written as no iCalendar it takes (a
+    /// CalDAV `valid-calendar-data`, `supported-calendar-data`,
+    /// `valid-calendar-object-resource` or `supported-calendar-component`
+    /// precondition, a refusal naming the iCalendar, a 400 answering a
+    /// Google or Graph event write): nothing was written, and the caller
+    /// fixes the item rather than its rights.
+    ItemInvalid,
     /// The server refused the request to the account: an HTTP 403 that
     /// is no rate limit and, on CalDAV, names no precondition but
     /// `need-privileges` (RFC 3744 §7.1.1).

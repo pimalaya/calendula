@@ -9,13 +9,16 @@ use pimalaya_cli::printer::Printer;
 
 use crate::vdir::{
     client::VdirClient, create::VdirCollectionCreateCommand, delete::VdirCollectionDeleteCommand,
-    list::VdirCollectionListCommand, rename::VdirCollectionRenameCommand,
+    item::cli::VdirItemCommand, list::VdirCollectionListCommand,
+    rename::VdirCollectionRenameCommand,
 };
 
 /// Vdir CLI.
 ///
-/// Direct access to the on-disk vdir backend: list, create, rename,
-/// delete collections without going through the unified calendar API.
+/// Direct access to the on-disk vdir backend rooted at the active
+/// account's `vdir.root`, without going through the unified API. The flat
+/// verbs act on collections, which are directories, and `item` on the raw
+/// item files inside them.
 #[derive(Debug, Subcommand)]
 #[command(rename_all = "kebab-case")]
 pub enum VdirCommand {
@@ -24,6 +27,8 @@ pub enum VdirCommand {
     Create(VdirCollectionCreateCommand),
     Rename(VdirCollectionRenameCommand),
     Delete(VdirCollectionDeleteCommand),
+    #[command(subcommand, visible_alias = "items")]
+    Item(VdirItemCommand),
 }
 
 impl VdirCommand {
@@ -33,6 +38,7 @@ impl VdirCommand {
             Self::Create(cmd) => cmd.execute(printer, client),
             Self::Rename(cmd) => cmd.execute(printer, client),
             Self::Delete(cmd) => cmd.execute(printer, client),
+            Self::Item(cmd) => cmd.execute(printer, client),
         }
     }
 }

@@ -30,6 +30,8 @@ use crate::caldav::{
 };
 #[cfg(feature = "gcal")]
 use crate::gcal::{cli::GcalCommand, client::build_gcal_client};
+#[cfg(feature = "msgraph")]
+use crate::msgraph::{cli::MsgraphCommand, client::build_msgraph_client};
 #[cfg(feature = "pimdir")]
 use crate::pimdir::{backend::PimdirBackend, cli::PimdirCommand};
 #[cfg(feature = "vdir")]
@@ -104,6 +106,9 @@ pub enum Command {
     #[cfg(feature = "caldav")]
     #[command(subcommand)]
     Caldav(CaldavCommand),
+    #[cfg(feature = "msgraph")]
+    #[command(subcommand)]
+    Msgraph(MsgraphCommand),
     #[cfg(feature = "gcal")]
     #[command(subcommand)]
     Gcal(GcalCommand),
@@ -202,6 +207,11 @@ impl Command {
                 let config = caldav_config(config_paths, account_name)?;
                 cmd.check()?;
                 let client = build_caldav_client(&config)?;
+                cmd.execute(printer, client)
+            }
+            #[cfg(feature = "msgraph")]
+            Self::Msgraph(cmd) => {
+                let client = build_msgraph_client(config_paths, account_name)?;
                 cmd.execute(printer, client)
             }
             #[cfg(feature = "gcal")]
@@ -382,5 +392,250 @@ mod tests {
 
         let (_, name, _) = resolve_account(&paths, Some("work")).unwrap();
         assert_eq!(name, "work");
+    }
+}
+
+#[cfg(all(
+    test,
+    feature = "caldav",
+    feature = "gcal",
+    feature = "msgraph",
+    feature = "vdir"
+))]
+mod namespace_tests {
+    use clap::{CommandFactory, Parser};
+
+    use crate::{
+        caldav::{cli::CaldavCommand, report::cli::CaldavReportCommand},
+        cli::{Cli, Command},
+        gcal::{cli::GcalCommand, events::GcalEventsCommand},
+        msgraph::{
+            calendars::cli::MsgraphCalendarsCommand, cli::MsgraphCommand,
+            events::cli::MsgraphEventsCommand,
+        },
+        vdir::{cli::VdirCommand, item::cli::VdirItemCommand},
+    };
+
+    /// The command a line runs, which must parse.
+    fn parse(line: &str) -> Command {
+        let args = line.split_whitespace();
+        let cli = Cli::try_parse_from(["calendula"].into_iter().chain(args));
+        cli.unwrap_or_else(|err| panic!("{line}: {err}"))
+            .cmd
+            .unwrap()
+    }
+
+    /// Whether `path` names a command the help, the manual and the
+    /// completions hide.
+    fn hidden(path: &[&str]) -> bool {
+        let mut command = Cli::command();
+
+        for name in path {
+            command = command
+                .find_subcommand(name)
+                .unwrap_or_else(|| panic!("{path:?}"))
+                .clone();
+        }
+
+        command.is_hide_set()
+    }
+
+    /// Every method of `caldav` parses, with the ids positional.
+    #[test]
+    fn the_caldav_methods_parse() {
+        use CaldavCommand::*;
+
+        assert!(matches!(
+            parse("caldav discover"),
+            Command::Caldav(Discover(_))
+        ));
+        let Command::Caldav(Propfind(cmd)) = parse("caldav propfind cal") else {
+            panic!()
+        };
+        assert_eq!(cmd.calendar_id.as_deref(), Some("cal"));
+        let Command::Caldav(Proppatch(cmd)) = parse("caldav proppatch cal -n Work -C #ff0000")
+        else {
+            panic!()
+        };
+        assert_eq!(cmd.name.as_deref(), Some("Work"));
+        assert!(matches!(
+            parse("caldav mkcalendar cal --component VEVENT"),
+            Command::Caldav(Mkcalendar(_))
+        ));
+        assert!(matches!(
+            parse("caldav report query cal --match SUMMARY standup --from 2026-11-16"),
+            Command::Caldav(Report(CaldavReportCommand::Query(_)))
+        ));
+        assert!(matches!(
+            parse("caldav report multiget cal e1.ics e2.ics"),
+            Command::Caldav(Report(CaldavReportCommand::Multiget(_)))
+        ));
+        assert!(matches!(
+            parse("caldav report sync cal --sync-token t"),
+            Command::Caldav(Report(CaldavReportCommand::Sync(_)))
+        ));
+        assert!(matches!(
+            parse("caldav report raw cal <x/>"),
+            Command::Caldav(Report(CaldavReportCommand::Raw(_)))
+        ));
+        assert!(matches!(
+            parse("caldav get cal e1.ics"),
+            Command::Caldav(Get(_))
+        ));
+        assert!(matches!(
+            parse("caldav put cal e1.ics - --if-match e1"),
+            Command::Caldav(Put(_))
+        ));
+        let Command::Caldav(Delete(cmd)) = parse("caldav delete cal e1.ics") else {
+            panic!()
+        };
+        assert_eq!(cmd.item_id.as_deref(), Some("e1.ics"));
+    }
+
+    /// The former `caldav` names run the methods they became, flags
+    /// included, hidden from the help.
+    #[test]
+    fn the_former_caldav_names_stay_hidden_aliases() {
+        use CaldavCommand::*;
+
+        for line in ["caldav list", "caldav ls"] {
+            let Command::Caldav(Propfind(cmd)) = parse(line) else {
+                panic!("{line}")
+            };
+            assert_eq!(cmd.calendar_id, None, "{line}");
+        }
+
+        let line = "caldav create cal --display-name Work -D Team -C #ff0000";
+        let Command::Caldav(Mkcalendar(cmd)) = parse(line) else {
+            panic!()
+        };
+        assert_eq!(cmd.id, "cal");
+        assert_eq!(cmd.name.as_deref(), Some("Work"));
+        assert_eq!(cmd.description.as_deref(), Some("Team"));
+
+        let Command::Caldav(Delete(cmd)) = parse("caldav delete cal") else {
+            panic!()
+        };
+        assert_eq!(cmd.item_id, None);
+
+        let caldav = Cli::command();
+        let caldav = caldav.find_subcommand("caldav").unwrap();
+        let propfind = caldav.find_subcommand("propfind").unwrap();
+        assert!(propfind.get_visible_aliases().next().is_none());
+        let mkcalendar = caldav.find_subcommand("mkcalendar").unwrap();
+        assert!(mkcalendar.get_visible_aliases().next().is_none());
+    }
+
+    /// The Events methods live under `gcal events`, the former flat names
+    /// running them hidden.
+    #[test]
+    fn the_gcal_event_methods_move_under_events() {
+        use GcalCommand as Gcal;
+        use GcalEventsCommand as Events;
+
+        assert!(matches!(
+            parse("gcal events instances E1 --from 2026-11-16"),
+            Command::Gcal(Gcal::Events(Events::Instances(_)))
+        ));
+        assert!(matches!(
+            parse("gcal event move E1 work"),
+            Command::Gcal(Gcal::Events(Events::Move(_)))
+        ));
+        assert!(matches!(
+            parse("gcal events quick-add Lunch"),
+            Command::Gcal(Gcal::Events(Events::QuickAdd(_)))
+        ));
+
+        assert!(matches!(
+            parse("gcal instances E1"),
+            Command::Gcal(Gcal::Instances(_))
+        ));
+        assert!(matches!(
+            parse("gcal instance E1"),
+            Command::Gcal(Gcal::Instances(_))
+        ));
+        assert!(matches!(
+            parse("gcal move E1 work"),
+            Command::Gcal(Gcal::Move(_))
+        ));
+        assert!(matches!(
+            parse("gcal quick-add Lunch"),
+            Command::Gcal(Gcal::QuickAdd(_))
+        ));
+
+        for name in ["instances", "move", "quick-add"] {
+            assert!(hidden(&["gcal", name]), "{name}");
+            assert!(!hidden(&["gcal", "events", name]), "{name}");
+        }
+    }
+
+    /// The Graph resources parse, their singular hidden.
+    #[test]
+    fn the_msgraph_resources_parse() {
+        use MsgraphCalendarsCommand as Calendars;
+        use MsgraphCommand as Graph;
+        use MsgraphEventsCommand as Events;
+
+        assert!(matches!(
+            parse("msgraph calendars list -s 5"),
+            Command::Msgraph(Graph::Calendars(Calendars::List(_)))
+        ));
+        assert!(matches!(
+            parse("msgraph calendar rename C1 Work"),
+            Command::Msgraph(Graph::Calendars(Calendars::Rename(_)))
+        ));
+        assert!(matches!(
+            parse("msgraph events list -k C1 --filter x"),
+            Command::Msgraph(Graph::Events(Events::List(_)))
+        ));
+        assert!(matches!(
+            parse("msgraph event rm E1"),
+            Command::Msgraph(Graph::Events(Events::Delete(_)))
+        ));
+        assert!(matches!(
+            parse("msgraph events delta --from 2026-11-16 --to 2026-11-22"),
+            Command::Msgraph(Graph::Events(Events::Delta(_)))
+        ));
+        assert!(matches!(
+            parse("msgraph events delta --delta-link https://graph.example.org/x"),
+            Command::Msgraph(Graph::Events(Events::Delta(_)))
+        ));
+        assert!(matches!(
+            parse("msgraph profile get"),
+            Command::Msgraph(Graph::Profile(_))
+        ));
+        assert!(matches!(
+            parse("msgraph request get me"),
+            Command::Msgraph(Graph::Request(_))
+        ));
+
+        let window = "calendula msgraph events delta --from 2026-11-16";
+        assert!(Cli::try_parse_from(window.split_whitespace()).is_err());
+    }
+
+    /// The vdir items parse, under `item` and `items`.
+    #[test]
+    fn the_vdir_items_parse() {
+        use VdirItemCommand as Item;
+
+        for line in ["vdir item list cal", "vdir items ls cal"] {
+            assert!(
+                matches!(parse(line), Command::Vdir(VdirCommand::Item(Item::List(_)))),
+                "{line}"
+            );
+        }
+
+        assert!(matches!(
+            parse("vdir item create cal --kind ical -"),
+            Command::Vdir(VdirCommand::Item(Item::Create(_)))
+        ));
+        assert!(matches!(
+            parse("vdir item move cal work e1"),
+            Command::Vdir(VdirCommand::Item(Item::Move(_)))
+        ));
+        assert!(matches!(
+            parse("vdir ls"),
+            Command::Vdir(VdirCommand::List(_))
+        ));
     }
 }

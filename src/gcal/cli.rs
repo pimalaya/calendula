@@ -8,9 +8,16 @@ use clap::Subcommand;
 use pimalaya_cli::printer::Printer;
 
 use crate::gcal::{
-    acl::GcalAclCommand, calendars::GcalCalendarListCommand, client::GcalClient,
-    colors::GcalColorsCommand, free_busy::GcalFreeBusyCommand, instances::GcalInstancesCommand,
-    move_event::GcalMoveCommand, quick_add::GcalQuickAddCommand, settings::GcalSettingsCommand,
+    acl::GcalAclCommand,
+    calendars::GcalCalendarListCommand,
+    client::GcalClient,
+    colors::GcalColorsCommand,
+    events::{
+        GcalEventsCommand, instances::GcalInstancesCommand, move_event::GcalMoveCommand,
+        quick_add::GcalQuickAddCommand,
+    },
+    free_busy::GcalFreeBusyCommand,
+    settings::GcalSettingsCommand,
 };
 
 /// Google Calendar CLI.
@@ -18,7 +25,8 @@ use crate::gcal::{
 /// Direct access to the half of the Calendar API iCalendar cannot express:
 /// sharing, availability, recurrence expansion, server-side parsing and the
 /// palettes. Everything a calendar and its items have in common with the
-/// other backends stays in the unified API.
+/// other backends stays in the unified API. Each command is named after the
+/// API's resource, plural included.
 ///
 /// Push channels are not exposed: a channel delivers to an HTTPS endpoint
 /// the caller must host, which a CLI has not. Neither are `calendars.clear`
@@ -31,14 +39,20 @@ pub enum GcalCommand {
     #[command(subcommand)]
     Acl(GcalAclCommand),
     FreeBusy(GcalFreeBusyCommand),
-    #[command(alias = "instance")]
-    Instances(GcalInstancesCommand),
-    Move(GcalMoveCommand),
-    QuickAdd(GcalQuickAddCommand),
+    #[command(subcommand, alias = "event")]
+    Events(GcalEventsCommand),
     #[command(alias = "color")]
     Colors(GcalColorsCommand),
     #[command(alias = "setting")]
     Settings(GcalSettingsCommand),
+
+    // NOTE: the former names, run as the `events` commands they became.
+    #[command(hide = true, alias = "instance")]
+    Instances(GcalInstancesCommand),
+    #[command(hide = true)]
+    Move(GcalMoveCommand),
+    #[command(hide = true)]
+    QuickAdd(GcalQuickAddCommand),
 }
 
 impl GcalCommand {
@@ -47,11 +61,12 @@ impl GcalCommand {
             Self::Calendars(cmd) => cmd.execute(printer, client),
             Self::Acl(cmd) => cmd.execute(printer, client),
             Self::FreeBusy(cmd) => cmd.execute(printer, client),
+            Self::Events(cmd) => cmd.execute(printer, client),
+            Self::Colors(cmd) => cmd.execute(printer, client),
+            Self::Settings(cmd) => cmd.execute(printer, client),
             Self::Instances(cmd) => cmd.execute(printer, client),
             Self::Move(cmd) => cmd.execute(printer, client),
             Self::QuickAdd(cmd) => cmd.execute(printer, client),
-            Self::Colors(cmd) => cmd.execute(printer, client),
-            Self::Settings(cmd) => cmd.execute(printer, client),
         }
     }
 }

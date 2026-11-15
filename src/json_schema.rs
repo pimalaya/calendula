@@ -20,7 +20,12 @@ use pimalaya_cli::{
 };
 use schemars::JsonSchema;
 
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "vdir"))]
+#[cfg(any(
+    feature = "caldav",
+    feature = "gcal",
+    feature = "msgraph",
+    feature = "vdir"
+))]
 use crate::shared::receipt::IdReceipt;
 use crate::{
     error::{ErrorCode, ItemError},
@@ -130,11 +135,71 @@ pub fn registry() -> JsonSchemaRegistry {
             crate::caldav::discover::CaldavDiscoverOutput
         );
         insert!(
-            "calendula-caldav-list",
-            crate::caldav::list::CaldavCalendarListOutput
+            "calendula-caldav-propfind",
+            crate::caldav::propfind::CaldavPropfindOutput
         );
-        insert!("calendula-caldav-create", IdReceipt);
+        insert!("calendula-caldav-proppatch", IdReceipt);
+        insert!("calendula-caldav-mkcalendar", IdReceipt);
+        for key in [
+            "calendula-caldav-report-query",
+            "calendula-caldav-report-multiget",
+        ] {
+            insert!(key, crate::caldav::report::entries::CaldavItemEntriesOutput);
+        }
+        insert!(
+            "calendula-caldav-report-sync",
+            crate::caldav::report::sync::CaldavReportSyncOutput
+        );
+        insert!(
+            "calendula-caldav-report-raw",
+            crate::caldav::report::raw::CaldavReportRawOutput
+        );
+        insert!("calendula-caldav-get", crate::caldav::get::CaldavGetOutput);
+        insert!("calendula-caldav-put", crate::caldav::put::CaldavPutOutput);
         insert!("calendula-caldav-delete", IdReceipt);
+    }
+
+    #[cfg(feature = "msgraph")]
+    {
+        insert!(
+            "calendula-msgraph-calendars-list",
+            crate::msgraph::calendars::render::MsgraphCalendarsOutput
+        );
+        for key in [
+            "calendula-msgraph-calendars-get",
+            "calendula-msgraph-calendars-create",
+            "calendula-msgraph-calendars-rename",
+        ] {
+            insert!(
+                key,
+                crate::msgraph::calendars::render::MsgraphCalendarOutput
+            );
+        }
+        insert!("calendula-msgraph-calendars-delete", IdReceipt);
+        insert!(
+            "calendula-msgraph-events-list",
+            crate::msgraph::events::render::MsgraphEventsOutput
+        );
+        for key in [
+            "calendula-msgraph-events-get",
+            "calendula-msgraph-events-create",
+            "calendula-msgraph-events-update",
+        ] {
+            insert!(key, crate::msgraph::events::render::MsgraphEventOutput);
+        }
+        insert!("calendula-msgraph-events-delete", IdReceipt);
+        insert!(
+            "calendula-msgraph-events-delta",
+            crate::msgraph::events::delta::MsgraphEventDeltaOutput
+        );
+        insert!(
+            "calendula-msgraph-profile-get",
+            crate::msgraph::profile::get::MsgraphProfileGetOutput
+        );
+        insert!(
+            "calendula-msgraph-request",
+            crate::shared::raw_json::RawJsonOutput
+        );
     }
 
     #[cfg(feature = "gcal")]
@@ -150,16 +215,25 @@ pub fn registry() -> JsonSchemaRegistry {
         insert!("calendula-gcal-acl-create", IdReceipt);
         insert!("calendula-gcal-acl-update", IdReceipt);
         insert!("calendula-gcal-acl-delete", IdReceipt);
-        insert!("calendula-gcal-move", IdReceipt);
-        insert!("calendula-gcal-quick-add", IdReceipt);
+        // NOTE: the former names keep their schema beside the new ones.
+        for key in [
+            "calendula-gcal-events-move",
+            "calendula-gcal-events-quick-add",
+            "calendula-gcal-move",
+            "calendula-gcal-quick-add",
+        ] {
+            insert!(key, IdReceipt);
+        }
         insert!(
             "calendula-gcal-free-busy",
             crate::gcal::free_busy::GcalFreeBusyOutput
         );
-        insert!(
+        for key in [
+            "calendula-gcal-events-instances",
             "calendula-gcal-instances",
-            crate::gcal::instances::GcalInstancesOutput
-        );
+        ] {
+            insert!(key, crate::gcal::events::instances::GcalInstancesOutput);
+        }
         insert!(
             "calendula-gcal-colors",
             crate::gcal::colors::GcalColorsOutput
@@ -220,6 +294,26 @@ pub fn registry() -> JsonSchemaRegistry {
         insert!("calendula-vdir-create", IdReceipt);
         insert!("calendula-vdir-rename", IdReceipt);
         insert!("calendula-vdir-delete", IdReceipt);
+        insert!(
+            "calendula-vdir-item-list",
+            crate::vdir::item::list::VdirItemListOutput
+        );
+        insert!(
+            "calendula-vdir-item-get",
+            crate::vdir::item::get::VdirItemGetOutput
+        );
+        insert!(
+            "calendula-vdir-item-create",
+            crate::vdir::item::create::VdirItemCreateOutput
+        );
+        for key in [
+            "calendula-vdir-item-update",
+            "calendula-vdir-item-delete",
+            "calendula-vdir-item-copy",
+            "calendula-vdir-item-move",
+        ] {
+            insert!(key, IdReceipt);
+        }
     }
 
     insert!("calendula-error", ErrorReport<ErrorCode>);

@@ -31,7 +31,7 @@ use log::warn;
 use pimalaya_config::secret::SecretResolver;
 
 use crate::{
-    caldav::client::{connect, item_refusal, proppatch, row_code},
+    caldav::client::{connect, item_refusal, proppatch, rejects_item, row_code},
     config::CaldavConfig,
     error::{ErrorCode, ItemError, calendar_not_found, recoded},
     shared::{
@@ -255,7 +255,7 @@ impl CaldavBackend {
             ) => Err(recoded(ErrorCode::ItemDuplicate, err).context(format!(
                 "Calendar `{calendar_id}` already holds `{id}`; update that item instead"
             ))),
-            Err(err) => Err(err.into()),
+            Err(err) => Err(create_error(err)),
         }
     }
 
@@ -269,7 +269,7 @@ impl CaldavBackend {
     ) -> Result<()> {
         self.client
             .update_item(calendar_id, item_id, contents, if_match)
-            .map_err(item_refusal)?;
+            .map_err(update_error)?;
         Ok(())
     }
 
@@ -285,6 +285,39 @@ impl CaldavBackend {
             .map_err(item_refusal)?;
         Ok(())
     }
+}
+
+/// The failure of a create: [`invalid_item`]'s hint, else the server's
+/// answer.
+fn create_error(err: WebdavClientStdError) -> anyhow::Error {
+    invalid_item(err).unwrap_or_else(Into::into)
+}
+
+/// The failure of an update: [`invalid_item`]'s hint, else
+/// [`item_refusal`]'s.
+fn update_error(err: WebdavClientStdError) -> anyhow::Error {
+    invalid_item(err).unwrap_or_else(item_refusal)
+}
+
+/// A hint over the server's answer when it refuses the iCalendar written
+/// ([`rejects_item`]), coded `item-invalid` by the same predicate, so the
+/// two never disagree; the answer handed back otherwise.
+///
+/// The server's answer stays the cause, its typed error kept for the
+/// readers of [`crate::error::code`].
+fn invalid_item(err: WebdavClientStdError) -> Result<anyhow::Error, WebdavClientStdError> {
+    let WebdavClientStdError::Send(WebdavSendError::HttpStatus { status, body }) = &err else {
+        return Err(err);
+    };
+
+    if !rejects_item(*status, body) {
+        return Err(err);
+    }
+
+    Ok(anyhow::Error::new(err).context(
+        "The server rejected the iCalendar as invalid: calendula sends the item unchanged, \
+         so the server's answer says what to fix",
+    ))
 }
 
 /// The VCALENDAR child filter a listing sends.
@@ -339,7 +372,7 @@ fn item_from(calendar_id: &str, entry: CaldavItemEntry) -> CalendarItem {
 /// from the row's status or the status refusing its properties, a 403
 /// `permission-denied`, else `item-unreadable`; each refused property in its
 /// sources.
-fn unreadable_row(row: WebdavUnreadableEntry) -> ItemError {
+pub(crate) fn unreadable_row(row: WebdavUnreadableEntry) -> ItemError {
     let code = row
         .status
         .into_iter()
@@ -428,6 +461,7 @@ mod tests {
 
     use ical::component::IcalComponentKind;
     use io_webdav::rfc4918::WebdavAuth;
+    use pimalaya_cli::error::{code_of, with_code};
     use url::Url;
 
     use super::*;
@@ -638,10 +672,11 @@ mod tests {
                 need_privileges.as_str(),
                 Some(ErrorCode::PermissionDenied),
             ),
-            (403, data.as_str(), None),
+            (403, data.as_str(), Some(ErrorCode::ItemInvalid)),
             (507, "", Some(ErrorCode::QuotaExceeded)),
             (403, quota.as_str(), Some(ErrorCode::QuotaExceeded)),
             (429, "", Some(ErrorCode::RateLimited)),
+            (404, "", None),
             (500, "", None),
         ];
 
@@ -651,6 +686,56 @@ mod tests {
                 .unwrap_err();
             assert_eq!(code(&err), expected, "{status} {body}: {err:#}");
         }
+    }
+
+    /// An iCalendar the server refuses is a matter of the item, not of
+    /// rights: coded `item-invalid` under a hint, the server's answer its
+    /// cause, whether the refusal names a precondition on the content (RFC
+    /// 4791 §5.3.2.1) or the iCalendar in plain text, on a create as on an
+    /// update. Another precondition carries no code.
+    #[test]
+    fn a_refused_icalendar_is_invalid_and_keeps_the_answer_as_its_cause() {
+        let mut refusals: Vec<(u16, String)> = [
+            "supported-calendar-data",
+            "valid-calendar-data",
+            "valid-calendar-object-resource",
+            "supported-calendar-component",
+        ]
+        .iter()
+        .map(|name| (403, precondition(CALDAV, name)))
+        .collect();
+        refusals.push((400, precondition(CALDAV, "valid-calendar-data")));
+        refusals.push((403, String::from("Invalid iCalendar: missing DTSTART")));
+        refusals.push((400, String::from("Cannot parse VCALENDAR")));
+
+        for (status, body) in &refusals {
+            for update in [false, true] {
+                let mut backend = answering(*status, body);
+                let err = match update {
+                    false => backend.create_item("cal", EVENT.to_vec()),
+                    true => backend
+                        .update_item("cal", "e1.ics", EVENT.to_vec(), None)
+                        .map(|()| String::new()),
+                }
+                .unwrap_err();
+
+                assert_eq!(code(&err), Some(ErrorCode::ItemInvalid), "{body}: {err:#}");
+                assert!(
+                    err.to_string()
+                        .starts_with("The server rejected the iCalendar")
+                );
+                let cause = err.chain().nth(1).unwrap().to_string();
+                assert!(cause.contains(&status.to_string()), "{cause}");
+                let coded = code_of(&with_code(err, code));
+                assert_eq!(coded, Some(ErrorCode::ItemInvalid));
+            }
+        }
+
+        let other = precondition(CALDAV, "max-resource-size");
+        let err = answering(403, &other)
+            .create_item("cal", EVENT.to_vec())
+            .unwrap_err();
+        assert_eq!(code(&err), None, "{err:#}");
     }
 
     #[test]
@@ -696,8 +781,8 @@ mod tests {
     }
 
     /// iCloud answers 400, not 404, to a GET of a name without `.ics`:
-    /// a read names no item then. A write answered 400 keeps no code, its
-    /// body being what the server refused.
+    /// a read names no item then. A write answered 400 naming nothing keeps
+    /// no code.
     #[test]
     fn a_read_answered_400_is_not_found_and_a_write_is_not() {
         let err = answering(400, "").get_item("cal", "nope").unwrap_err();

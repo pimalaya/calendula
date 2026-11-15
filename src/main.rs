@@ -76,11 +76,14 @@
 //! unified API (`calendar`, `event`, `item`) is the portable surface, where
 //! an operation means the same whichever backend serves the account.
 //!
-//! The protocol-specific APIs (`caldav`, `gcal`, `pimdir`, `vdir`) each expose
-//! what only one backend has, gated behind its own cargo feature. The meta
-//! commands (`account`, `repl`, `mcp`, `completion`, `manual`,
-//! `json-schema`) inspect the configuration and what its backends serve,
-//! run the sessions, and generate the shell integration and the schemas.
+//! The protocol-specific APIs (`caldav`, `msgraph`, `gcal`, `pimdir`,
+//! `vdir`) each expose what only one backend has, gated behind its own cargo
+//! feature, shaped as cardamum's: `caldav` the WebDAV methods, `msgraph`
+//! and `gcal` nested by the API's resources, `vdir` its collections and
+//! their raw items. The meta commands (`account`, `repl`, `mcp`,
+//! `completion`, `manual`, `json-schema`) inspect the configuration and what
+//! its backends serve, run the sessions, and generate the shell integration
+//! and the schemas.
 //!
 //! ### Events against item
 //!
@@ -221,6 +224,8 @@ mod msgraph;
 #[cfg(feature = "pimdir")]
 mod pimdir;
 mod repl;
+#[cfg(all(test, any(feature = "caldav", feature = "msgraph")))]
+mod script;
 mod session;
 mod shared;
 #[cfg(feature = "vdir")]

@@ -1,7 +1,7 @@
 //! # Move
 //!
-//! The `calendula gcal move` command, relocating one event to another
-//! calendar.
+//! The `calendula gcal events move` command, relocating one event to
+//! another calendar (`events.move`).
 
 use anyhow::Result;
 use clap::Parser;
