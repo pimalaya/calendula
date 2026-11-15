@@ -20,7 +20,7 @@ use tempfile::TempDir;
 fn account() -> TempDir {
     let home = TempDir::new().unwrap();
     let config = format!(
-        "[accounts.test]\ndefault = true\nvdir.home-dir = {:?}\npimdir.root = {:?}\n",
+        "[accounts.test]\ndefault = true\nvdir.root = {:?}\npimdir.root = {:?}\n",
         home.path().display().to_string(),
         home.path().join("missing").display().to_string(),
     );

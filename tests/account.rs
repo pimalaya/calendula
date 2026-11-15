@@ -4,8 +4,8 @@
 //! ways pimalaya-config refuses one, each coded under `--json`, `default`
 //! read as a name like any other, and the block of a backend this build
 //! leaves out, loaded so one file serves every build, then refused with
-//! `backend-not-built` by a command reaching it. A `caldav.discover` key is
-//! refused by name.
+//! `backend-not-built` by a command reaching it. A `caldav.discover` or a
+//! `vdir.home-dir` key is refused by name.
 
 use std::{
     fs,
@@ -212,13 +212,40 @@ fn a_caldav_discover_key_is_refused_naming_server() {
     );
 }
 
+/// A vdir block naming its home `home-dir`, as 0.2 did, is refused by name,
+/// the message naming `vdir.root` and the guide; the same path under `root`
+/// lists the home.
+#[cfg(feature = "vdir")]
+#[test]
+fn a_vdir_home_dir_key_is_refused_by_name_and_root_is_read() {
+    let (dir, path) = config("");
+    let calendars = dir.path().join("calendars");
+    fs::create_dir_all(calendars.join("work")).unwrap();
+
+    let toml = format!("[accounts.a]\ndefault = true\nvdir.home-dir = {calendars:?}\n");
+    fs::write(&path, toml).unwrap();
+    let out = run(&path, &["--json", "calendar", "list"]);
+    let error = json(&out, 1);
+    let cause = error["sources"][0].as_str().unwrap_or_default();
+    let sentence = "The `vdir.home-dir` key is removed, the vdir home being named \
+                    `root` as a store root is: rename it `vdir.root`, the path \
+                    unchanged, see MIGRATION.md";
+    assert!(cause.contains(sentence), "{error}");
+
+    let toml = format!("[accounts.a]\ndefault = true\nvdir.root = {calendars:?}\n");
+    fs::write(&path, toml).unwrap();
+    let out = run(&path, &["--json", "calendar", "list"]);
+    let listed = json(&out, 0);
+    assert_eq!(listed["calendars"][0]["id"], "work", "{listed}");
+}
+
 /// `account list` prints pimalaya-cli's shared text, as Himalaya does: one
 /// line per account and no header row, the default marked `default`.
 #[cfg(all(feature = "vdir", feature = "pimdir"))]
 #[test]
 fn the_account_list_is_the_shared_text() {
     let toml = "[accounts.work]\ndefault = true\npimdir.root = \"/nowhere\"\n\
-                [accounts.perso]\nvdir.home-dir = \"/nowhere\"\n";
+                [accounts.perso]\nvdir.root = \"/nowhere\"\n";
     let (_dir, path) = config(toml);
 
     let out = run(&path, &["account", "list"]);

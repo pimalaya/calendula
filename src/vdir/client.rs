@@ -32,10 +32,10 @@ pub struct VdirClient {
 impl VdirClient {
     /// Builds the client rooted at the configured home directory.
     ///
-    /// The path arrives shell-expanded, [`VdirConfig::home_dir`] doing
+    /// The path arrives shell-expanded, [`VdirConfig::root`] doing
     /// it at deserialize.
     pub fn new(config: VdirConfig) -> Self {
-        let root = VdirPath::new(config.home_dir.to_string_lossy().into_owned());
+        let root = VdirPath::new(config.root.to_string_lossy().into_owned());
 
         Self {
             inner: Inner::new(root),

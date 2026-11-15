@@ -20,10 +20,12 @@ use ical::{
 use io_webdav::{
     client::{WebdavClientStd, WebdavClientStdError},
     rfc4791::{
-        calendar::{CALENDAR_COLOR, CALENDAR_DESCRIPTION, CaldavCalendar, join_path, property_set},
+        calendar::{CALENDAR_COLOR, CALENDAR_DESCRIPTION, CaldavCalendar, property_set},
         item::CaldavItemEntry,
     },
-    rfc4918::{WebdavProperty, send::WebdavSendError, typed::WebdavUnreadableEntry},
+    rfc4918::{
+        WebdavProperty, collection_path, send::WebdavSendError, typed::WebdavUnreadableEntry,
+    },
 };
 use log::warn;
 use pimalaya_config::secret::SecretResolver;
@@ -161,7 +163,7 @@ impl CaldavBackend {
 
         let home = self.client.calendar_home_set.clone();
         let home = home.ok_or(WebdavClientStdError::MissingCalendarHomeSet)?;
-        let path = join_path(home.path(), &calendar.id);
+        let path = collection_path(home.path(), &calendar.id);
         proppatch(&mut self.client, &path, &property_set(calendar), cleared)?;
 
         Ok(())
@@ -826,6 +828,17 @@ END:VCALENDAR&#13;
 
         assert!(listed.items.is_empty());
         assert!(listed.errors.is_empty(), "{:?}", listed.errors);
+    }
+
+    /// A listed item is the whole body the server sent, the final CRLF it
+    /// escapes as `&#13;` included, as a GET returns it.
+    #[test]
+    fn a_caldav_listing_keeps_the_whole_item() {
+        let listed = answering(207, LISTING)
+            .list_items("cal", CalendarItemQuery::default())
+            .unwrap();
+
+        assert_eq!(listed.items[0].contents, EVENT);
     }
 
     #[test]

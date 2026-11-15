@@ -248,7 +248,7 @@ A [vdir](https://vdirsyncer.pimutils.org/en/stable/vdir.html) home is one direct
 
 ```toml
 [accounts.local]
-vdir.home-dir = "~/.local/share/vdirsyncer/calendars"
+vdir.root = "~/.local/share/vdirsyncer/calendars"
 calendar.default = "personal"
 ```
 

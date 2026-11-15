@@ -24,7 +24,10 @@ use pimalaya_cli::{
 use pimalaya_config::toml::{ConfigMissingError, TomlConfig};
 
 #[cfg(feature = "caldav")]
-use crate::caldav::{cli::CaldavCommand, client::build_caldav_client};
+use crate::caldav::{
+    cli::CaldavCommand,
+    client::{build_caldav_client, caldav_config},
+};
 #[cfg(feature = "gcal")]
 use crate::gcal::{cli::GcalCommand, client::build_gcal_client};
 #[cfg(feature = "pimdir")]
@@ -196,7 +199,9 @@ impl Command {
 
             #[cfg(feature = "caldav")]
             Self::Caldav(cmd) => {
-                let client = build_caldav_client(config_paths, account_name)?;
+                let config = caldav_config(config_paths, account_name)?;
+                cmd.check()?;
+                let client = build_caldav_client(&config)?;
                 cmd.execute(printer, client)
             }
             #[cfg(feature = "gcal")]

@@ -50,7 +50,7 @@ fn account() -> TempDir {
 
     let config = format!(
         "[accounts.perso]\ndefault = true\ncalendar.default = \"personal\"\n\
-         vdir.home-dir = {:?}\n",
+         vdir.root = {:?}\n",
         home.path().display().to_string()
     );
     fs::write(home.path().join("config.toml"), config).unwrap();

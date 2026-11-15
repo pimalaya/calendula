@@ -72,7 +72,7 @@ item.list.page-size = 25		# items per page without -s
 
 # vdir
 #
-#vdir.home-dir = "~/.local/share/vdirsyncer/calendars"	# a directory per calendar, an .ics file per item
+#vdir.root = "~/.local/share/vdirsyncer/calendars"	# a directory per calendar, an .ics file per item
 
 # pimdir
 #

@@ -10,19 +10,21 @@ use std::{
     path::PathBuf,
 };
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use io_http::{rfc6750::bearer::HttpAuthBearer, rfc7617::basic::HttpAuthBasic};
 use io_webdav::{
     client::{WebdavClientStd, WebdavClientStdConnectOptions, WebdavClientStdError},
     coroutine::{WebdavCoroutine, WebdavCoroutineState, WebdavYield},
     rfc4918::{
-        WebdavAuth, WebdavPropValue, WebdavProperty,
+        WebdavAuth, WebdavIdError, WebdavPropValue, WebdavProperty, check_collection_id,
+        check_resource_id,
         follow_redirects::WebdavFollowRedirectsError,
         proppatch::{WebdavProppatch, WebdavProppatchOk},
         send::WebdavSendError,
     },
     rfc6578::sync_collection::WebdavSyncCollectionError,
 };
+use pimalaya_cli::error::with_code;
 use pimalaya_config::secret::SecretResolver;
 use pimalaya_stream::tls::Tls;
 use secrecy::ExposeSecret;
@@ -279,22 +281,55 @@ pub fn item_refusal(err: WebdavClientStdError) -> anyhow::Error {
     }
 }
 
-/// Loads the configuration, picks the active account, then connects.
+/// Refuses a calendar id no collection can have, one io-webdav's
+/// `check_collection_id` refuses (empty, or holding an empty, `.` or `..`
+/// segment), before anything connects: `calendar-not-found`, as vdir
+/// refuses an id that is not one directory name, io-webdav's reason in
+/// `sources`.
+pub(crate) fn check_calendar_id(id: &str) -> Result<()> {
+    check_collection_id(id).map_err(|err| {
+        not_found(err, ErrorCode::CalendarNotFound).context(format!("Calendar `{id}` not found"))
+    })
+}
+
+/// Refuses an item id no resource of a calendar can have, one io-webdav's
+/// `check_resource_id` refuses, before anything connects: `item-not-found`,
+/// io-webdav's reason in `sources`.
+pub(crate) fn check_item_id(id: &str) -> Result<()> {
+    check_resource_id(id).map_err(|err| {
+        not_found(err, ErrorCode::ItemNotFound).context(format!("Item `{id}` not found"))
+    })
+}
+
+/// Refuses the id of a calendar to create that no collection can have,
+/// before anything connects: uncoded, as vdir refuses a new id that is not
+/// one directory name, io-webdav's reason in `sources`.
+pub(crate) fn check_new_calendar_id(id: &str) -> Result<()> {
+    check_collection_id(id)
+        .with_context(|| format!("Calendar id `{id}` names no CalDAV collection"))
+}
+
+/// io-webdav's refusal of an id, carrying `code`.
+fn not_found(err: WebdavIdError, code: ErrorCode) -> anyhow::Error {
+    with_code(err.into(), |_| Some(code))
+}
+
+/// Loads the configuration, picks the active account and takes its
+/// `[caldav]` block, so a command checks its ids before anything connects.
 ///
 /// Bails when the account carries no `[caldav]` block.
-pub fn build_caldav_client(
-    config_paths: &[PathBuf],
-    account_name: Option<&str>,
-) -> Result<CaldavClient> {
+pub fn caldav_config(config_paths: &[PathBuf], account_name: Option<&str>) -> Result<CaldavConfig> {
     let (_, name, mut account_config) = resolve_account(config_paths, account_name)?;
 
-    let caldav_config = account_config
+    account_config
         .caldav
         .take()
-        .ok_or_else(|| anyhow!("CalDAV configuration is missing for account `{name}`"))?;
+        .ok_or_else(|| anyhow!("CalDAV configuration is missing for account `{name}`"))
+}
 
-    let inner = connect(&caldav_config, &mut SecretResolver::new())?;
-
+/// Connects the client the `caldav` commands run against.
+pub fn build_caldav_client(config: &CaldavConfig) -> Result<CaldavClient> {
+    let inner = connect(config, &mut SecretResolver::new())?;
     Ok(CaldavClient::new(inner))
 }
 

@@ -8,8 +8,11 @@ use clap::Subcommand;
 use pimalaya_cli::printer::Printer;
 
 use crate::caldav::{
-    client::CaldavClient, create::CaldavCalendarCreateCommand, delete::CaldavCalendarDeleteCommand,
-    discover::CaldavDiscoverCommand, list::CaldavCalendarListCommand,
+    client::{CaldavClient, check_calendar_id, check_new_calendar_id},
+    create::CaldavCalendarCreateCommand,
+    delete::CaldavCalendarDeleteCommand,
+    discover::CaldavDiscoverCommand,
+    list::CaldavCalendarListCommand,
 };
 
 /// CalDAV CLI.
@@ -27,6 +30,17 @@ pub enum CaldavCommand {
 }
 
 impl CaldavCommand {
+    /// Refuses, before anything connects, a calendar id no CalDAV collection
+    /// can have, coded as the unified commands code it, and the id of a
+    /// calendar to create that none can have.
+    pub fn check(&self) -> Result<()> {
+        match self {
+            Self::Discover(_) | Self::List(_) => Ok(()),
+            Self::Create(cmd) => check_new_calendar_id(&cmd.id),
+            Self::Delete(cmd) => check_calendar_id(&cmd.id),
+        }
+    }
+
     pub fn execute(self, printer: &mut impl Printer, client: CaldavClient) -> Result<()> {
         match self {
             Self::Discover(cmd) => cmd.execute(printer, client),

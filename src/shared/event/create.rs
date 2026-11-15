@@ -225,7 +225,8 @@ mod tests {
         let client = || {
             let account = AccountConfig {
                 vdir: Some(VdirConfig {
-                    home_dir: dir.path().to_path_buf(),
+                    root: dir.path().to_path_buf(),
+                    home_dir: None,
                 }),
                 ..Default::default()
             };

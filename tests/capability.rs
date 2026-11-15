@@ -90,7 +90,7 @@ fn vdir_home(dir: &Path) -> String {
     let cal = dir.join("cal");
     fs::create_dir(&cal).unwrap();
     fs::write(cal.join("1.ics"), EVENT).unwrap();
-    format!("vdir.home-dir = {:?}\n", dir.display().to_string())
+    format!("vdir.root = {:?}\n", dir.display().to_string())
 }
 
 /// A vdir item has no version: a write gated on one is refused before

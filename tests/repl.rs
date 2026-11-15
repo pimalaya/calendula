@@ -36,7 +36,7 @@ fn account() -> TempDir {
     let calendars = home.path().join("calendars");
     let toml = format!(
         "[accounts.perso]\ndefault = true\ncalendar.default = \"personal\"\n\
-         vdir.home-dir = {:?}\n",
+         vdir.root = {:?}\n",
         calendars.display().to_string(),
     );
     fs::write(home.path().join("config.toml"), toml).unwrap();

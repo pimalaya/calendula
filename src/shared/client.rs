@@ -314,6 +314,38 @@ impl CalendarClient {
         Ok(self.inner.as_mut().expect("just opened"))
     }
 
+    /// Refuses, before anything connects, a calendar id the backend cannot
+    /// address and, when the call names one, an item id: on CalDAV an id
+    /// io-webdav refuses, coded as a calendar or an item the server does not
+    /// hold.
+    #[cfg_attr(not(feature = "caldav"), allow(unused_variables))]
+    fn check_ids(&self, calendar_id: &str, item_id: Option<&str>) -> Result<()> {
+        match &self.config {
+            #[cfg(feature = "caldav")]
+            BackendConfig::Caldav(_) => {
+                crate::caldav::client::check_calendar_id(calendar_id)?;
+                item_id.map_or(Ok(()), crate::caldav::client::check_item_id)
+            }
+            #[allow(unreachable_patterns)]
+            _ => Ok(()),
+        }
+    }
+
+    /// Refuses, before anything connects, the id of a calendar to create
+    /// the backend cannot address: on CalDAV, where the id is the
+    /// collection's URL segment, one io-webdav refuses.
+    #[cfg_attr(not(feature = "caldav"), allow(unused_variables))]
+    fn check_new_id(&self, id: Option<&str>) -> Result<()> {
+        match (&self.config, id) {
+            #[cfg(feature = "caldav")]
+            (BackendConfig::Caldav(_), Some(id)) => {
+                crate::caldav::client::check_new_calendar_id(id)
+            }
+            #[allow(unreachable_patterns)]
+            _ => Ok(()),
+        }
+    }
+
     /// Refuses, inside an MCP server without `--allow-send`, to `verb` an
     /// item whose `contents` or stored copy `item_id` names an attendee,
     /// whom the server or a sync may notify.
@@ -383,6 +415,8 @@ impl CalendarClient {
         description: Option<&str>,
         color: Option<&str>,
     ) -> Result<String> {
+        self.check_new_id(id)?;
+
         match self.open()? {
             #[cfg(not(any(
                 feature = "vdir",
@@ -408,6 +442,8 @@ impl CalendarClient {
     /// Applies a partial update to the calendar `id`, preserving the fields
     /// left as `None` in `patch`.
     pub fn update_calendar(&mut self, id: &str, patch: CalendarDiff) -> Result<()> {
+        self.check_ids(id, None)?;
+
         match self.open()? {
             #[cfg(not(any(
                 feature = "vdir",
@@ -432,6 +468,8 @@ impl CalendarClient {
 
     /// Deletes the calendar `id` and every item it contains.
     pub fn delete_calendar(&mut self, id: &str) -> Result<()> {
+        self.check_ids(id, None)?;
+
         match self.open()? {
             #[cfg(not(any(
                 feature = "vdir",
@@ -466,6 +504,8 @@ impl CalendarClient {
         page_size: Option<u32>,
         mut query: CalendarItemQuery<'_>,
     ) -> Result<CalendarItemPage> {
+        self.check_ids(calendar_id, None)?;
+
         let page_size = page_size.filter(|size| *size > 0).map(|size| size as usize);
 
         if let Some(size) = page_size {
@@ -532,6 +572,8 @@ impl CalendarClient {
 
     /// Fetches the item `item_id` from `calendar_id`.
     pub fn get_item(&mut self, calendar_id: &str, item_id: &str) -> Result<CalendarItem> {
+        self.check_ids(calendar_id, Some(item_id))?;
+
         match self.open()? {
             #[cfg(not(any(
                 feature = "vdir",
@@ -568,6 +610,7 @@ impl CalendarClient {
         #[cfg(not(feature = "gcal"))]
         let _ = send_updates;
 
+        self.check_ids(calendar_id, None)?;
         self.refuse_invitations("create", calendar_id, None, Some(&contents))?;
 
         match self.open()? {
@@ -610,6 +653,7 @@ impl CalendarClient {
         #[cfg(not(feature = "gcal"))]
         let _ = send_updates;
 
+        self.check_ids(calendar_id, Some(item_id))?;
         self.refuse_invitations("update", calendar_id, Some(item_id), Some(&contents))?;
 
         match self.open()? {
@@ -661,6 +705,7 @@ impl CalendarClient {
         #[cfg(not(feature = "gcal"))]
         let _ = send_updates;
 
+        self.check_ids(calendar_id, Some(item_id))?;
         self.refuse_invitations("delete", calendar_id, Some(item_id), None)?;
 
         match self.open()? {
@@ -774,7 +819,8 @@ mod tests {
 
         let account = AccountConfig {
             vdir: Some(VdirConfig {
-                home_dir: dir.path().to_path_buf(),
+                root: dir.path().to_path_buf(),
+                home_dir: None,
             }),
             ..Default::default()
         };

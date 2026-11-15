@@ -42,11 +42,11 @@ pub struct VdirBackend {
 impl VdirBackend {
     /// Opens the backend on the configured home directory.
     ///
-    /// The path arrives shell-expanded, [`VdirConfig::home_dir`] doing
+    /// The path arrives shell-expanded, [`VdirConfig::root`] doing
     /// it at deserialize. Nothing is checked here, so a missing home
     /// surfaces on the first operation.
     pub fn new(config: VdirConfig) -> Self {
-        let root = VdirPath::new(config.home_dir.to_string_lossy().into_owned());
+        let root = VdirPath::new(config.root.to_string_lossy().into_owned());
 
         Self {
             client: VdirClient::new(root.clone()),
@@ -300,7 +300,8 @@ mod tests {
         fs::write(home.path().join("cal").join("a.ics"), "BEGIN:VCALENDAR\r\n").unwrap();
 
         let config = VdirConfig {
-            home_dir: home.path().to_path_buf(),
+            root: home.path().to_path_buf(),
+            home_dir: None,
         };
         (home, VdirBackend::new(config))
     }

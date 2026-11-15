@@ -136,14 +136,14 @@ fn check_account(account_config: &AccountConfig, backend: Backend) -> Vec<Backen
 /// The vdir home has to be a directory that exists: everything else is
 /// a per-collection concern a command reports on its own.
 ///
-/// The path arrives shell-expanded, `VdirConfig::home_dir` doing it at
+/// The path arrives shell-expanded, `VdirConfig::root` doing it at
 /// deserialize.
 #[cfg(feature = "vdir")]
 fn check_vdir(config: crate::config::VdirConfig) -> Result<()> {
-    if !config.home_dir.is_dir() {
+    if !config.root.is_dir() {
         bail!(
             "vdir home `{}` does not exist or is not a directory",
-            config.home_dir.display()
+            config.root.display()
         );
     }
 
@@ -303,7 +303,7 @@ mod tests {
             std::fs::write(
                 &config,
                 format!(
-                    "[accounts.test]\ndefault = true\nvdir.home-dir = {:?}\n",
+                    "[accounts.test]\ndefault = true\nvdir.root = {:?}\n",
                     home.display().to_string(),
                 ),
             )

@@ -15,10 +15,10 @@
 //! no longer reads are refused by name: `todo` and `journal`, their
 //! domains having moved to unfog and journal, and the rendering tables
 //! (`table`, `account`, `calendar.list`, `event.list.table`,
-//! `item.list.table`), the output being plain text. So is the
-//! `caldav.discover` key, `caldav.server` naming the root instead. Each
-//! refusal is pimalaya-config's sentence (`removed_key!`), naming
-//! MIGRATION.md.
+//! `item.list.table`), the output being plain text. So are the
+//! `caldav.discover` key, `caldav.server` naming the root instead, and
+//! the `vdir.home-dir` key, `vdir.root` naming the home. Each refusal is
+//! pimalaya-config's sentence (`removed_key!`), naming MIGRATION.md.
 
 use std::collections::HashMap;
 #[cfg(any(
@@ -386,9 +386,13 @@ pub struct ItemListConfig {
 pub struct VdirConfig {
     /// Filesystem path of the vdir home: the directory holding one
     /// subdirectory per calendar. Shell-expanded at load, so `~` and
-    /// environment variables both work.
+    /// environment variables both work, as in `pimdir.root`.
     #[serde(deserialize_with = "shell_expanded_path")]
-    pub home_dir: PathBuf,
+    pub root: PathBuf,
+    /// Refused: the home is `root`, as a pimdir store's.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub home_dir: Option<VdirHomeDirRemovedConfig>,
 }
 
 /// pimdir backend configuration.
@@ -467,6 +471,15 @@ removed_key! {
         instead: "name the server in `caldav.server` instead (Fastmail's \
                   `https://caldav.fastmail.com/dav/`, Google's \
                   `https://apidata.googleusercontent.com/caldav/v2/`)",
+    }
+
+    /// The `vdir.home-dir` key, refused by name, the vdir home being
+    /// `vdir.root`.
+    #[cfg_attr(not(feature = "vdir"), allow(dead_code))]
+    pub VdirHomeDirRemovedConfig: Key {
+        name: "vdir.home-dir",
+        why: "the vdir home being named `root` as a store root is",
+        instead: "rename it `vdir.root`, the path unchanged",
     }
 }
 
@@ -764,12 +777,35 @@ mod tests {
     }
 
     /// Expansion happens at deserialize, so no call site can read a
-    /// literal `./~/…` directory under the current one.
+    /// literal `./~/…` directory under the current one; an environment
+    /// variable expands as the tilde does.
     #[cfg(feature = "vdir")]
     #[test]
-    fn a_vdir_home_expands_its_tilde_at_deserialize() {
-        let config: VdirConfig = toml::from_str(r#"home-dir = "~/calendars""#).unwrap();
-        assert_eq!(config.home_dir, home().join("calendars"));
+    fn a_vdir_root_expands_its_tilde_at_deserialize() {
+        for root in ["~/calendars", "$HOME/calendars"] {
+            let document = format!("root = {root:?}");
+            let config: VdirConfig = toml::from_str(&document).unwrap();
+            assert_eq!(config.root, home().join("calendars"), "{root}");
+        }
+    }
+
+    /// `vdir.home-dir`, the vdir home 0.2 read, is refused by name in the
+    /// family sentence, alone or beside `vdir.root`.
+    #[cfg(feature = "vdir")]
+    #[test]
+    fn a_vdir_home_dir_is_refused_by_name() {
+        let sentence = "The `vdir.home-dir` key is removed, the vdir home being \
+                        named `root` as a store root is: rename it `vdir.root`, \
+                        the path unchanged, see MIGRATION.md";
+
+        for vdir in [
+            "vdir.home-dir = \"~/calendars\"\n",
+            "vdir.root = \"~/calendars\"\nvdir.home-dir = \"~/calendars\"\n",
+        ] {
+            let document = format!("[accounts.a]\n{vdir}");
+            let err = toml::from_str::<Config>(&document).unwrap_err().to_string();
+            assert!(err.contains(sentence), "{err}");
+        }
     }
 
     #[cfg(feature = "pimdir")]
@@ -883,10 +919,7 @@ mod tests {
     #[test]
     fn an_unknown_backend_or_nested_key_is_refused() {
         for (document, refusal) in [
-            (
-                "[accounts.a]\nvdir.home-dri = \"~/c\"\n",
-                "unknown field `home-dri`",
-            ),
+            ("[accounts.a]\nvdir.rot = \"~/c\"\n", "unknown field `rot`"),
             (
                 "[accounts.a]\ncaldav.server = \"example.org\"\n\
                  caldav.auth = \"none\"\ncaldav.tls.certificate = \"ca.pem\"\n",
@@ -912,7 +945,7 @@ mod tests {
     #[test]
     fn a_backend_left_out_of_the_build_still_loads() {
         let document = "[accounts.a]\n\
-                        vdir.home-dir = \"~/calendars\"\n\
+                        vdir.root = \"~/calendars\"\n\
                         pimdir.root = \"~/store\"\n\
                         caldav.server = \"example.org\"\n\
                         caldav.auth = \"none\"\n\

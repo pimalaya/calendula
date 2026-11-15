@@ -230,8 +230,8 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 | `backend-not-built` | the account's backend is one this build leaves out, its block loaded unread: the message names the cargo feature bringing it back; nothing was read or connected |
 | `capability-missing` | the backend the account resolves to does not serve a capability the command reaches; nothing was read, opened or connected |
 | `stdin-taken` | a command run inside a session (`repl`, `mcp`) would read its iCalendar from stdin, which carries the session's commands; nothing was read |
-| `item-not-found` | the item a command names is not in the calendar: the failure of `item read`, `item update`, `item delete`, `event read`, `event update` or `event delete` |
-| `calendar-not-found` | the calendar a command names does not exist; nothing was read or written |
+| `item-not-found` | the item a command names is not in the calendar: the failure of `item read`, `item update`, `item delete`, `event read`, `event update` or `event delete`; an item id no CalDAV item can have, before anything connects (backends, "A CalDAV id addresses its own resource") |
+| `calendar-not-found` | the calendar a command names does not exist, or no calendar can have its id (not one vdir directory name, refused by io-webdav on CalDAV); nothing was read or written |
 | `calendar-default-missing` | a unified or pimdir command names no calendar and the account sets no `calendar.default`; nothing was read |
 | `item-unreadable` | the backend answered for an item calendula could not read: its file could not be read (vdir), its iCalendar did not parse, the server refused it while it was read again (Graph), its body could not be read or is missing from the store (pimdir); an `errors` entry |
 | `permission-denied` | the server refused the request to the account (see "A server's refusal carries its code") |

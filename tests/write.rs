@@ -29,7 +29,7 @@ fn account(default: &str) -> TempDir {
     fs::create_dir(home.path().join("personal")).unwrap();
 
     let config = format!(
-        "[accounts.perso]\ndefault = true\n{default}vdir.home-dir = {:?}\n",
+        "[accounts.perso]\ndefault = true\n{default}vdir.root = {:?}\n",
         home.path().display().to_string()
     );
     fs::write(home.path().join("config.toml"), config).unwrap();

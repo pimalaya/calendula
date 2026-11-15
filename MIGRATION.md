@@ -4,7 +4,7 @@
 
 The next release brings calendula onto the standards Himalaya, Ortie and cardamum share: it manages events alone, drops the configuration wizard, takes one configuration path per `-c`, prints plain text with no table nor colour, serves a unified API whose backends say what they serve, and adds a REPL and an MCP server.
 
-A 0.2 configuration loads as it is, unless it holds a `todo`, `journal`, `table` or top-level `account` table, a colour key, `caldav.discover`, a key calendula does not know, a non-ASCII CalDAV host, or several default accounts.
+A 0.2 configuration loads as it is, unless it holds a `todo`, `journal`, `table` or top-level `account` table, a colour key, `caldav.discover`, `vdir.home-dir`, a key calendula does not know, a non-ASCII CalDAV host, or several default accounts.
 
 The text output changes everywhere, a few JSON outputs and exit codes move, and some commands fail earlier. The CHANGELOG lists every change; these are the ones to act on.
 
@@ -65,6 +65,16 @@ The text output changes everywhere, a few JSON outputs and exit codes move, and 
 
   # next
   caldav.server = "https://caldav.fastmail.com/dav/"
+  ```
+
+- **`vdir.home-dir` is now `vdir.root`**, as `pimdir.root` names a store. A configuration still holding `vdir.home-dir` fails by name (``The `vdir.home-dir` key is removed, …: rename it `vdir.root`, the path unchanged, see MIGRATION.md``). Rename the key and keep its path; `~` and environment variables still expand.
+
+  ```toml
+  # 0.2
+  vdir.home-dir = "~/.local/share/vdirsyncer/calendars"
+
+  # next
+  vdir.root = "~/.local/share/vdirsyncer/calendars"
   ```
 
 ### pimdir store

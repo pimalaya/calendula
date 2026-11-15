@@ -315,7 +315,8 @@ mod tests {
         fn client(dir: &tempfile::TempDir) -> CalendarClient {
             let account = AccountConfig {
                 vdir: Some(VdirConfig {
-                    home_dir: dir.path().to_path_buf(),
+                    root: dir.path().to_path_buf(),
+                    home_dir: None,
                 }),
                 ..Default::default()
             };

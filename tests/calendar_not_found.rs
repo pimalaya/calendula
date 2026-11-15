@@ -34,7 +34,7 @@ fn account() -> TempDir {
     fs::write(calendar.join("a.ics"), ics).unwrap();
 
     let config = format!(
-        "[accounts.perso]\ndefault = true\nvdir.home-dir = {:?}\n",
+        "[accounts.perso]\ndefault = true\nvdir.root = {:?}\n",
         outer.join("home").display().to_string()
     );
     fs::write(dir.path().join("config.toml"), config).unwrap();
