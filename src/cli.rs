@@ -657,10 +657,6 @@ mod namespace_tests {
         }
 
         assert!(matches!(
-            parse("vdir item create cal --kind ical -"),
-            Command::Vdir(VdirCommand::Item(Item::Create(_)))
-        ));
-        assert!(matches!(
             parse("vdir item move cal work e1"),
             Command::Vdir(VdirCommand::Item(Item::Move(_)))
         ));
@@ -668,5 +664,36 @@ mod namespace_tests {
             parse("vdir ls"),
             Command::Vdir(VdirCommand::List(_))
         ));
+    }
+
+    /// `vdir item add` stores an item, the family verb for one (pimalaya-cli
+    /// commands.md), `create` a hidden alias and `new` still a visible one.
+    #[test]
+    fn the_vdir_item_is_added() {
+        use VdirItemCommand as Item;
+
+        for verb in ["add", "create", "new"] {
+            let line = format!("vdir item {verb} cal --kind ical -");
+            let Command::Vdir(VdirCommand::Item(Item::Add(cmd))) = parse(&line) else {
+                panic!("{line}")
+            };
+            assert_eq!(cmd.collection, "cal", "{line}");
+            assert!(cmd.kind.is_some(), "{line}");
+        }
+
+        let mut item = Cli::command();
+
+        for name in ["vdir", "item"] {
+            item = item.find_subcommand(name).unwrap().clone();
+        }
+
+        let add = item.find_subcommand("add").unwrap();
+        assert_eq!(add.get_name(), "add");
+        let visible: Vec<_> = add.get_visible_aliases().collect();
+        assert_eq!(visible, ["new"]);
+
+        let help = item.render_help().to_string();
+        assert!(help.contains("  add "), "{help}");
+        assert!(!help.contains("create"), "{help}");
     }
 }

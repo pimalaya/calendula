@@ -1,4 +1,4 @@
-//! # Item create command
+//! # Item add command
 //!
 //! Stores a new item file in a collection, inferring its kind when the
 //! command does not give one.
@@ -23,7 +23,7 @@ use crate::vdir::{
 /// with `--kind`. JSON output: `{"id"}`, the file stem the item landed
 /// under.
 #[derive(Debug, Parser)]
-pub struct VdirItemCreateCommand {
+pub struct VdirItemAddCommand {
     /// Collection to store the item in.
     #[arg(value_name = "COLLECTION")]
     pub collection: String,
@@ -34,7 +34,7 @@ pub struct VdirItemCreateCommand {
     pub input: ItemInputArg,
 }
 
-impl VdirItemCreateCommand {
+impl VdirItemAddCommand {
     pub fn execute(self, printer: &mut impl Printer, client: VdirClient) -> Result<()> {
         let path = client.collection_path(&self.collection)?;
         let contents = self.input.read()?;
@@ -45,19 +45,19 @@ impl VdirItemCreateCommand {
 
         let (id, _) = client.store_item(path, None, kind, contents)?;
 
-        printer.out(VdirItemCreateOutput { id })
+        printer.out(VdirItemAddOutput { id })
     }
 }
 
 /// The item the collection now holds.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct VdirItemCreateOutput {
+pub struct VdirItemAddOutput {
     /// Item id, the file stem it was stored under.
     pub id: String,
 }
 
-impl fmt::Display for VdirItemCreateOutput {
+impl fmt::Display for VdirItemAddOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Item `{}` successfully created", self.id)
     }

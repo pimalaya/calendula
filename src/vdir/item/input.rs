@@ -1,6 +1,6 @@
 //! # Item input
 //!
-//! The item source shared by the create and update commands, plus the kind
+//! The item source shared by the add and update commands, plus the kind
 //! selector and the sniffing that infers a kind from the bytes.
 
 use std::{
@@ -13,7 +13,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, ValueEnum};
 use io_vdir::item::VdirItemKind;
 
-/// Positional item source shared by `item create` and `item update`.
+/// Positional item source shared by `item add` and `item update`.
 #[derive(Debug, Parser)]
 pub struct ItemInputArg {
     /// A path to an item file, raw item contents, or `-` for stdin.
@@ -53,7 +53,7 @@ impl ItemInputArg {
     }
 }
 
-/// Item kind selector for `item create`.
+/// Item kind selector for `item add`.
 #[derive(Clone, Copy, Debug, ValueEnum)]
 #[value(rename_all = "kebab-case")]
 pub enum ItemKindArg {

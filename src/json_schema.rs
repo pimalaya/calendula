@@ -307,8 +307,8 @@ pub fn registry() -> JsonSchemaRegistry {
             crate::vdir::item::get::VdirItemGetOutput
         );
         insert!(
-            "calendula-vdir-item-create",
-            crate::vdir::item::create::VdirItemCreateOutput
+            "calendula-vdir-item-add",
+            crate::vdir::item::add::VdirItemAddOutput
         );
         for key in [
             "calendula-vdir-item-update",

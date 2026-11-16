@@ -3,9 +3,9 @@
 //! Commands over the raw files a collection holds, of any kind, passing
 //! their bytes through untouched.
 
+pub mod add;
 pub mod cli;
 pub mod copy;
-pub mod create;
 pub mod delete;
 pub mod get;
 pub mod input;

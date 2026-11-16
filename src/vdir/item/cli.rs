@@ -10,7 +10,7 @@ use pimalaya_cli::printer::Printer;
 use crate::vdir::{
     client::VdirClient,
     item::{
-        copy::VdirItemCopyCommand, create::VdirItemCreateCommand, delete::VdirItemDeleteCommand,
+        add::VdirItemAddCommand, copy::VdirItemCopyCommand, delete::VdirItemDeleteCommand,
         get::VdirItemGetCommand, list::VdirItemListCommand, r#move::VdirItemMoveCommand,
         update::VdirItemUpdateCommand,
     },
@@ -27,8 +27,8 @@ pub enum VdirItemCommand {
     #[command(visible_alias = "ls")]
     List(VdirItemListCommand),
     Get(VdirItemGetCommand),
-    #[command(visible_alias = "new")]
-    Create(VdirItemCreateCommand),
+    #[command(visible_alias = "new", alias = "create")]
+    Add(VdirItemAddCommand),
     Update(VdirItemUpdateCommand),
     #[command(visible_alias = "rm")]
     Delete(VdirItemDeleteCommand),
@@ -42,7 +42,7 @@ impl VdirItemCommand {
         match self {
             Self::List(cmd) => cmd.execute(printer, client),
             Self::Get(cmd) => cmd.execute(printer, client),
-            Self::Create(cmd) => cmd.execute(printer, client),
+            Self::Add(cmd) => cmd.execute(printer, client),
             Self::Update(cmd) => cmd.execute(printer, client),
             Self::Delete(cmd) => cmd.execute(printer, client),
             Self::Copy(cmd) => cmd.execute(printer, client),

@@ -89,7 +89,12 @@ A protocol command renamed or moved SHALL keep its former name, hidden from the 
 `vdir list` SHALL print each collection `{id, displayName, description, color, path}` under `--json`, each of the three `null` when its marker file is absent, as cardamum's does; its text SHALL be the columns ID, PATH, COLOR, NAME, the description under `--json` alone, as `calendar list` prints it.
 
 ### Requirement: vdir items
-`vdir item` (visible alias `items`) SHALL cover the raw files of a collection, byte for byte and of any kind, as cardamum's `vdir item` does: `list <COLLECTION>` (`{"items": [{id, kind, size, path}]}`), `get <COLLECTION> <ID>` (`{id, kind, contents, encoding}`, its text the bytes), `create <COLLECTION> [--kind ical|vcard] <INPUT>` (the kind sniffed from the bytes when omitted, `{id}`), `update <COLLECTION> <ID> <INPUT>` (its kind kept), `delete`, `copy <SOURCE> <TARGET> <ID>` and `move <SOURCE> <TARGET> <ID>`, each write printing `{id}`. A collection that is not one directory name of the home SHALL fail `calendar-not-found`, an item it does not hold `item-not-found`.
+`vdir item` (visible alias `items`) SHALL cover the raw files of a collection, byte for byte and of any kind, as cardamum's `vdir item` does: `list <COLLECTION>` (`{"items": [{id, kind, size, path}]}`), `get <COLLECTION> <ID>` (`{id, kind, contents, encoding}`, its text the bytes), `add <COLLECTION> [--kind ical|vcard] <INPUT>` (visible alias `new`, `create` a hidden one; the kind sniffed from the bytes when omitted, `{id}`), `update <COLLECTION> <ID> <INPUT>` (its kind kept), `delete`, `copy <SOURCE> <TARGET> <ID>` and `move <SOURCE> <TARGET> <ID>`, each write printing `{id}`. A collection that is not one directory name of the home SHALL fail `calendar-not-found`, an item it does not hold `item-not-found`.
+
+#### Scenario: A raw item is added
+- WHEN `calendula vdir item add cal --kind ical -` runs
+- THEN it stores the item read from stdin in `cal` and prints `{id}`
+- AND `vdir item create` and `vdir item new` run the same command, and `calendula vdir item --help` lists `add` (alias `new`) and not `create`
 
 ### Requirement: The component families against item
 The unified API SHALL offer two kinds of view over the same resources. `item` is the raw, unfiltered one: it lists, reads, writes and deletes any iCalendar object by id, leaving the bytes untouched, a to-do or a journal entry included.
