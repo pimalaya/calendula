@@ -204,12 +204,17 @@ msgraph SHALL adapt io-msgraph's calendars and events. A calendar is a Graph cal
 
 A listing SHALL follow its pages through io-msgraph, which refuses a paging link leaving the Graph origin, the request it builds carrying the account's token.
 
-Graph narrows a listing by time only through the calendar view, which expands every series, so a range SHALL filter the listed items locally, as on vdir. Graph models a VEVENT and nothing else, so another kind SHALL be answered empty without a round-trip. A write of a series SHALL go through io-msgraph's `MsgraphEventSeries`: the master created or patched, then each occurrence the document cancels (an EXDATE) deleted and each it overrides patched, through the instance `event_instances` lists for it in the change's window (`is_instance`); a delete whose instance is not listed is done already, a patch naming an occurrence the series does not have SHALL be refused. A create whose occurrence fails SHALL delete the series again. What Graph cannot hold (`left_out`: an RDATE, an EXRULE, a RANGE) SHALL be left out with a warning naming it. An update naming an etag SHALL be refused when the master's `changeKey` moved. Graph mints a calendar's id, so msgraph SHALL declare `calendar.create.id` `none`.
+Graph narrows a listing by time only through the calendar view, which expands every series, so a range SHALL filter the listed items locally, as on vdir. A series master whose recurrence range, as the listing gives it, ends before the range or starts after it SHALL be left out unread, neither read again for its cancelled occurrences nor its instances listed. Graph models a VEVENT and nothing else, so another kind SHALL be answered empty without a round-trip. A write of a series SHALL go through io-msgraph's `MsgraphEventSeries`: the master created or patched, then each occurrence the document cancels (an EXDATE) deleted and each it overrides patched, through the instance `event_instances` lists for it in the change's window (`is_instance`); a delete whose instance is not listed is done already, a patch naming an occurrence the series does not have SHALL be refused. A create whose occurrence fails SHALL delete the series again. What Graph cannot hold (`left_out`: an RDATE, an EXRULE, a RANGE) SHALL be left out with a warning naming it. An update naming an etag SHALL be refused when the master's `changeKey` moved. Graph mints a calendar's id, so msgraph SHALL declare `calendar.create.id` `none`.
 
 #### Scenario: An open-ended series older than five years
 - GIVEN a Microsoft 365 calendar holding a weekly series started six years ago with no end, one occurrence this week moved by a day
 - WHEN `event list` lists this week
 - THEN it succeeds, and lists the moved occurrence on its new day
+
+#### Scenario: A calendar holding years of ended series
+- GIVEN a Microsoft 365 calendar holding 135 series masters, 117 of them ended before this week
+- WHEN `event list --from` and `--to` list this week
+- THEN no request reads one of the 117 again or lists its instances
 
 ### Requirement: vdir backend
 vdir SHALL adapt io-vdir. A collection directory is a calendar and its metadata marker files carry the display name, description and color; each `.ics` file inside is an item, and a `.vcf` file is not.

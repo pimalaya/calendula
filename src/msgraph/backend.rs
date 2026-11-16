@@ -199,10 +199,17 @@ impl MsgraphBackend {
             page = self.client.events_list_from_link(&next)?.response;
         }
 
+        let days = range_days(query.range)?;
         let within = read_within(query.range, today())?;
         let mut items = Vec::new();
         let mut errors = Vec::new();
         for event in unique(events)? {
+            // NOTE: a series out of the range lists nothing, so it is not
+            // read again: a calendar keeps every series it ever had.
+            if !reaches(&event, days) {
+                continue;
+            }
+
             let id = event.id.clone();
             let (event, exceptions) = match self.reread(event, within) {
                 Ok(read) => read,
@@ -559,11 +566,27 @@ fn today() -> Date {
     Timestamp::now().to_zoned(TimeZone::UTC).date()
 }
 
-/// The days a series is read for exceptions within, as `instance_windows`
-/// takes them, the second excluded: those `range` lists, a day wider
-/// either side for the zones, a side it leaves open, or no range at all,
-/// reaching [`HORIZON_YEARS`] from today.
-fn read_within(range: Option<&CalendarTimeRange>, today: Date) -> Result<(Date, Date)> {
+/// Whether a listed event may have an occurrence within `days`, as
+/// [`range_days`] reads them: false only for a series whose recurrence
+/// range ends before the first or starts on or after the second.
+fn reaches(event: &MsgraphEvent, (from, to): (Option<Date>, Option<Date>)) -> bool {
+    if event.event_type != Some(MsgraphEventType::SeriesMaster) {
+        return true;
+    }
+
+    let bounds = event.recurrence.as_option().and_then(|r| r.bounds());
+    let Some((start, end)) = bounds else {
+        return true;
+    };
+
+    let ended = matches!((end, from), (Some(end), Some(from)) if end < from);
+    let later = matches!(to, Some(to) if start >= to);
+    !ended && !later
+}
+
+/// The days `range` lists, the second excluded, a day wider either side
+/// for the zones, a side it leaves open `None`.
+fn range_days(range: Option<&CalendarTimeRange>) -> Result<(Option<Date>, Option<Date>)> {
     let day = |stamp: Option<&String>| -> Result<Option<Date>> {
         let Some(stamp) = stamp else {
             return Ok(None);
@@ -585,6 +608,16 @@ fn read_within(range: Option<&CalendarTimeRange>, today: Date) -> Result<(Date, 
         Some(to) => Some(to.checked_add(1.day())?),
         None => None,
     };
+
+    Ok((from, to))
+}
+
+/// The days a series is read for exceptions within, as `instance_windows`
+/// takes them, the second excluded: those `range` lists, a day wider
+/// either side for the zones, a side it leaves open, or no range at all,
+/// reaching [`HORIZON_YEARS`] from today.
+fn read_within(range: Option<&CalendarTimeRange>, today: Date) -> Result<(Date, Date)> {
+    let (from, to) = range_days(range)?;
 
     let years = HORIZON_YEARS.years();
     let from = match from {
@@ -974,6 +1007,59 @@ pub(crate) mod scripted {
         };
         let listed = answering(&answers).list_items("cal", later).unwrap();
         assert!(listed.errors.is_empty(), "{:?}", listed.errors);
+    }
+
+    /// A series whose recurrence range ends before the range listed, or
+    /// starts after it, is neither read again nor its instances listed.
+    #[test]
+    fn a_series_out_of_the_range_is_not_read_again() {
+        use chrono::NaiveDate;
+
+        let recurrence = |range: &str| {
+            format!(
+                r#""recurrence":{{"pattern":{{"type":"weekly","interval":1,
+                   "daysOfWeek":["monday"]}},"range":{range}}}"#
+            )
+        };
+        let ended =
+            recurrence(r#"{"type":"endDate","startDate":"2024-01-01","endDate":"2024-12-30"}"#);
+        let later = recurrence(r#"{"type":"noEnd","startDate":"2030-01-07"}"#);
+        let current = recurrence(r#"{"type":"noEnd","startDate":"2026-11-02"}"#);
+        let master = |id: &str, recurrence: &str| {
+            format!(
+                r#"{{"id":"{id}","changeKey":"k1","subject":"{id}",
+                   "type":"seriesMaster",
+                   "start":{{"dateTime":"2026-11-02T09:00:00","timeZone":"UTC"}},
+                   "end":{{"dateTime":"2026-11-02T09:30:00","timeZone":"UTC"}},
+                   {recurrence}}}"#
+            )
+        };
+        let listing = format!(
+            r#"{{"value":[{},{},{}]}}"#,
+            master("ENDED", &ended),
+            master("LATER", &later),
+            master("CURRENT", &current),
+        );
+        let reread = master("CURRENT", &current);
+        let mut backend = answering(&[(200, &listing), (200, &reread), (200, r#"{"value":[]}"#)]);
+
+        let from = NaiveDate::from_ymd_opt(2026, 11, 16);
+        let range = CalendarTimeRange::from_days(from, from).unwrap().unwrap();
+        let query = CalendarItemQuery {
+            range: Some(&range),
+            ..Default::default()
+        };
+        let listed = backend.list_items("cal", query).unwrap();
+        let ids: Vec<&str> = listed.items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(ids, ["CURRENT"], "{:?}", listed.errors);
+
+        let sent = requests(&mut backend);
+        assert_eq!(sent.len(), 3, "{sent:#?}");
+        assert!(sent[1].contains("/me/events/CURRENT?"), "{sent:#?}");
+        assert!(
+            sent[2].contains("/me/events/CURRENT/instances?"),
+            "{sent:#?}"
+        );
     }
 
     /// A write the server refuses prints its code in the failure object,

@@ -185,6 +185,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Fixed msgraph listings dropping the cancelled occurrences of a series: Graph returns them only on a read of the master by id, so each master is now read so before projection. ([#11](https://github.com/pimalaya/calendula/issues/11))
 - Fixed msgraph listings repeating an event Graph returned on both sides of a page boundary; one id at two revisions is now an error. ([#12](https://github.com/pimalaya/calendula/issues/12))
 - Fixed a msgraph listing failing whole on a recurring series with no end or bounded over five years, Graph refusing an instances read past five years ([#31](https://github.com/pimalaya/calendula/issues/31)).
+- Fixed a msgraph `event list` over a range reading again every series the calendar ever held, ended ones included, so its time grew with the calendar's history (about a minute for one day on a calendar of 135 series): a series whose recurrence ends before the range or starts after it is no longer read ([#32](https://github.com/pimalaya/calendula/issues/32)).
 
   A series is read within the range listed, or five years either side of today without one, in windows Graph accepts (io-msgraph 0.9.1), so an old series' recent exceptions are read too. A window Graph refuses makes that series an `errors` entry.
 - Fixed a Google calendar or event id holding `#`, `?` or `/` naming another resource: the events of a subscribed calendar such as `en.usa#holiday@group.v.calendar.google.com` list and read (io-gcal 0.4).
