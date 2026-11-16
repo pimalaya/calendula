@@ -29,7 +29,12 @@ pub struct MsgraphEventListCommand {
     )]
     pub calendar: Option<String>,
     /// Maximum number of events in the page (`$top`).
-    #[arg(short = 's', long, value_name = "N", conflicts_with = "page_token")]
+    #[arg(
+        long,
+        short_alias = 's',
+        value_name = "N",
+        conflicts_with = "page_token"
+    )]
     pub top: Option<u32>,
     /// Comma-separated properties to return (`$select`).
     #[arg(long, value_name = "CSV", conflicts_with = "page_token")]

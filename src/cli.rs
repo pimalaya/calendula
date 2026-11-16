@@ -610,6 +610,40 @@ mod namespace_tests {
         assert!(Cli::try_parse_from(window.split_whitespace()).is_err());
     }
 
+    /// The Graph listings show `--top` long-only, as Himalaya's do, the
+    /// former `-s` still read as `--top`.
+    #[test]
+    fn the_msgraph_top_is_long_only() {
+        use MsgraphCalendarsCommand as Calendars;
+        use MsgraphCommand as Graph;
+        use MsgraphEventsCommand as Events;
+
+        for resource in ["calendars", "events"] {
+            let mut command = Cli::command();
+
+            for name in ["msgraph", resource, "list"] {
+                command = command.find_subcommand(name).unwrap().clone();
+            }
+
+            let help = command.render_help().to_string();
+            assert!(help.contains("--top <N>"), "{help}");
+            assert!(!help.contains("-s,"), "{help}");
+        }
+
+        let Command::Msgraph(Graph::Calendars(Calendars::List(list))) =
+            parse("msgraph calendars list -s 5")
+        else {
+            panic!("calendars list");
+        };
+        assert_eq!(list.top, Some(5));
+
+        let Command::Msgraph(Graph::Events(Events::List(list))) = parse("msgraph events list -s 5")
+        else {
+            panic!("events list");
+        };
+        assert_eq!(list.top, Some(5));
+    }
+
     /// The vdir items parse, under `item` and `items`.
     #[test]
     fn the_vdir_items_parse() {

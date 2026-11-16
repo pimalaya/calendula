@@ -17,7 +17,12 @@ use crate::msgraph::{calendars::render::MsgraphCalendarsOutput, client::MsgraphC
 #[derive(Debug, Parser)]
 pub struct MsgraphCalendarListCommand {
     /// Maximum number of calendars in the page (`$top`).
-    #[arg(short = 's', long, value_name = "N", conflicts_with = "page_token")]
+    #[arg(
+        long,
+        short_alias = 's',
+        value_name = "N",
+        conflicts_with = "page_token"
+    )]
     pub top: Option<u32>,
     /// The page to resume at, carrying the query.
     #[command(flatten)]
