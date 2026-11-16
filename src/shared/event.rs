@@ -253,7 +253,7 @@ impl Event {
             return parse_stamp(&self.wire_start);
         };
 
-        let at = at.to_zoned(zone.clone()).datetime();
+        let at = at.to_zoned_datetime(zone.clone()).datetime();
         let date = NaiveDate::from_ymd_opt(at.year().into(), at.month() as u32, at.day() as u32)?;
         date.and_hms_opt(at.hour() as u32, at.minute() as u32, at.second() as u32)
     }

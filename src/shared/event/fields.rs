@@ -921,13 +921,15 @@ impl Moment {
     /// as UTC.
     fn anchor(&self) -> i64 {
         let instant = match self {
-            Self::Date(date) => date.to_zoned(TimeZone::UTC).map(|at| at.timestamp()),
-            Self::Floating(civil) | Self::Utc(civil) => {
-                civil.to_zoned(TimeZone::UTC).map(|at| at.timestamp())
-            }
+            Self::Date(date) => date
+                .to_zoned_datetime(TimeZone::UTC)
+                .map(|at| at.timestamp()),
+            Self::Floating(civil) | Self::Utc(civil) => civil
+                .to_zoned_datetime(TimeZone::UTC)
+                .map(|at| at.timestamp()),
             Self::Zoned(zone, civil) => zone
                 .tz
-                .to_ambiguous_zoned(*civil)
+                .to_ambiguous_zoned_datetime(*civil)
                 .compatible()
                 .map(|at| at.timestamp()),
         };
@@ -963,9 +965,12 @@ impl Moment {
             Self::Floating(civil) => Self::Floating(civil.checked_add(seconds.seconds())?),
             Self::Utc(civil) => Self::Utc(civil.checked_add(seconds.seconds())?),
             Self::Zoned(zone, civil) => {
-                let at = zone.tz.to_ambiguous_zoned(*civil).compatible()?;
+                let at = zone.tz.to_ambiguous_zoned_datetime(*civil).compatible()?;
                 let at = at.timestamp().checked_add(seconds.seconds())?;
-                Self::Zoned(zone.clone(), at.to_zoned(zone.tz.clone()).datetime())
+                Self::Zoned(
+                    zone.clone(),
+                    at.to_zoned_datetime(zone.tz.clone()).datetime(),
+                )
             }
         };
 

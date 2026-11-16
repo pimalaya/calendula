@@ -236,7 +236,7 @@ pub(crate) fn row_times(event: &Event, zone: &TimeZone) -> (String, String) {
     let local = |secs: Option<i64>, raw: &str| {
         secs.and_then(|secs| Timestamp::from_second(secs).ok())
             .map(|at| {
-                at.to_zoned(zone.clone())
+                at.to_zoned_datetime(zone.clone())
                     .strftime("%Y-%m-%d %H:%M")
                     .to_string()
             })

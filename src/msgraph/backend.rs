@@ -563,7 +563,7 @@ pub(crate) fn refusal_code(cause: &(dyn std::error::Error + 'static)) -> Option<
 
 /// Today's date in UTC, the day [`HORIZON_YEARS`] counts from.
 fn today() -> Date {
-    Timestamp::now().to_zoned(TimeZone::UTC).date()
+    Timestamp::now().to_zoned_datetime(TimeZone::UTC).date()
 }
 
 /// Whether a listed event may have an occurrence within `days`, as
@@ -1198,7 +1198,7 @@ pub(crate) mod scripted {
             "{days:?}"
         );
 
-        let at = |day: Date| day.to_zoned(TimeZone::UTC).unwrap().timestamp();
+        let at = |day: Date| day.to_zoned_datetime(TimeZone::UTC).unwrap().timestamp();
         let windows = instance_windows(&mut backend);
         assert!(
             windows
@@ -1229,7 +1229,7 @@ pub(crate) mod scripted {
             assert!(windows.len() > 1, "{windows:?}");
             for (start, end) in windows {
                 let limit = start
-                    .to_zoned(TimeZone::UTC)
+                    .to_zoned_datetime(TimeZone::UTC)
                     .checked_add(5.years())
                     .unwrap()
                     .timestamp();

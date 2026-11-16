@@ -791,7 +791,7 @@ fn rfc3339(at: i64, offset: i32) -> Option<String> {
     let offset = Offset::from_seconds(offset).ok()?;
     let zoned = Timestamp::from_second(at)
         .ok()?
-        .to_zoned(TimeZone::fixed(offset));
+        .to_zoned_datetime(TimeZone::fixed(offset));
 
     let format = match offset == Offset::UTC {
         true => "%Y-%m-%dT%H:%M:%SZ",
