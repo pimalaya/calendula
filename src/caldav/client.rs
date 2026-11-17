@@ -27,7 +27,7 @@ use url::{ParseError, Url};
 
 use crate::{
     cli::resolve_account,
-    config::{CaldavAuthConfig, CaldavConfig, ProxyConfig, default_caldav_alpn},
+    config::{CaldavAuthConfig, CaldavConfig, ProxyConfig, default_caldav_alpn, parse_url},
     error::{ErrorCode, recoded},
 };
 
@@ -94,15 +94,14 @@ pub fn connect(config: &CaldavConfig, resolver: &mut SecretResolver) -> Result<W
 /// Accepts a full URL, a bare domain, or `domain:port`; anything
 /// without an explicit `http` or `https` scheme defaults to `https://`,
 /// since `url` would otherwise read the leading label of `domain:port`
-/// as the scheme. A URL that fails to parse, a non-ASCII host among
-/// them, is refused rather than prefixed.
+/// as the scheme. A URL that fails to parse is refused rather than
+/// prefixed, a host that is not ASCII naming its Punycode form
+/// ([`parse_url`]).
 pub fn parse_server(server: &str) -> Result<Url> {
     match Url::parse(server) {
         Ok(url) if matches!(url.scheme(), "http" | "https") => Ok(url),
-        Ok(_) | Err(ParseError::RelativeUrlWithoutBase) => {
-            Ok(Url::parse(&format!("https://{server}"))?)
-        }
-        Err(err) => Err(err.into()),
+        Ok(_) | Err(ParseError::RelativeUrlWithoutBase) => parse_url(&format!("https://{server}")),
+        Err(_) => parse_url(server),
     }
 }
 
@@ -147,6 +146,26 @@ pub(crate) fn refused(err: &WebdavClientStdError) -> Option<(u16, &str)> {
         }) => Some((*status, body)),
         _ => None,
     }
+}
+
+/// `err` under a message saying the account configures no `auth`, when
+/// the server answered a request 401 (RFC 9110 §15.5.2) and `auth` sent
+/// no credential; any other failure is `err` unchanged, its code kept.
+pub fn unauthenticated(err: anyhow::Error, auth: &CaldavAuthConfig) -> anyhow::Error {
+    let asked = |cause: &(dyn std::error::Error + 'static)| {
+        cause
+            .downcast_ref::<WebdavClientStdError>()
+            .and_then(refused)
+            .is_some_and(|(status, _)| status == 401)
+    };
+
+    if !matches!(auth, CaldavAuthConfig::None) || !err.chain().any(asked) {
+        return err;
+    }
+
+    err.context(
+        "CalDAV server answered 401: it asks for credentials, and the account configures no `auth`",
+    )
 }
 
 /// The code of a CalDAV refusal in an error chain.
@@ -312,6 +331,26 @@ mod tests {
                 .map(String::from),
             Some(String::from("https://xn--bcher-kva.example/dav/"))
         );
+    }
+
+    /// The refusal of a host outside ASCII names the host and its Punycode
+    /// form as the way out, from `server` and `home` alike.
+    #[test]
+    fn a_non_ascii_host_names_its_punycode_form() {
+        let hint = "Host `bücher.example` is not ASCII: write it in its Punycode form";
+
+        for server in [
+            "https://bücher.example/dav/",
+            "bücher.example",
+            "bücher.example:8443",
+        ] {
+            let err = parse_server(server).unwrap_err().to_string();
+            assert!(err.contains(hint), "{server}: {err}");
+        }
+
+        let document = "home = \"https://alice@bücher.example:8443/dav/\"";
+        let err = toml::from_str::<CaldavConfig>(document).unwrap_err();
+        assert!(err.to_string().contains(hint), "{err}");
     }
 
     /// A URL that fails to parse is refused, rather than prefixed with

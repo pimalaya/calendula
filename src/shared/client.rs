@@ -37,7 +37,7 @@ use std::path::PathBuf;
 )))]
 use std::convert::Infallible;
 
-use anyhow::{Result, bail};
+use anyhow::{Error, Result, bail};
 use log::debug;
 use pimalaya_config::secret::SecretResolver;
 
@@ -235,6 +235,19 @@ impl CalendarClient {
         let (config, name, account_config) = resolve_account(config_paths, account_name)?;
 
         Self::new(config, name, account_config, backend)
+    }
+
+    /// `err` as the backend's configuration explains it: a CalDAV 401
+    /// to a block with no `auth` says the block configures none.
+    pub fn explain(&self, err: Error) -> Error {
+        match &self.config {
+            #[cfg(feature = "caldav")]
+            BackendConfig::Caldav(config) => {
+                crate::caldav::client::unauthenticated(err, &config.auth)
+            }
+            #[allow(unreachable_patterns)]
+            _ => err,
+        }
     }
 
     /// Drops the connection, so the next call opens a fresh one.

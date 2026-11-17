@@ -176,27 +176,34 @@ fn check_pimdir(config: crate::config::PimdirConfig) -> Result<()> {
 /// skips discovery, so a PROPFIND Depth 0 on it exercises the credential,
 /// through the client, sent again on a fresh connection when the server
 /// closed the one it was sent on.
+/// A 401 to a block with no `auth` says the block configures none.
 #[cfg(feature = "caldav")]
 fn check_caldav(config: crate::config::CaldavConfig, resolver: &mut SecretResolver) -> Result<()> {
     use io_webdav::rfc4918::{RESOURCETYPE, WebdavMultistatus, propfind::WebdavPropfind};
 
-    let mut client = crate::caldav::client::connect(&config, resolver)?;
+    use crate::caldav::client::{connect, unauthenticated};
 
-    let Some(home) = config.home else {
-        return Ok(());
+    let mut check = || -> Result<()> {
+        let mut client = connect(&config, resolver)?;
+
+        let Some(home) = &config.home else {
+            return Ok(());
+        };
+
+        let propfind = WebdavPropfind::<WebdavMultistatus>::new(
+            &client.base_url,
+            client.auth(),
+            &client.user_agent,
+            home.path(),
+            0,
+            &[RESOURCETYPE],
+        );
+        client.run(propfind)?;
+
+        Ok(())
     };
 
-    let propfind = WebdavPropfind::<WebdavMultistatus>::new(
-        &client.base_url,
-        client.auth(),
-        &client.user_agent,
-        home.path(),
-        0,
-        &[RESOURCETYPE],
-    );
-    client.run(propfind)?;
-
-    Ok(())
+    check().map_err(|err| unauthenticated(err, &config.auth))
 }
 
 /// Listing the calendars is the check: it resolves the token secret,
@@ -498,6 +505,35 @@ mod caldav_tests {
         assert!(head.starts_with("PROPFIND /calendars/alice/ "), "{head}");
         assert!(depth, "{head}");
         assert!(heads.try_recv().is_err());
+    }
+
+    /// A 401 to a block with no `auth` says the account configures none,
+    /// still uncoded, on the `home` route as on the `server` one; a
+    /// credential refused says nothing of the kind.
+    #[test]
+    fn a_401_without_auth_names_the_missing_auth() {
+        let (origin, _heads) = answering("401 Unauthorized", "Unauthorized");
+        let anonymous = |route: String| {
+            let config: CaldavConfig = toml::from_str(&route).unwrap();
+            checked("caldav", check_caldav(config, &mut SecretResolver::new()))
+        };
+
+        for row in [
+            anonymous(format!("server = \"{origin}/\"")),
+            anonymous(format!("home = \"{origin}/calendars/alice/\"")),
+        ] {
+            assert!(!row.ok, "{row:?}");
+            assert_eq!(row.code, None, "{row:?}");
+            let error = row.error.unwrap_or_default();
+            assert!(
+                error.contains("answered 401: it asks for credentials")
+                    && error.contains("the account configures no `auth`"),
+                "{error}"
+            );
+        }
+
+        let refused = check(format!("server = \"{origin}/\""));
+        assert!(!refused.error.unwrap().contains("no `auth`"));
     }
 
     /// A home answering its PROPFIND passes the check.

@@ -26,7 +26,7 @@ use pimalaya_config::toml::{ConfigMissingError, TomlConfig};
 #[cfg(feature = "caldav")]
 use crate::caldav::{
     cli::CaldavCommand,
-    client::{build_caldav_client, caldav_config},
+    client::{build_caldav_client, caldav_config, unauthenticated},
 };
 #[cfg(feature = "gcal")]
 use crate::gcal::{cli::GcalCommand, client::build_gcal_client};
@@ -203,8 +203,9 @@ impl Command {
             Self::Caldav(cmd) => {
                 let config = caldav_config(config_paths, account_name)?;
                 cmd.check()?;
-                let client = build_caldav_client(&config)?;
-                cmd.execute(printer, client)
+                build_caldav_client(&config)
+                    .and_then(|client| cmd.execute(printer, client))
+                    .map_err(|err| unauthenticated(err, &config.auth))
             }
             #[cfg(feature = "msgraph")]
             Self::Msgraph(cmd) => {

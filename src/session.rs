@@ -42,7 +42,8 @@ pub struct SessionAccount<'a> {
 impl Session<'_> {
     /// Runs a unified command over the kept client, building it when the
     /// session holds none, and dropping it when the command fails, a
-    /// partial outcome aside.
+    /// partial outcome aside. A failure is explained by the client
+    /// ([`CalendarClient::explain`]).
     pub fn run_unified<P: Printer>(
         &mut self,
         printer: &mut P,
@@ -58,7 +59,7 @@ impl Session<'_> {
             }
         };
 
-        let result = command(printer, client);
+        let result = command(printer, client).map_err(|err| client.explain(err));
 
         // NOTE: a partial outcome printed its result over a client that
         // answered, so the session keeps it.

@@ -21,7 +21,7 @@ item.list.page-size = 25		# items per page without -s
 ##caldav.server = "caldav.example.org:8443"		# a bare authority, over https
 ##caldav.server = "https://example.org/dav/"		# a root under a path, as the provider documents it
 ##caldav.home = "https://caldav.example.org/alice/"	# the calendar home set, over server, skipping discovery
-#caldav.auth.basic.username = "alice@example.org"	# HTTP Basic; or bearer.token, or auth = "none"
+#caldav.auth.basic.username = "alice@example.org"	# HTTP Basic; or bearer.token, or auth = "none", as no auth at all
 #caldav.auth.basic.password.command = "exit 127"	# prints the password
 ##caldav.auth.basic.password.raw = "secret"		# the password itself
 #caldav.alpn = ["http/1.1"]				# the ALPN id rustls offers

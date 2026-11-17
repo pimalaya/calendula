@@ -58,7 +58,9 @@ use serde::Deserialize;
 )))]
 use serde::de::IgnoredAny;
 #[cfg(feature = "caldav")]
-use url::Url;
+use serde::{Deserializer, de::Error as _};
+#[cfg(feature = "caldav")]
+use url::{ParseError, Url};
 
 /// The whole configuration file: global options and every account,
 /// refusing a key it does not know.
@@ -439,6 +441,7 @@ pub struct CaldavConfig {
     pub server: Option<String>,
     /// Pre-resolved calendar home-set URL, skipping every discovery
     /// step. The host is ASCII, as for `server`.
+    #[serde(default, deserialize_with = "ascii_url")]
     pub home: Option<Url>,
     /// TLS configuration.
     #[serde(default)]
@@ -450,7 +453,8 @@ pub struct CaldavConfig {
     /// `proxy`, and then the `all_proxy` and `https_proxy` environment
     /// variables.
     pub proxy: Option<ProxyConfig>,
-    /// Authentication configuration.
+    /// Authentication configuration, absent sending no credential.
+    #[serde(default)]
     pub auth: CaldavAuthConfig,
 }
 
@@ -459,6 +463,43 @@ pub struct CaldavConfig {
 #[cfg(feature = "caldav")]
 pub fn default_caldav_alpn() -> Vec<String> {
     vec![String::from("http/1.1")]
+}
+
+/// Parses `input` into a URL, a host that is not ASCII refused with the
+/// way out: its Punycode form, url linking no Unicode IDNA back end.
+#[cfg(feature = "caldav")]
+pub fn parse_url(input: &str) -> Result<Url> {
+    match Url::parse(input) {
+        Err(ParseError::IdnaError) => bail!(
+            "Host `{}` is not ASCII: write it in its Punycode form (xn--...)",
+            host_of(input)
+        ),
+        result => Ok(result?),
+    }
+}
+
+/// Deserializes an optional URL through [`parse_url`].
+#[cfg(feature = "caldav")]
+fn ascii_url<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Url>, D::Error> {
+    let input = String::deserialize(deserializer)?;
+    let url = parse_url(&input).map_err(D::Error::custom)?;
+    Ok(Some(url))
+}
+
+/// The host `input` names, as written: what follows the scheme, short of
+/// the path, the user info and the port.
+#[cfg(feature = "caldav")]
+fn host_of(input: &str) -> &str {
+    let rest = input.split_once("://").map_or(input, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+
+    match host.rsplit_once(':') {
+        Some((name, port)) if port.bytes().all(|b| b.is_ascii_digit()) => name,
+        _ => host,
+    }
 }
 
 removed_key! {
@@ -485,10 +526,12 @@ removed_key! {
 
 /// CalDAV authentication configuration.
 #[cfg(feature = "caldav")]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum CaldavAuthConfig {
-    /// No credentials, for a server that asks for none.
+    /// No credentials, for a server that asks for none: no `auth` at all
+    /// reads as this.
+    #[default]
     None,
     /// HTTP Basic (RFC 7617), the usual username and password, often
     /// an app password.
@@ -787,6 +830,20 @@ mod tests {
             let config: VdirConfig = toml::from_str(&document).unwrap();
             assert_eq!(config.root, home().join("calendars"), "{root}");
         }
+    }
+
+    /// A CalDAV block with no `auth` loads, sending no credential, as
+    /// `auth = "none"` does.
+    #[cfg(feature = "caldav")]
+    #[test]
+    fn a_caldav_block_without_auth_loads() {
+        let config: CaldavConfig = toml::from_str("server = \"dav.example.org\"").unwrap();
+        assert!(matches!(config.auth, CaldavAuthConfig::None));
+
+        let document = "[accounts.a]\ncaldav.home = \"http://localhost:5232/a/\"";
+        let config: Config = toml::from_str(document).unwrap();
+        let caldav = config.accounts["a"].caldav.as_ref().unwrap();
+        assert!(matches!(caldav.auth, CaldavAuthConfig::None));
     }
 
     /// `vdir.home-dir`, the vdir home 0.2 read, is refused by name in the

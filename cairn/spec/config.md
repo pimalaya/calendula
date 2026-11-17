@@ -107,6 +107,21 @@ Every backend that authenticates SHALL carry its credentials under an `auth` sub
 
 A backend accepting exactly one kind SHALL still nest, as a struct rather than an enumeration of kinds, so gaining a second kind later is not a breaking change to the first.
 
+### Requirement: A CalDAV server may ask for no credentials
+`caldav.auth` SHALL carry a credential-less variant alongside Basic and Bearer, spelled `auth = "none"`, which emits no `Authorization` header, and SHALL be optional, a block naming none reading as `auth = "none"`: a server asking for no credential (Radicale with `auth = none`, a server behind a VPN or an authenticating reverse proxy) needs no key for it, as cardamum and carillon read their DAV blocks.
+
+A server answering a request 401 to a block sending no credential SHALL fail with a message saying so, "CalDAV server answered 401: it asks for credentials, and the account configures no `auth`", above io-webdav's `WebDAV server returned HTTP 401`, on every command reaching CalDAV (the unified ones, the `caldav` namespace and `account check`), its code unchanged (`null`). A block naming a credential the server refuses fails as before, without the sentence.
+
+#### Scenario: A block with no auth
+- GIVEN an account whose `caldav` block names `server` and no `auth`
+- WHEN the configuration is loaded
+- THEN it loads, and every request goes without an `Authorization` header
+
+#### Scenario: A server asking for credentials a block does not give
+- GIVEN an account whose `caldav` block names no `auth`, its server answering 401
+- WHEN `calendula --json account check` runs
+- THEN the `caldav` row is `ok: false`, `code` `null`, its `error` saying the server asks for credentials and the account configures no `auth`
+
 ### Requirement: gcal has nothing to discover
 The Calendar API lives at one fixed base URL, so the `gcal` block SHALL name no server and offer no discovery route: a bearer token and a TLS profile are the whole block.
 
