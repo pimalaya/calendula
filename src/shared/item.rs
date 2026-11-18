@@ -500,6 +500,19 @@ mod tests {
         assert!(!range.contains_in("20261201", &zone));
     }
 
+    /// CAL-16: a stamp a server sent with a multi-byte character at its
+    /// eighth byte is compared, never sliced through.
+    #[cfg(any(feature = "vdir", feature = "msgraph", feature = "pimdir"))]
+    #[test]
+    fn a_stamp_with_a_wide_character_is_compared_whole() {
+        let range = CalendarTimeRange {
+            start: Some("20260801T000000Z".into()),
+            end: None,
+        };
+
+        assert!(range.contains_in("2026080\u{e9}T1", &TimeZone::UTC));
+    }
+
     #[cfg(feature = "caldav")]
     #[test]
     fn the_caldav_filter_omits_the_bounds_it_does_not_carry() {

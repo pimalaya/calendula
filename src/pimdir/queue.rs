@@ -340,6 +340,9 @@ mod tests {
         store.ensure_collection("cal", "text/calendar").unwrap();
         store.ensure_collection("other", "text/calendar").unwrap();
         drop(store);
+        for collection in ["cal", "other"] {
+            crate::pimdir::client::sync_from(dir.path(), None, collection);
+        }
 
         let config = PimdirConfig {
             root: dir.path().to_path_buf(),

@@ -276,6 +276,7 @@ impl PimdirBackend {
     /// or has queued is refused by the store, nothing queued.
     pub fn create_item(&mut self, calendar_id: &str, contents: Vec<u8>) -> Result<String> {
         self.known_collection(calendar_id)?;
+        self.check_synced(calendar_id)?;
         self.check_online_meeting(calendar_id, None, None, &contents)?;
 
         let link_id = derive(&contents).link_id;
@@ -312,6 +313,7 @@ impl PimdirBackend {
         if_match: Option<&str>,
     ) -> Result<()> {
         self.known_collection(calendar_id)?;
+        self.check_synced(calendar_id)?;
 
         let stored = self.item(calendar_id, item_id)?;
         check_version(&stored, calendar_id, item_id, if_match)?;
@@ -331,6 +333,29 @@ impl PimdirBackend {
                 resolves: None,
             }
         })?;
+
+        Ok(())
+    }
+
+    /// Refuses, before anything is queued, a write to a calendar no
+    /// source of the store syncs: nobody would push it (TWN-3).
+    fn check_synced(&self, calendar_id: &str) -> Result<()> {
+        let sources = self
+            .client
+            .reader
+            .capabilities(calendar_id)
+            .map_err(|err| store_error(err, format_args!("Read the sources of `{calendar_id}`")))?;
+
+        if sources.is_empty() {
+            return Err(CodedError::new(
+                ErrorCode::NoPerformer,
+                format!(
+                    "No source syncs calendar `{calendar_id}` yet, so none would push this \
+                     write: run a sync first"
+                ),
+            )
+            .into());
+        }
 
         Ok(())
     }
@@ -415,6 +440,7 @@ impl PimdirBackend {
         if_match: Option<&str>,
     ) -> Result<()> {
         self.known_collection(calendar_id)?;
+        self.check_synced(calendar_id)?;
 
         let stored = self.item(calendar_id, item_id)?;
         check_version(&stored, calendar_id, item_id, if_match)?;
@@ -1372,6 +1398,28 @@ mod tests {
         assert!(err.contains("pimdir.account"), "{err}");
     }
 
+    /// CAL-14: a `pimdir.account` the store holds no collection of is
+    /// refused, naming those it holds, rather than read as empty.
+    #[test]
+    fn a_configured_account_the_store_lacks_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        io_pimdir::client::PimdirStore::open(dir.path())
+            .unwrap()
+            .for_account("work")
+            .ensure_collection("caldav/work", CALENDAR_KIND)
+            .unwrap();
+
+        let err = PimdirBackend::new(crate::config::PimdirConfig {
+            root: dir.path().to_path_buf(),
+            account: Some("wrok".into()),
+        })
+        .err()
+        .unwrap()
+        .to_string();
+
+        assert!(err.contains("no account `wrok` (work)"), "{err}");
+    }
+
     /// A write the owner parks never lands, so status shows it by its
     /// queue row, for the account read alone.
     #[test]
@@ -1383,6 +1431,7 @@ mod tests {
                 .for_account(account)
                 .ensure_collection(collection, CALENDAR_KIND)
                 .unwrap();
+            crate::pimdir::client::sync_from(dir.path(), Some(account), collection);
         }
         let open = |account: &str| {
             PimdirBackend::new(crate::config::PimdirConfig {
@@ -1580,13 +1629,15 @@ mod tests {
         BEGIN:VEVENT\r\nUID:alone@example.org\r\nDTSTAMP:20261001T080000Z\r\n\
         DTSTART:20261005T090000Z\r\nSUMMARY:Focus\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
 
-    /// A store holding one calendar, `cal`, carrying `bodies` as items a
-    /// sync applied, and the backend over it with their public ids.
+    /// A store holding one calendar, `cal`, synced by `caldav` and
+    /// carrying `bodies` as items a sync applied, and the backend over it
+    /// with their public ids.
     fn store(bodies: &[&str]) -> (tempfile::TempDir, PimdirBackend, Vec<String>) {
         let dir = tempfile::tempdir().unwrap();
         let store = io_pimdir::client::PimdirStore::open(dir.path()).unwrap();
         store.ensure_collection("cal", CALENDAR_KIND).unwrap();
         drop(store);
+        crate::pimdir::client::sync_from(dir.path(), None, "cal");
 
         let config = || PimdirConfig {
             root: dir.path().to_path_buf(),
@@ -2985,6 +3036,31 @@ mod tests {
 
         files.sort();
         files
+    }
+
+    /// TWN-3: a write to a calendar no source syncs is refused, nothing
+    /// queued, since nobody would push it.
+    #[test]
+    fn a_write_no_source_would_push_is_refused() {
+        use pimalaya_cli::error::code_of;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = io_pimdir::client::PimdirStore::open(dir.path()).unwrap();
+        store.ensure_collection("cal", CALENDAR_KIND).unwrap();
+        drop(store);
+        let mut backend = PimdirBackend::new(PimdirConfig {
+            root: dir.path().to_path_buf(),
+            account: None,
+        })
+        .unwrap();
+
+        let err = backend
+            .create_item("cal", ALONE.as_bytes().to_vec())
+            .unwrap_err();
+
+        assert_eq!(code_of(&err), Some(ErrorCode::NoPerformer), "{err:#}");
+        assert!(err.to_string().contains("run a sync first"), "{err:#}");
+        assert!(queued(&backend).is_empty());
     }
 
     /// A write the next sync pushes is confirmed as queued, never as done.

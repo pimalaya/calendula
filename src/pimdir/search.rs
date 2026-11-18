@@ -113,7 +113,9 @@ impl PimdirSearchCommand {
                 let page = self.page.unwrap_or(1).max(1);
 
                 for _ in 1..page {
-                    let skipped = backend.client.search_items(query.clone(), calendar, &options)?;
+                    let skipped = backend
+                        .client
+                        .search_items(query.clone(), calendar, &options)?;
 
                     match skipped.next.clone() {
                         Some(next) => options.after = Some(next),

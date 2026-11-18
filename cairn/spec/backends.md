@@ -245,7 +245,7 @@ Collections come from the sync, so pimdir SHALL declare `calendar.create`, `cale
 
 A collection SHALL be listed as a calendar when it declares `text/calendar`, or when it declares no kind at all (a sync created it before any consumer declared one).
 
-The backend SHALL read one account of the store (pimdir STORAGE §9.2): `pimdir.account` when set, else the one account every collection of the store is grouped under, or none when the store groups none. A store whose collections are grouped under several accounts, or partly ungrouped, SHALL be refused while `pimdir.account` is unset, the error naming the accounts and the key. Reads and writes SHALL be narrowed to that account's collections, and the producer bound to it.
+The backend SHALL read one account of the store (pimdir STORAGE §9.2): `pimdir.account` when set, else the one account every collection of the store is grouped under, or none when the store groups none. A store whose collections are grouped under several accounts, or partly ungrouped, SHALL be refused while `pimdir.account` is unset, the error naming the accounts and the key, and a `pimdir.account` naming none of the accounts a store holding collections groups them under SHALL be refused, naming those it holds, `account check` included. Reads and writes SHALL be narrowed to that account's collections, and the producer bound to it.
 
 ### Requirement: pimdir takes the reader and producer roles, the owner for one cancel
 The pimdir backend SHALL read through a `PimdirReader` and write through a `PimdirProducer`, and SHALL NOT open a `PimdirStore`, but in `pimdir queue cancel`, which drops one queue row as Himalaya's does: it opens the store as its owner for that call alone, through `PimdirStore::open_current`, which creates nothing, and fails `store-owned` at once while a sync holds it.
@@ -260,6 +260,14 @@ The pimdir backend SHALL show and accept a calendar as the store's collection id
 A sync engine binds a source's collections under a namespace, so an id carries one. The store is opaque to it, neither parsing nor validating an id (pimdir STORAGE §9.2) and modelling hierarchy through `parent` rather than through a separator.
 
 Shortening is therefore a guess at the producer's convention, and one that makes a single calendar answer to two spellings.
+
+### Requirement: pimdir refuses a write nobody would push
+A write (`create_item`, `update_item`, `delete_item`: an add, an update or a delete of an event or an item) to a calendar no source of the store syncs, by a binding or a checkpoint (pimdir STORAGE §15.6), SHALL be refused before anything is queued, with the code `no-performer` and a message naming the calendar and saying to run a sync first: a write queued there would be pushed by nobody. cardamum refuses a write to an address book the same way.
+
+#### Scenario: A calendar created but never synced
+- GIVEN a pimdir store whose calendar `cal` no source has synced
+- WHEN `calendula --json event add -k cal event.ics` runs
+- THEN it exits 1 coded `no-performer`, and the queue holds nothing
 
 ### Requirement: pimdir refuses an unknown calendar
 Every pimdir read and write SHALL fail when the calendar id names no collection of the account.

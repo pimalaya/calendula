@@ -11,8 +11,8 @@ use io_pimdir::{
     client::{
         reader::PimdirItem,
         search::{
-            PimdirIndex, PimdirSearchClock, PimdirSearchCursor, PimdirSearchHit, PimdirSearchMatched,
-            PimdirSearchOptions,
+            PimdirIndex, PimdirSearchClock, PimdirSearchCursor, PimdirSearchHit,
+            PimdirSearchMatched, PimdirSearchOptions,
         },
     },
     search::{
@@ -685,6 +685,9 @@ mod tests {
         store.ensure_collection("cal", "text/calendar").unwrap();
         store.ensure_collection("work", "text/calendar").unwrap();
         drop(store);
+        for collection in ["cal", "work"] {
+            crate::pimdir::client::sync_from(dir.path(), None, collection);
+        }
 
         let mut backend = backend(dir.path(), None);
         let items = [
@@ -848,6 +851,7 @@ mod tests {
             .unwrap()
             .ensure_collection("cal", "text/calendar")
             .unwrap();
+        crate::pimdir::client::sync_from(dir.path(), None, "cal");
 
         let mut backend = backend(dir.path(), None);
         for item in items {
@@ -1203,6 +1207,7 @@ mod tests {
                 .for_account(account)
                 .ensure_collection(format!("{account}/cal"), "text/calendar")
                 .unwrap();
+            crate::pimdir::client::sync_from(dir.path(), Some(account), &format!("{account}/cal"));
         }
         let (mut work, mut home) = (
             backend(dir.path(), Some("work")),

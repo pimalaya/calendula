@@ -454,6 +454,7 @@ mod tests {
             let store = io_pimdir::client::PimdirStore::open(dir.path()).unwrap();
             store.ensure_collection("cal", "text/calendar").unwrap();
             drop(store);
+            crate::pimdir::client::sync_from(dir.path(), None, "cal");
 
             client(&dir)
                 .create_item("cal", EVENT.as_bytes().to_vec(), None)

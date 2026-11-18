@@ -109,10 +109,6 @@ impl PimdirClient {
 /// `pimdir.account` answers, and leaving it unset there errors rather
 /// than merging their calendars into one view.
 fn resolve_account(reader: &PimdirReader, configured: Option<String>) -> Result<Option<String>> {
-    if configured.is_some() {
-        return Ok(configured);
-    }
-
     let mut accounts: Vec<Option<String>> = reader
         .list_collections()
         .map_err(|err| store_error(err, "List pimdir collections"))?
@@ -122,18 +118,31 @@ fn resolve_account(reader: &PimdirReader, configured: Option<String>) -> Result<
     accounts.sort();
     accounts.dedup();
 
+    let names = |accounts: &[Option<String>]| {
+        accounts
+            .iter()
+            .map(|account| account.as_deref().unwrap_or("<ungrouped>"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
+    if let Some(account) = &configured {
+        if !accounts.is_empty() && !accounts.contains(&configured) {
+            return Err(anyhow!(
+                "The pimdir store holds no account `{account}` ({}); fix `pimdir.account`",
+                names(&accounts),
+            ));
+        }
+
+        return Ok(configured);
+    }
+
     match accounts.as_slice() {
         [] | [_] => Ok(accounts.into_iter().next().flatten()),
-        _ => {
-            let names: Vec<&str> = accounts
-                .iter()
-                .map(|account| account.as_deref().unwrap_or("<ungrouped>"))
-                .collect();
-            Err(anyhow!(
-                "The pimdir store holds several accounts ({}); name one with `pimdir.account`",
-                names.join(", "),
-            ))
-        }
+        _ => Err(anyhow!(
+            "The pimdir store holds several accounts ({}); name one with `pimdir.account`",
+            names(&accounts),
+        )),
     }
 }
 
@@ -243,6 +252,36 @@ fn version_message(found: Option<&str>, context: impl fmt::Display) -> String {
              calendula's {FORMAT_VERSION}; upgrade calendula"
         ),
     }
+}
+
+/// Records the `caldav` source as syncing `collection` of the store at
+/// `root`, under `account` when given, as a complete sync round does.
+#[cfg(test)]
+pub(crate) fn sync_from(root: &std::path::Path, account: Option<&str>, collection: &str) {
+    use io_pimdir::{
+        change::PimdirWriteOp,
+        collection::{PimdirCheckpoint, PimdirCollectionId, PimdirScope},
+    };
+
+    let mut store = io_pimdir::client::PimdirStore::open(root).unwrap();
+    if let Some(account) = account {
+        store = store.for_account(account);
+    }
+    store
+        .for_source("caldav")
+        .write(vec![
+            PimdirWriteOp::OpenRound {
+                collection: PimdirCollectionId(collection.into()),
+                scope: PimdirScope::unbounded(),
+                band: false,
+            },
+            PimdirWriteOp::CloseRound {
+                collection: PimdirCollectionId(collection.into()),
+                coverage: PimdirScope::unbounded(),
+                checkpoint: Some(PimdirCheckpoint(b"0".to_vec())),
+            },
+        ])
+        .unwrap();
 }
 
 #[cfg(test)]

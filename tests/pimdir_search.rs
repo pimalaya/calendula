@@ -12,9 +12,13 @@ use std::{
     process::{Command, Output, Stdio},
 };
 
-use io_pimdir::client::{
-    PimdirStore,
-    search::{PimdirIndex, PimdirIndexRefreshOptions},
+use io_pimdir::{
+    change::PimdirWriteOp,
+    client::{
+        PimdirStore,
+        search::{PimdirIndex, PimdirIndexRefreshOptions},
+    },
+    collection::{PimdirCheckpoint, PimdirCollectionId, PimdirScope},
 };
 use serde_json::Value;
 use tempfile::TempDir;
@@ -63,7 +67,21 @@ fn account() -> TempDir {
 
     let store = PimdirStore::open(&root).unwrap();
     store.ensure_collection("cal", "text/calendar").unwrap();
-    drop(store);
+    store
+        .for_source("caldav")
+        .write(vec![
+            PimdirWriteOp::OpenRound {
+                collection: PimdirCollectionId("cal".into()),
+                scope: PimdirScope::unbounded(),
+                band: false,
+            },
+            PimdirWriteOp::CloseRound {
+                collection: PimdirCollectionId("cal".into()),
+                coverage: PimdirScope::unbounded(),
+                checkpoint: Some(PimdirCheckpoint(b"0".to_vec())),
+            },
+        ])
+        .unwrap();
 
     let starts = [
         ("a", "20261110T090000Z"),

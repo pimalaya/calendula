@@ -152,6 +152,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed a pimdir write to a calendar no source syncs being queued for nobody: it is refused before anything is queued, coded `no-performer`, as cardamum refuses one.
+- Fixed a `pimdir.account` naming no account of the store loading as an empty one, `account check` passing: it is refused, naming the accounts the store holds.
+- Fixed a windowed listing aborting on a not-downloaded pimdir event whose stored `DTSTART` holds a multi-byte character at its eighth byte.
 - Fixed `event agenda` leaving out the timed events within the zone's UTC offset of its grid's edge: the last evening west of UTC, the first morning east of it.
 - Fixed a CalDAV `item update` or `event update` given a source creating an item under an id the calendar did not hold: it sends `If-Match: *` and fails `item-not-found`.
 - Fixed the MCP `calendar_delete` deleting, without `--allow-send`, a calendar holding an item naming an attendee, whose own delete was refused.
