@@ -247,9 +247,9 @@ A time SHALL resolve through its `TZID` as the time-zone database names it (a wr
 Expansion SHALL move a UTC `UNTIL` onto the wall clock of a zoned `DTSTART` before the civil walk, and SHALL drop the instances a calendar-defined zone skips.
 
 ### Requirement: The event projection
-An event's JSON SHALL carry `id`, `etag` (the entity tag of its item, `null` when the backend has none), `uid`, `recurrenceId`, `summary`, `description` and `location` (`null` when the event carries none, never `""`), `start` and `end` (RFC 3339 with the offset, a zero one spelled `Z` as pimalaya-cli's output contract and Himalaya spell UTC, or `YYYY-MM-DD` with an exclusive end for a whole day, `null` when the time does not resolve), `allDay`, `timeZone`, `zoneAssumed` (`true` when `DTSTART` or `DTEND` names a `TZID` neither the time-zone database nor the calendar defines, read in the local zone), `recurring`, `sequence` (its `SEQUENCE`, 0 when absent), `status`, `transparency`, `busyStatus` (Outlook's), `organizer` (`email`, `name`), `attendees` (`email`, `name`, `partstat` defaulting to `NEEDS-ACTION`, `role`, `rsvp`, `cutype`) and `onlineMeetingUrl` (`CONFERENCE`, then the vendors' properties). The end SHALL be `DTEND`, else the start plus `DURATION`, else a day for a date and the start for a time. A time SHALL print in that one form: its iCalendar spelling stays in the item's contents.
+An event's JSON SHALL carry `id`, `etag` (the entity tag of its item, `null` when the backend has none), `uid`, `recurrenceId`, `summary`, `description` and `location` (`null` when the event carries none, never `""`), `start` and `end` (RFC 3339 with the offset, a zero one spelled `Z` as pimalaya-cli's output contract and Himalaya spell UTC, or `YYYY-MM-DD` with an exclusive end for a whole day, `null` when the time does not resolve), `allDay`, `timeZone`, `zoneAssumed` (`true` when `DTSTART` or `DTEND` names a `TZID` neither the time-zone database nor the calendar defines, read in the local zone), `recurring`, `sequence` (its `SEQUENCE`, 0 when absent), `status`, `transparency`, `busyStatus` (Outlook's), `organizer` (`email`, `name`), `attendees` (`email`, `name`, `partstat` defaulting to `NEEDS-ACTION`, `role`, `rsvp`, `cutype`), `onlineMeetingUrl` (`CONFERENCE`, then the vendors' properties) and `alarms` (every VALARM of the VEVENT in document order: `action` uppercased and `trigger`, its value as written, each `null` when absent). The end SHALL be `DTEND`, else the start plus `DURATION`, else a day for a date and the start for a time. A time SHALL print in that one form: its iCalendar spelling stays in the item's contents.
 
-`event read` SHALL print the item's bytes, and its JSON SHALL be the row of its item ("An item's bytes are text or base64") plus the projected `events`, or the one occurrence `-r/--recurrence-id` names.
+`event read` SHALL print the item's bytes, VALARMs included, and its JSON SHALL be the row of its item ("An item's bytes are text or base64") plus the projected `events`, or the one occurrence `-r/--recurrence-id` names.
 
 ### Requirement: An item's bytes are text or base64
 An item SHALL print as one row in `item list`, `item read` and `event read`: `{id, calendarId, etag, contents, encoding}`, `etag` `null` when the backend versions no item. `contents` SHALL be the iCalendar text when its bytes are valid UTF-8, `encoding` then `utf-8`, and the base64 of the bytes otherwise (RFC 4648 standard alphabet, padded), `encoding` then `base64`, as cardamum prints a vCard. A read SHALL always carry both, an empty file the empty text; `item list` alone SHALL print both `null`, for an item carrying no bytes (a pimdir item whose body is not local yet or cannot be read), which a read refuses. No output SHALL decode an item's bytes lossily under `--json`.
@@ -559,7 +559,7 @@ A `create` given no source SHALL mint the item it starts from rather than open a
 A command given neither a source nor `-i` has nothing to write and SHALL say so; the `event` family also takes the field flags, which count as something to write.
 
 ### Requirement: The composer is the authoring surface
-The composer SHALL remain the complete authoring surface; the field flags cover the common fields only. A recurrence rule and an alarm are where a flag stops being ergonomic, and the documentation SHALL say so, so their absence reads as the boundary it is.
+The composer SHALL remain the complete authoring surface; the field flags cover the common fields only. A recurrence rule, and any alarm beyond one display alarm before the start, are where a flag stops being ergonomic, and the documentation SHALL say so, so their absence reads as the boundary it is.
 
 ### Requirement: A source, the field flags and the composer stack
 `event build`, `event add` and `event update` SHALL take an iCalendar source, the field flags and `-i/--interactive` together, applied in that order: the source (or the minted seed, or for an update the item the backend holds) is the event to start from, each flag sets the property it names on its VEVENT, and `-i` opens the result in the composer. A command given no source, no field flag and no `-i` has nothing to write and SHALL say so.
@@ -567,7 +567,33 @@ The composer SHALL remain the complete authoring surface; the field flags cover 
 A build or a create made from flags alone, with no source and no `-i`, SHALL be checked as a composed item is and refused naming the violations; a source given on the command line SHALL NOT be.
 
 ### Requirement: The field flags are a convenience, not the surface
-The field flags SHALL cover the fields `event list` renders and the few every calendar carries, and SHALL NOT grow to match what a composer models. Recurrence (`RRULE`, `RDATE`, `EXDATE`, overrides), alarms, conference links (`CONFERENCE`) and hand-written `VTIMEZONE`s are out; `--online-meeting` asks a sync engine to create a meeting and writes no link. The documentation SHALL say the composer is the complete surface.
+The field flags SHALL cover the fields `event list` renders and the few every calendar carries, and SHALL NOT grow to match what a composer models. Recurrence (`RRULE`, `RDATE`, `EXDATE`, overrides), every alarm but the one `--alarm` writes (several alarms, one after the end or related to it, an absolute one, an EMAIL or AUDIO one), conference links (`CONFERENCE`) and hand-written `VTIMEZONE`s are out; `--online-meeting` asks a sync engine to create a meeting and writes no link. The documentation SHALL say the composer is the complete surface.
+
+### Requirement: One display alarm can be set from a flag
+`event build`, `event add` and `event update` SHALL take `--alarm <LEAD>`, `LEAD` being an RFC 5545 3.3.6 duration in any case, a leading `+` dropped, checked by ical-rs's validator, or a short form: a whole number followed by `m`, `h` or `d` (`15m` is `PT15M`, `1h` is `PT1H`, `2d` is `P2D`). A negative lead, or one that is neither, SHALL be refused naming both shapes.
+
+`--alarm` SHALL drop every VALARM of the VEVENT and write one in place of the first, or after the VEVENT's last item when it carried none: `ACTION:DISPLAY`, `TRIGGER:-<LEAD>` and a `DESCRIPTION` (required for DISPLAY, RFC 5545 3.6.6) holding the summary the event ends up with, `Reminder` when it has none. Every other line SHALL keep its bytes.
+
+#### Scenario: A create with an alarm
+- GIVEN a CalDAV account
+- WHEN `calendula event add --summary Stand-up --start 2026-10-19T09:00Z --end 2026-10-19T09:15Z --alarm 15m` runs
+- THEN the event is written with `BEGIN:VALARM`, `ACTION:DISPLAY`, `TRIGGER:-PT15M`, `DESCRIPTION:Stand-up`, `END:VALARM` inside its VEVENT
+
+#### Scenario: An update replacing two alarms
+- GIVEN an event carrying a DISPLAY VALARM at `-PT10M` and an EMAIL VALARM at `-P1D`
+- WHEN `calendula event update <ID> --alarm PT1H` runs
+- THEN the event carries one VALARM, `TRIGGER:-PT1H`, where the first stood, and every other line keeps its bytes
+
+### Requirement: Every alarm can be removed from a flag
+`--no-alarm` SHALL drop every VALARM of the VEVENT and write nothing in its place, and SHALL conflict with `--alarm`. Removing from an event that carries no VALARM SHALL leave the event byte for byte. On a backend falling back to the calendar's default reminders when an event carries none (gcal), the event SHALL get those defaults, as the projection says.
+
+### Requirement: A lead a backend cannot hold is refused before the write
+`event add` and `event update` SHALL refuse an `--alarm` lead the account's backend cannot hold, by name and before reaching it, never rounding it: on gcal a lead that is not whole minutes or exceeds four weeks (40320 minutes); on msgraph a lead that is not whole minutes, or that names days or weeks, which the msgraph projection does not read as a reminder. `event build` reaches no backend and SHALL write any lead the grammar allows. Google and Graph hold a lead in minutes, so the alarm reads back as `-PT<n>M` (`--alarm 1h` as `-PT60M`).
+
+#### Scenario: A lead Google refuses
+- GIVEN a gcal account
+- WHEN `calendula event add --summary Trip --alarm 30d` (or `--alarm P5W`) runs
+- THEN the command fails naming the four-week ceiling, and nothing is written
 
 ### Requirement: A field flag sets its property and touches nothing else
 Writing a field flag SHALL drop every instance of the property it names on the VEVENT and write the flag's own, a repeated flag writing one instance per value. `--add-attendee` and `--remove-attendee` are the exception: each SHALL touch the one `ATTENDEE` it names (see [A field flag adds or removes one attendee](#requirement-a-field-flag-adds-or-removes-one-attendee)). Every other line SHALL keep its bytes. A time flag SHALL take a date, a local time, a `Z` time, or a time prefixed by an IANA zone (`Europe/Paris:2026-10-19T09:00`); `--time-zone` names the zone of the times that name none, and on `event update` such a time is otherwise read in the event's own zone ("An update reads a zone-less time in the event's zone"). A zone a flag names SHALL arrive with its `VTIMEZONE`, minted once from the time-zone database. On an update, `--start` given without `--end` or `--duration` SHALL move the end with it, keeping the event's length. `--end` given without `--start` SHALL be held to the `DTSTART` the event carries: a date against a time, either way, and an end before that start on one timeline, SHALL be refused before anything is written.

@@ -256,3 +256,108 @@ pub fn env_content(name: &str) -> Option<String> {
         None => env_var(name),
     }
 }
+
+/// A calendar a live test created, deleted when the test ends, failed or
+/// not, so a run writes only in what it made.
+pub struct ScratchCalendar<'a> {
+    pub config: &'a Path,
+    pub token: &'a str,
+    pub id: String,
+}
+
+impl<'a> ScratchCalendar<'a> {
+    /// Creates a calendar named `name` and the time in the account `config`
+    /// names, so two runs never meet a name the other deleted.
+    pub fn create(config: &'a Path, token: &'a str, name: &str) -> Self {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let name = format!("{name}-{stamp}");
+        let out = calendula(config, token, &["--json", "calendar", "create", &name]);
+        let created = json(&out, 0);
+        let id = created["id"].as_str().unwrap().to_owned();
+        Self { config, token, id }
+    }
+}
+
+impl Drop for ScratchCalendar<'_> {
+    fn drop(&mut self) {
+        let args = ["--json", "calendar", "delete", &self.id];
+        let out = calendula(self.config, self.token, &args);
+        if !out.status.success() {
+            eprintln!("left calendar {} behind: {}", self.id, failure(&out));
+        }
+    }
+}
+
+/// The triggers of the alarms of the event `id` of `calendar`, as
+/// `event read` prints them.
+pub fn alarm_triggers(calendar: &ScratchCalendar, id: &str) -> Vec<String> {
+    let args = ["--json", "event", "read", "-k", &calendar.id, id];
+    let out = calendula(calendar.config, calendar.token, &args);
+    let read = json(&out, 0);
+    let events = match read["events"].as_array() {
+        Some(events) => events.clone(),
+        None => vec![read["event"].clone()],
+    };
+    events[0]["alarms"]
+        .as_array()
+        .unwrap_or(&Vec::new())
+        .iter()
+        .filter_map(|alarm| alarm["trigger"].as_str().map(str::to_owned))
+        .collect()
+}
+
+/// `event add --alarm 15m`, then `event update --alarm 1h`, then
+/// `--no-alarm`, in a calendar created for the run: what `--alarm`
+/// writes is the one alarm the account holds back (event-alarm-flag).
+pub fn alarm_round_trip(config: &Path, token: &str, name: &str) -> Vec<String> {
+    let calendar = ScratchCalendar::create(config, token, name);
+
+    let args = [
+        "--json",
+        "event",
+        "add",
+        "-k",
+        &calendar.id,
+        "--summary",
+        "Alarm",
+        "--start",
+        "2026-12-01T09:00Z",
+        "--end",
+        "2026-12-01T10:00Z",
+        "--alarm",
+        "15m",
+    ];
+    let added = json(&calendula(config, token, &args), 0);
+    let id = added["id"].as_str().unwrap().to_owned();
+    let first = alarm_triggers(&calendar, &id);
+
+    let args = [
+        "--json",
+        "event",
+        "update",
+        "-k",
+        &calendar.id,
+        &id,
+        "--alarm",
+        "1h",
+    ];
+    json(&calendula(config, token, &args), 0);
+    let second = alarm_triggers(&calendar, &id);
+
+    let args = [
+        "--json",
+        "event",
+        "update",
+        "-k",
+        &calendar.id,
+        &id,
+        "--no-alarm",
+    ];
+    json(&calendula(config, token, &args), 0);
+    let third = alarm_triggers(&calendar, &id);
+
+    [first, second, vec![String::from("|")], third].concat()
+}

@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: event-alarm-flag
-status: active
+status: landed
 created: 2026-10-27
 ---
 

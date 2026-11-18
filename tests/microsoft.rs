@@ -179,4 +179,16 @@ mod credentialed {
         let out = calendula(&config, token(), &args);
         assert_events(&json(&out, 0), 5);
     }
+
+    /// `--alarm` writes the one reminder Graph holds, and `--no-alarm`
+    /// turns it off, in a calendar made for the run.
+    #[test]
+    #[ignore = "requires Microsoft credentials and --ignored"]
+    fn graph_event_alarm_round_trip() {
+        let dir = TempDir::new().unwrap();
+        let config = write_account(dir.path());
+
+        let triggers = alarm_round_trip(&config, token(), "calendula-live-alarm");
+        assert_eq!(triggers, ["-PT15M", "-PT60M", "|"], "{triggers:?}");
+    }
 }

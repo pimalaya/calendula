@@ -10,9 +10,9 @@ change: event-alarm-flag
 - [x] Refusal of a lead gcal or msgraph cannot hold, before the write
 - [x] `alarms` in the event JSON output, registered in src/json_schema.rs (no registry change: `Event` already rides `EventListOutput`, `EventReadOutput` and `EventBuildOutput`, so `EventAlarm` lands in their schemas)
 - [x] Tests per requirement; `--help` of each verb in a debug build (clap collisions)
-- [ ] Live check on the Google and Microsoft test accounts only
+- [x] Live check on the Google and Microsoft test accounts only (2026-11-18, tests/google.rs `gcal_event_alarm_round_trip`, tests/microsoft.rs `graph_event_alarm_round_trip`)
 - [x] `cargo fmt`, `cargo test`, `cargo clippy`; README and CHANGELOG (Added) (README lists no field flag, so it is unchanged)
-- [ ] Fold into spec/commands.md and spec/projection.md, log entry
+- [x] Fold into spec/commands.md and spec/projection.md, log entry
 
 ## Notes
 
