@@ -62,6 +62,14 @@ A protocol command renamed or moved SHALL keep its former name, hidden from the 
 - WHEN `calendula caldav list`, `calendula caldav create work` or `calendula gcal quick-add "Lunch tomorrow"` runs
 - THEN it runs `caldav propfind`, `caldav mkcalendar work` or `gcal events quick-add "Lunch tomorrow"`, printing what that prints, and none of the three shows in `--help`
 
+### Requirement: A protocol refusal is a result
+Inside the `caldav`, `gcal` and `msgraph` namespaces, an HTTP 4xx or 5xx the server answers (the `request` commands included) SHALL print as the command's result and exit 3, as himalaya's `gmail`, `msgraph` and `jmap` do (pimalaya-cli cairn/spec/output.md, *A protocol refusal is a result*): `{refusal: {status, reason, message, code, retryAfter}}`, `status` the HTTP status; `reason` the provider's name for it in its spelling (Google's first reason, Graph's `error.code`), `null` when it names none, as a WebDAV server does; `message` the provider's text, a WebDAV server's body; `code` the code the failure would carry, `null` when none applies; `retryAfter` the seconds the server asked to wait, `null` when it asked none. A command getting no answer (a network, TLS or decoding failure, a local error, a value refused before sending) SHALL print the failure object and exit 1. Each command's JSON Schema SHALL describe its own result and the refusal as two alternatives told apart by their keys. The unified commands are not concerned: a refusal there fails as before.
+
+#### Scenario: A Graph request refused
+- GIVEN a Graph account answering 403 `ErrorAccessDenied`
+- WHEN `calendula --json msgraph request get me/calendars/nope` runs
+- THEN it prints `{"refusal":{"status":403,"reason":"ErrorAccessDenied","message":"…","code":"permission-denied","retryAfter":null}}` and exits 3
+
 ### Requirement: caldav speaks the protocol
 `caldav` SHALL be the WebDAV and CalDAV methods (RFC 4918, 4791, 6578) run against the account's endpoint, each named after its method, as cardamum's `carddav` is: `discover`, `propfind`, `proppatch`, `mkcalendar`, `report` (`query`, `multiget`, `sync`, `raw`), `get`, `put` and `delete`. Each takes its calendar and item ids positionally, and refuses one no CalDAV resource can have before anything connects (backends, "A CalDAV id addresses its own resource").
 

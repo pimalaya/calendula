@@ -263,3 +263,24 @@ fn squeeze(text: &str) -> String {
         .map(|c| c.to_ascii_lowercase())
         .collect()
 }
+
+/// The refusal of a Calendar API error in a chain, for the `gcal`
+/// commands: the status, the first reason and the message Google
+/// answered.
+pub(crate) fn refusal(
+    cause: &(dyn std::error::Error + 'static),
+) -> Option<crate::shared::refusal::Refusal> {
+    let GcalClientStdError::Send(GcalSendError::Api(err)) =
+        cause.downcast_ref::<GcalClientStdError>()?
+    else {
+        return None;
+    };
+
+    Some(crate::shared::refusal::Refusal {
+        status: Some(err.status),
+        reason: err.reasons.first().cloned(),
+        message: err.message.clone(),
+        code: None,
+        retry_after: err.retry_after.map(|delay| delay.as_secs()),
+    })
+}

@@ -388,6 +388,22 @@ pub fn build_caldav_client(config: &CaldavConfig) -> Result<CaldavClient> {
     Ok(CaldavClient::new(inner))
 }
 
+/// The refusal of a WebDAV error in a chain, for the `caldav` commands:
+/// the status and the body the server answered, which names no reason.
+pub(crate) fn refusal(
+    cause: &(dyn std::error::Error + 'static),
+) -> Option<crate::shared::refusal::Refusal> {
+    let (status, body) = refused(cause.downcast_ref::<WebdavClientStdError>()?)?;
+
+    Some(crate::shared::refusal::Refusal {
+        status: Some(status),
+        reason: None,
+        message: body.trim().to_owned(),
+        code: None,
+        retry_after: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::parse_server;

@@ -69,7 +69,7 @@ impl CaldavCommand {
     }
 
     pub fn execute(self, printer: &mut impl Printer, client: CaldavClient) -> Result<()> {
-        match self {
+        let result = match self {
             Self::Discover(cmd) => cmd.execute(printer, client),
             Self::Propfind(cmd) => cmd.execute(printer, client),
             Self::Proppatch(cmd) => cmd.execute(printer, client),
@@ -78,6 +78,8 @@ impl CaldavCommand {
             Self::Get(cmd) => cmd.execute(printer, client),
             Self::Put(cmd) => cmd.execute(printer, client),
             Self::Delete(cmd) => cmd.execute(printer, client),
-        }
+        };
+
+        crate::shared::refusal::print(printer, &[crate::caldav::client::refusal], result)
     }
 }

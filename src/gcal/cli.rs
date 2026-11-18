@@ -60,7 +60,7 @@ pub enum GcalCommand {
 
 impl GcalCommand {
     pub fn execute(self, printer: &mut impl Printer, client: GcalClient) -> Result<()> {
-        match self {
+        let result = match self {
             Self::Calendars(cmd) => cmd.execute(printer, client),
             Self::Acl(cmd) => cmd.execute(printer, client),
             Self::FreeBusy(cmd) => cmd.execute(printer, client),
@@ -71,6 +71,8 @@ impl GcalCommand {
             Self::Instances(cmd) => cmd.execute(printer, client),
             Self::Move(cmd) => cmd.execute(printer, client),
             Self::QuickAdd(cmd) => cmd.execute(printer, client),
-        }
+        };
+
+        crate::shared::refusal::print(printer, &[crate::gcal::client::refusal], result)
     }
 }

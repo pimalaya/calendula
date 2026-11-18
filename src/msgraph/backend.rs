@@ -672,6 +672,25 @@ fn read_within(range: Option<&CalendarTimeRange>, today: Date) -> Result<(Date, 
     Ok((from, to))
 }
 
+/// The refusal of a Graph error in a chain, for the `msgraph` commands:
+/// the status, `error.code` and `error.message` of what Graph answered.
+pub(crate) fn refusal(
+    cause: &(dyn std::error::Error + 'static),
+) -> Option<crate::shared::refusal::Refusal> {
+    let MsgraphClientStdError::Send(send) = cause.downcast_ref::<MsgraphClientStdError>()? else {
+        return None;
+    };
+    let err = send.api()?;
+
+    Some(crate::shared::refusal::Refusal {
+        status: Some(err.status),
+        reason: Some(err.code.clone()).filter(|code| !code.is_empty()),
+        message: err.message.clone(),
+        code: None,
+        retry_after: err.retry_after.map(|delay| delay.as_secs()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -839,6 +858,13 @@ pub(crate) mod scripted {
 
         MsgraphBackend {
             client: MsgraphClientStd::new(stream, "made-up", Default::default()),
+        }
+    }
+
+    impl MsgraphBackend {
+        /// The client the backend runs over, for a protocol command.
+        pub(crate) fn into_client(self) -> MsgraphClientStd {
+            self.client
         }
     }
 
