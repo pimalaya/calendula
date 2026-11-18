@@ -131,11 +131,11 @@ An account's `vdir` block SHALL name the vdir home, the directory holding one ca
 - THEN the vdir home is the calendars directory of the user's home
 
 ### Requirement: CalDAV locates its home-set two ways
-The `caldav` block SHALL offer exactly two mutually exclusive routes, `server` and `home`, and calendula SHALL resolve no domain through DNS.
+The `caldav` block SHALL offer exactly two mutually exclusive routes, `server` and `home`, and calendula SHALL resolve no domain through DNS SRV records.
 
-`server` names the context root the principal and home-set walk starts from, taking a full URL, a bare domain or `domain:port` with `https` assumed for a bare authority, and is parsed when it is used rather than when it is read. A string that fails to parse as a URL for any reason other than lacking a scheme SHALL be refused rather than read as a bare authority. `home` pins the home-set outright.
+`server` names the context root the principal and home-set walk starts from, taking a full URL, a bare domain or `domain:port`, and is parsed when it is used rather than when it is read. A value naming no scheme (no `://`) SHALL be read as `https://` followed by it; a value naming one SHALL be read as written and refused when it does not parse or its scheme is not `http` nor `https`, never prefixed. A `server` naming an `https` origin (no path) SHALL be probed at `.well-known/caldav` (RFC 6764 §5), as cardamum probes `.well-known/carddav`, and the walk SHALL start from the redirect target when the server answers one over `https`; a redirect to another scheme SHALL be ignored with a warning, the credential going where the target points, and a failed probe SHALL leave the origin as it is. `home` pins the home-set outright.
 
-A block carrying neither SHALL be rejected by name.
+A block carrying neither SHALL be rejected by name, and one carrying both SHALL be refused before anything connects, `account check` included.
 
 A `caldav.discover` key, the RFC 6764 route an earlier calendula offered, SHALL fail the load as an unknown field.
 

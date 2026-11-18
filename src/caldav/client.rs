@@ -5,12 +5,19 @@
 //! caches populated so a command runs no extra round-trip.
 
 use std::{
+    io::{Read, Write},
     ops::{Deref, DerefMut},
     path::PathBuf,
 };
 
-use anyhow::{Context, Result, anyhow};
-use io_http::{rfc6750::bearer::HttpAuthBearer, rfc7617::basic::HttpAuthBasic};
+use anyhow::{Context, Result, anyhow, bail};
+use io_http::{
+    coroutine::{HttpCoroutine, HttpCoroutineState, HttpYield},
+    rfc6750::bearer::HttpAuthBearer,
+    rfc7617::basic::HttpAuthBasic,
+    rfc8615::well_known::{Http11WellKnown, Http11WellKnownOutput},
+    rfc9110::request::HttpRequest,
+};
 use io_webdav::{
     client::{WebdavClientStd, WebdavClientStdConnectOptions, WebdavClientStdError},
     rfc4918::{
@@ -19,11 +26,16 @@ use io_webdav::{
     },
     rfc6578::sync_collection::WebdavSyncCollectionError,
 };
+use log::warn;
 use pimalaya_cli::error::with_code;
 use pimalaya_config::secret::SecretResolver;
-use pimalaya_stream::tls::Tls;
+use pimalaya_stream::{
+    proxy::Proxy,
+    stream::{Stream, TlsConnectOptions},
+    tls::Tls,
+};
 use secrecy::ExposeSecret;
-use url::{ParseError, Url};
+use url::Url;
 
 use crate::{
     cli::resolve_account,
@@ -69,6 +81,10 @@ pub fn connect(config: &CaldavConfig, resolver: &mut SecretResolver) -> Result<W
     let tls = build_tls(config);
     let proxy = ProxyConfig::resolve(config.proxy.clone(), resolver)?;
 
+    if config.home.is_some() && config.server.is_some() {
+        bail!("The CalDAV block names both `server` and `home`; keep one");
+    }
+
     if let Some(home) = &config.home {
         let opts = WebdavClientStdConnectOptions { tls, proxy };
         let mut client = WebdavClientStd::connect(home, auth, opts)?;
@@ -82,6 +98,13 @@ pub fn connect(config: &CaldavConfig, resolver: &mut SecretResolver) -> Result<W
         .ok_or_else(|| anyhow!("CalDAV config needs `server` or `home`"))?;
     let server = parse_server(server)?;
 
+    let server = match server.path() {
+        "" | "/" if server.scheme() == "https" => {
+            probe_caldav_context_root(&server, &tls, &proxy).unwrap_or(server)
+        }
+        _ => server,
+    };
+
     let opts = WebdavClientStdConnectOptions { tls, proxy };
     let mut client = WebdavClientStd::connect(&server, auth, opts)?;
     client.calendar_home_set()?;
@@ -89,20 +112,88 @@ pub fn connect(config: &CaldavConfig, resolver: &mut SecretResolver) -> Result<W
     Ok(client)
 }
 
+/// Probes `.well-known/caldav` (RFC 6764 §5) on a bare-origin `server`
+/// with a GET.
+///
+/// Returns the context-root redirect target when the server publishes
+/// one over `https`. Silent: a failed probe or a response without a
+/// redirect leaves the origin as is.
+///
+/// The credential goes wherever the target points, so a redirect to any
+/// other scheme (`http`, which would send it in clear) is ignored with a
+/// warning, whoever serves the domain's web root.
+fn probe_caldav_context_root(server: &Url, tls: &Tls, proxy: &Proxy) -> Option<Url> {
+    let host = server.host_str()?;
+    let port = server.port_or_known_default()?;
+    let request = Http11WellKnown::prepare_request(server.as_str(), "caldav").ok()?;
+    let output = run_well_known(host, port, request, tls, proxy).ok()?;
+    https_only(output.redirect_url?)
+}
+
+/// `target` when its scheme is `https`, none otherwise.
+fn https_only(target: Url) -> Option<Url> {
+    if target.scheme() == "https" {
+        return Some(target);
+    }
+
+    warn!("ignore the .well-known/caldav redirect to {target}: it is not https");
+    None
+}
+
+/// Runs a prepared `.well-known` request over a fresh TLS stream.
+fn run_well_known(
+    host: &str,
+    port: u16,
+    request: HttpRequest,
+    tls: &Tls,
+    proxy: &Proxy,
+) -> Result<Http11WellKnownOutput> {
+    let opts = TlsConnectOptions {
+        tls: tls.clone(),
+        proxy: proxy.clone(),
+        ..Default::default()
+    };
+    let mut stream = Stream::connect_tls(host, port, opts)?;
+    let mut coroutine = Http11WellKnown::new(request);
+    let mut buf = [0u8; 8 * 1024];
+    let mut arg: Option<&[u8]> = None;
+
+    loop {
+        match coroutine.resume(arg.take()) {
+            HttpCoroutineState::Complete(Ok(output)) => return Ok(output),
+            HttpCoroutineState::Complete(Err(err)) => return Err(err.into()),
+            HttpCoroutineState::Yielded(HttpYield::WantsWrite(bytes)) => {
+                stream.write_all(&bytes)?;
+            }
+            HttpCoroutineState::Yielded(HttpYield::WantsRead) => {
+                let n = stream.read(&mut buf)?;
+                arg = Some(&buf[..n]);
+            }
+        }
+    }
+}
+
 /// Parses a `server` config string into a [`Url`].
 ///
-/// Accepts a full URL, a bare domain, or `domain:port`; anything
-/// without an explicit `http` or `https` scheme defaults to `https://`,
-/// since `url` would otherwise read the leading label of `domain:port`
-/// as the scheme. A URL that fails to parse is refused rather than
-/// prefixed, a host that is not ASCII naming its Punycode form
-/// ([`parse_url`]).
+/// Accepts a full `http` or `https` URL, a bare domain, or `domain:port`.
+/// A value naming no scheme (no `://`) is read as `https://` followed by
+/// it, since `url` would otherwise read the leading label of
+/// `domain:port` as the scheme. A value naming a scheme is read as
+/// written: one that does not parse, or names another scheme, is refused
+/// rather than prefixed. A host that is not ASCII is refused, naming its
+/// Punycode form ([`parse_url`]).
 pub fn parse_server(server: &str) -> Result<Url> {
-    match Url::parse(server) {
-        Ok(url) if matches!(url.scheme(), "http" | "https") => Ok(url),
-        Ok(_) | Err(ParseError::RelativeUrlWithoutBase) => parse_url(&format!("https://{server}")),
-        Err(_) => parse_url(server),
+    if !server.contains("://") {
+        return parse_url(&format!("https://{server}"));
     }
+
+    let url = parse_url(server)?;
+
+    if !matches!(url.scheme(), "http" | "https") {
+        bail!("Cannot read CalDAV server `{server}`: its scheme is not http nor https");
+    }
+
+    Ok(url)
 }
 
 /// The TLS profile CalDAV connects with.
@@ -362,6 +453,41 @@ mod tests {
             let parsed = parse_server(server);
             assert!(parsed.is_err(), "{server}: {parsed:?}");
         }
+    }
+
+    /// TWN-4: a server naming another scheme is refused, never read as
+    /// a bare authority whose host is the scheme.
+    #[test]
+    fn a_scheme_other_than_http_is_refused() {
+        let err = parse_server("ftp://dav.example.org/").unwrap_err();
+        assert!(err.to_string().contains("not http nor https"), "{err}");
+    }
+
+    /// TWN-4: the `.well-known/caldav` redirect is followed over https
+    /// alone, the credential going where it points.
+    #[test]
+    fn a_well_known_redirect_is_followed_over_https_only() {
+        let https = url::Url::parse("https://dav.example.org/dav/").unwrap();
+        let http = url::Url::parse("http://dav.example.org/dav/").unwrap();
+
+        assert_eq!(super::https_only(https.clone()), Some(https));
+        assert_eq!(super::https_only(http), None);
+    }
+
+    /// CAL-18: `server` and `home` are two routes, so a block naming both
+    /// is refused before anything connects.
+    #[test]
+    fn a_block_naming_server_and_home_is_refused() {
+        let document = "server = \"https://a.example/\"\nhome = \"https://b.example/h/\"\n\
+                        auth = \"none\"\n";
+        let config: CaldavConfig = toml::from_str(document).unwrap();
+        let mut resolver = pimalaya_config::secret::SecretResolver::default();
+
+        let err = super::connect(&config, &mut resolver).err().unwrap();
+        assert!(
+            err.to_string().contains("both `server` and `home`"),
+            "{err}"
+        );
     }
 
     /// Every spelling a user writes a context root in resolves, and a

@@ -152,6 +152,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed a `caldav.server` naming another scheme than `http` or `https` (`ftp://x`) being read as the bare host `ftp`: it is refused. A `server` naming an `https` origin is now probed at `.well-known/caldav`, the redirect followed over `https` alone, as cardamum probes `.well-known/carddav`.
+- Fixed a `caldav` block naming both `server` and `home` loading with `home` winning silently: it is refused.
+- Fixed `event.list.page-size = 0`, documented as every event on one page, making `pimdir search` print one hit per page.
 - Fixed `pimdir reply` and `pimdir cancel` queuing, in a store whose sources declare nothing, a row naming a `--source` that syncs nothing of the calendar, which the sync engine skips for ever: it is refused, coded `no-performer`, naming the sources that do. The text receipt now names the queue row.
 - Fixed a pimdir `item update` or `event update` given a source over an event whose body is gone failing `body-pending` where cardamum queues it, and `--if-match` naming the hash of that gone body passing: it is queued, and any `--if-match` fails `precondition-failed`.
 - Fixed a pimdir event whose body is not downloaded yet vanishing from `event list`, `event search` and `event agenda` while the page line counted it: it shows from the store's summary, as `pimdir search` shows it.

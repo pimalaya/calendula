@@ -142,6 +142,17 @@ fn a_search_resumes_at_the_next_page_it_names() {
     let won = search(&["--page", "1", "--page-token", &token]);
     assert_eq!(won["hits"], last["hits"], "{won}");
 
+    let whole = json(
+        &run(home, &["--json", "pimdir", "search", "-s", "0", "budget"]),
+        0,
+    );
+    assert_eq!(
+        whole["hits"].as_array().unwrap().len(),
+        3,
+        "CAL-18: {whole}"
+    );
+    assert_eq!(whole["nextPage"], Value::Null, "{whole}");
+
     let text = run(home, &["pimdir", "search", "-s", "2", "budget"]);
     let text = String::from_utf8(text.stdout).unwrap();
     assert!(text.contains("Page:      1, events 1 to 2\n"), "{text}");

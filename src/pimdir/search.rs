@@ -92,7 +92,10 @@ impl PimdirSearchCommand {
 
         let account = &backend.account;
         let page_size = self.page_size.unwrap_or(account.events_list_page_size());
-        let limit = page_size.max(1);
+        let limit = match page_size {
+            0 => u32::MAX,
+            size => size,
+        };
         let mut options = PimdirSearchOptions {
             sort: self.sort.into(),
             limit: limit as usize,
