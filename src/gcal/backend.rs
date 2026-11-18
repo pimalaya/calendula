@@ -126,7 +126,12 @@ impl GcalBackend {
         }
 
         if let Some(color) = color {
-            self.paint(&created_id, color)?;
+            self.paint(&created_id, color).with_context(|| {
+                format!(
+                    "Calendar `{created_id}` was created without its colour; set it with \
+                     `calendar update {created_id} -C <COLOR>` rather than creating it again"
+                )
+            })?;
         }
 
         Ok(created_id)
@@ -138,6 +143,10 @@ impl GcalBackend {
     /// A field a PATCH leaves out stays as it is, so a cleared description
     /// is sent empty, which Google stores as none.
     pub fn update_calendar(&mut self, id: &str, patch: CalendarDiff) -> Result<()> {
+        if let Some(None) = patch.color {
+            bail!("Google calendars always carry a colour; set one instead");
+        }
+
         if patch.name.is_some() || patch.description.is_some() {
             let calendar = GcalCalendar {
                 summary: patch.name,
@@ -148,11 +157,8 @@ impl GcalBackend {
             self.client.calendar_patch(id, &calendar)?;
         }
 
-        if let Some(color) = patch.color {
-            match color {
-                Some(color) => self.paint(id, &color)?,
-                None => bail!("Google calendars always carry a colour; set one instead"),
-            }
+        if let Some(Some(color)) = patch.color {
+            self.paint(id, &color)?;
         }
 
         Ok(())
@@ -825,6 +831,45 @@ mod tests {
         let stream = backend.client.stream.as_any_mut();
         let stream = stream.downcast_mut::<Scripted>().unwrap();
         String::from_utf8_lossy(&stream.written).into_owned()
+    }
+
+    /// CAL-11: a refusal knowable before any request sends none.
+    #[test]
+    fn a_cleared_colour_is_refused_before_the_rename() {
+        let mut backend = backend(&[]);
+        let patch = CalendarDiff {
+            name: Some("New".into()),
+            color: Some(None),
+            ..Default::default()
+        };
+
+        let err = backend.update_calendar("cal", patch).unwrap_err();
+
+        assert!(err.to_string().contains("colour"), "{err:#}");
+        assert_eq!(written(&mut backend), "");
+    }
+
+    /// CAL-11: a calendar created then left unpainted is named, so a
+    /// retry updates it rather than creating a second one.
+    #[test]
+    fn a_failed_paint_names_the_calendar_created() {
+        let mut backend = answering(&[
+            (
+                200,
+                r#"{"id":"new@group.calendar.google.com","summary":"N"}"#,
+            ),
+            (400, &refusal(400, "invalid", "Invalid colour")),
+        ]);
+
+        let err = backend
+            .create_calendar(None, "N", None, Some("nope"))
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("Calendar `new@group.calendar.google.com` was created"),
+            "{err:#}"
+        );
     }
 
     #[test]
