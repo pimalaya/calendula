@@ -13,13 +13,14 @@
 use std::{
     env::temp_dir,
     fs,
+    io::Write,
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
 };
 
 use anyhow::{Context, Error, Result, anyhow, bail};
 use log::{debug, info};
-use pimalaya_cli::{printer::Printer, prompt};
+use pimalaya_cli::{file::private_options, printer::Printer, prompt};
 use pimalaya_config::command::{self, CommandConfig};
 
 use crate::shared::{ical::check, uuid::uuid_v4};
@@ -52,7 +53,7 @@ impl IcalComposer {
 
         let path = temp_dir().join(format!("calendula-{}.ics", uuid_v4()?));
         info!("seeding the composer with {} bytes in {path:?}", seed.len());
-        fs::write(&path, seed).with_context(|| format!("Cannot write iCalendar {path:?}"))?;
+        write_draft(&path, seed)?;
 
         let mut draft = IcalDraft {
             path,
@@ -191,9 +192,51 @@ fn quote(path: &str) -> String {
     format!("'{}'", path.replace('\'', r"'\''"))
 }
 
+/// Writes `seed` to a new file at `path`, the composer's draft.
+///
+/// The draft can hold private data (an attendee, a description), so it is
+/// created afresh and, on Unix, readable by its owner alone whatever the
+/// umask, never through a file or a symbolic link another user planted at
+/// its path in the shared temporary directory
+/// ([`private_options`] with `create_new`).
+fn write_draft(path: &Path, seed: &[u8]) -> Result<()> {
+    private_options()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .and_then(|mut file| file.write_all(seed))
+        .with_context(|| format!("Cannot write iCalendar {path:?}"))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::quote;
+    use super::{quote, write_draft};
+
+    /// The draft is its owner's alone, and a path another user holds
+    /// first, a file or a link to one, is refused rather than written
+    /// through.
+    #[cfg(unix)]
+    #[test]
+    fn a_draft_is_private_and_never_written_through_a_planted_path() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+
+        let dir = tempfile::tempdir().unwrap();
+
+        let draft = dir.path().join("draft.ics");
+        write_draft(&draft, b"BEGIN:VCALENDAR").unwrap();
+        let mode = std::fs::metadata(&draft).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        assert_eq!(std::fs::read(&draft).unwrap(), b"BEGIN:VCALENDAR");
+
+        let target = dir.path().join("target");
+        std::fs::write(&target, b"theirs").unwrap();
+        let planted = dir.path().join("planted.ics");
+        symlink(&target, &planted).unwrap();
+
+        assert!(write_draft(&planted, b"mine").is_err());
+        assert!(write_draft(&target, b"mine").is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"theirs");
+    }
 
     #[test]
     fn a_quoted_path_survives_a_quote_of_its_own() {

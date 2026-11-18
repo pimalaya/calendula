@@ -6,7 +6,10 @@ use std::fmt;
 
 use anyhow::Result;
 use clap::Parser;
-use io_pimdir::client::producer::{PimdirActionStatus, PimdirReceiptRefusal};
+use io_pimdir::{
+    client::producer::{PimdirActionStatus, PimdirReceiptRefusal},
+    codec::PimdirActionHandle,
+};
 use pimalaya_cli::{printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -35,16 +38,18 @@ use crate::pimdir::backend::PimdirBackend;
 /// "reason", "refusedAt"}]}`, as cardamum prints it.
 #[derive(Debug, Parser)]
 pub struct PimdirQueueShowCommand {
-    /// The queue row id.
+    /// The queue row: its id, as `pimdir queue list` prints it, or its
+    /// handle, as a receipt prints it, refused once the store is a copy
+    /// restored since (`reset`).
     #[arg(value_name = "ROW")]
-    pub id: i64,
+    pub row: PimdirActionHandle,
 }
 
 impl PimdirQueueShowCommand {
     /// Looks the row up in the account's queue and receipts.
     pub fn execute(self, printer: &mut impl Printer, backend: PimdirBackend) -> Result<()> {
-        let status = backend.queue_row(self.id)?;
-        printer.out(PimdirQueueShowOutput::new(self.id, status))
+        let status = backend.queue_row(&self.row)?;
+        printer.out(PimdirQueueShowOutput::new(self.row.id, status))
     }
 }
 

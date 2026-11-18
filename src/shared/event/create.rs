@@ -20,6 +20,7 @@ use crate::{
         composer::IcalComposer,
         event::fields::EventFieldsArgs,
         ical::{IcalFamily, blank_item, ensure_valid, read_source},
+        item::ItemOrigin,
     },
 };
 
@@ -102,7 +103,12 @@ impl EventCreateCommand {
                 ensure_valid(&seed)?;
             }
 
-            let id = client.create_item(&calendar_id, seed, self.send_updates.send_updates)?;
+            let id = client.create_item(
+                &calendar_id,
+                seed,
+                ItemOrigin::User,
+                self.send_updates.send_updates,
+            )?;
             return printer.out(EventCreateOutput::Created(EventCreatedOutput {
                 id,
                 queued: client.queues_writes(),
@@ -123,6 +129,7 @@ impl EventCreateCommand {
         let created = client.create_item(
             &calendar_id,
             draft.contents.clone(),
+            ItemOrigin::User,
             self.send_updates.send_updates,
         );
         let id = draft.finish(created)?;

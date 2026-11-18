@@ -18,6 +18,7 @@ use crate::{
         client::CalendarClient,
         composer::IcalComposer,
         ical::{IcalFamily, blank_item, read_source},
+        item::ItemOrigin,
     },
 };
 
@@ -61,9 +62,10 @@ impl ItemCreateCommand {
             Some(source) => read_source(source)?,
             None => blank_item(IcalFamily::Item)?,
         };
+        let origin = ItemOrigin::of_source(self.ical.as_deref());
 
         if !self.composer.interactive {
-            let id = client.create_item(&calendar_id, seed, None)?;
+            let id = client.create_item(&calendar_id, seed, origin, None)?;
             return printer.out(ItemCreateOutput::Created(ItemCreatedOutput {
                 id,
                 queued: client.queues_writes(),
@@ -81,7 +83,7 @@ impl ItemCreateCommand {
             return printer.out(ItemCreateOutput::Abandoned {});
         };
 
-        let created = client.create_item(&calendar_id, draft.contents.clone(), None);
+        let created = client.create_item(&calendar_id, draft.contents.clone(), origin, None);
         let id = draft.finish(created)?;
 
         printer.out(ItemCreateOutput::Created(ItemCreatedOutput {

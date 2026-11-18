@@ -7,7 +7,7 @@ use std::fmt;
 
 use anyhow::{Result, bail};
 use clap::Parser;
-use io_pimdir::client::producer::PimdirActionStatus;
+use io_pimdir::{client::producer::PimdirActionStatus, codec::PimdirActionHandle};
 use pimalaya_cli::{printer::Printer, prompt, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -33,9 +33,11 @@ use crate::pimdir::backend::PimdirBackend;
 /// version of the sync engine wrote is refused rather than reshaped.
 #[derive(Debug, Parser)]
 pub struct PimdirQueueCancelCommand {
-    /// Row id of the queued action, as `pimdir queue list` prints it.
+    /// The queued action's row: its id, as `pimdir queue list` prints
+    /// it, or its handle, as a receipt prints it, refused `store-reset`
+    /// once the store is a copy restored since.
     #[arg(value_name = "ROW")]
-    pub id: i64,
+    pub row: PimdirActionHandle,
     /// Do not ask for confirmation.
     #[arg(long, short)]
     pub yes: bool,
@@ -44,7 +46,7 @@ pub struct PimdirQueueCancelCommand {
 impl PimdirQueueCancelCommand {
     /// Retracts the queued action the row id names.
     pub fn execute(self, printer: &mut impl Printer, backend: PimdirBackend) -> Result<()> {
-        let (named, unconfirmed) = match backend.queue_row(self.id)? {
+        let (named, unconfirmed) = match backend.queue_row(&self.row)? {
             PimdirActionStatus::Pending { kind, .. } | PimdirActionStatus::Parked { kind, .. } => {
                 (kind, false)
             }
@@ -56,21 +58,21 @@ impl PimdirQueueCancelCommand {
                 "The {} queued as row {} was sent and may have taken effect, which \
                  cancelling does not undo. Cancel it?",
                 sanitize::text(&named),
-                self.id
+                self.row
             ),
             false => format!(
                 "Cancel the {} queued as row {}?",
                 sanitize::text(&named),
-                self.id
+                self.row
             ),
         };
         if !self.yes && !prompt::bool(question, false)? {
             bail!("Cancellation aborted");
         }
 
-        let kind = backend.cancel_queued(self.id)?;
+        let kind = backend.cancel_queued(&self.row)?;
         printer.out(PimdirQueueCancelOutput {
-            id: self.id,
+            id: self.row.id,
             kind,
             unconfirmed,
         })

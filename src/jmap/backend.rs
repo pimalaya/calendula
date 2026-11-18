@@ -22,7 +22,11 @@ use ical::component::IcalComponentKind;
 use io_jmap::{
     calendars::{
         JMAP_CALENDARS_CAPABILITY,
-        calendar::{JmapCalendar, get::JmapCalendarGetOptions},
+        calendar::{
+            JmapCalendar,
+            get::JmapCalendarGetOptions,
+            set::{JmapCalendarCreate, JmapCalendarSetArgs, JmapCalendarUpdate},
+        },
         calendar_event::{
             JmapCalendarEvent,
             get::JmapCalendarEventGetOptions,
@@ -38,13 +42,11 @@ use io_jmap::{
 use log::warn;
 use pimalaya_cli::error::{CodedError, with_code};
 use pimalaya_config::secret::SecretResolver;
-use serde_json::Map;
 
 use crate::{
     config::JmapConfig,
     error::{self, ErrorCode},
     jmap::{
-        calendar_set,
         client::connect,
         error::{JmapSetError, set_error},
         project,
@@ -92,16 +94,27 @@ impl JmapBackend {
             return Err(CodedError::new(ErrorCode::PermissionDenied, message).into());
         }
 
-        let mut calendar = Map::new();
-        calendar.insert("name".into(), name.into());
-        if let Some(description) = description {
-            calendar.insert("description".into(), description.into());
-        }
-        if let Some(color) = color {
-            calendar.insert("color".into(), color.into());
+        let calendar = JmapCalendarCreate {
+            name: Some(name.to_owned()),
+            description: description.map(ToOwned::to_owned),
+            color: color.map(ToOwned::to_owned),
+            ..Default::default()
+        };
+        let args = JmapCalendarSetArgs {
+            create: Some(BTreeMap::from([(CREATE_ID.to_owned(), calendar)])),
+            ..Default::default()
+        };
+        let mut out = self.client.calendar_set(args)?;
+
+        if let Some(err) = out.not_created.remove(CREATE_ID) {
+            return Err(set_error("JMAP Calendar create rejected", &err));
         }
 
-        let created = calendar_set::create(&mut self.client, calendar)?;
+        let created = out
+            .created
+            .remove(CREATE_ID)
+            .and_then(|created| created.id)
+            .ok_or_else(|| anyhow!("JMAP Calendar/set answered no id for the calendar created"))?;
 
         if let Some(id) = id.filter(|id| *id != created) {
             warn!("the JMAP server assigned the calendar id `{created}`, not `{id}`");
@@ -123,27 +136,42 @@ impl JmapBackend {
     /// Applies `patch` to the calendar `id`, a cleared field sent as
     /// `null`.
     pub fn update_calendar(&mut self, id: &str, patch: CalendarDiff) -> Result<()> {
-        let mut object = Map::new();
-        if let Some(name) = patch.name {
-            object.insert("name".into(), name.into());
-        }
-        if let Some(description) = patch.description {
-            object.insert("description".into(), description.into());
-        }
-        if let Some(color) = patch.color {
-            object.insert("color".into(), color.into());
-        }
-
-        if object.is_empty() {
+        if patch.name.is_none() && patch.description.is_none() && patch.color.is_none() {
             return Ok(());
         }
 
-        calendar_set::update(&mut self.client, id, object)
+        let update = JmapCalendarUpdate {
+            name: patch.name,
+            description: patch.description,
+            color: patch.color,
+            ..Default::default()
+        };
+        let args = JmapCalendarSetArgs {
+            update: Some(BTreeMap::from([(id.to_owned(), update)])),
+            ..Default::default()
+        };
+        let mut out = self.client.calendar_set(args)?;
+
+        match out.not_updated.remove(id) {
+            Some(err) => Err(set_error("JMAP Calendar update rejected", &err)),
+            None => Ok(()),
+        }
     }
 
-    /// Deletes the calendar `id` with every event it holds.
+    /// Deletes the calendar `id` with every event it holds
+    /// (`onDestroyRemoveEvents`).
     pub fn delete_calendar(&mut self, id: &str) -> Result<()> {
-        calendar_set::destroy(&mut self.client, id)
+        let args = JmapCalendarSetArgs {
+            destroy: Some(vec![id.to_owned()]),
+            on_destroy_remove_events: Some(true),
+            ..Default::default()
+        };
+        let mut out = self.client.calendar_set(args)?;
+
+        match out.not_destroyed.remove(id) {
+            Some(err) => Err(set_error("JMAP Calendar destroy rejected", &err)),
+            None => Ok(()),
+        }
     }
 
     /// Lists the window `query` names of the events of `calendar_id`, one

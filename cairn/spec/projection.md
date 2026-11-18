@@ -16,7 +16,7 @@ CalDAV, vdir and pimdir speak iCalendar natively and SHALL store and return the 
 ### Requirement: JMAP converts through JSCalendar
 The jmap projection SHALL convert a CalendarEvent's JSCalendar payload (RFC 8984, JSCalendar 2.0 on write) through ical-rs's conversion both ways: `Ical::from_jscalendar` then the calendar's text on read, io-jmap's `JmapCalendarEvent::from_ical` (ical-rs's Group export, its one entry, `method` dropped) on write. The JMAP envelope (`id`, `calendarIds`, `isDraft`, `isOrigin`, `utcStart`, `utcEnd`, `baseEventId`) SHALL be kept out of the document both ways. What JSCalendar cannot express rides ical-rs's escape hatches, so the document round-trips: a document read and written back unedited patches nothing. A document converting to anything but one JSCalendar object (several UIDs, an event beside a to-do) SHALL be refused as not one JMAP event, and one holding several `RRULE`s as io-jmap refuses it. An `RRULE`'s `UNTIL` is carried across unshifted (ical-rs 0.7): exact for a floating or UTC series, off by the zone's offset for a zoned one, so a zoned series written from a document with a UTC `UNTIL`, or expanded from the document a read gives, may gain or lose its last instance; a document read and written back keeps the server's `until`.
 
-The read conversion SHALL stay behind one function of the jmap module (`project::to_ical`), standing in for the `to_ical` io-jmap has not released.
+The read conversion SHALL be io-jmap's `JmapCalendarEvent::to_ical`.
 
 #### Scenario: A series read and written back
 - GIVEN a JMAP series with one override, as the server answers it

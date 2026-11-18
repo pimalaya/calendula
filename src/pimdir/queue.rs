@@ -13,7 +13,7 @@ use anyhow::{Result, bail};
 use clap::Subcommand;
 use io_pimdir::{
     client::{PimdirError, PimdirStore, producer::PimdirActionStatus},
-    codec::{PimdirAction, action_from_payload},
+    codec::{PimdirAction, PimdirActionHandle, action_from_payload},
     intent::{PimdirIntentItem, PimdirInvitation},
     object::PimdirHash,
     summary::{PimdirSummary, calendar::derive},
@@ -214,14 +214,15 @@ impl PimdirBackend {
         }
     }
 
-    /// Where the queue row `id` stands, `Unknown` for a row of a calendar
-    /// another account holds.
-    pub(crate) fn queue_row(&self, id: i64) -> Result<PimdirActionStatus> {
+    /// Where the queue row `handle` names stands, `Unknown` for a row of a
+    /// calendar another account holds, `Reset` for a handle another store,
+    /// or another incarnation of this one, answered (pimdir STORAGE §4.5).
+    pub(crate) fn queue_row(&self, handle: &PimdirActionHandle) -> Result<PimdirActionStatus> {
         let status = self
             .client
             .reader
-            .action_status(id)
-            .map_err(|err| store_error(err, format!("Read queue row {id}")))?;
+            .action_status(handle.clone())
+            .map_err(|err| store_error(err, format!("Read queue row {handle}")))?;
 
         let collection = match &status {
             PimdirActionStatus::Pending { collection, .. }
@@ -249,21 +250,26 @@ impl PimdirBackend {
         })
     }
 
-    /// Drops the queued or parked row `id` of the account's queue and
-    /// returns the action kind it held.
+    /// Drops the queued or parked row `handle` names of the account's
+    /// queue and returns the action kind it held.
     ///
     /// Dropping a row is the store owner's write, so this takes that role
     /// for the call and fails `store-owned` while a sync holds it.
-    pub(crate) fn cancel_queued(&self, id: i64) -> Result<String> {
-        let kind = match self.queue_row(id)? {
+    pub(crate) fn cancel_queued(&self, handle: &PimdirActionHandle) -> Result<String> {
+        let kind = match self.queue_row(handle)? {
             PimdirActionStatus::Pending { kind, .. }
             | PimdirActionStatus::Parked { kind, .. }
             | PimdirActionStatus::Unconfirmed { kind, .. } => kind,
-            PimdirActionStatus::Applied { .. } => bail!("Row {id} was applied already"),
-            // NOTE: a bare row id states no store, so io-pimdir follows it
-            // unchecked and never answers a reset for it.
-            PimdirActionStatus::Unknown | PimdirActionStatus::Reset => bail!(
-                "No queued action with row {id} in this account's queue; it may have been \
+            PimdirActionStatus::Applied { .. } => bail!("Row {handle} was applied already"),
+            PimdirActionStatus::Reset => {
+                let message = format!(
+                    "The pimdir store is not the one row {handle} was queued in, a copy restored \
+                     since, where the id may name another row; nothing is cancelled"
+                );
+                return Err(CodedError::new(ErrorCode::StoreReset, message).into());
+            }
+            PimdirActionStatus::Unknown => bail!(
+                "No queued action with row {handle} in this account's queue; it may have been \
                  synced already"
             ),
         };
@@ -279,15 +285,15 @@ impl PimdirBackend {
                 ),
             )
             .into(),
-            err => store_error(err, format!("Cancel queued action {id}")),
+            err => store_error(err, format!("Cancel queued action {handle}")),
         })?;
 
         let dropped = owner
-            .drop_action(id)
-            .map_err(|err| store_error(err, format!("Cancel queued action {id}")))?;
+            .drop_action(handle.clone())
+            .map_err(|err| store_error(err, format!("Cancel queued action {handle}")))?;
 
         if !dropped {
-            bail!("No queued action with row {id}; it may have been synced already");
+            bail!("No queued action with row {handle}; it may have been synced already");
         }
 
         Ok(kind)
@@ -326,6 +332,7 @@ mod tests {
         config::PimdirConfig,
         error::{self, ErrorCode},
         pimdir::backend::PimdirBackend,
+        shared::item::ItemOrigin,
     };
 
     const EVENT: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n\
@@ -350,7 +357,7 @@ mod tests {
         };
         let mut backend = PimdirBackend::new(config).unwrap();
         backend
-            .create_item("cal", EVENT.as_bytes().to_vec())
+            .create_item("cal", EVENT.as_bytes().to_vec(), ItemOrigin::User)
             .unwrap();
 
         (dir, backend)
@@ -375,20 +382,74 @@ mod tests {
         assert_eq!(row.link_id.as_deref(), Some("standup@example.org"));
         assert_eq!(row.item_id, None);
         assert_eq!(row.summary.as_deref(), Some("Standup"));
-        let row = row.row;
+        let row = row.row.into();
 
-        let status = backend.queue_row(row).unwrap();
+        let status = backend.queue_row(&row).unwrap();
         assert!(
             matches!(status, PimdirActionStatus::Pending { ref kind, .. } if kind == "add"),
             "{status:?}"
         );
 
-        assert_eq!(backend.cancel_queued(row).unwrap(), "add");
+        assert_eq!(backend.cancel_queued(&row).unwrap(), "add");
         assert!(backend.queued_rows(Some("cal")).unwrap().is_empty());
-        assert_eq!(backend.queue_row(row).unwrap(), PimdirActionStatus::Unknown);
+        assert_eq!(
+            backend.queue_row(&row).unwrap(),
+            PimdirActionStatus::Unknown
+        );
 
-        let err = backend.cancel_queued(row).unwrap_err();
+        let err = backend.cancel_queued(&row).unwrap_err();
         assert!(err.to_string().contains("No queued action"), "{err}");
+    }
+
+    /// A row named by the handle its enqueue answered is followed and
+    /// cancelled in the store that answered it, and refused `store-reset`,
+    /// nothing dropped, under another store id or incarnation: a restored
+    /// copy, where the id may name another row (pimdir STORAGE §4.5).
+    #[test]
+    fn a_handle_of_another_store_is_refused_as_a_reset() {
+        use io_pimdir::{
+            codec::{PimdirAction, PimdirActionHandle},
+            placement::{PimdirFlags, PimdirLinkId},
+        };
+
+        let (_dir, backend) = store();
+        let body = EVENT.replace("standup@", "retro@");
+        let handle = backend
+            .client
+            .producer()
+            .unwrap()
+            .enqueue_user_body("cal", body.as_bytes(), |hash| PimdirAction::Add {
+                link_id: Some(PimdirLinkId("retro@example.org".into())),
+                flags: PimdirFlags::default(),
+                object: Some(hash),
+                supersedes: None,
+            })
+            .unwrap()
+            .handle;
+        let identity = handle.store.clone().unwrap();
+
+        let mut restored = identity.clone();
+        restored.incarnation += 1;
+        let mut foreign = identity.clone();
+        foreign.store_id = "0".repeat(32);
+
+        for store in [restored, foreign] {
+            let other = PimdirActionHandle {
+                id: handle.id,
+                store: Some(store),
+            };
+            assert_eq!(
+                backend.queue_row(&other).unwrap(),
+                PimdirActionStatus::Reset
+            );
+            let err = backend.cancel_queued(&other).unwrap_err();
+            assert_eq!(error::code(&err), Some(ErrorCode::StoreReset), "{err}");
+        }
+        assert_eq!(backend.queued_rows(Some("cal")).unwrap().len(), 2);
+
+        let parsed: PimdirActionHandle = handle.to_string().parse().unwrap();
+        assert_eq!(backend.cancel_queued(&parsed).unwrap(), "add");
+        assert_eq!(backend.queued_rows(Some("cal")).unwrap().len(), 1);
     }
 
     /// The queue of a calendar the store does not hold is refused

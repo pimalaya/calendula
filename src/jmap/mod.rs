@@ -6,7 +6,6 @@
 //! No protocol-specific command tree sits beside it yet.
 
 pub mod backend;
-pub mod calendar_set;
 pub mod client;
 pub mod error;
 pub mod project;

@@ -111,7 +111,8 @@ pub enum ErrorCode {
     StoreUncreated,
     /// The pimdir store is of another format version than this
     /// calendula's, never migrated: an earlier sync engine's store is
-    /// reinstalled by that engine, a newer one's needs a newer calendula.
+    /// drained by that engine then set aside, a later one's needs a later
+    /// calendula.
     StoreVersion,
     /// The pimdir database is not a pimdir store, another program having
     /// written it: the caller points calendula at the store its sync

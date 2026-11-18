@@ -313,7 +313,7 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 | `invitation-missing` | `pimdir reply` names an event naming no `ORGANIZER` to answer or no `ATTENDEE` to answer as, or `pimdir cancel` one naming no `ATTENDEE` to notify; nothing was queued |
 | `item-duplicate` | a create names a `UID` its calendar holds: a CalDAV `no-uid-conflict` or 412, a gcal calendar holding it, a pimdir calendar holding or queuing it |
 | `store-uncreated` | the pimdir store has no schema yet: its sync engine creates it |
-| `store-version` | the pimdir store is of another format version than calendula's: an earlier sync engine's is reinstalled, a newer one's needs calendula upgraded |
+| `store-version` | the pimdir store is of another format version than calendula's: an earlier sync engine's is drained by it then set aside, a later one's needs calendula upgraded |
 | `store-foreign` | the pimdir database is not a pimdir store: another program wrote it |
 | `store-corrupt` | the pimdir store's two version stamps disagree, or its schema is not the canonical one |
 | `store-not-current` | the pimdir store holds no schema yet and the verb creates none: its sync engine creates it |
@@ -522,6 +522,8 @@ Every key of such a payload SHALL be camelCase, the spelling of the wire formats
 
 ### Requirement: An item is edited through a command, never through a pipe
 A composer SHALL be a command the configuration names, spawned on the path of a temporary file holding the iCalendar, with stdin, stdout and stderr all inherited. calendula SHALL capture none of the command's streams: a composer that spawns an editor would otherwise hand it a pipe instead of the terminal, and the editor hangs or writes where nothing reads. The command edits the file in place, and calendula reads it back once the command exits.
+
+The file SHALL be created afresh in the temporary directory (pimalaya-cli's `file::private_options`, `create_new`): on Unix readable by its owner alone whatever the umask, and never written through a file or a symbolic link another user planted at its path, which fails the command instead.
 
 The path SHALL be appended as the command's last argument. For a shell line that means interpolating it into the line, single-quoted, since a shell invoked as `sh -c <line> <path>` binds the path to `$0` rather than passing it on.
 

@@ -37,7 +37,7 @@ use io_pimdir::{
         producer::PimdirProducer,
         reader::{PimdirCollection, PimdirItem},
     },
-    codec::PimdirAction,
+    codec::{PimdirAction, PimdirActionHandle},
     intent::{PimdirIntentItem, PimdirInvitation, PimdirPartstat},
     object::PimdirHash,
     placement::PimdirFlags,
@@ -64,7 +64,7 @@ use crate::{
         calendar::{Calendar, CalendarDiff},
         event::Event,
         ical::may_hold_kind,
-        item::{CalendarItem, CalendarItemList, CalendarItemQuery, CalendarTimeRange},
+        item::{CalendarItem, CalendarItemList, CalendarItemQuery, CalendarTimeRange, ItemOrigin},
     },
 };
 
@@ -275,15 +275,22 @@ impl PimdirBackend {
     /// public `seq` until the store's owner applies it, so there is no
     /// store-assigned id to report yet. A link id the calendar holds live
     /// or has queued is refused by the store, nothing queued.
-    pub fn create_item(&mut self, calendar_id: &str, contents: Vec<u8>) -> Result<String> {
+    pub fn create_item(
+        &mut self,
+        calendar_id: &str,
+        contents: Vec<u8>,
+        origin: ItemOrigin,
+    ) -> Result<String> {
         self.known_collection(calendar_id)?;
         self.check_synced(calendar_id)?;
-        self.check_online_meeting(calendar_id, None, None, &contents)?;
+        if origin == ItemOrigin::User {
+            self.check_online_meeting(calendar_id, None, None, &contents)?;
+        }
 
         let link_id = derive(&contents).link_id;
 
         let mut producer = self.client.producer()?;
-        enqueue_with_body(&mut producer, calendar_id, &contents, |hash| {
+        enqueue_with_body(&mut producer, calendar_id, &contents, origin, |hash| {
             PimdirAction::Add {
                 link_id: Some(link_id.clone()),
                 flags: PimdirFlags::default(),
@@ -312,6 +319,7 @@ impl PimdirBackend {
         item_id: &str,
         contents: Vec<u8>,
         if_match: Option<&str>,
+        origin: ItemOrigin,
     ) -> Result<()> {
         self.known_collection(calendar_id)?;
         self.check_synced(calendar_id)?;
@@ -320,14 +328,21 @@ impl PimdirBackend {
         let current = self.local_body(&stored)?;
         let held = current.as_ref().and(stored.object.clone());
         check_version(held.as_ref(), calendar_id, item_id, if_match)?;
-        self.check_online_meeting(calendar_id, Some(stored.seq), current.as_deref(), &contents)?;
+        if origin == ItemOrigin::User {
+            self.check_online_meeting(
+                calendar_id,
+                Some(stored.seq),
+                current.as_deref(),
+                &contents,
+            )?;
+        }
 
         // NOTE: `check_version` passed, so `if_match` names the body the
         // item holds.
         let read = if_match.and(held);
 
         let mut producer = self.client.producer()?;
-        enqueue_with_body(&mut producer, calendar_id, &contents, |hash| {
+        enqueue_with_body(&mut producer, calendar_id, &contents, origin, |hash| {
             PimdirAction::Update {
                 seq: stored.seq,
                 object: hash,
@@ -935,7 +950,7 @@ impl PimdirBackend {
         }
 
         Ok(PimdirQueued {
-            row: enqueued.handle.id,
+            handle: enqueued.handle,
             seq,
             source: invitation.source,
         })
@@ -987,15 +1002,21 @@ fn body_pending(item_id: &str, calendar_id: &str) -> anyhow::Error {
 ///
 /// Logs and answers the partial supports the gate passed the action
 /// with, read with the body in hand, those the body asks for included.
+///
+/// A [`ItemOrigin::Foreign`] body is queued without its `X-PIMDIR-`
+/// properties (pimdir STORAGE §18), a [`ItemOrigin::User`] one whole.
 fn enqueue_with_body(
     producer: &mut PimdirProducer,
     calendar_id: &str,
     body: &[u8],
+    origin: ItemOrigin,
     action: impl FnOnce(PimdirHash) -> PimdirAction,
 ) -> Result<Vec<PimdirPartial>> {
-    let enqueued = producer
-        .enqueue_with_body(calendar_id, body, action)
-        .map_err(staging_error)?;
+    let enqueued = match origin {
+        ItemOrigin::User => producer.enqueue_user_body(calendar_id, body, action),
+        ItemOrigin::Foreign => producer.enqueue_with_body(calendar_id, body, action),
+    }
+    .map_err(staging_error)?;
 
     for partial in &enqueued.partial {
         warn!("{partial}");
@@ -1309,8 +1330,9 @@ fn start_of(stored: &PimdirItem) -> Option<&PimdirTime> {
 /// What queueing an intent wrote.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PimdirQueued {
-    /// The queue row, which `pimdir` operator tooling cancels by.
-    pub row: i64,
+    /// The queue row's handle, its id under the store's identity (pimdir
+    /// STORAGE §4.5), which `pimdir queue show` and `cancel` take.
+    pub handle: PimdirActionHandle,
     /// The public id of the item the intent addresses.
     pub seq: i64,
     /// The source named to perform it.
@@ -1538,7 +1560,9 @@ mod tests {
         // queueing, so the producer stages it bare.
         for (account, collection) in [("work", "caldav/work"), ("home", "caldav/home")] {
             let mut backend = open(account);
-            backend.create_item(collection, ALONE.into()).unwrap();
+            backend
+                .create_item(collection, ALONE.into(), ItemOrigin::User)
+                .unwrap();
 
             let mut producer = backend.client.producer().unwrap();
             let object = producer.stage_body(ALONE.as_bytes()).unwrap();
@@ -1741,7 +1765,7 @@ mod tests {
         let mut backend = PimdirBackend::new(config()).unwrap();
         for body in bodies {
             backend
-                .create_item("cal", body.as_bytes().to_vec())
+                .create_item("cal", body.as_bytes().to_vec(), ItemOrigin::User)
                 .unwrap();
         }
 
@@ -2038,7 +2062,13 @@ mod tests {
 
         let edited = ALONE.replace("SUMMARY:", "SUMMARY:Edited ");
         backend
-            .update_item("cal", &ids[0], edited.clone().into_bytes(), Some(&etag))
+            .update_item(
+                "cal",
+                &ids[0],
+                edited.clone().into_bytes(),
+                Some(&etag),
+                ItemOrigin::User,
+            )
             .unwrap();
 
         let moved = backend.get_item("cal", &ids[0]).unwrap().etag.unwrap();
@@ -2100,7 +2130,13 @@ mod tests {
                 .len()
         };
 
-        let update = backend.update_item("cal", &ids[0], ALONE.into(), Some("stale"));
+        let update = backend.update_item(
+            "cal",
+            &ids[0],
+            ALONE.into(),
+            Some("stale"),
+            ItemOrigin::User,
+        );
         let err = update.unwrap_err().to_string();
         assert!(err.starts_with(PRECONDITION_FAILED), "{err}");
         assert!(err.contains("`stale`"), "{err}");
@@ -2406,7 +2442,9 @@ mod tests {
     fn an_online_meeting_in_an_undeclared_store_queues_nothing() {
         let (_dir, mut backend, ids) = store(&[ALONE]);
 
-        let err = backend.create_item("cal", MEETING.into()).unwrap_err();
+        let err = backend
+            .create_item("cal", MEETING.into(), ItemOrigin::User)
+            .unwrap_err();
         let code = pimalaya_cli::error::code_of(&err);
         assert_eq!(code, Some(ErrorCode::Unsupported), "{err:#}");
 
@@ -2416,10 +2454,55 @@ mod tests {
         assert!(err.contains("no source of this store declares it"), "{err}");
 
         let asked = ALONE.replace("SUMMARY", "X-PIMDIR-ONLINE-MEETING:TRUE\r\nSUMMARY");
-        let err = backend.update_item("cal", &ids[0], asked.into(), None);
+        let err = backend.update_item("cal", &ids[0], asked.into(), None, ItemOrigin::User);
         assert!(err.is_err());
 
         assert_eq!(pending(&backend), 0);
+    }
+
+    /// An iCalendar the user did not write as it stands is queued without
+    /// its `X-PIMDIR-` properties (pimdir STORAGE §18): it asks for
+    /// nothing, so no gate refuses it, and its online meeting is never
+    /// created; one the user wrote keeps its ask whole.
+    #[test]
+    fn a_foreign_body_is_queued_without_its_instructions() {
+        let (_dir, mut backend, ids) = store(&[ALONE]);
+        let asked = ALONE.replace("SUMMARY", "X-PIMDIR-ONLINE-MEETING:TRUE\r\nSUMMARY");
+
+        backend
+            .create_item("cal", MEETING.into(), ItemOrigin::Foreign)
+            .unwrap();
+        backend
+            .update_item(
+                "cal",
+                &ids[0],
+                asked.clone().into(),
+                None,
+                ItemOrigin::Foreign,
+            )
+            .unwrap();
+
+        let objects: Vec<_> = backend
+            .client
+            .producer()
+            .unwrap()
+            .pending_actions("cal")
+            .unwrap()
+            .into_iter()
+            .map(|pending| match pending.action {
+                PimdirAction::Add { object, .. } => object.unwrap(),
+                PimdirAction::Update { object, .. } => object,
+                action => panic!("{action:?}"),
+            })
+            .collect();
+        let stripped = |body: &str| {
+            let body = body.replace("X-PIMDIR-ONLINE-MEETING:TRUE\r\n", "");
+            backend.client.reader.hash(body.as_bytes())
+        };
+        assert_eq!(objects, [stripped(MEETING), stripped(&asked)]);
+
+        let read = backend.get_item("cal", &ids[0]).unwrap().contents;
+        assert!(!String::from_utf8(read).unwrap().contains("X-PIMDIR-"));
     }
 
     #[test]
@@ -2428,7 +2511,7 @@ mod tests {
         declare_meeting(&dir, io_pimdir::capability::PimdirSupport::None);
 
         let err = backend
-            .create_item("cal", MEETING.into())
+            .create_item("cal", MEETING.into(), ItemOrigin::User)
             .unwrap_err()
             .to_string();
         assert!(err.contains("source caldav does not support it"), "{err}");
@@ -2443,11 +2526,13 @@ mod tests {
             let (dir, mut backend, ids) = store(&[ALONE]);
             declare_meeting(&dir, support);
 
-            backend.create_item("cal", MEETING.into()).unwrap();
+            backend
+                .create_item("cal", MEETING.into(), ItemOrigin::User)
+                .unwrap();
 
             let asked = ALONE.replace("SUMMARY", "X-PIMDIR-ONLINE-MEETING:TRUE\r\nSUMMARY");
             backend
-                .update_item("cal", &ids[0], asked.into(), None)
+                .update_item("cal", &ids[0], asked.into(), None, ItemOrigin::User)
                 .unwrap();
 
             assert_eq!(pending(&backend), 2, "{support:?}");
@@ -2464,7 +2549,7 @@ mod tests {
         declare_meeting(&dir, PimdirSupport::Full);
         let asked = ALONE.replace("SUMMARY", "X-PIMDIR-ONLINE-MEETING:TRUE\r\nSUMMARY");
         backend
-            .update_item("cal", &ids[0], asked.clone().into(), None)
+            .update_item("cal", &ids[0], asked.clone().into(), None, ItemOrigin::User)
             .unwrap();
 
         let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
@@ -2477,7 +2562,7 @@ mod tests {
 
         let edited = asked.replace("SUMMARY:Focus", "SUMMARY:Deep focus");
         backend
-            .update_item("cal", &ids[0], edited.into(), None)
+            .update_item("cal", &ids[0], edited.into(), None, ItemOrigin::User)
             .unwrap();
 
         assert_eq!(pending(&backend), 1);
@@ -2526,7 +2611,7 @@ mod tests {
 
         let asked = ALONE.replace("SUMMARY", "X-PIMDIR-ONLINE-MEETING:TRUE\r\nSUMMARY");
         let err = backend
-            .update_item("cal", &ids[0], asked.into(), None)
+            .update_item("cal", &ids[0], asked.into(), None, ItemOrigin::User)
             .unwrap_err()
             .to_string();
 
@@ -2572,11 +2657,17 @@ mod tests {
         drop(owner);
 
         let created = backend
-            .create_item("cal", todo("todo@example.org").into())
+            .create_item("cal", todo("todo@example.org").into(), ItemOrigin::User)
             .unwrap_err()
             .to_string();
         let updated = backend
-            .update_item("cal", &ids[0], todo("alone@example.org").into(), None)
+            .update_item(
+                "cal",
+                &ids[0],
+                todo("alone@example.org").into(),
+                None,
+                ItemOrigin::User,
+            )
             .unwrap_err()
             .to_string();
 
@@ -2644,7 +2735,7 @@ mod tests {
             owner.declare("caldav", &declaration).unwrap();
             drop(owner);
 
-            let created = backend.create_item("cal", todo.clone().into());
+            let created = backend.create_item("cal", todo.clone().into(), ItemOrigin::User);
             assert_eq!(created.is_ok(), accepted, "{rows:?}: {created:?}");
             assert_eq!(pending(&backend), usize::from(accepted), "{rows:?}");
         }
@@ -2680,14 +2771,18 @@ mod tests {
         drop(owner);
 
         let mut producer = backend.client.producer().unwrap();
-        let partial = enqueue_with_body(&mut producer, "cal", INVITATION.as_bytes(), |hash| {
-            PimdirAction::Add {
+        let partial = enqueue_with_body(
+            &mut producer,
+            "cal",
+            INVITATION.as_bytes(),
+            ItemOrigin::Foreign,
+            |hash| PimdirAction::Add {
                 link_id: None,
                 flags: PimdirFlags::default(),
                 object: Some(hash),
                 supersedes: None,
-            }
-        })
+            },
+        )
         .unwrap();
 
         let named: Vec<(&str, &str)> = partial
@@ -2704,10 +2799,16 @@ mod tests {
 
         let (_dir, mut backend, _) = store(&[ALONE]);
         let fresh = ALONE.replace("alone@example.org", "fresh@example.org");
-        backend.create_item("cal", fresh.clone().into()).unwrap();
+        backend
+            .create_item("cal", fresh.clone().into(), ItemOrigin::User)
+            .unwrap();
 
-        let live = backend.create_item("cal", ALONE.into()).unwrap_err();
-        let queued = backend.create_item("cal", fresh.into()).unwrap_err();
+        let live = backend
+            .create_item("cal", ALONE.into(), ItemOrigin::User)
+            .unwrap_err();
+        let queued = backend
+            .create_item("cal", fresh.into(), ItemOrigin::User)
+            .unwrap_err();
 
         assert_eq!(code_of(&live), Some(ErrorCode::ItemDuplicate));
         assert!(live.to_string().contains("as item 1; update"), "{live}");
@@ -2725,7 +2826,9 @@ mod tests {
         let before = blob_files(dir.path());
 
         let again = ALONE.replace("SUMMARY:Focus", "SUMMARY:Focus again");
-        backend.create_item("cal", again.into()).unwrap_err();
+        backend
+            .create_item("cal", again.into(), ItemOrigin::User)
+            .unwrap_err();
 
         assert_eq!(blob_files(dir.path()), before);
         assert_eq!(pending(&backend), 0);
@@ -2742,7 +2845,7 @@ mod tests {
 
         let etag = backend.get_item("cal", &ids[0]).unwrap().etag.unwrap();
         backend
-            .update_item("cal", &ids[0], mine.into(), Some(&etag))
+            .update_item("cal", &ids[0], mine.into(), Some(&etag), ItemOrigin::User)
             .unwrap();
 
         let (landed, applied, parked) = land_and_drain(&dir, &backend, &theirs, false);
@@ -2771,12 +2874,14 @@ mod tests {
 
         let etag = backend.get_item("cal", &ids[0]).unwrap().etag.unwrap();
         backend
-            .update_item("cal", &ids[0], mine.into(), Some(&etag))
+            .update_item("cal", &ids[0], mine.into(), Some(&etag), ItemOrigin::User)
             .unwrap();
         land_and_drain(&dir, &backend, &theirs, false);
 
         let fresh = ALONE.replace("alone@example.org", "fresh@example.org");
-        backend.create_item("cal", fresh.into()).unwrap();
+        backend
+            .create_item("cal", fresh.into(), ItemOrigin::User)
+            .unwrap();
 
         let parked = backend.parked_rows(None).unwrap();
         let [parked] = &parked[..] else {
@@ -2855,7 +2960,7 @@ mod tests {
             match action {
                 "remove" => backend.delete_item("cal", &ids[0], None).unwrap(),
                 _ => backend
-                    .update_item("cal", &ids[0], mine.clone().into(), None)
+                    .update_item("cal", &ids[0], mine.clone().into(), None, ItemOrigin::User)
                     .unwrap(),
             }
 
@@ -3005,13 +3110,16 @@ mod tests {
             open(&dir)
         };
         let earlier = versioned("storage-draft-12");
-        let newer = versioned("storage-draft-14");
+        let newer = versioned("storage-draft-15");
 
         assert_eq!(code_of(&uncreated), Some(ErrorCode::StoreUncreated));
         assert_eq!(code_of(&foreign), Some(ErrorCode::StoreForeign));
         assert_eq!(code_of(&earlier), Some(ErrorCode::StoreVersion));
         assert_eq!(code_of(&newer), Some(ErrorCode::StoreVersion));
-        assert!(earlier.to_string().contains("neverest init"), "{earlier}");
+        assert!(
+            earlier.to_string().contains("move its directory aside"),
+            "{earlier}"
+        );
         assert!(newer.to_string().contains("upgrade calendula"), "{newer}");
         for err in [uncreated, foreign, earlier, newer] {
             assert!(!err.to_string().contains("delete"), "{err}");
@@ -3058,7 +3166,13 @@ mod tests {
         }
 
         let stale = backend
-            .update_item("cal", &ids[0], ALONE.as_bytes().to_vec(), Some(&former))
+            .update_item(
+                "cal",
+                &ids[0],
+                ALONE.as_bytes().to_vec(),
+                Some(&former),
+                ItemOrigin::User,
+            )
             .unwrap_err();
         assert_eq!(
             code_of(&stale),
@@ -3076,7 +3190,13 @@ mod tests {
         assert_eq!(pending(&backend), 0);
 
         backend
-            .update_item("cal", &ids[0], ALONE.as_bytes().to_vec(), None)
+            .update_item(
+                "cal",
+                &ids[0],
+                ALONE.as_bytes().to_vec(),
+                None,
+                ItemOrigin::User,
+            )
             .unwrap();
         assert_eq!(pending(&backend), 1);
     }
@@ -3209,7 +3329,7 @@ mod tests {
         .unwrap();
 
         let err = backend
-            .create_item("cal", ALONE.as_bytes().to_vec())
+            .create_item("cal", ALONE.as_bytes().to_vec(), ItemOrigin::User)
             .unwrap_err();
 
         assert_eq!(code_of(&err), Some(ErrorCode::NoPerformer), "{err:#}");
@@ -3326,9 +3446,11 @@ mod tests {
             collector.lock().unwrap();
 
             let writer = scope.spawn(|| {
-                backend.create_item("cal", created.into()).unwrap();
                 backend
-                    .update_item("cal", &ids[0], edited.into(), None)
+                    .create_item("cal", created.into(), ItemOrigin::User)
+                    .unwrap();
+                backend
+                    .update_item("cal", &ids[0], edited.into(), None, ItemOrigin::User)
                     .unwrap();
             });
 
@@ -3683,14 +3805,14 @@ mod tests {
             "UID:single-8-0@example.org\r\nSUMMARY:Now a todo\r\nDUE;VALUE=DATE:20261013\r\n",
         ));
         backend
-            .update_item("cal", &ids[0], retyped.into_bytes(), None)
+            .update_item("cal", &ids[0], retyped.into_bytes(), None, ItemOrigin::User)
             .unwrap();
         let renamed = resource(&component(
             "VEVENT",
             "UID:renamed@example.org\r\nSUMMARY:Renamed\r\nDTSTART:20261013T090000Z\r\n",
         ));
         backend
-            .update_item("cal", &ids[1], renamed.into_bytes(), None)
+            .update_item("cal", &ids[1], renamed.into_bytes(), None, ItemOrigin::User)
             .unwrap();
 
         assert_streams_as_it_listed(&mut backend);

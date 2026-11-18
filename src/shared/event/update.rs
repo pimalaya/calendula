@@ -22,6 +22,7 @@ use crate::{
         composer::IcalComposer,
         event::fields::{EventFieldsArgs, revise},
         ical::read_source,
+        item::ItemOrigin,
     },
 };
 
@@ -150,6 +151,7 @@ impl EventUpdateCommand {
                     &self.event_id,
                     contents,
                     if_match.as_deref(),
+                    ItemOrigin::User,
                     send_updates,
                 )
                 .map_err(missing)?;
@@ -183,6 +185,7 @@ impl EventUpdateCommand {
                     &self.event_id,
                     contents,
                     if_match.as_deref(),
+                    ItemOrigin::User,
                     send_updates,
                 )
                 .map_err(missing)
@@ -315,7 +318,12 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             std::fs::create_dir(dir.path().join("cal")).unwrap();
             let id = client(&dir)
-                .create_item("cal", body.as_bytes().to_vec(), None)
+                .create_item(
+                    "cal",
+                    body.as_bytes().to_vec(),
+                    crate::shared::item::ItemOrigin::User,
+                    None,
+                )
                 .unwrap();
             (dir, id)
         }
@@ -457,7 +465,12 @@ mod tests {
             crate::pimdir::client::sync_from(dir.path(), None, "cal");
 
             client(&dir)
-                .create_item("cal", EVENT.as_bytes().to_vec(), None)
+                .create_item(
+                    "cal",
+                    EVENT.as_bytes().to_vec(),
+                    crate::shared::item::ItemOrigin::User,
+                    None,
+                )
                 .unwrap();
 
             let mut owner = io_pimdir::client::PimdirStore::open(dir.path())

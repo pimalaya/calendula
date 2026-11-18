@@ -642,6 +642,7 @@ mod tests {
                 PimdirCalendarZones, parse_query,
             },
         },
+        shared::item::ItemOrigin,
     };
 
     /// 2026-11-06T00:00:00Z, the instant the test index is refreshed at.
@@ -731,7 +732,9 @@ mod tests {
             ),
         ];
         for (calendar, item) in items {
-            backend.create_item(calendar, item.into_bytes()).unwrap();
+            backend
+                .create_item(calendar, item.into_bytes(), ItemOrigin::User)
+                .unwrap();
         }
 
         let mut owner = PimdirStore::open(dir.path()).unwrap().for_source("caldav");
@@ -857,7 +860,7 @@ mod tests {
         let mut backend = backend(dir.path(), None);
         for item in items {
             backend
-                .create_item("cal", item.clone().into_bytes())
+                .create_item("cal", item.clone().into_bytes(), ItemOrigin::User)
                 .unwrap();
         }
 
@@ -1202,7 +1205,9 @@ mod tests {
             "zeppelin",
             "DTSTART:20261201T100000Z\r\nSUMMARY:Zeppelin ride\r\n",
         );
-        backend.create_item("cal", zeppelin.into_bytes()).unwrap();
+        backend
+            .create_item("cal", zeppelin.into_bytes(), ItemOrigin::User)
+            .unwrap();
 
         let queued = page(&backend.client, "zeppelin", None);
         assert!(
@@ -1253,9 +1258,9 @@ mod tests {
                 "DTSTART:20261110T120000Z\r\nSUMMARY:Lunch\r\n",
             )
         };
-        work.create_item("work/cal", lunch("w").into_bytes())
+        work.create_item("work/cal", lunch("w").into_bytes(), ItemOrigin::User)
             .unwrap();
-        home.create_item("home/cal", lunch("h").into_bytes())
+        home.create_item("home/cal", lunch("h").into_bytes(), ItemOrigin::User)
             .unwrap();
         let mut owner = PimdirStore::open(dir.path()).unwrap().for_source("caldav");
         assert_eq!(owner.drain().unwrap().applied, 2);

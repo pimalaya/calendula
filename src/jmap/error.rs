@@ -8,12 +8,14 @@ use std::fmt;
 
 use anyhow::Error;
 use io_jmap::{
-    calendars::calendar_event::set::JmapCalendarEventSetItemError,
+    calendars::{
+        calendar::set::JmapCalendarSetItemError, calendar_event::set::JmapCalendarEventSetItemError,
+    },
     client::JmapClientStdError,
     rfc8620::{error::JmapMethodError, send::JmapSendError},
 };
 
-use crate::{error::ErrorCode, jmap::calendar_set::JmapCalendarSetItemError};
+use crate::error::ErrorCode;
 
 /// The parts of a JMAP SetError worth showing.
 pub trait JmapSetError {
@@ -171,18 +173,35 @@ impl JmapSetError for JmapCalendarSetItemError {
     }
 
     fn type_name(&self) -> &str {
-        match self.type_name.as_str() {
-            "" => "unknown",
-            name => name,
+        match self {
+            Self::CalendarHasEvent { .. } => "calendarHasEvent",
+            Self::Forbidden { .. } => "forbidden",
+            Self::NotFound { .. } => "notFound",
+            Self::InvalidPatch { .. } => "invalidPatch",
+            Self::WillDestroy { .. } => "willDestroy",
+            Self::InvalidProperties { .. } => "invalidProperties",
+            Self::Other { type_name, .. } if type_name.is_empty() => "unknown",
+            Self::Other { type_name, .. } => type_name,
         }
     }
 
     fn description(&self) -> Option<&str> {
-        self.description.as_deref()
+        match self {
+            Self::CalendarHasEvent { description }
+            | Self::Forbidden { description }
+            | Self::NotFound { description }
+            | Self::InvalidPatch { description }
+            | Self::WillDestroy { description }
+            | Self::InvalidProperties { description, .. }
+            | Self::Other { description, .. } => description.as_deref(),
+        }
     }
 
     fn properties(&self) -> &[String] {
-        &self.properties
+        match self {
+            Self::InvalidProperties { properties, .. } => properties,
+            _ => &[],
+        }
     }
 }
 

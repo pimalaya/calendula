@@ -56,6 +56,32 @@ pub struct CalendarItem {
     pub stand_in: Option<Box<Event>>,
 }
 
+/// Who wrote the body a write sends, which decides whether its
+/// `X-PIMDIR-` properties are an ask (pimdir STORAGE §18).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ItemOrigin {
+    /// Written by the user: through the `event` commands, or composed by
+    /// a raw `item` command from the blank or the stored item. An
+    /// `X-PIMDIR-ONLINE-MEETING` it carries is their ask, queued whole.
+    User,
+    /// An iCalendar a raw `item` command was given (a file, raw contents
+    /// or stdin), which the user did not write as it stands: a pimdir
+    /// write removes its `X-PIMDIR-` properties first.
+    Foreign,
+}
+
+impl ItemOrigin {
+    /// The origin of a raw `item` write: [`Foreign`](Self::Foreign) for an
+    /// iCalendar `source` gave, [`User`](Self::User) for one composed from
+    /// the blank item or from the stored one.
+    pub fn of_source(source: Option<&str>) -> Self {
+        match source {
+            Some(_) => Self::Foreign,
+            None => Self::User,
+        }
+    }
+}
+
 impl Serialize for CalendarItem {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         ItemRow::from(self).serialize(serializer)

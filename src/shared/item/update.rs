@@ -19,6 +19,7 @@ use crate::{
         client::CalendarClient,
         composer::IcalComposer,
         ical::read_source,
+        item::ItemOrigin,
     },
 };
 
@@ -88,10 +89,18 @@ impl ItemUpdateCommand {
         };
 
         let if_match = self.if_match.or(etag);
+        let origin = ItemOrigin::of_source(self.ical.as_deref());
 
         if !self.composer.interactive {
             client
-                .update_item(&calendar_id, &self.item_id, seed, if_match.as_deref(), None)
+                .update_item(
+                    &calendar_id,
+                    &self.item_id,
+                    seed,
+                    if_match.as_deref(),
+                    origin,
+                    None,
+                )
                 .map_err(missing)?;
 
             return printer.out(ItemUpdateOutput::Applied(ItemUpdatedOutput {
@@ -120,6 +129,7 @@ impl ItemUpdateCommand {
                 &self.item_id,
                 draft.contents.clone(),
                 if_match.as_deref(),
+                origin,
                 None,
             )
             .map_err(missing);

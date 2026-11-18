@@ -14,7 +14,7 @@
 //! the next, which `--if-match` is compared with before a write.
 
 use anyhow::{Context, Result, anyhow, bail};
-use ical::{ical::Ical, param::IcalParam, tree::cst::IcalCst};
+use ical::{param::IcalParam, tree::cst::IcalCst};
 use io_jmap::calendars::calendar_event::{
     JmapCalendarEvent, ical::JmapCalendarEventIcalError, set::JmapCalendarEventPatch,
 };
@@ -48,23 +48,12 @@ pub fn to_item(calendar_id: &str, event: &JmapCalendarEvent) -> Result<CalendarI
         id,
         calendar_id: calendar_id.to_owned(),
         etag: Some(etag(event)),
-        contents: to_ical(&event.event)?.into_bytes(),
+        contents: event
+            .to_ical()
+            .context("Cannot read the JMAP event as JSCalendar")?
+            .into_bytes(),
         stand_in: None,
     })
-}
-
-/// The iCalendar document of a JSCalendar Event or Task, the envelope
-/// stripped first.
-///
-/// Stands in for the `to_ical` io-jmap has not released yet.
-pub fn to_ical(event: &Map<String, Value>) -> Result<String> {
-    let mut event = event.clone();
-    strip(&mut event);
-
-    let event = Value::Object(event);
-    let ical = Ical::from_jscalendar(&event).context("Cannot read the JMAP event as JSCalendar")?;
-
-    Ok(ical.to_string())
 }
 
 /// The CalendarEvent of an iCalendar document, with no id and no

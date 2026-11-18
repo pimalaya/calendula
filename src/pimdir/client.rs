@@ -24,6 +24,7 @@ use anyhow::{Result, anyhow};
 use io_pimdir::{
     client::{PimdirError, blobs::PimdirBlobs, producer::PimdirProducer, reader::PimdirReader},
     sql::FORMAT_VERSION,
+    version::PimdirFormatRefusal,
 };
 use pimalaya_cli::error::CodedError;
 
@@ -224,57 +225,34 @@ impl ErrorCode {
 /// intent no source or several can perform, a search index state, and a
 /// search query refused or unanswered; an SQL, I/O or JSON failure gets
 /// none. The message is io-pimdir's, but for a store of another format
-/// version: a store is never migrated (pimdir STORAGE §6), so one an
-/// earlier sync engine wrote is reinstalled by the engine that owns it,
-/// which moves it aside, and one a newer engine wrote needs a newer
-/// calendula. No message advises deleting the store.
+/// version, worded by [`version_message`].
 pub(crate) fn store_error(err: PimdirError, context: impl fmt::Display) -> anyhow::Error {
     let Some(code) = ErrorCode::of_pimdir(&err) else {
         return anyhow!("{context}: {err}");
     };
 
     let message = match &err {
-        PimdirError::Version { found } => version_message(found.as_deref(), context),
+        PimdirError::Version { found } => {
+            version_message(found.as_deref(), FORMAT_VERSION, context)
+        }
         err => format!("{context}: {err}"),
     };
 
     CodedError::new(code, message).into()
 }
 
-/// What a store of another format version than calendula's reads as,
-/// `found` being the version it names, `None` for one naming none.
-///
-/// A store naming none, as every draft before storage-draft-08 wrote, or
-/// an earlier draft, is an earlier sync engine's: its queued writes live
-/// in it alone, so it is synced by that engine until nothing is queued
-/// before the current one reinstalls it. Any other is a newer one's.
-fn version_message(found: Option<&str>, context: impl fmt::Display) -> String {
-    let draft = |version: &str| {
-        version
-            .strip_prefix("storage-draft-")
-            .and_then(|number| number.parse::<u32>().ok())
+/// What a store of another format version than `own` reads as, `found`
+/// being the version it names, `None` for one naming none: io-pimdir's
+/// one wording ([`PimdirFormatRefusal`]), naming calendula, which orders
+/// the two by pimdir STORAGE §4.2 and never advises deleting the store.
+fn version_message(found: Option<&str>, own: &str, context: impl fmt::Display) -> String {
+    let refusal = PimdirFormatRefusal {
+        found,
+        own,
+        program: "calendula",
     };
-    let earlier = match found {
-        None => true,
-        Some(found) => matches!(
-            (draft(found), draft(FORMAT_VERSION)),
-            (Some(found), Some(ours)) if found < ours
-        ),
-    };
-    let found = found.unwrap_or("of no format version");
 
-    match earlier {
-        true => format!(
-            "{context}: the pimdir store is {found}, written by an earlier sync engine, and \
-             calendula reads {FORMAT_VERSION} alone; a store is never migrated, so sync it \
-             with the neverest that wrote it until nothing is queued, upgrade neverest, \
-             move the store directory aside, then run `neverest init` and sync again"
-        ),
-        false => format!(
-            "{context}: the pimdir store is {found}, written by a newer sync engine than \
-             calendula's {FORMAT_VERSION}; upgrade calendula"
-        ),
-    }
+    format!("{context}: {refusal}")
 }
 
 /// Records the `caldav` source as syncing `collection` of the store at
@@ -390,38 +368,36 @@ mod tests {
         }
     }
 
-    /// A store an earlier sync engine wrote is reinstalled by it, in the
-    /// order that keeps its queued writes, and one a newer engine wrote
-    /// needs a newer calendula; neither says to delete the store.
+    /// A store an earlier sync engine wrote is drained by it, then set
+    /// aside, and one a later engine wrote needs a later calendula, the
+    /// two ordered by pimdir STORAGE §4.2: under a release, every draft
+    /// store is the earlier; neither says to delete the store.
     #[test]
-    fn a_store_of_another_version_names_the_reinstall_or_the_upgrade() {
-        let refused = |found: Option<&str>| {
-            store_error(
-                PimdirError::Version {
-                    found: found.map(Into::into),
-                },
-                "Open pimdir store",
-            )
-            .to_string()
+    fn a_store_of_another_version_names_the_drain_or_the_upgrade() {
+        let refused = |found: Option<&str>, own: &str| {
+            super::version_message(found, own, "Open pimdir store")
         };
 
-        for earlier in [refused(None), refused(Some("storage-draft-10"))] {
+        for (found, own) in [
+            (None, "storage-draft-14"),
+            (Some("storage-draft-10"), "storage-draft-14"),
+            (Some("storage-draft-14"), "storage-v1"),
+        ] {
+            let earlier = refused(found, own);
             assert!(earlier.contains("earlier sync engine"), "{earlier}");
             assert!(earlier.contains("until nothing is queued"), "{earlier}");
-            assert!(
-                earlier.contains("move the store directory aside"),
-                "{earlier}"
-            );
-            assert!(earlier.contains("neverest init"), "{earlier}");
+            assert!(earlier.contains("move its directory aside"), "{earlier}");
+            assert!(!earlier.contains("delet"), "{earlier}");
         }
 
-        for newer in [
-            refused(Some("storage-draft-14")),
-            refused(Some("storage-v1.0.0")),
+        for (found, own) in [
+            (Some("storage-draft-15"), "storage-draft-14"),
+            (Some("storage-v1"), "storage-draft-14"),
         ] {
-            assert!(newer.contains("upgrade calendula"), "{newer}");
-            assert!(!newer.contains("move"), "{newer}");
-            assert!(!newer.contains("delet"), "{newer}");
+            let later = refused(found, own);
+            assert!(later.contains("upgrade calendula"), "{later}");
+            assert!(!later.contains("aside"), "{later}");
+            assert!(!later.contains("delet"), "{later}");
         }
     }
 }

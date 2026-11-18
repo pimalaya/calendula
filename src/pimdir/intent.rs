@@ -49,8 +49,9 @@ impl PimdirPartstat {
 ///
 /// When several sources of the account can send it, pass `--source`.
 ///
-/// JSON output: `{"row", "id", "calendarId", "recurrenceId", "partstat",
-/// "comment", "source"}`, `row` being the queue row and `id` the event.
+/// JSON output: `{"row", "handle", "id", "calendarId", "recurrenceId",
+/// "partstat", "comment", "source"}`, `row` being the queue row, `handle`
+/// the row under the store's identity, and `id` the event.
 #[derive(Debug, Parser)]
 pub struct PimdirReplyCommand {
     /// Calendar holding the event; falls back to `calendar.default`.
@@ -114,8 +115,8 @@ impl PimdirReplyCommand {
 ///
 /// When several sources of the account can send it, pass `--source`.
 ///
-/// JSON output: `{"row", "id", "calendarId", "recurrenceId", "partstat",
-/// "comment", "source"}`, `partstat` being `null`.
+/// JSON output: `{"row", "handle", "id", "calendarId", "recurrenceId",
+/// "partstat", "comment", "source"}`, `partstat` being `null`.
 #[derive(Debug, Parser)]
 pub struct PimdirCancelCommand {
     /// Calendar holding the event; falls back to `calendar.default`.
@@ -168,9 +169,13 @@ impl PimdirCancelCommand {
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PimdirIntentOutput {
-    /// The queue row the intent was appended as, the row `pimdir queue
-    /// show` and `pimdir queue cancel` take.
+    /// The queue row the intent was appended as, as `pimdir queue list`
+    /// prints it.
     pub row: i64,
+    /// The row's handle, its id under the store's identity (pimdir STORAGE
+    /// §4.5): `pimdir queue show` and `pimdir queue cancel` take it, and
+    /// refuse it once the store is a restored copy.
+    pub handle: String,
     /// The event the intent addresses, as `event list` prints it.
     pub id: String,
     /// The calendar holding the event.
@@ -195,7 +200,8 @@ impl PimdirIntentOutput {
         comment: Option<String>,
     ) -> Self {
         Self {
-            row: queued.row,
+            row: queued.handle.id,
+            handle: queued.handle.to_string(),
             id: event_id,
             calendar_id,
             recurrence_id,
@@ -214,22 +220,36 @@ impl fmt::Display for PimdirIntentOutput {
             Some(partstat) => write!(f, "Reply {partstat} to event `{id}`")?,
             None => write!(f, "Cancellation of event `{id}`")?,
         }
-        writeln!(f, " queued as row {}; the next sync sends it", self.row)
+        writeln!(
+            f,
+            " queued as row {} (handle {}); the next sync sends it",
+            self.row, self.handle
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use io_pimdir::codec::{PimdirActionHandle, PimdirStoreIdentity};
     use serde_json::json;
 
     use super::*;
 
-    /// The queue row prints as `row`, the event as `id` beside its
-    /// `calendarId`, as every other queue and event output names them.
+    const STORE_ID: &str = "e2646df031cd876334410c4df14ebd86";
+
+    /// The queue row prints as `row` beside its `handle`, the event as
+    /// `id` beside its `calendarId`, as every other queue and event output
+    /// names them.
     #[test]
     fn a_queued_reply_prints_its_row_and_the_event_id() {
         let queued = PimdirQueued {
-            row: 12,
+            handle: PimdirActionHandle {
+                id: 12,
+                store: Some(PimdirStoreIdentity {
+                    store_id: STORE_ID.into(),
+                    incarnation: 1,
+                }),
+            },
             seq: 7,
             source: "caldav".into(),
         };
@@ -246,6 +266,7 @@ mod tests {
             serde_json::to_value(&output).unwrap(),
             json!({
                 "row": 12,
+                "handle": format!("{STORE_ID}.1.12"),
                 "id": "7",
                 "calendarId": "personal",
                 "recurrenceId": null,
@@ -256,7 +277,10 @@ mod tests {
         );
         assert_eq!(
             output.to_string(),
-            "Reply ACCEPTED to event `7` queued as row 12; the next sync sends it\n"
+            format!(
+                "Reply ACCEPTED to event `7` queued as row 12 (handle {STORE_ID}.1.12); the \
+                 next sync sends it\n"
+            )
         );
     }
 }

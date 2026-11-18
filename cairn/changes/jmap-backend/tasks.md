@@ -14,7 +14,7 @@ change: jmap-backend
 ## 1. Upstream
 
 - [ ] ical-rs: shift `UNTIL` between UTC and the series' zone when `tzdb` is on, both directions, with tests for a zoned, a UTC and a floating series; release. Not done: the backend landed on ical-rs 0.7.1, `UNTIL` unshifted (projection.md says so).
-- [ ] io-jmap: `Calendar/set` (create, update, destroy, `onDestroyRemoveEvents`) and `CalendarEvent/set` (create, PatchObject update, destroy) coroutines and client methods, modelled on `AddressBook/set` and `ContactCard/set`; query `position`/`limit` if missing; release. Half done: io-jmap 0.10 carries `CalendarEvent/set`, `JmapCalendarEventPatch::diff` and the query paging; `Calendar/set` (unreleased commit 59e28a8) and `JmapCalendarEvent::to_ical` are not released, calendula sending `Calendar/set` through `send_raw` (src/jmap/calendar_set.rs) and converting to iCalendar itself (`project::to_ical`) until then.
+- [x] io-jmap: `Calendar/set` (create, update, destroy, `onDestroyRemoveEvents`) and `CalendarEvent/set` (create, PatchObject update, destroy) coroutines and client methods, modelled on `AddressBook/set` and `ContactCard/set`; query `position`/`limit` if missing; release. Done: io-jmap 0.10 carried `CalendarEvent/set`, `JmapCalendarEventPatch::diff` and the query paging; io-jmap 0.10.1 (released 2026-11-18) adds `Calendar/set` and `JmapCalendarEvent::to_ical`, which calendula uses since the-releases-land, its own `send_raw` copy (src/jmap/calendar_set.rs) and `project::to_ical` removed.
 - [ ] calendula: io-pim-discovery 0.8 with `rfc8620`. Not done: calendula carries no io-pim-discovery; a bare server name reaches `/.well-known/jmap` through io-jmap's `session_get`, and no DNS discovery runs.
 
 ## 2. Backend

@@ -55,7 +55,7 @@ use crate::{
         arg::SendUpdates,
         calendar::{Calendar, CalendarDiff},
         ical::invites,
-        item::{CalendarItem, CalendarItemList, CalendarItemPage, CalendarItemQuery},
+        item::{CalendarItem, CalendarItemList, CalendarItemPage, CalendarItemQuery, ItemOrigin},
     },
 };
 
@@ -673,15 +673,21 @@ impl CalendarClient {
     ///
     /// `send_updates` says whom a gcal write mails; the command refuses it
     /// before reaching any other backend, which ignores it.
+    /// `origin` says whether a pimdir write queues the body whole or
+    /// without its `X-PIMDIR-` properties; every other backend sends it as
+    /// given.
     pub fn create_item(
         &mut self,
         calendar_id: &str,
         contents: Vec<u8>,
+        origin: ItemOrigin,
         send_updates: Option<SendUpdates>,
     ) -> Result<String> {
         // NOTE: read by gcal alone, the commands refusing it elsewhere.
         #[cfg(not(feature = "gcal"))]
         let _ = send_updates;
+        #[cfg(not(feature = "pimdir"))]
+        let _ = origin;
 
         self.check_ids(calendar_id, None)?;
         self.refuse_invitations("create", calendar_id, None, Some(&contents))?;
@@ -703,7 +709,7 @@ impl CalendarClient {
             #[cfg(feature = "jmap")]
             BackendClient::Jmap(client) => client.create_item(calendar_id, contents),
             #[cfg(feature = "pimdir")]
-            BackendClient::Pimdir(client) => client.create_item(calendar_id, contents),
+            BackendClient::Pimdir(client) => client.create_item(calendar_id, contents, origin),
             #[cfg(feature = "gcal")]
             BackendClient::Gcal(client) => client.create_item(calendar_id, contents, send_updates),
             #[cfg(feature = "msgraph")]
@@ -716,18 +722,22 @@ impl CalendarClient {
     /// `if_match` is the entity tag to gate the write on, `None` overwriting
     /// unconditionally. A backend with no guard concept ignores it.
     /// `send_updates` is read by gcal alone, as on
-    /// [`create_item`](Self::create_item).
+    /// [`create_item`](Self::create_item), and `origin` by pimdir
+    /// alone.
     pub fn update_item(
         &mut self,
         calendar_id: &str,
         item_id: &str,
         contents: Vec<u8>,
         if_match: Option<&str>,
+        origin: ItemOrigin,
         send_updates: Option<SendUpdates>,
     ) -> Result<()> {
         // NOTE: read by gcal alone, the commands refusing it elsewhere.
         #[cfg(not(feature = "gcal"))]
         let _ = send_updates;
+        #[cfg(not(feature = "pimdir"))]
+        let _ = origin;
 
         self.check_ids(calendar_id, Some(item_id))?;
         self.refuse_invitations("update", calendar_id, Some(item_id), Some(&contents))?;
@@ -756,7 +766,7 @@ impl CalendarClient {
             }
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => {
-                client.update_item(calendar_id, item_id, contents, if_match)
+                client.update_item(calendar_id, item_id, contents, if_match, origin)
             }
             #[cfg(feature = "gcal")]
             BackendClient::Gcal(client) => {
