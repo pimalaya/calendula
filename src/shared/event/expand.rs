@@ -120,7 +120,7 @@ pub fn occurrences(
     let mut events: Vec<(i64, Event)> = Vec::new();
 
     for group in groups(&ical) {
-        for (_, event, at) in context.walk(&item.id, &group, window.bound()) {
+        for (_, event, at) in context.walk(&item.id, &group, window.floor(), window.bound()) {
             if window.overlaps(&event) {
                 events.push((at, event));
             }
@@ -141,7 +141,7 @@ pub fn occurrence(item: &CalendarItem, recurrence_id: &str) -> Option<Event> {
 
     groups(&ical).iter().find_map(|group| {
         context
-            .walk(&item.id, group, Some(wanted))
+            .walk(&item.id, group, Some(wanted), Some(wanted))
             .into_iter()
             .find(|(id, ..)| *id == Some(wanted))
             .map(|(_, event, _)| event)
@@ -325,6 +325,16 @@ impl Window {
         }
     }
 
+    /// The earliest identity an instance overlapping the window may carry
+    /// before its length is taken off, `None` for a window open on its
+    /// start.
+    fn floor(&self) -> Option<IcalRecurDateTime> {
+        let start = self.start?;
+        Some(IcalRecurDateTime::from_seconds(
+            start.seconds() - BOUND_SLACK,
+        ))
+    }
+
     /// The latest identity an instance starting inside the window may
     /// carry.
     ///
@@ -482,12 +492,14 @@ impl<'a> Context<'a> {
     /// Walks a group into its occurrences: `(identity, event, sort key)`,
     /// the identity `None` for an event that does not recur.
     ///
-    /// Stops at the first instance whose identity passes `bound`, and
-    /// still yields an override moved into reach from past it.
+    /// Starts at the first instance whose identity, its length added, may
+    /// reach `floor`, stops at the first whose identity passes `bound`,
+    /// and still yields an override moved into reach from either side.
     fn walk(
         &self,
         item_id: &str,
         group: &Group<'_>,
+        floor: Option<IcalRecurDateTime>,
         bound: Option<IcalRecurDateTime>,
     ) -> Vec<(Option<IcalRecurDateTime>, Event, i64)> {
         let mut out = Vec::new();
@@ -523,10 +535,19 @@ impl<'a> Context<'a> {
                 .as_deref()
                 .and_then(|tzid| defined_zone(self.ical, tzid)),
         };
-        let walk: Box<dyn Iterator<Item = _>> = match &filter {
-            Some(zone) => Box::new(set.expand_in_zone(zone)),
-            None => Box::new(set.expand()),
+        let mut walk = match &filter {
+            Some(zone) => set.expand_in_zone(zone),
+            None => set.expand(),
         };
+        if let Some(floor) = floor {
+            let length = match span {
+                Span::Days(days) => days * 86_400,
+                Span::Civil(seconds) | Span::Exact(seconds) => seconds,
+            };
+            walk.skip_to(IcalRecurDateTime::from_seconds(
+                floor.seconds() - length.max(0),
+            ));
+        }
 
         let mut seen = BTreeSet::new();
         for occurrence in walk.take(MAX_STEPS) {
@@ -1166,6 +1187,26 @@ mod tests {
         let events = Event::occurrences(&item, Some(&days("2026-10-05", "2026-10-11")));
 
         assert_eq!(starts(&events), ["2026-10-05T09:00:00Z"]);
+    }
+
+    /// CAL-12: a window walks from its own start, so a minutely series
+    /// begun past the step cap before it still lists there.
+    #[test]
+    fn a_series_begun_long_before_the_window_lists_in_it() {
+        let item = item(
+            "",
+            &vevent(&[
+                "UID:tick@example.org",
+                "DTSTART:20260101T000000Z",
+                "DURATION:PT1M",
+                "RRULE:FREQ=MINUTELY",
+            ]),
+        );
+
+        let events = Event::occurrences(&item, Some(&days("2026-06-01", "2026-06-01")));
+
+        assert_eq!(events.len(), 24 * 60);
+        assert_eq!(events[0].start.as_deref(), Some("2026-06-01T00:00:00Z"));
     }
 
     #[test]

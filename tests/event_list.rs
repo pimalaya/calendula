@@ -431,3 +431,51 @@ fn the_agenda_stamps_an_event_in_the_local_zone() {
     let listed = String::from_utf8(listed.stdout).unwrap();
     assert!(listed.contains("2026-11-12 09:00"), "{listed}");
 }
+
+/// CAL-12: a window pages its occurrences in start order across the whole
+/// window, whatever order the backend lists its items in.
+#[test]
+fn a_window_pages_its_events_in_start_order() {
+    let home = account();
+    let calendar = home.path().join("personal");
+    event(
+        &calendar,
+        "z",
+        "20261111T080000Z",
+        "20261111T083000Z",
+        "Earliest",
+    );
+
+    let page = |page: &str| {
+        let args = [
+            "--json",
+            "event",
+            "list",
+            "--from",
+            "2026-11-10",
+            "--to",
+            "2026-11-20",
+            "-s",
+            "2",
+            "-p",
+            page,
+        ];
+        let json: Value = serde_json::from_str(&run(home.path(), &args)).unwrap();
+        let summaries: Vec<String> = json["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|event| event["summary"].as_str().unwrap_or("").to_owned())
+            .collect();
+        (summaries, json["nextPage"].clone())
+    };
+
+    assert_eq!(
+        page("1"),
+        (vec!["Earliest".into(), "Standup".into()], "2".into())
+    );
+    assert_eq!(
+        page("2"),
+        (vec!["Review".into(), String::new()], Value::Null)
+    );
+}

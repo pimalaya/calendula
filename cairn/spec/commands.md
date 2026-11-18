@@ -220,7 +220,7 @@ Projecting a VEVENT out of an item SHALL be read-only and lossy by design: calen
 - WHEN `calendula event list --from 2026-11-30 --to 2026-11-30` runs, or `calendula event agenda 11 2026`
 - THEN the event is listed
 
-A crossed pair SHALL be rejected by name. A range SHALL lift the default page-size cap, so a window returns every match rather than its first page.
+A crossed pair SHALL be rejected by name. A range SHALL lift the default page-size cap, so a window returns every match rather than its first page. A window given `-s` SHALL page its occurrences, sorted by start across the whole window, the page line counting the occurrences it shows, never the items they came from. A recurring series SHALL be walked from the window's start (its length and a day of offsets either way before it), however long before the series began, so no step cap cuts it.
 
 A backend filtering locally (vdir, msgraph, pimdir) SHALL keep an item when one of its events starts in the window or one of its occurrences overlaps it. An undownloaded pimdir series the summary says recurs SHALL pass from its `DTSTART` to its `UNTIL`.
 

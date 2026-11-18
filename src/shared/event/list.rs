@@ -122,21 +122,29 @@ impl EventListCommand {
             kind: IcalFamily::Event.kind(),
             ..Default::default()
         };
-        let listed = client.list_items(&calendar_id, page, page_size, query)?;
-        let mut errors = listed.errors;
-        let (events, count) = match &range {
+        let (events, count, more, errors) = match &range {
             Some(range) => {
-                let (mut events, count) = Event::read_all(&listed.items, &mut errors, |item| {
+                let listed = client.list_items(&calendar_id, None, None, query)?;
+                let mut errors = listed.errors;
+                let (mut events, _) = Event::read_all(&listed.items, &mut errors, |item| {
                     Event::try_occurrences(item, Some(range))
                 });
                 events.sort_by_key(|event| event.start_secs);
-                (events, count)
+                let more = page_window(&mut events, page, page_size);
+                let count = events.len();
+                (events, count, more, errors)
             }
-            None => Event::read_all(&listed.items, &mut errors, Event::try_project),
+            None => {
+                let listed = client.list_items(&calendar_id, page, page_size, query)?;
+                let mut errors = listed.errors;
+                let (events, count) =
+                    Event::read_all(&listed.items, &mut errors, Event::try_project);
+                (events, count, listed.more, errors)
+            }
         };
 
         let next_page = match page {
-            Some(page) if listed.more => Some((page + 1).to_string()),
+            Some(page) if more => Some((page + 1).to_string()),
             _ => None,
         };
 
@@ -156,6 +164,21 @@ impl EventListCommand {
         printer.out(&output)?;
         error::partial_when(&output.errors)
     }
+}
+
+/// Keeps page `page` of `size` of a window's occurrences, sorted by start
+/// across the whole window, and answers whether another follows.
+fn page_window(events: &mut Vec<Event>, page: Option<u32>, size: Option<u32>) -> bool {
+    let (Some(page), Some(size)) = (page, size) else {
+        return false;
+    };
+    let size = size as usize;
+    let skip = (page as usize).saturating_sub(1).saturating_mul(size);
+
+    events.drain(..skip.min(events.len()));
+    let more = events.len() > size;
+    events.truncate(size);
+    more
 }
 
 /// What the header of an event listing calls one event, then several.
