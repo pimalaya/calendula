@@ -13,7 +13,7 @@ use anyhow::{Result, bail};
 use clap::Subcommand;
 use io_pimdir::{
     client::{PimdirError, PimdirStore, producer::PimdirActionStatus},
-    codec::{PimdirAction, PimdirActionHandle, action_from_payload},
+    codec::{PimdirAction, PimdirActionHandle, PimdirStoreIdentity, action_from_payload},
     intent::{PimdirIntentItem, PimdirInvitation},
     object::PimdirHash,
     summary::{PimdirSummary, calendar::derive},
@@ -61,6 +61,21 @@ impl PimdirQueueCommand {
 }
 
 impl PimdirBackend {
+    /// The store's identity, its id and incarnation (pimdir STORAGE §4.5),
+    /// which a listed row's handle names.
+    pub(crate) fn store_identity(&self) -> Result<PimdirStoreIdentity> {
+        let cursor = self
+            .client
+            .reader
+            .change_cursor()
+            .map_err(|err| store_error(err, "Read the pimdir store identity"))?;
+
+        Ok(PimdirStoreIdentity {
+            store_id: cursor.store_id,
+            incarnation: cursor.incarnation,
+        })
+    }
+
     /// The calendars a queue listing reads: `calendar` alone, refused
     /// `calendar-not-found` unless the account holds it, else every one of
     /// the account's.
@@ -84,6 +99,7 @@ impl PimdirBackend {
     /// An update or a removal is left out: it addresses an item that
     /// already exists, which the listings show it on.
     pub(crate) fn queued_rows(&self, calendar: Option<&str>) -> Result<Vec<PimdirQueueRow>> {
+        let identity = self.store_identity()?;
         let mut rows = Vec::new();
 
         for collection in self.queue_calendars(calendar)? {
@@ -105,6 +121,7 @@ impl PimdirBackend {
 
                 rows.push(PimdirQueueRow {
                     row: queued.id,
+                    handle: handle(&identity, queued.id),
                     kind: queued.action.kind().to_owned(),
                     collection: queued.collection,
                     link_id: addressed.link_id,
@@ -127,6 +144,7 @@ impl PimdirBackend {
     /// calendar of the account, in append order.
     pub(crate) fn parked_rows(&self, calendar: Option<&str>) -> Result<Vec<PimdirQueueRow>> {
         let calendars = self.queue_calendars(calendar)?;
+        let identity = self.store_identity()?;
 
         Ok(self
             .client
@@ -144,6 +162,7 @@ impl PimdirBackend {
 
                 PimdirQueueRow {
                     row: parked.id,
+                    handle: handle(&identity, parked.id),
                     unconfirmed: parked.unconfirmed().is_some(),
                     kind: parked.action,
                     collection: parked.collection,
@@ -313,6 +332,16 @@ struct Addressed {
 
 /// The title a calendar summary carries, `None` when empty or when the
 /// summary is no calendar one.
+/// The handle of the row `id` of the store `identity`, as `pimdir queue
+/// show` and `cancel` take it.
+pub(crate) fn handle(identity: &PimdirStoreIdentity, id: i64) -> String {
+    PimdirActionHandle {
+        id,
+        store: Some(identity.clone()),
+    }
+    .to_string()
+}
+
 fn title(summary: PimdirSummary) -> Option<String> {
     let title = match summary {
         PimdirSummary::Event(event) => event.summary,
@@ -382,7 +411,8 @@ mod tests {
         assert_eq!(row.link_id.as_deref(), Some("standup@example.org"));
         assert_eq!(row.item_id, None);
         assert_eq!(row.summary.as_deref(), Some("Standup"));
-        let row = row.row.into();
+        let row: io_pimdir::codec::PimdirActionHandle = row.handle.parse().unwrap();
+        assert_eq!(row.store, Some(backend.store_identity().unwrap()));
 
         let status = backend.queue_row(&row).unwrap();
         assert!(

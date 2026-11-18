@@ -22,8 +22,8 @@ use crate::pimdir::backend::PimdirBackend;
 ///
 /// A calendar whose items list but do not read is waiting on a sync to
 /// hydrate them, and this is where to see that coming. A parked write
-/// never lands: it is shown by its queue row (ROW), the id `pimdir queue
-/// cancel` cancels it by, `pimdir queue list` listing every row of a
+/// never lands: it is shown by its queue row handle (ROW), which `pimdir
+/// queue cancel` cancels it by, `pimdir queue list` listing every row of a
 /// calendar. A refused event was applied in the store, but a server
 /// refused for good the change it led to (a time its calendar does not
 /// take, a value it does not store): the sync engine holds that change,
@@ -31,7 +31,7 @@ use crate::pimdir::backend::PimdirBackend;
 /// STORAGE §15.4).
 ///
 /// JSON output: `{"account", "accounts", "calendars": [{"id", "name",
-/// "total", "hydrated", "queued"}], "parked": [{"row", "calendarId",
+/// "total", "hydrated", "queued"}], "parked": [{"row", "handle", "calendarId",
 /// "kind", "error"}], "refused": [{"calendarId", "itemId", "source",
 /// "reason", "refusedAt"}]}`, `kind` kebab-case as the queue spells it.
 #[derive(Debug, Parser)]
@@ -85,6 +85,9 @@ pub struct PimdirCalendarStatus {
 pub struct PimdirParkedStatus {
     /// The queue row, which addresses the action rather than an item.
     pub row: i64,
+    /// The row's handle, its id under the store's identity (pimdir STORAGE
+    /// §4.5), which `pimdir queue show` and `cancel` take and check.
+    pub handle: String,
     /// The calendar the action targets.
     pub calendar_id: String,
     /// The action kind, as the queue spells it: `add`, `update`, `remove`,
@@ -147,7 +150,7 @@ impl fmt::Display for PimdirStatusOutput {
 
             for parked in &self.parked {
                 columns.push([
-                    parked.row.to_string(),
+                    sanitize::text(&parked.handle).into_owned(),
                     sanitize::text(&parked.kind).into_owned(),
                     sanitize::text(&parked.calendar_id).into_owned(),
                     sanitize::text(&parked.error).into_owned(),

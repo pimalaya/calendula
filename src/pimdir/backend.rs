@@ -526,6 +526,7 @@ impl PimdirBackend {
 
         calendars.sort_by(|a, b| a.name.cmp(&b.name));
 
+        let identity = self.store_identity()?;
         let parked = self
             .client
             .reader
@@ -538,6 +539,7 @@ impl PimdirBackend {
             })
             .map(|parked| PimdirParkedStatus {
                 row: parked.id,
+                handle: crate::pimdir::queue::handle(&identity, parked.id),
                 calendar_id: parked.collection,
                 kind: parked.action,
                 error: parked.error,
@@ -1595,8 +1597,16 @@ mod tests {
         );
 
         let text = status.to_string();
-        assert!(text.contains("\nROW  KIND  CALENDAR"), "{text}");
-        let row = parked.row.to_string();
+        let head = |line: &str| {
+            line.split_whitespace()
+                .eq(["ROW", "KIND", "CALENDAR", "ERROR"])
+        };
+        assert!(text.lines().any(head), "{text}");
+        let handle: io_pimdir::codec::PimdirActionHandle = parked.handle.parse().unwrap();
+        assert_eq!(handle.id, parked.row);
+        assert!(handle.store.is_some(), "{handle:?}");
+        assert_eq!(json["parked"][0]["handle"], parked.handle, "{json}");
+        let row = parked.handle.clone();
         let words = |line: &str| line.split_whitespace().take(2).eq([row.as_str(), "add"]);
         assert!(text.lines().any(words), "{text}");
         assert!(text.contains(&parked.error), "{text}");

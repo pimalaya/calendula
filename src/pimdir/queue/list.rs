@@ -20,7 +20,7 @@ use crate::pimdir::backend::PimdirBackend;
 /// An item added on pimdir waits in the store's queue until the sync
 /// engine applies it, and has no id until then, so `event list` cannot
 /// show it; a reply or a cancellation waits there until the engine sends
-/// it. This is where both show: the row id to cancel one by, when it was
+/// it. This is where both show: the row handle to cancel one by, when it was
 /// queued, its kind, the link id `event add` reported or the event a reply
 /// or a cancellation addresses, and its summary.
 ///
@@ -31,9 +31,10 @@ use crate::pimdir::backend::PimdirBackend;
 /// is listed `unconfirmed` instead: it may have taken effect.
 ///
 /// JSON output: `{"items": [<row>], "parked": [<row>]}`, each row, pending
-/// or parked, `{"row", "kind", "collection", "linkId", "itemId",
+/// or parked, `{"row", "handle", "kind", "collection", "linkId", "itemId",
 /// "producer", "queuedAt", "attempts", "unconfirmed", "error",
-/// "summary"}`, as every Pimalaya program prints a queue row.
+/// "summary"}`, as every Pimalaya program prints a queue row, plus the
+/// row's handle.
 #[derive(Debug, Parser)]
 pub struct PimdirQueueListCommand {
     /// Calendar to list, every one of the account's when omitted.
@@ -67,6 +68,10 @@ pub struct PimdirQueueRow {
     /// names a queued action, not an item: a creation has no id until the
     /// sync engine applies it.
     pub row: i64,
+    /// The row's handle, its id under the store's identity (pimdir STORAGE
+    /// §4.5), which `pimdir queue show` and `cancel` take and check, a
+    /// restored copy of the store refusing it rather than another row.
+    pub handle: String,
     /// The row's action as the store holds it, never re-spelled: `add`,
     /// `update`, `remove`, `calendar-reply`, `calendar-cancel`, ...
     pub kind: String,
@@ -142,11 +147,11 @@ impl fmt::Display for PimdirQueueListOutput {
     }
 }
 
-/// The text cells of `row`: its id, its `state`, when it was queued, its
+/// The text cells of `row`: its handle, its `state`, when it was queued, its
 /// kind, its calendar, then `last`.
 fn cells(row: &PimdirQueueRow, state: &str, last: Option<&str>) -> [String; 6] {
     [
-        row.row.to_string(),
+        sanitize::text(&row.handle).into_owned(),
         String::from(state),
         sanitize::text(&row.queued_at).into_owned(),
         sanitize::text(&row.kind).into_owned(),
@@ -161,10 +166,13 @@ mod tests {
 
     use super::{PimdirQueueListOutput, PimdirQueueRow};
 
+    const STORE: &str = "e2646df031cd876334410c4df14ebd86";
+
     /// A row of `kind` in the calendar `cal`, pending.
     fn row(row: i64, kind: &str) -> PimdirQueueRow {
         PimdirQueueRow {
             row,
+            handle: format!("{STORE}.1.{row}"),
             kind: kind.into(),
             collection: "cal".into(),
             link_id: None,
@@ -214,9 +222,9 @@ Account:   perso (pimdir)
 Calendar:  all
 Cancel:    calendula pimdir queue cancel <ROW>
 
-3  queued  2026-11-15T09:00:00Z  add             cal  Standup
-4  queued  2026-11-15T09:05:00Z  calendar-reply  cal  7
-2  parked  2026-11-14T09:00:00Z  update          cal  conflict
+e2646df031cd876334410c4df14ebd86.1.3  queued  2026-11-15T09:00:00Z  add             cal  Standup
+e2646df031cd876334410c4df14ebd86.1.4  queued  2026-11-15T09:05:00Z  calendar-reply  cal  7
+e2646df031cd876334410c4df14ebd86.1.2  parked  2026-11-14T09:00:00Z  update          cal  conflict
 ";
         assert_eq!(output.to_string(), expected);
 
@@ -225,6 +233,7 @@ Cancel:    calendula pimdir queue cancel <ROW>
             json["items"][0],
             json!({
                 "row": 3,
+                "handle": format!("{STORE}.1.3"),
                 "kind": "add",
                 "collection": "cal",
                 "linkId": "standup@example.org",
@@ -241,6 +250,7 @@ Cancel:    calendula pimdir queue cancel <ROW>
             json["parked"][0],
             json!({
                 "row": 2,
+                "handle": format!("{STORE}.1.2"),
                 "kind": "update",
                 "collection": "cal",
                 "linkId": null,
