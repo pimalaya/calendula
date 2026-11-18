@@ -50,6 +50,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- **BREAKING**: read `--from` and `--to` as local days (`TZ`, then the system's zone) rather than UTC ones, in `event list`, `caldav report query`, `gcal free-busy` and `gcal events instances`, as the rows and `pimdir search date:` read a day.
 - **Breaking:** changed a pimdir item whose body the blob tree no longer holds (a `pimdir item erase`, a quarantine, a blob failing its name) to read as not downloaded, as pimdir's guide says and Himalaya reads a message: the listings list it as an unfetched item, no bytes and `etag` `null`, where it was an `item-unreadable` entry carrying the etag of the body it could not read and the command exited 3; `item read`, `event read`, `event update`, `pimdir reply` and `pimdir cancel` fail coded `body-pending` with the sentence of an unfetched item, where they failed uncoded with "Body blob missing", and `event delete` deletes it. An item whose body the store fails to read keeps its `item-unreadable` entry and now reports no `etag`. A sync brings the body back.
 - Changed `caldav.auth` to be optional: a block naming none sends no `Authorization` header, as `auth = "none"` does, for a server that asks for no credential (Radicale with `auth = none`, a server behind a VPN or an authenticating reverse proxy), where it failed "missing field `auth`". A server answering such a block 401 fails with "CalDAV server answered 401: it asks for credentials, and the account configures no `auth`", still uncoded, as carillon reads its DAV blocks.
 - Changed the refusal of a CalDAV `server` or `home` whose host is not ASCII to name the host and the way out, "Host `bücher.de` is not ASCII: write it in its Punycode form (xn--...)", where it read "invalid international domain name".
@@ -152,6 +153,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed `event agenda` leaving out the timed events within the zone's UTC offset of its grid's edge: the last evening west of UTC, the first morning east of it.
+- Fixed a CalDAV `item update` or `event update` given a source creating an item under an id the calendar did not hold: it sends `If-Match: *` and fails `item-not-found`.
+- Fixed the MCP `calendar_delete` deleting, without `--allow-send`, a calendar holding an item naming an attendee, whose own delete was refused.
+- Fixed the MCP invitation guard reading the first VCALENDAR of a body only.
+- Fixed `event update --end` given alone writing an end before the stored start, or a date end on a timed start.
+- Fixed a Google `calendar update -n New -C ""` renaming the calendar before refusing the cleared colour, and a Google `calendar create --color` whose paint failed leaving a calendar it did not name.
 - Fixed a Google or Outlook series losing its cancelled and moved occurrences on `event add`, `item add`, `event update` and `item update`: the master alone was written, so an EXDATE (on Outlook) and every override vanished with no word. The master is written, then each occurrence through the instance the server lists for it, deleted or updated; a create whose occurrence fails deletes the series again. What the server cannot hold is left out with a warning naming it (io-gcal 0.5.1, io-msgraph 0.9.2).
 - Fixed a Google series written in another zone than its calendar's drifting an hour across a daylight-saving change: a weekly event at 09:00 in Paris read from a calendar in UTC listed at 10:00 after the change, where Google keeps 09:00. A boundary is read in the zone Google names (io-gcal 0.5.1).
 - Fixed `calendar create --color` and `calendar update --color` writing a CalDAV calendar's colour as the inf-it `calendar-color`, which iCloud ignores: it is written as Apple's (`http://apple.com/ns/ical/`), which iCloud, Fastmail, Nextcloud and Radicale serve, and read from it, the inf-it one when it is absent (io-webdav 0.10.0).

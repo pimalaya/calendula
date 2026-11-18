@@ -617,7 +617,11 @@ fn a_calendar_holding_an_invitation_needs_allow_send_to_go() {
     let home = account();
     let delete = call(1, "calendar_delete", json!({ "calendar": "personal" }));
 
-    let responses = serve(home.path(), &["--allow-write"], std::slice::from_ref(&delete));
+    let responses = serve(
+        home.path(),
+        &["--allow-write"],
+        std::slice::from_ref(&delete),
+    );
     let error = refusal(&responses[0]);
     assert!(error.contains("--allow-send"), "{error}");
     assert!(error.contains("ATTENDEE"), "{error}");

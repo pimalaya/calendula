@@ -105,6 +105,8 @@ A listing the server answers with anything but one whole multistatus (an HTML pa
 
 A listing SHALL name, in its `errors`, each row the server answered without the item's data and a listing the server truncated ("Each backend names the items it could not read"), on the first page only: the whole calendar is read before the page is cut, and such a row holds no place on a page.
 
+`update_item` given no version SHALL send `If-Match: *` (RFC 9110 §13.1.1), so an id the calendar does not hold is refused, its 412 coded `item-not-found`, rather than created and reported as an update.
+
 A calendar's colour SHALL be written as Apple's `calendar-color` (`http://apple.com/ns/ical/`), by a create and an update alike, and read from it, the inf-it one when it is absent.
 
 `update_calendar` SHALL write only the properties the patch names, setting a given one and removing (`DAV:remove`) a cleared one, through io-webdav's calendar update (`CaldavCalendarPatch`), which sends a request again on a fresh connection when the server closed the one it was sent on: a property the server refuses, or answers nothing of (RFC 4918 §9.2.1), fails the update. A colour SHALL go first, in a PROPPATCH of its own, so a server keeping the rest of a PROPPATCH while it ignores a colour leaves the calendar as it was: the update fails ``Write the colour of calendar `<id>`, nothing else written``. A calendar no listed id addresses SHALL fail `calendar-not-found` before anything is written. `create_calendar` given a colour SHALL read the calendars back and log a warning naming the colour when the server kept none.
@@ -173,7 +175,7 @@ A read of an event Google holds as cancelled, a deleted event's stub, SHALL be `
 
 `create_calendar` SHALL insert a secondary calendar. Google mints the id of a calendar it creates, so gcal SHALL declare `calendar.create.id` `none`, `--id` refused before connecting, and the [assigned one](#requirement-a-create-reports-the-identifier-it-was-given) SHALL be reported.
 
-`update_calendar` SHALL patch the calendar for the name and the description and the calendar list entry for the colour, since Google splits those across the two resources. A cleared description SHALL be sent as an empty string, a field a PATCH leaves out staying as it is, and an empty description SHALL read as none. A Google calendar always carries a colour, so clearing one SHALL be refused by name. The user's primary calendar (`primary` on its calendar list entry) SHALL be the `default` of `calendar list`.
+`update_calendar` SHALL patch the calendar for the name and the description and the calendar list entry for the colour, since Google splits those across the two resources. A cleared description SHALL be sent as an empty string, a field a PATCH leaves out staying as it is, and an empty description SHALL read as none. A Google calendar always carries a colour, so clearing one SHALL be refused by name, before any request. `create_calendar` given a colour SHALL insert the calendar, then paint its calendar list entry; a failed paint SHALL name the calendar created and say to set the colour with `calendar update`, so a retry does not create a second one. The user's primary calendar (`primary` on its calendar list entry) SHALL be the `default` of `calendar list`.
 
 #### Scenario: An event created with attendees invites them
 - GIVEN a gcal calendar and an event naming an `ATTENDEE` and no `ORGANIZER`, or the calendar's own address as `ORGANIZER`
