@@ -249,6 +249,7 @@ impl CaldavBackend {
             calendar_id: calendar_id.to_owned(),
             etag: body.etag,
             contents: body.data,
+            stand_in: None,
         })
     }
 
@@ -399,6 +400,7 @@ fn item_from(calendar_id: &str, entry: CaldavItemEntry) -> CalendarItem {
         calendar_id: calendar_id.to_owned(),
         etag: entry.etag,
         contents: entry.data,
+        stand_in: None,
     }
 }
 

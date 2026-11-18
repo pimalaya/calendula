@@ -298,6 +298,13 @@ An item whose body is not local SHALL still list, carrying no bytes and no `etag
 
 A range filter SHALL still apply to it, read off the stored `text/calendar` summary rather than off bytes that are not local: a cache that hid its own undownloaded items from a date window would answer a different question than the one asked.
 
+The `event` family (`event list`, `event search`, `event agenda`) SHALL show such an event from its summary, as `pimdir search` renders it: its UID, summary, location, organizer, whether it recurs, and its start and end resolved as a listing resolves them, its `etag` `null`. A series shows once at its start, its occurrences waiting for its body.
+
+#### Scenario: An event not downloaded yet
+- GIVEN a pimdir calendar holding an event its sync listed with its summary alone
+- WHEN `calendula --json event list` runs
+- THEN the event is listed with its summary and its start, and `errors` is empty
+
 A body the store fails to read (an I/O error) is a different state: the item SHALL still list, carrying no bytes, and the listing SHALL name it in its `errors`, coded `item-unreadable`, since the row renders the same as an unhydrated one.
 
 #### Scenario: A body gone from the blob tree

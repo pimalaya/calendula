@@ -1045,6 +1045,7 @@ mod tests {
                 "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n{zones}{events}END:VCALENDAR\r\n"
             )
             .into_bytes(),
+            stand_in: None,
         }
     }
 

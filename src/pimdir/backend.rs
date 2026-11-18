@@ -264,6 +264,7 @@ impl PimdirBackend {
             calendar_id: calendar_id.to_owned(),
             etag: stored.object.map(|hash| hash.0),
             contents,
+            stand_in: None,
         })
     }
 
@@ -685,12 +686,21 @@ impl PimdirBackend {
             None => None,
         };
 
-        let item = CalendarItem {
+        let mut item = CalendarItem {
             id,
             calendar_id: calendar_id.to_owned(),
             etag,
             contents: contents.unwrap_or_default(),
+            stand_in: None,
         };
+
+        if item.contents.is_empty()
+            && error.is_none()
+            && let Some(PimdirSummary::Event(_)) = &stored.summary
+        {
+            let event = crate::pimdir::index::event_hit(&item, Some(stored), String::new());
+            item.stand_in = Some(Box::new(event));
+        }
 
         (item, error)
     }
@@ -1046,6 +1056,7 @@ fn check_occurrence(
         calendar_id: calendar_id.to_owned(),
         etag: None,
         contents: contents.to_vec(),
+        stand_in: None,
     };
 
     match Event::occurrence(&item, recurrence_id) {
@@ -1513,6 +1524,7 @@ mod tests {
             calendar_id: "personal".into(),
             etag: None,
             contents: body(summary),
+            stand_in: None,
         };
 
         let woonies = item("1", "Pre demo woonies");
@@ -1591,6 +1603,7 @@ mod tests {
             calendar_id: "personal".into(),
             etag: None,
             contents: Vec::new(),
+            stand_in: None,
         }
     }
 

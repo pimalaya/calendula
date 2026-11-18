@@ -107,6 +107,7 @@ impl PimdirClient {
             calendar_id: calendar_id.clone(),
             etag: object.map(|hash| hash.0.clone()),
             contents,
+            stand_in: None,
         };
 
         // NOTE: an item dropped since the refresh has no row, only a title.
@@ -532,7 +533,7 @@ impl PimdirCalendarCoverage {
 }
 
 /// The event a hit renders as: from its body, its summary or its title.
-fn event_hit(item: &CalendarItem, stored: Option<&PimdirItem>, title: String) -> Event {
+pub(crate) fn event_hit(item: &CalendarItem, stored: Option<&PimdirItem>, title: String) -> Event {
     let events = Event::project(item);
     let master = events
         .iter()
@@ -1087,6 +1088,38 @@ mod tests {
             "{}",
             invoice.coverage
         );
+    }
+
+    /// CAL-15 (TRI-2): an event whose body is not local yet lists from
+    /// its summary, as a search renders it, in a listing and a window.
+    #[test]
+    fn a_bodiless_event_lists_from_its_summary() {
+        let (_dir, mut backend) = indexed_store();
+        let range = crate::shared::item::CalendarTimeRange {
+            start: Some("20261120T000000Z".into()),
+            end: Some("20261121T000000Z".into()),
+        };
+
+        for range in [None, Some(&range)] {
+            let query = crate::shared::item::CalendarItemQuery {
+                range,
+                ..Default::default()
+            };
+            let listed = backend.list_items("work", query).unwrap();
+            let mut errors = Vec::new();
+            let (events, _) =
+                crate::shared::event::Event::read_all(&listed.items, &mut errors, |item| {
+                    crate::shared::event::Event::try_occurrences(item, range)
+                });
+
+            let invoice = events
+                .iter()
+                .find(|event| event.uid.as_deref() == Some("invoice@example.org"))
+                .unwrap_or_else(|| panic!("{events:?}"));
+            assert_eq!(invoice.summary.as_deref(), Some("Invoice review"));
+            assert_eq!(invoice.start.as_deref(), Some("2026-11-20T14:00:00Z"));
+            assert!(errors.is_empty(), "{errors:?}");
+        }
     }
 
     #[test]

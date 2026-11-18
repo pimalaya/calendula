@@ -30,9 +30,10 @@ use jiff::tz::TimeZone;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize, Serializer};
 
-#[cfg(any(feature = "vdir", feature = "msgraph"))]
-use crate::shared::event::Event;
-use crate::{error::ItemError, shared::event::list::local_zone};
+use crate::{
+    error::ItemError,
+    shared::event::{Event, list::local_zone},
+};
 
 /// A calendar object resource: one iCalendar file.
 ///
@@ -49,6 +50,10 @@ pub struct CalendarItem {
     pub etag: Option<String>,
     /// Raw iCalendar bytes, exactly as the backend stored them.
     pub contents: Vec<u8>,
+    /// The event a listing shows for an item whose body is not local, read
+    /// from what the backend keeps beside it (a pimdir summary), never
+    /// written back.
+    pub stand_in: Option<Box<Event>>,
 }
 
 impl Serialize for CalendarItem {

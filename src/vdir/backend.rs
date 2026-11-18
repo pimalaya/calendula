@@ -270,6 +270,7 @@ fn item_from(calendar_id: &str, item: VdirItem) -> CalendarItem {
         calendar_id: calendar_id.to_owned(),
         etag: None,
         contents: item.contents,
+        stand_in: None,
     }
 }
 

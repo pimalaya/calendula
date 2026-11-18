@@ -747,6 +747,7 @@ fn item_from(calendar_id: &str, event: &GcalEvent, exceptions: &[&GcalEvent]) ->
         calendar_id: calendar_id.to_owned(),
         etag: event.etag.clone(),
         contents: event.to_ical_series(exceptions).into_bytes(),
+        stand_in: None,
     }
 }
 

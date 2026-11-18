@@ -167,10 +167,10 @@ impl Event {
 
     /// Projects every VEVENT carried by `item` as [`Event::project`] does,
     /// or the reason its bytes do not parse. An item with no bytes, whose
-    /// body is not local yet, carries no event.
+    /// body is not local yet, carries its stand-in, if any.
     pub fn try_project(item: &CalendarItem) -> Result<Vec<Self>> {
         if item.contents.is_empty() {
-            return Ok(Vec::new());
+            return Ok(stand_in(item));
         }
 
         let events = expand::project(item).map_err(|err| unparsed(item, err))?;
@@ -194,7 +194,7 @@ impl Event {
         range: Option<&CalendarTimeRange>,
     ) -> Result<Vec<Self>> {
         if item.contents.is_empty() {
-            return Ok(Vec::new());
+            return Ok(stand_in(item));
         }
 
         let events = expand::occurrences(item, range).map_err(|err| unparsed(item, err))?;
@@ -265,6 +265,14 @@ fn unparsed(item: &CalendarItem, err: IcalParseError) -> anyhow::Error {
     anyhow::Error::from(err).context(format!("Cannot parse item `{}` as iCalendar", item.id))
 }
 
+/// The event standing in for an item whose body is not local, if any.
+fn stand_in(item: &CalendarItem) -> Vec<Event> {
+    item.stand_in
+        .iter()
+        .map(|event| (**event).clone())
+        .collect()
+}
+
 fn tagged(item: &CalendarItem, events: Vec<Event>) -> Vec<Event> {
     events
         .into_iter()
@@ -325,6 +333,7 @@ mod tests {
             calendar_id: "personal".into(),
             etag: None,
             contents: contents.as_bytes().to_vec(),
+            stand_in: None,
         }
     }
 
