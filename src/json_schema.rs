@@ -201,7 +201,7 @@ pub fn registry() -> JsonSchemaRegistry {
         );
         refusable!(
             "calendula-msgraph-profile-get",
-            crate::msgraph::profile::get::MsgraphProfileGetOutput
+            crate::shared::raw_json::RawRead
         );
         refusable!(
             "calendula-msgraph-request",
@@ -233,7 +233,7 @@ pub fn registry() -> JsonSchemaRegistry {
         }
         refusable!(
             "calendula-gcal-free-busy",
-            crate::gcal::free_busy::GcalFreeBusyOutput
+            crate::shared::raw_json::RawRead
         );
         for key in [
             "calendula-gcal-events-instances",
@@ -243,7 +243,7 @@ pub fn registry() -> JsonSchemaRegistry {
         }
         refusable!(
             "calendula-gcal-colors",
-            crate::gcal::colors::GcalColorsOutput
+            crate::shared::raw_json::RawRead
         );
         refusable!(
             "calendula-gcal-settings",

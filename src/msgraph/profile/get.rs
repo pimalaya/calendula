@@ -15,14 +15,18 @@ use crate::msgraph::client::MsgraphClient;
 
 /// GET the signed-in user (Graph `/me`).
 ///
-/// JSON output: the raw Graph user object.
+/// JSON output: the Graph user object as Graph sent it.
 #[derive(Debug, Parser)]
 pub struct MsgraphProfileGetCommand;
 
 impl MsgraphProfileGetCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: MsgraphClient) -> Result<()> {
-        let user = client.me()?.response;
-        printer.out(MsgraphProfileGetOutput(user))
+        let value = client.raw_get(&[])?;
+        let text = serde_json::from_value::<MsgraphUser>(value.clone())
+            .map(|user| MsgraphProfileGetOutput(user).to_string())
+            .unwrap_or_default();
+
+        printer.out(crate::shared::raw_json::RawRead { value, text })
     }
 }
 

@@ -7,6 +7,7 @@ use std::fmt;
 
 use anyhow::Result;
 use clap::Parser;
+use io_gcal::v3::rest::colors::GcalColors;
 use pimalaya_cli::{columns::Columns, printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -19,14 +20,15 @@ use crate::gcal::client::GcalClient;
 /// a `colorId` into something readable, and what tells you which id to
 /// reach for.
 ///
-/// JSON output: `{"colors": [{"palette", "id", "background",
-/// "foreground"}]}`.
+/// JSON output: the `colors` resource as Google sent it, its `calendar` and
+/// `event` palettes keyed by colour id.
 #[derive(Debug, Parser)]
 pub struct GcalColorsCommand;
 
 impl GcalColorsCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: GcalClient) -> Result<()> {
-        let palettes = client.colors_get()?.response;
+        let value = client.raw_get(&["colors"])?;
+        let palettes: GcalColors = serde_json::from_value(value.clone())?;
 
         let rows = palettes
             .calendar
@@ -41,7 +43,8 @@ impl GcalColorsCommand {
             })
             .collect();
 
-        printer.out(GcalColorsOutput { rows })
+        let text = GcalColorsOutput { rows }.to_string();
+        printer.out(crate::shared::raw_json::RawRead { value, text })
     }
 }
 

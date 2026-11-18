@@ -62,6 +62,22 @@ impl GcalClient {
 }
 
 impl GcalClient {
+    /// The resource at `segments` under the Calendar API, as Google sent
+    /// it.
+    pub fn raw_get(&mut self, segments: &[&str]) -> Result<Value> {
+        let url = gcal_api_url(segments)?;
+        let send = GcalSend::<Value>::get(&self.inner.auth, url);
+        Ok(self.inner.run(send)?.response)
+    }
+
+    /// What the Calendar API answers a `POST` of `body` to `segments`, as
+    /// Google sent it.
+    pub fn raw_post<B: Serialize>(&mut self, segments: &[&str], body: &B) -> Result<Value> {
+        let url = gcal_api_url(segments)?;
+        let send = GcalSend::<Value>::post_json(&self.inner.auth, url, body)?;
+        Ok(self.inner.run(send)?.response)
+    }
+
     /// Every item of the listing at `segments` under the Calendar API,
     /// queried by `params`, each as Google sent it: the pages followed
     /// through `nextPageToken`, the items of each read from `items`, a

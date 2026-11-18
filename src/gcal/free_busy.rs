@@ -8,7 +8,9 @@ use std::fmt;
 use anyhow::{Result, bail};
 use chrono::NaiveDate;
 use clap::Parser;
-use io_gcal::v3::rest::freebusy::{GcalError, GcalFreeBusyRequest, GcalFreeBusyRequestItem};
+use io_gcal::v3::rest::freebusy::{
+    GcalError, GcalFreeBusyRequest, GcalFreeBusyRequestItem, GcalFreeBusyResponse,
+};
 use pimalaya_cli::{
     fields::Fields,
     printer::Printer,
@@ -29,9 +31,8 @@ use crate::{
 /// it, which is why it lives here. Pass one or more calendar ids; with
 /// none, the account's default calendar is queried.
 ///
-/// JSON output: `{"calendars": [{"id", "busy": [{"start", "end"}],
-/// "queryErrors": [{"domain", "reason"}]}]}`, `queryErrors` being the
-/// error objects the API answered for the calendar, raw.
+/// JSON output: the `freeBusy` answer as Google sent it, its `calendars`
+/// keyed by id, each with its `busy` periods and its `errors`.
 #[derive(Debug, Parser)]
 pub struct GcalFreeBusyCommand {
     /// The calendars to query. Repeat the flag for several; falls back to
@@ -70,7 +71,8 @@ impl GcalFreeBusyCommand {
             ..Default::default()
         };
 
-        let response = client.free_busy_query(&request)?.response;
+        let value = client.raw_post(&["freeBusy"], &request)?;
+        let response: GcalFreeBusyResponse = serde_json::from_value(value.clone())?;
 
         let rows = response
             .calendars
@@ -89,7 +91,8 @@ impl GcalFreeBusyCommand {
             })
             .collect();
 
-        printer.out(GcalFreeBusyOutput { rows })
+        let text = GcalFreeBusyOutput { rows }.to_string();
+        printer.out(crate::shared::raw_json::RawRead { value, text })
     }
 }
 
@@ -174,15 +177,11 @@ impl fmt::Display for GcalFreeBusyOutput {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::*;
 
-    /// The API's error objects print raw under `queryErrors`, so `errors`
-    /// keeps the one meaning it has across calendula, the item errors of
-    /// a listing.
+    /// A calendar Google could not answer for prints its reasons.
     #[test]
-    fn the_api_errors_print_raw_under_their_own_key() {
+    fn the_api_errors_print_as_reasons() {
         let output = GcalFreeBusyOutput {
             rows: vec![CalendarBusy {
                 id: "nope@example.org".into(),
@@ -194,16 +193,6 @@ mod tests {
             }],
         };
 
-        assert_eq!(
-            serde_json::to_value(&output).unwrap(),
-            json!({
-                "calendars": [{
-                    "id": "nope@example.org",
-                    "busy": [],
-                    "queryErrors": [{"domain": "global", "reason": "notFound"}],
-                }],
-            })
-        );
         assert_eq!(output.to_string(), "nope@example.org\nErrors:  notFound\n");
     }
 }

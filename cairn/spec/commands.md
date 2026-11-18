@@ -47,7 +47,7 @@ An ACL rule id is `<scope type>:<scope value>` (`default` for everyone), which t
 
 `calendars`, `acl list`, `events instances` and `settings` SHALL read every page and print under `--json` every item as Google sent it, read as JSON and never through a type (pimalaya-cli output.md, *Protocol commands are raw-faithful*), under `calendars`, `rules`, `instances` and `settings`; their text reads the same items. `request <METHOD> <PATH> [JSON]` SHALL send any Calendar API request, the path joined onto the `v3/` base or a full URL, and print `{response}`, the JSON Google answered, as `msgraph request` and cardamum's `gpeople request` do.
 
-`free-busy` SHALL print `{calendars: [{id, busy: [{start, end}], queryErrors}]}`, `queryErrors` the error objects the API answers for the calendar (`domain`, `reason`), raw, `[]` when none. It SHALL NOT print them under `errors`, the key of the item errors a listing names.
+`free-busy` and `colors`, each a single read, SHALL print under `--json` what the API answered, as Google sent it, every property kept, as the `msgraph` reads of one calendar, one event and the profile print Graph's object (the family's ruling of 2026-11-18 that a single protocol read prints the provider's payload raw), their text forms unchanged.
 
 ### Requirement: What the gcal family declines
 `channels` / `watch` SHALL NOT be exposed: a push channel delivers to an HTTPS endpoint the caller must host, which a CLI has not. `calendars.transferOwnership` SHALL NOT be exposed: it is an irreversible administrative act on a Workspace domain.

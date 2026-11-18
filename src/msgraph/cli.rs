@@ -55,6 +55,29 @@ mod tests {
         request::MsgraphRequestCommand,
     };
 
+    /// A single read prints the event as Graph sent it, a property
+    /// io-msgraph does not model kept.
+    #[test]
+    fn a_single_read_prints_what_graph_sent() {
+        let event = r#"{"id":"E1","subject":"Standup","transactionId":"t1"}"#;
+        let client = MsgraphClient::new(answering(&[(200, event)]).into_client());
+        let mut printer = CapturePrinter::default();
+
+        let command =
+            MsgraphCommand::Events(crate::msgraph::events::cli::MsgraphEventsCommand::Get(
+                crate::msgraph::events::get::MsgraphEventGetCommand {
+                    event_id: "E1".into(),
+                },
+            ));
+        command.execute(&mut printer, client).unwrap();
+
+        let output = printer.into_single().unwrap();
+        assert_eq!(
+            output,
+            serde_json::json!({"id": "E1", "subject": "Standup", "transactionId": "t1"})
+        );
+    }
+
     /// COH-5: a request Graph refuses is the command's result, under
     /// `refusal`, coded as a failure would be, and exits 3.
     #[test]

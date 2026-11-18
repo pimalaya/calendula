@@ -124,3 +124,22 @@ mod tests {
         );
     }
 }
+
+/// One resource a protocol read printed as the provider sent it, every
+/// property kept, under `--json`, and as its text form on a terminal.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(transparent)]
+pub struct RawRead {
+    /// The resource, verbatim.
+    #[schemars(with = "serde_json::Map<String, Value>")]
+    pub value: Value,
+    /// Its text form.
+    #[serde(skip)]
+    pub text: String,
+}
+
+impl fmt::Display for RawRead {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.text)
+    }
+}

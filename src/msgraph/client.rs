@@ -10,11 +10,14 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow};
-use io_msgraph::v1::client::{
-    MsgraphClientStd, MsgraphClientStdConnectOptions, MsgraphClientStdError,
+use io_msgraph::v1::{
+    client::{MsgraphClientStd, MsgraphClientStdConnectOptions, MsgraphClientStdError},
+    send::{MSGRAPH_API_BASE, MsgraphSend},
 };
 use pimalaya_config::secret::SecretResolver;
 use secrecy::ExposeSecret;
+use serde_json::Value;
+use url::Url;
 
 use crate::{
     cli::resolve_account,
@@ -31,6 +34,28 @@ impl MsgraphClient {
     /// Wraps an already-connected client.
     pub fn new(inner: MsgraphClientStd) -> Self {
         Self { inner }
+    }
+}
+
+impl MsgraphClient {
+    /// The resource at `segments` under the account's owner (`me` or
+    /// `users/<id>`), each segment percent-encoded, as Graph sent it.
+    pub fn raw_get(&mut self, segments: &[&str]) -> Result<Value> {
+        let mut url = Url::parse(MSGRAPH_API_BASE)?;
+        {
+            let mut path = url
+                .path_segments_mut()
+                .map_err(|()| anyhow!("Cannot build a Graph URL"))?;
+            path.pop_if_empty();
+            match self.user_id.as_str() {
+                "me" => path.push("me"),
+                user => path.push("users").push(user),
+            };
+            path.extend(segments);
+        }
+
+        let auth = self.auth.clone();
+        Ok(self.run(MsgraphSend::<Value>::get(&auth, url))?.response)
     }
 }
 
@@ -88,6 +113,17 @@ pub fn event_refusal(err: MsgraphClientStdError) -> anyhow::Error {
     match is_missing(&err) {
         true => recoded(ErrorCode::ItemNotFound, err),
         false => err.into(),
+    }
+}
+
+/// `err` coded by `refusal` when it is Graph's answer, else as it is.
+pub fn coded(
+    err: anyhow::Error,
+    refusal: fn(MsgraphClientStdError) -> anyhow::Error,
+) -> anyhow::Error {
+    match err.downcast::<MsgraphClientStdError>() {
+        Ok(err) => refusal(err),
+        Err(err) => err,
     }
 }
 
