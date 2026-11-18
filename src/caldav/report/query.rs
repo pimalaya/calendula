@@ -7,6 +7,7 @@ use anyhow::Result;
 use chrono::NaiveDate;
 use clap::Parser;
 use io_webdav::rfc4918::{escape_attr, escape_text};
+use jiff::tz::TimeZone;
 use pimalaya_cli::printer::Printer;
 
 use crate::{
@@ -16,7 +17,7 @@ use crate::{
         report::entries::{CaldavItemEntriesOutput, EntryRow},
     },
     error::partial_when,
-    shared::item::CalendarTimeRange,
+    shared::{event::list::local_zone, item::CalendarTimeRange},
 };
 
 /// The component a window or a prop-filter narrows when no `--component`
@@ -74,7 +75,7 @@ pub struct CaldavReportQueryCommand {
 
 impl CaldavReportQueryCommand {
     pub fn execute(self, printer: &mut impl Printer, mut client: CaldavClient) -> Result<()> {
-        let filter = self.comp_filter()?;
+        let filter = self.comp_filter(&local_zone())?;
         let ok = client.list_items(&self.calendar_id, &filter)?;
 
         let output = CaldavItemEntriesOutput {
@@ -90,10 +91,10 @@ impl CaldavReportQueryCommand {
     /// The VCALENDAR child filter the flags build: one component filter
     /// holding the window, then one prop-filter per filter flag (RFC 4791
     /// §9.7.1), or none at all.
-    fn comp_filter(&self) -> Result<String> {
+    fn comp_filter(&self, zone: &TimeZone) -> Result<String> {
         let mut inner = String::new();
 
-        if let Some(range) = CalendarTimeRange::from_days(self.from, self.to)? {
+        if let Some(range) = CalendarTimeRange::from_days_in(self.from, self.to, zone)? {
             inner.push_str(&range.to_caldav_filter());
         }
 
@@ -156,13 +157,14 @@ fn prop_filter(name: &str, test: &str) -> String {
 #[cfg(test)]
 mod tests {
     use clap::Parser;
+    use jiff::tz::TimeZone;
 
     use super::CaldavReportQueryCommand;
 
     fn filter(args: &[&str]) -> String {
         let argv = ["query", "cal"].iter().chain(args);
         let cmd = CaldavReportQueryCommand::try_parse_from(argv).unwrap();
-        cmd.comp_filter().unwrap()
+        cmd.comp_filter(&TimeZone::UTC).unwrap()
     }
 
     /// No flag asks for every item, a bare component keeps its kind.
@@ -219,6 +221,11 @@ mod tests {
     fn refuses_a_crossed_window() {
         let argv = ["query", "cal", "--from", "2026-11-17", "--to", "2026-11-16"];
         let cmd = CaldavReportQueryCommand::try_parse_from(argv).unwrap();
-        assert!(cmd.comp_filter().unwrap_err().to_string().contains("--to"));
+        assert!(
+            cmd.comp_filter(&TimeZone::UTC)
+                .unwrap_err()
+                .to_string()
+                .contains("--to")
+        );
     }
 }

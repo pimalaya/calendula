@@ -22,16 +22,17 @@ pub mod update;
 
 use std::{borrow::Cow, str};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use base64_codec::codec::Base64Codec;
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use ical::component::IcalComponentKind;
+use jiff::tz::TimeZone;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize, Serializer};
 
-use crate::error::ItemError;
 #[cfg(any(feature = "vdir", feature = "msgraph"))]
 use crate::shared::event::Event;
+use crate::{error::ItemError, shared::event::list::local_zone};
 
 /// A calendar object resource: one iCalendar file.
 ///
@@ -299,12 +300,24 @@ pub struct CalendarTimeRange {
 }
 
 impl CalendarTimeRange {
-    /// Builds a range from the inclusive `--from` and `--to` days.
+    /// Builds a range from the inclusive `--from` and `--to` days, local
+    /// ones (`TZ`, then the system's zone).
     ///
-    /// `to` maps onto the exclusive upper bound the wire format wants, the
-    /// day after at midnight. Two absent bounds give `None`, and crossed
-    /// ones bail.
+    /// Two absent bounds give `None`, and crossed ones bail.
     pub fn from_days(from: Option<NaiveDate>, to: Option<NaiveDate>) -> Result<Option<Self>> {
+        Self::from_days_in(from, to, &local_zone())
+    }
+
+    /// Builds a range from the inclusive `from` and `to` days of `zone`.
+    ///
+    /// Each bound is the UTC instant of a midnight in `zone`: `from`'s, and
+    /// for `to` the next day's, the exclusive upper bound the wire format
+    /// wants.
+    pub fn from_days_in(
+        from: Option<NaiveDate>,
+        to: Option<NaiveDate>,
+        zone: &TimeZone,
+    ) -> Result<Option<Self>> {
         if let (Some(from), Some(to)) = (from, to)
             && to < from
         {
@@ -315,32 +328,49 @@ impl CalendarTimeRange {
             return Ok(None);
         }
 
-        let end = to
-            .and_then(|day| day.succ_opt())
-            .map(|day| stamp(day, "000000"));
+        let end = match to.and_then(|day| day.succ_opt()) {
+            Some(day) => Some(midnight(day, zone)?),
+            None => None,
+        };
+        let start = match from {
+            Some(day) => Some(midnight(day, zone)?),
+            None => None,
+        };
 
-        Ok(Some(Self {
-            start: from.map(|day| stamp(day, "000000")),
-            end,
-        }))
+        Ok(Some(Self { start, end }))
+    }
+
+    /// Whether an iCalendar date or date-time falls inside the range, the
+    /// local zone telling the days of the bounds.
+    #[cfg(any(feature = "vdir", feature = "msgraph", feature = "pimdir"))]
+    pub fn contains(&self, stamp: &str) -> bool {
+        self.contains_in(stamp, &local_zone())
     }
 
     /// Whether an iCalendar date or date-time falls inside the range.
     ///
-    /// Comparison is lexicographic on the leading `YYYYMMDD`, enough for a
-    /// day window and keeping the CLI out of time-zone resolution.
+    /// A UTC date-time compares as an instant. A date or a local date-time
+    /// names no instant without resolving its zone, so its day compares to
+    /// the days the bounds fall on in `zone`.
     #[cfg(any(feature = "vdir", feature = "msgraph", feature = "pimdir"))]
-    pub fn contains(&self, stamp: &str) -> bool {
-        let day = &stamp[..stamp.len().min(8)];
+    pub fn contains_in(&self, stamp: &str, zone: &TimeZone) -> bool {
+        if stamp.len() == 16 && stamp.ends_with('Z') {
+            let after_start = self.start.as_deref().is_none_or(|start| stamp >= start);
+            let before_end = self.end.as_deref().is_none_or(|end| stamp < end);
+            return after_start && before_end;
+        }
 
-        if let Some(start) = &self.start
-            && day < &start[..8]
+        let day = stamp.get(..8).unwrap_or(stamp);
+        let local_day = |bound: &str| bound_day(bound, zone);
+
+        if let Some(start) = self.start.as_deref()
+            && day < local_day(start).as_str()
         {
             return false;
         }
 
-        if let Some(end) = &self.end
-            && day >= &end[..8]
+        if let Some(end) = self.end.as_deref()
+            && day >= local_day(end).as_str()
         {
             return false;
         }
@@ -367,9 +397,29 @@ impl CalendarTimeRange {
     }
 }
 
-/// Formats `day` as an iCalendar UTC date-time at `time` (`HHMMSS`).
-fn stamp(day: NaiveDate, time: &str) -> String {
-    format!("{}T{time}Z", day.format("%Y%m%d"))
+/// The UTC instant of midnight starting `day` in `zone`, as an iCalendar
+/// UTC date-time.
+fn midnight(day: NaiveDate, zone: &TimeZone) -> Result<String> {
+    let date = jiff::civil::Date::new(day.year() as i16, day.month() as i8, day.day() as i8)
+        .with_context(|| format!("Cannot read the day {day}"))?;
+    let instant = date
+        .to_zoned_datetime(zone.clone())
+        .with_context(|| format!("Cannot tell the midnight of {day}"))?
+        .timestamp();
+    Ok(instant.strftime("%Y%m%dT%H%M%SZ").to_string())
+}
+
+/// The day a range bound falls on in `zone`, as `YYYYMMDD`: the bound's
+/// own leading digits when it does not read as a UTC date-time.
+#[cfg(any(feature = "vdir", feature = "msgraph", feature = "pimdir"))]
+fn bound_day(bound: &str, zone: &TimeZone) -> String {
+    match jiff::fmt::strtime::parse("%Y%m%dT%H%M%SZ", bound).and_then(|tm| tm.to_timestamp()) {
+        Ok(instant) => instant
+            .to_zoned_datetime(zone.clone())
+            .strftime("%Y%m%d")
+            .to_string(),
+        Err(_) => bound.get(..8).unwrap_or(bound).to_owned(),
+    }
 }
 
 #[cfg(test)]
@@ -381,14 +431,27 @@ mod tests {
         let from = NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
         let to = NaiveDate::from_ymd_opt(2026, 8, 31).unwrap();
 
-        let range = CalendarTimeRange::from_days(Some(from), Some(to))
+        let range = CalendarTimeRange::from_days_in(Some(from), Some(to), &TimeZone::UTC)
             .unwrap()
             .unwrap();
 
         assert_eq!(range.start.as_deref(), Some("20260801T000000Z"));
-        // NOTE: the upper bound is exclusive on the wire, so the whole of
-        // the 31st stays inside the window.
         assert_eq!(range.end.as_deref(), Some("20260901T000000Z"));
+    }
+
+    /// CAL-1 and CAL-7: a day is a local one, so an evening west of UTC
+    /// stays on its own day.
+    #[test]
+    fn a_day_range_spans_the_local_days() {
+        let zone = TimeZone::get("America/New_York").unwrap();
+        let day = NaiveDate::from_ymd_opt(2026, 11, 30).unwrap();
+
+        let range = CalendarTimeRange::from_days_in(Some(day), Some(day), &zone)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(range.start.as_deref(), Some("20261130T050000Z"));
+        assert_eq!(range.end.as_deref(), Some("20261201T050000Z"));
     }
 
     #[test]
@@ -408,16 +471,33 @@ mod tests {
             end: Some("20260901T000000Z".into()),
         };
 
-        assert!(range.contains("20260801T090000Z"));
-        assert!(range.contains("20260831"));
-        assert!(!range.contains("20260731T235900Z"));
-        assert!(!range.contains("20260901T000000Z"));
+        let utc = TimeZone::UTC;
+        assert!(range.contains_in("20260801T090000Z", &utc));
+        assert!(range.contains_in("20260831", &utc));
+        assert!(!range.contains_in("20260731T235900Z", &utc));
+        assert!(!range.contains_in("20260901T000000Z", &utc));
 
         let open = CalendarTimeRange {
             start: None,
             end: Some("20260901T000000Z".into()),
         };
-        assert!(open.contains("19990101"));
+        assert!(open.contains_in("19990101", &utc));
+    }
+
+    #[cfg(any(feature = "vdir", feature = "msgraph", feature = "pimdir"))]
+    #[test]
+    fn containment_tells_a_utc_time_as_an_instant_and_a_local_one_by_its_day() {
+        let zone = TimeZone::get("America/New_York").unwrap();
+        let range = CalendarTimeRange {
+            start: Some("20261130T050000Z".into()),
+            end: Some("20261201T050000Z".into()),
+        };
+
+        assert!(range.contains_in("20261201T010000Z", &zone));
+        assert!(!range.contains_in("20261201T050000Z", &zone));
+        assert!(range.contains_in("20261130T200000", &zone));
+        assert!(range.contains_in("20261130", &zone));
+        assert!(!range.contains_in("20261201", &zone));
     }
 
     #[cfg(feature = "caldav")]

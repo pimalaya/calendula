@@ -1062,7 +1062,7 @@ mod tests {
     /// A day window, both bounds inclusive.
     fn days(from: &str, to: &str) -> CalendarTimeRange {
         let day = |day: &str| chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").unwrap();
-        CalendarTimeRange::from_days(Some(day(from)), Some(day(to)))
+        CalendarTimeRange::from_days_in(Some(day(from)), Some(day(to)), &jiff::tz::TimeZone::UTC)
             .unwrap()
             .unwrap()
     }

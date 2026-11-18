@@ -1044,7 +1044,9 @@ pub(crate) mod scripted {
         let mut backend = answering(&[(200, &listing), (200, &reread), (200, r#"{"value":[]}"#)]);
 
         let from = NaiveDate::from_ymd_opt(2026, 11, 16);
-        let range = CalendarTimeRange::from_days(from, from).unwrap().unwrap();
+        let range = CalendarTimeRange::from_days_in(from, from, &jiff::tz::TimeZone::UTC)
+            .unwrap()
+            .unwrap();
         let query = CalendarItemQuery {
             range: Some(&range),
             ..Default::default()
