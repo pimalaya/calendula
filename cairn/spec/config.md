@@ -55,7 +55,7 @@ calendula SHALL NOT write a configuration file: the user writes it, from the doc
 The top-level options SHALL be folded under the selected account, the account's own values overriding them field by field. A value set once at the top therefore applies everywhere it is not overridden.
 
 ### Requirement: Unknown fields
-Every block of the configuration, the top-level and account blocks included, SHALL set `deny_unknown_fields`, so a key calendula does not know fails the load naming it, a typo reported rather than ignored. The block of a backend the build leaves out SHALL load unread, so one file serves every build, and a command reaching it SHALL fail with `backend-not-built` (see "Backend selection order" in backends). The account `proxy` of a build with no network backend SHALL load unread too. A table calendula no longer reads SHALL be refused by name: `todo`, `journal`, `table`, the top-level `account`, `calendar.list`, `event.list.table` and `item.list.table`, and so SHALL the `caldav.discover` and `vdir.home-dir` keys, each through pimalaya-config's `removed_key!`, in the family sentence ``The `<name>` table is removed, <why>: delete it, see MIGRATION.md`` (`key` for a key, and its own instead for `caldav.discover` and `vdir.home-dir`).
+Every block of the configuration, the top-level and account blocks included, SHALL set `deny_unknown_fields`, so a key calendula does not know fails the load naming it, a typo reported rather than ignored. The block of a backend the build leaves out SHALL load unread, so one file serves every build, and a command reaching it SHALL fail with `backend-not-built` (see "Backend selection order" in backends). The account `proxy` of a build with no network backend SHALL load unread too. A table or a key calendula no longer reads (`todo`, `journal`, `table`, the top-level `account`, `calendar.list`, `event.list.table`, `item.list.table`, `caldav.discover`, `vdir.home-dir`) SHALL fail the same way, with no sentence of its own.
 
 #### Scenario: A typo in an account
 - GIVEN `[accounts.a]` holding `defualt = true`
@@ -67,26 +67,13 @@ Every block of the configuration, the top-level and account blocks included, SHA
 - WHEN the configuration is loaded
 - THEN it loads, the `gcal` block unread, and a unified command on that account fails coded `backend-not-built`, naming `--features gcal`
 
-### Requirement: A leftover todo or journal table is refused by name
-A `todo` or `journal` table left in a configuration, at the top level or under an account, SHALL fail the load, naming the CLI that took the domain over and saying to delete the table, in the family sentence rather than as unknown fields: ``The `todo` table is removed, the to-dos having moved to unfog, the Pimalaya CLI for tasks: delete it, see MIGRATION.md`` and ``The `journal` table is removed, the journal entries having moved to journal, the Pimalaya CLI for journal entries: delete it, see MIGRATION.md``.
-
-#### Scenario: An upgraded configuration
-- GIVEN a configuration written for 0.2 with a `[todo.list]` table
-- WHEN any calendula command loads it
-- THEN the command fails before reaching a backend, the error locating the table (its line, or its key once several files are merged) and naming unfog
-
-#### Scenario: A table under an account
-- GIVEN a configuration with an `[accounts.work.journal]` table
-- WHEN any calendula command loads it
-- THEN the command fails, the error naming journal
-
 ### Requirement: No colour or table is configured
-The configuration SHALL hold no colour and no table shape. A `table` table (`table.preset`, `table.arrangement`), at the top level or under an account, a top-level `account` table (`account.list.table`), and the `calendar.list`, `event.list.table` and `item.list.table` tables holding the `*-color` keys, at the top level or under an account, SHALL fail the load by name in the family sentence, ``The `<table>` table is removed, <command> printing plain text with no colour: delete it, see MIGRATION.md`` (`calendula printing plain text with no border or colour` for `table`). `event.list.page-size` and `item.list.page-size` stay.
+The configuration SHALL hold no colour and no table shape. A `table` table (`table.preset`, `table.arrangement`), at the top level or under an account, a top-level `account` table (`account.list.table`), and the `calendar.list`, `event.list.table` and `item.list.table` tables holding the `*-color` keys, at the top level or under an account, SHALL fail the load as unknown fields. `event.list.page-size` and `item.list.page-size` stay.
 
 #### Scenario: A colour key
 - GIVEN a configuration written for 0.2 with `event.list.table.id-color = "red"`
 - WHEN any calendula command loads it
-- THEN it fails naming the line and saying the `event.list.table` table is removed, pointing at MIGRATION.md
+- THEN it fails naming the unknown field `table`
 
 ### Requirement: Backend blocks
 An account SHALL carry an optional block per compiled backend: `vdir` with a `root`, `pimdir` with a `root` and an optional `account`, `caldav` with its endpoint, TLS, ALPN and authentication, `gcal` and `msgraph` with TLS, ALPN and authentication.
@@ -131,12 +118,12 @@ Every configured filesystem path SHALL be shell-expanded by the deserializer tha
 `vdir.root`, `pimdir.root` and `tls.cert` are the paths concerned; the optional one goes through a local deserializer until pimalaya-config ships an optional variant of its own.
 
 ### Requirement: The vdir home is `vdir.root`
-An account's `vdir` block SHALL name the vdir home, the directory holding one calendar per immediate subdirectory, in `root`, its `~` and environment variables expanded as it is read ("Paths are shell-expanded"), as `pimdir.root` names a store. `vdir.home-dir`, the key 0.2 read, SHALL be refused by name in the family's sentence (pimalaya-config's `removed_key!`), alone or beside `root`: ``The `vdir.home-dir` key is removed, the vdir home being named `root` as a store root is: rename it `vdir.root`, the path unchanged, see MIGRATION.md``. A build without `vdir` loads the block unread.
+An account's `vdir` block SHALL name the vdir home, the directory holding one calendar per immediate subdirectory, in `root`, its `~` and environment variables expanded as it is read ("Paths are shell-expanded"), as `pimdir.root` names a store. `vdir.home-dir`, the key 0.2 read, SHALL fail as an unknown field. A build without `vdir` loads the block unread.
 
 #### Scenario: A 0.2 vdir home
 - GIVEN an account holding `vdir.home-dir = "~/calendars"`
 - WHEN `calendula --json calendar list` runs
-- THEN it exits 1, the sentence naming the `vdir.home-dir` key as removed, `vdir.root` and MIGRATION.md in `sources`
+- THEN it exits 1 naming the unknown field `home-dir`
 
 #### Scenario: The same home under `root`
 - GIVEN an account holding `vdir.root = "~/calendars"`
@@ -150,12 +137,12 @@ The `caldav` block SHALL offer exactly two mutually exclusive routes, `server` a
 
 A block carrying neither SHALL be rejected by name.
 
-A `caldav.discover` key, the RFC 6764 route an earlier calendula offered, SHALL fail the load by name in a build with the `caldav` feature (one without it loads the block unread), as the family refuses its removed keys, the message naming `caldav.server` with a provider root as example and MIGRATION.md, rather than as an unknown field.
+A `caldav.discover` key, the RFC 6764 route an earlier calendula offered, SHALL fail the load as an unknown field.
 
 #### Scenario: A discover route left in a configuration
 - GIVEN a configuration written for 0.2 with `caldav.discover = "fastmail.com"`
 - WHEN any calendula command loads it
-- THEN it fails before reaching a backend, naming the line, saying the `caldav.discover` key is removed and to set `caldav.server`, and pointing at MIGRATION.md
+- THEN it fails before reaching a backend, naming the unknown field `discover`
 
 ### Requirement: Secrets are read, never written
 A CalDAV password, a CalDAV token or a gcal token SHALL be a secret read from the configuration itself or from the standard output of a command.

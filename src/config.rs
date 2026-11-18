@@ -11,14 +11,8 @@
 //! Every block sets `deny_unknown_fields`, so a typo fails the load. The
 //! block of a backend left out of the build loads unread into
 //! [`AccountConfig`], so one file serves every build, and a command
-//! reaching it fails with `backend-not-built`. The tables calendula
-//! no longer reads are refused by name: `todo` and `journal`, their
-//! domains having moved to unfog and journal, and the rendering tables
-//! (`table`, `account`, `calendar.list`, `event.list.table`,
-//! `item.list.table`), the output being plain text. So are the
-//! `caldav.discover` key, `caldav.server` naming the root instead, and
-//! the `vdir.home-dir` key, `vdir.root` naming the home. Each refusal is
-//! pimalaya-config's sentence (`removed_key!`), naming MIGRATION.md.
+//! reaching it fails with `backend-not-built`. A key or a table
+//! calendula does not read fails as any unknown one does.
 
 use std::collections::HashMap;
 #[cfg(any(
@@ -40,7 +34,7 @@ use pimalaya_config::toml::opt_shell_expanded_path;
 use pimalaya_config::toml::shell_expanded_path;
 #[cfg(feature = "caldav")]
 use pimalaya_config::toml::shell_expanded_string;
-use pimalaya_config::{command::CommandConfig, removed_key, toml::TomlConfig};
+use pimalaya_config::{command::CommandConfig, toml::TomlConfig};
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 use pimalaya_stream::{
     proxy::{Proxy, ProxyAuth},
@@ -67,10 +61,6 @@ use url::{ParseError, Url};
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Config {
-    /// Refused: the output is plain text, drawn in no table.
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub table: Option<TableRemovedConfig>,
     /// `calendar` command options.
     #[serde(default)]
     pub calendar: CalendarConfig,
@@ -80,18 +70,6 @@ pub struct Config {
     /// `item` command options.
     #[serde(default)]
     pub item: ItemConfig,
-    /// Refused: the to-dos moved to unfog.
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub todo: Option<TodoMovedConfig>,
-    /// Refused: the journal entries moved to journal.
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub journal: Option<JournalMovedConfig>,
-    /// Refused: `account list` prints plain text, in no colour.
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub account: Option<AccountRemovedConfig>,
     /// One `[accounts.<name>]` block per account.
     pub accounts: HashMap<String, AccountConfig>,
 }
@@ -133,10 +111,6 @@ pub struct AccountConfig {
     /// Whether a command given no `-a/--account` picks this account.
     #[serde(default)]
     pub default: bool,
-    /// Refused: the output is plain text, drawn in no table.
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub table: Option<TableRemovedConfig>,
     /// `calendar` command options.
     #[serde(default)]
     pub calendar: CalendarConfig,
@@ -146,14 +120,6 @@ pub struct AccountConfig {
     /// `item` command options.
     #[serde(default)]
     pub item: ItemConfig,
-    /// Refused: the to-dos moved to unfog.
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub todo: Option<TodoMovedConfig>,
-    /// Refused: the journal entries moved to journal.
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub journal: Option<JournalMovedConfig>,
     /// Proxy every network backend of this account goes through, unless
     /// its own block names one.
     #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
@@ -266,10 +232,6 @@ pub struct CalendarConfig {
     /// Calendar id used by `event` and `item` commands when their
     /// `-k/--calendar` flag is omitted.
     pub default: Option<String>,
-    /// Refused: `calendar list` prints plain text, in no colour.
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub list: Option<CalendarListRemovedConfig>,
 }
 
 /// Event-level options.
@@ -287,67 +249,6 @@ pub struct EventConfig {
 pub struct EventListConfig {
     /// Default `-s/--page-size` value for `event list`, 25 when unset.
     pub page_size: Option<u32>,
-    /// Refused: `event list` prints plain text, in no colour.
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub table: Option<EventListTableRemovedConfig>,
-}
-
-removed_key! {
-    /// The `todo` table, refused by name, the to-dos having moved to unfog.
-    pub TodoMovedConfig: Table {
-        name: "todo",
-        why: "the to-dos having moved to unfog, the Pimalaya CLI for tasks",
-        instead: "delete it",
-    }
-
-    /// The `journal` table, refused by name, the journal entries having
-    /// moved to journal.
-    pub JournalMovedConfig: Table {
-        name: "journal",
-        why: "the journal entries having moved to journal, the Pimalaya CLI \
-              for journal entries",
-        instead: "delete it",
-    }
-
-    /// The `table` table, refused by name, the output being plain text.
-    pub TableRemovedConfig: Table {
-        name: "table",
-        why: "calendula printing plain text with no border or colour",
-        instead: "delete it",
-    }
-
-    /// The top-level `account` table, refused by name, `account list`
-    /// printing plain text.
-    pub AccountRemovedConfig: Table {
-        name: "account",
-        why: "`account list` printing plain text with no colour",
-        instead: "delete it",
-    }
-
-    /// The `calendar.list` table, refused by name, `calendar list`
-    /// printing plain text.
-    pub CalendarListRemovedConfig: Table {
-        name: "calendar.list",
-        why: "`calendar list` printing plain text with no colour",
-        instead: "delete it",
-    }
-
-    /// The `event.list.table` table, refused by name, `event list`
-    /// printing plain text.
-    pub EventListTableRemovedConfig: Table {
-        name: "event.list.table",
-        why: "`event list` printing plain text with no colour",
-        instead: "delete it",
-    }
-
-    /// The `item.list.table` table, refused by name, `item list` printing
-    /// plain text.
-    pub ItemListTableRemovedConfig: Table {
-        name: "item.list.table",
-        why: "`item list` printing plain text with no colour",
-        instead: "delete it",
-    }
 }
 
 /// Item-level options.
@@ -375,10 +276,6 @@ pub struct ItemConfig {
 pub struct ItemListConfig {
     /// Default `-s/--page-size` value for `item list`, 25 when unset.
     pub page_size: Option<u32>,
-    /// Refused: `item list` prints plain text, in no colour.
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub table: Option<ItemListTableRemovedConfig>,
 }
 
 /// vdir backend configuration.
@@ -391,10 +288,6 @@ pub struct VdirConfig {
     /// environment variables both work, as in `pimdir.root`.
     #[serde(deserialize_with = "shell_expanded_path")]
     pub root: PathBuf,
-    /// Refused: the home is `root`, as a pimdir store's.
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub home_dir: Option<VdirHomeDirRemovedConfig>,
 }
 
 /// pimdir backend configuration.
@@ -428,10 +321,6 @@ pub struct PimdirConfig {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CaldavConfig {
-    /// Refused: calendula resolves no domain, `server` names the root.
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub discover: Option<CaldavDiscoverRemovedConfig>,
     /// DAV context root. Principal and calendar-home-set discovery
     /// start here.
     ///
@@ -499,28 +388,6 @@ fn host_of(input: &str) -> &str {
     match host.rsplit_once(':') {
         Some((name, port)) if port.bytes().all(|b| b.is_ascii_digit()) => name,
         _ => host,
-    }
-}
-
-removed_key! {
-    /// The `caldav.discover` key, refused by name, calendula resolving no
-    /// domain.
-    #[cfg_attr(not(feature = "caldav"), allow(dead_code))]
-    pub CaldavDiscoverRemovedConfig: Key {
-        name: "caldav.discover",
-        why: "calendula resolving no domain",
-        instead: "name the server in `caldav.server` instead (Fastmail's \
-                  `https://caldav.fastmail.com/dav/`, Google's \
-                  `https://apidata.googleusercontent.com/caldav/v2/`)",
-    }
-
-    /// The `vdir.home-dir` key, refused by name, the vdir home being
-    /// `vdir.root`.
-    #[cfg_attr(not(feature = "vdir"), allow(dead_code))]
-    pub VdirHomeDirRemovedConfig: Key {
-        name: "vdir.home-dir",
-        why: "the vdir home being named `root` as a store root is",
-        instead: "rename it `vdir.root`, the path unchanged",
     }
 }
 
@@ -846,25 +713,6 @@ mod tests {
         assert!(matches!(caldav.auth, CaldavAuthConfig::None));
     }
 
-    /// `vdir.home-dir`, the vdir home 0.2 read, is refused by name in the
-    /// family sentence, alone or beside `vdir.root`.
-    #[cfg(feature = "vdir")]
-    #[test]
-    fn a_vdir_home_dir_is_refused_by_name() {
-        let sentence = "The `vdir.home-dir` key is removed, the vdir home being \
-                        named `root` as a store root is: rename it `vdir.root`, \
-                        the path unchanged, see MIGRATION.md";
-
-        for vdir in [
-            "vdir.home-dir = \"~/calendars\"\n",
-            "vdir.root = \"~/calendars\"\nvdir.home-dir = \"~/calendars\"\n",
-        ] {
-            let document = format!("[accounts.a]\n{vdir}");
-            let err = toml::from_str::<Config>(&document).unwrap_err().to_string();
-            assert!(err.contains(sentence), "{err}");
-        }
-    }
-
     #[cfg(feature = "pimdir")]
     #[test]
     fn a_pimdir_root_expands_its_tilde_at_deserialize() {
@@ -902,57 +750,36 @@ mod tests {
         }
     }
 
+    /// A table or a key an earlier calendula read is refused as any
+    /// unknown one is, with no sentence of its own.
+    #[cfg(all(feature = "vdir", feature = "caldav"))]
     #[test]
-    fn a_leftover_todo_table_is_refused_naming_unfog() {
-        let document = "[todo.list]\npage-size = 50\n\n[accounts.personal]\n";
-        let err = toml::from_str::<Config>(document).unwrap_err().to_string();
-
-        assert!(err.contains("The `todo` table is removed"), "{err}");
-        assert!(err.contains("unfog"), "{err}");
-        assert!(err.contains("see MIGRATION.md"), "{err}");
-        assert!(err.contains("line 1"), "{err}");
-    }
-
-    #[test]
-    fn a_leftover_journal_table_in_an_account_is_refused_naming_journal() {
-        let document = "[accounts.personal.journal]\nlist.page-size = 50\n";
-        let err = toml::from_str::<Config>(document).unwrap_err().to_string();
-
-        assert!(err.contains("The `journal` table is removed"), "{err}");
-        assert!(err.contains("moved to journal"), "{err}");
-        assert!(err.contains("see MIGRATION.md"), "{err}");
-        assert!(err.contains("line 1"), "{err}");
-    }
-
-    /// A list keeps its page size, and the colour tables of an earlier
-    /// calendula are refused by name, at the top level and under an
-    /// account.
-    #[test]
-    fn a_colour_table_is_refused_by_name() {
-        let document = "[event.list]\npage-size = 10\n[accounts.a.item.list]\npage-size = 5\n";
-        toml::from_str::<Config>(document).unwrap();
-
-        let tables = [
+    fn a_key_an_earlier_calendula_read_is_an_unknown_one() {
+        for (document, field) in [
+            ("[todo.list]\npage-size = 50\n[accounts.a]\n", "todo"),
+            ("[accounts.a.journal]\nlist.page-size = 50\n", "journal"),
+            ("[table]\npreset = \"ASCII_FULL\"\n[accounts]\n", "table"),
             (
-                "calendar.list",
-                "calendar.list.table.name-color = \"red\"\n",
+                "[account.list.table]\nname-color = \"red\"\n[accounts]\n",
+                "account",
             ),
-            ("event.list.table", "event.list.table.id-color = \"red\"\n"),
-            ("item.list.table", "item.list.table.etag-color = \"red\"\n"),
-        ];
-
-        for (table, line) in tables {
-            let root = format!("{line}[accounts.a]\n");
-            let account = format!("[accounts.a]\n{line}");
-
-            for document in [root, account] {
-                let err = toml::from_str::<Config>(&document).unwrap_err();
-                let err = err.to_string();
-                assert!(
-                    err.contains(&format!("The `{table}` table is removed")),
-                    "{err}"
-                );
-            }
+            (
+                "[accounts.a]\ncalendar.list.table.name-color = \"red\"\n",
+                "list",
+            ),
+            (
+                "[accounts.a]\nevent.list.table.id-color = \"red\"\n",
+                "table",
+            ),
+            ("[accounts.a]\nvdir.home-dir = \"~/c\"\n", "home-dir"),
+            (
+                "[accounts.a]\ncaldav.discover = true\ncaldav.auth = \"none\"\n",
+                "discover",
+            ),
+        ] {
+            let err = toml::from_str::<Config>(document).unwrap_err().to_string();
+            assert!(err.contains(&format!("unknown field `{field}`")), "{err}");
+            assert!(!err.contains("MIGRATION"), "{err}");
         }
     }
 
@@ -1009,24 +836,6 @@ mod tests {
                         gcal.auth.token.raw = \"token\"\n\
                         msgraph.auth.token.raw = \"token\"\n";
         toml::from_str::<Config>(document).unwrap();
-    }
-
-    /// The rendering tables of an earlier calendula are refused by name,
-    /// at the top level and under an account.
-    #[test]
-    fn a_leftover_table_or_account_table_is_refused() {
-        for document in [
-            "[table]\npreset = \"ASCII_FULL\"\n[accounts]\n",
-            "[accounts.a.table]\narrangement = \"disabled\"\n",
-        ] {
-            let err = toml::from_str::<Config>(document).unwrap_err().to_string();
-            assert!(err.contains("The `table` table is removed"), "{err}");
-            assert!(err.contains("delete it, see MIGRATION.md"), "{err}");
-        }
-
-        let document = "[account.list.table]\nname-color = \"red\"\n[accounts]\n";
-        let err = toml::from_str::<Config>(document).unwrap_err().to_string();
-        assert!(err.contains("The `account` table is removed"), "{err}");
     }
 
     #[cfg(feature = "caldav")]

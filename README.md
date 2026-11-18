@@ -19,7 +19,6 @@ CLI to manage calendars.
   - [Posteo](#posteo)
   - [Local calendars](#local-calendars)
 - [Usage](#usage)
-- [Migration](./MIGRATION.md)
 - [AI policy](https://github.com/pimalaya/.github/blob/master/AI_POLICY.md)
 - [License](#license)
 - [Social](#social)

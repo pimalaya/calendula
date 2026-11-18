@@ -171,10 +171,7 @@
 //! Every table refuses a key it does not know, the block of a backend left
 //! out of the build loading unread, so one file serves every build: a
 //! command reaching it, `account capability` included, fails with
-//! `backend-not-built`, and `account list` names it as left out. A table
-//! calendula no longer reads (`todo`, `journal`, `table`, the top-level
-//! `account`, `calendar.list`, `event.list.table`, `item.list.table`) or key
-//! (`caldav.discover`) is refused by name, saying where it went.
+//! `backend-not-built`, and `account list` names it as left out.
 //!
 //! ## Output
 //!

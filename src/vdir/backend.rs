@@ -310,7 +310,6 @@ mod tests {
 
         let config = VdirConfig {
             root: home.path().to_path_buf(),
-            home_dir: None,
         };
         (home, VdirBackend::new(config))
     }

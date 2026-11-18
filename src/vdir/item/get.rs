@@ -91,7 +91,6 @@ mod tests {
         let get = |id: &str| {
             let config = VdirConfig {
                 root: root.path().to_owned(),
-                home_dir: None,
             };
             let cmd = VdirItemGetCommand {
                 collection: String::from("cal"),

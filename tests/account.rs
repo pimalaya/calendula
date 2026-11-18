@@ -177,47 +177,28 @@ fn auto_stops_on_a_backend_left_out_naming_the_built_one() {
     refused(&out, "backend-not-built", "(`--backend msgraph`)");
 }
 
-/// A `caldav.discover` an earlier calendula resolved through DNS is
-/// refused by name, the message naming `caldav.server` and the guide.
+/// A `caldav.discover` an earlier calendula resolved through DNS fails as
+/// any unknown key does.
 #[cfg(feature = "caldav")]
 #[test]
-fn a_caldav_discover_key_is_refused_naming_server() {
+fn a_caldav_discover_key_is_an_unknown_one() {
     let toml = "[accounts.test]\ndefault = true\ncaldav.discover = \"fastmail.com\"\n\
                 caldav.auth = \"none\"\n";
     let (_dir, path) = config(toml);
 
     let out = run(&path, &["--json", "account", "list"]);
     let error = json(&out, 1);
-    let cause = error["sources"][0].as_str().unwrap_or_default();
     assert!(
-        cause.contains("The `caldav.discover` key is removed"),
+        error.to_string().contains("unknown field `discover`"),
         "{error}"
-    );
-    assert!(
-        cause.contains("name the server in `caldav.server`"),
-        "{error}"
-    );
-    assert!(
-        cause.contains("`https://caldav.fastmail.com/dav/`"),
-        "{error}"
-    );
-    assert!(cause.contains("MIGRATION.md"), "{error}");
-
-    let out = run(&path, &["event", "list"]);
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(1), "{stdout}");
-    assert!(
-        stdout.contains("`caldav.discover` key is removed"),
-        "{stdout}"
     );
 }
 
-/// A vdir block naming its home `home-dir`, as 0.2 did, is refused by name,
-/// the message naming `vdir.root` and the guide; the same path under `root`
-/// lists the home.
+/// A vdir block naming its home `home-dir`, as 0.2 did, fails as any
+/// unknown key does; the same path under `root` lists the home.
 #[cfg(feature = "vdir")]
 #[test]
-fn a_vdir_home_dir_key_is_refused_by_name_and_root_is_read() {
+fn a_vdir_home_dir_key_is_an_unknown_one_and_root_is_read() {
     let (dir, path) = config("");
     let calendars = dir.path().join("calendars");
     fs::create_dir_all(calendars.join("work")).unwrap();
@@ -226,11 +207,10 @@ fn a_vdir_home_dir_key_is_refused_by_name_and_root_is_read() {
     fs::write(&path, toml).unwrap();
     let out = run(&path, &["--json", "calendar", "list"]);
     let error = json(&out, 1);
-    let cause = error["sources"][0].as_str().unwrap_or_default();
-    let sentence = "The `vdir.home-dir` key is removed, the vdir home being named \
-                    `root` as a store root is: rename it `vdir.root`, the path \
-                    unchanged, see MIGRATION.md";
-    assert!(cause.contains(sentence), "{error}");
+    assert!(
+        error.to_string().contains("unknown field `home-dir`"),
+        "{error}"
+    );
 
     let toml = format!("[accounts.a]\ndefault = true\nvdir.root = {calendars:?}\n");
     fs::write(&path, toml).unwrap();

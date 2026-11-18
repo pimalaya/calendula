@@ -856,7 +856,6 @@ mod tests {
         let account = AccountConfig {
             vdir: Some(VdirConfig {
                 root: dir.path().to_path_buf(),
-                home_dir: None,
             }),
             ..Default::default()
         };
