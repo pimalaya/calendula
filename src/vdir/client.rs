@@ -17,6 +17,7 @@ use io_vdir::{
     },
     path::VdirPath,
 };
+use pimalaya_cli::error::CodedError;
 
 use crate::{
     cli::resolve_account,
@@ -55,6 +56,28 @@ impl VdirClient {
 pub(crate) fn collection_dir(root: &VdirPath, id: &str) -> Option<VdirPath> {
     let path = root.join(id);
     (is_dir_name(id) && Path::new(path.as_str()).is_dir()).then_some(path)
+}
+
+/// Refuses to `verb` the item `id` into `target`, named `target_name`, when
+/// it holds an item of that id already, coded `item-duplicate`: io-vdir
+/// replaces the target's file, and its event would be lost.
+pub(crate) fn check_item_absent(
+    client: &VdirClient,
+    target: &VdirPath,
+    target_name: &str,
+    id: &str,
+    verb: &str,
+) -> Result<()> {
+    match client.locate_item(target.clone(), id) {
+        Ok(_) => {
+            let message = format!(
+                "Cannot {verb} item `{id}` into `{target_name}`: it holds an item of that id already"
+            );
+            Err(CodedError::new(ErrorCode::ItemDuplicate, message).into())
+        }
+        Err(VdirClientError::VdirItemLocate(VdirItemLocateError::NotFound(_))) => Ok(()),
+        Err(err) => Err(err.into()),
+    }
 }
 
 /// Whether `id` is one directory name: a single normal path component that

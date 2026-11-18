@@ -152,6 +152,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed `vdir item move` and `vdir item copy` replacing an item of the same id in the target collection: they fail `item-duplicate`, as cardamum's do.
 - Fixed a `caldav.server` naming another scheme than `http` or `https` (`ftp://x`) being read as the bare host `ftp`: it is refused. A `server` naming an `https` origin is now probed at `.well-known/caldav`, the redirect followed over `https` alone, as cardamum probes `.well-known/carddav`.
 - Fixed a `caldav` block naming both `server` and `home` loading with `home` winning silently: it is refused.
 - Fixed `event.list.page-size = 0`, documented as every event on one page, making `pimdir search` print one hit per page.

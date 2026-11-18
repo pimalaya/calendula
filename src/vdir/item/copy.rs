@@ -6,7 +6,10 @@ use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::printer::Printer;
 
-use crate::{shared::receipt::IdReceipt, vdir::client::VdirClient};
+use crate::{
+    shared::receipt::IdReceipt,
+    vdir::client::{VdirClient, check_item_absent},
+};
 
 /// Copy an item from one collection into another.
 ///
@@ -28,6 +31,7 @@ impl VdirItemCopyCommand {
     pub fn execute(self, printer: &mut impl Printer, client: VdirClient) -> Result<()> {
         let source = client.collection_path(&self.source)?;
         let target = client.collection_path(&self.target)?;
+        check_item_absent(&client, &target, &self.target, &self.id, "copy")?;
         client.copy_item(source, target, &self.id)?;
 
         printer.out(IdReceipt {

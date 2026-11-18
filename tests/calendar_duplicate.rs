@@ -78,3 +78,27 @@ fn a_calendar_created_twice_is_a_duplicate() {
     let out = run(dir.path(), &["calendar", "create", "Home", "--id", "home"]);
     assert_eq!(out.status.code(), Some(0));
 }
+
+/// CAR-1: `vdir item move` and `copy` onto an item of the same id fail
+/// coded `item-duplicate`, both items left as they were.
+#[test]
+fn an_item_moved_or_copied_onto_its_id_is_a_duplicate() {
+    let dir = account();
+    let home = dir.path().join("home");
+    fs::create_dir_all(home.join("home")).unwrap();
+    fs::write(home.join("work").join("e1.ics"), "work copy").unwrap();
+    fs::write(home.join("home").join("e1.ics"), "home copy").unwrap();
+
+    for verb in ["move", "copy"] {
+        let output = run(dir.path(), &["vdir", "item", verb, "home", "work", "e1"]);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(output.status.code(), Some(1), "{verb}: {stdout}");
+
+        let json: Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(json["code"], "item-duplicate", "{json}");
+
+        let work = fs::read_to_string(home.join("work").join("e1.ics")).unwrap();
+        let other = fs::read_to_string(home.join("home").join("e1.ics")).unwrap();
+        assert_eq!((work.as_str(), other.as_str()), ("work copy", "home copy"));
+    }
+}
