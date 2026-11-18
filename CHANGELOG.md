@@ -157,6 +157,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed install.sh saving an HTTP error page as the archive and letting `tar` fail on it: it downloads with `curl -fsSLo` and stops on the error.
 - Fixed a pimdir store shared with an account holding no calendar (a mail account) refusing an unset `pimdir.account` as ambiguous: only the accounts holding calendars count. The two refusals are coded `store-account-ambiguous` and `store-account-unknown`, as himalaya and cardamum code them.
 - Fixed the Graph backend ignoring the calendar named on an item read, update and delete: `item read -k A <id of B>` printed the event as A's, and `event delete -k A <id of B>` deleted it from B. An event of another calendar now fails `item-not-found`.
 - Fixed a windowed `event list -s` paging in the backend's order and sorting inside each page, and counting items that listed nothing: it pages its occurrences sorted across the window.
