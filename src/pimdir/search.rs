@@ -6,7 +6,7 @@ use std::fmt;
 
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
-use io_pimdir::client::search::{PimdirSearchOptions, PimdirSearchSort};
+use io_pimdir::client::search::{PimdirSearchCursor, PimdirSearchOptions, PimdirSearchSort};
 use jiff::tz::TimeZone;
 use pimalaya_cli::{
     clap::args::PageTokenArg,
@@ -90,39 +90,71 @@ impl PimdirSearchCommand {
             backend.known_collection(calendar)?;
         }
 
-        let page = match &self.page_token.token {
-            Some(token) => token
-                .parse::<u32>()
-                .ok()
-                .filter(|page| *page > 0)
-                .with_context(|| format!("Invalid page token `{token}`"))?,
-            None => self.page.unwrap_or(1).max(1),
-        };
-
         let account = &backend.account;
         let page_size = self.page_size.unwrap_or(account.events_list_page_size());
         let limit = page_size.max(1);
-        let options = PimdirSearchOptions {
+        let mut options = PimdirSearchOptions {
             sort: self.sort.into(),
             limit: limit as usize,
-            offset: (page as usize - 1).saturating_mul(limit as usize),
+            after: None,
             clock: search_clock(),
         };
+        let calendar = self.calendar.as_deref();
+        let mut past_end = None;
 
-        let answer = backend
-            .client
-            .search_items(query, self.calendar.as_deref(), &options)?;
+        let page = match &self.page_token.token {
+            Some(token) => {
+                let cursor = PimdirSearchCursor::from_token(token)
+                    .with_context(|| format!("Invalid page token `{token}`"))?;
+                options.after = Some(cursor);
+                None
+            }
+            None => {
+                let page = self.page.unwrap_or(1).max(1);
 
-        let next_page = answer.more.then(|| (page + 1).to_string());
+                for _ in 1..page {
+                    let skipped = backend.client.search_items(query.clone(), calendar, &options)?;
+
+                    match skipped.next.clone() {
+                        Some(next) => options.after = Some(next),
+                        None => {
+                            past_end = Some(skipped);
+                            break;
+                        }
+                    }
+                }
+
+                Some(page)
+            }
+        };
+
+        let answer = match past_end {
+            Some(mut last) => {
+                last.hits.clear();
+                last.errors.clear();
+                last.next = None;
+                last
+            }
+            None => backend.client.search_items(query, calendar, &options)?,
+        };
+
+        let next_page = answer.next.as_ref().map(PimdirSearchCursor::token);
 
         let mut listing = Listing::new(&backend.name, Some("pimdir"));
-        listing.head("Calendar", self.calendar.as_deref().unwrap_or("all"));
+        listing.head("Calendar", calendar.unwrap_or("all"));
         listing.head("Query", &words);
-        let held = ListingPage::Numbered {
-            page: page.into(),
-            size: limit.into(),
+        let held = match page {
+            Some(page) => ListingPage::Numbered {
+                page: page.into(),
+                size: limit.into(),
+            },
+            None => ListingPage::Token,
         };
-        listing.page(held, answer.hits.len(), EVENT_NOUNS, next_page.as_deref());
+        let next_hint = match page {
+            Some(page) => next_page.as_ref().map(|_| (page + 1).to_string()),
+            None => next_page.clone(),
+        };
+        listing.page(held, answer.hits.len(), EVENT_NOUNS, next_hint.as_deref());
         answer.coverage.note(&mut listing);
         if let Some(zones) = &answer.zones {
             zones.note(&mut listing);

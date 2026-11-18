@@ -11,7 +11,7 @@ use io_pimdir::{
     client::{
         reader::PimdirItem,
         search::{
-            PimdirIndex, PimdirSearchClock, PimdirSearchHit, PimdirSearchMatched,
+            PimdirIndex, PimdirSearchClock, PimdirSearchCursor, PimdirSearchHit, PimdirSearchMatched,
             PimdirSearchOptions,
         },
     },
@@ -66,7 +66,7 @@ impl PimdirClient {
 
         Ok(PimdirCalendarPage {
             hits,
-            more: answer.more,
+            next: answer.next,
             errors,
             coverage: PimdirCalendarCoverage::from(&answer.coverage),
             zones: PimdirCalendarZones::of(&index, &options.clock, &answer.coverage)?,
@@ -249,8 +249,8 @@ fn refusal_report(query: &str, err: &PimdirQueryError) -> String {
 pub struct PimdirCalendarPage {
     /// The hits, in the order asked.
     pub hits: Vec<PimdirCalendarHit>,
-    /// Whether hits follow this page.
-    pub more: bool,
+    /// Where the next page starts, `None` on the last one.
+    pub next: Option<PimdirSearchCursor>,
     /// The error of each hit the store could not read, in the order met.
     pub errors: Vec<ItemError>,
     /// What the answer could not see.

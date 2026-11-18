@@ -106,16 +106,22 @@ fn a_search_resumes_at_the_next_page_it_names() {
 
     let first = search(&[]);
     assert_eq!(first["hits"].as_array().unwrap().len(), 2, "{first}");
-    assert_eq!(first["nextPage"], "2", "{first}");
+    let token = first["nextPage"].as_str().unwrap().to_owned();
     assert_eq!(first["errors"], Value::Array(Vec::new()), "{first}");
     assert!(first.get("more").is_none(), "{first}");
 
-    let last = search(&["--page-token", "2"]);
+    let last = search(&["--page-token", &token]);
     assert_eq!(last["hits"].as_array().unwrap().len(), 1, "{last}");
     assert_eq!(last["nextPage"], Value::Null, "{last}");
 
-    // NOTE: the token wins over a page given beside it.
-    let won = search(&["--page", "1", "--page-token", "2"]);
+    let numbered = search(&["--page", "2"]);
+    assert_eq!(numbered["hits"], last["hits"], "{numbered}");
+
+    let past = search(&["--page", "3"]);
+    assert_eq!(past["hits"], Value::Array(Vec::new()), "{past}");
+    assert_eq!(past["nextPage"], Value::Null, "{past}");
+
+    let won = search(&["--page", "1", "--page-token", &token]);
     assert_eq!(won["hits"], last["hits"], "{won}");
 
     let text = run(home, &["pimdir", "search", "-s", "2", "budget"]);
@@ -125,7 +131,7 @@ fn a_search_resumes_at_the_next_page_it_names() {
 }
 
 #[test]
-fn a_page_token_that_is_no_page_number_is_refused() {
+fn an_unreadable_page_token_is_refused() {
     let home = account();
 
     for token in ["0", "two"] {
