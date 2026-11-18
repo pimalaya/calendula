@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use chrono::NaiveDate;
 use clap::Parser;
 use io_gcal::v3::rest::freebusy::{GcalError, GcalFreeBusyRequest, GcalFreeBusyRequestItem};
@@ -54,6 +54,10 @@ impl GcalFreeBusyCommand {
             false => self.calendar_ids,
             true => vec![client.account.calendar_id(None)?],
         };
+
+        if self.from.is_none() || self.to.is_none() {
+            bail!("gcal free-busy needs a window: give both --from and --to");
+        }
 
         let range = CalendarTimeRange::from_days(self.from, self.to)?.unwrap_or_default();
         let request = GcalFreeBusyRequest {

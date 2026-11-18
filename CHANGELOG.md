@@ -152,6 +152,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed `gcal acl create` posting a `user`, `group` or `domain` scope with no value, and a `default` scope given `--value a@b.org` dropping the value and granting everyone: both are refused before any request. `gcal free-busy` needs `--from` and `--to`.
 - Fixed `vdir item move` and `vdir item copy` replacing an item of the same id in the target collection: they fail `item-duplicate`, as cardamum's do.
 - Fixed a `caldav.server` naming another scheme than `http` or `https` (`ftp://x`) being read as the bare host `ftp`: it is refused. A `server` naming an `https` origin is now probed at `.well-known/caldav`, the redirect followed over `https` alone, as cardamum probes `.well-known/carddav`.
 - Fixed a `caldav` block naming both `server` and `home` loading with `home` winning silently: it is refused.

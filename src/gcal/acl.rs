@@ -13,7 +13,7 @@ pub mod delete;
 pub mod list;
 pub mod update;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use io_gcal::v3::rest::acl::{GcalAclScope, GcalAclScopeType};
 use pimalaya_cli::printer::Printer;
@@ -72,16 +72,59 @@ impl GcalAclRuleArgs {
     pub fn scope(&self) -> Result<GcalAclScope> {
         let scope_type = render::parse_scope_type(&self.scope)?;
 
-        // NOTE: the default scope is everyone, and the API rejects a
-        // value alongside it.
-        let value = match scope_type {
-            GcalAclScopeType::Default => None,
-            _ => self.value.clone(),
+        let value = match (&scope_type, &self.value) {
+            (GcalAclScopeType::Default, None) => None,
+            (GcalAclScopeType::Default, Some(value)) => bail!(
+                "--scope default is everyone and takes no --value; give --scope user, group or \
+                 domain to grant `{value}`"
+            ),
+            (_, Some(value)) => Some(value.clone()),
+            (_, None) => bail!(
+                "--scope {} needs --value, the address or the domain it grants",
+                self.scope
+            ),
         };
 
         Ok(GcalAclScope {
             scope_type: Some(scope_type),
             value,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::GcalAclRuleArgs;
+
+    #[derive(Parser)]
+    struct Wrap {
+        #[command(flatten)]
+        rule: GcalAclRuleArgs,
+    }
+
+    fn scope(args: &[&str]) -> anyhow::Result<io_gcal::v3::rest::acl::GcalAclScope> {
+        let args = [&["acl"], args].concat();
+        Wrap::try_parse_from(args).unwrap().rule.scope()
+    }
+
+    /// CAL-19: a scope needing a value is refused without one, and the
+    /// default scope, everyone, refuses one rather than dropping it.
+    #[test]
+    fn a_scope_and_its_value_are_settled_before_any_request() {
+        let err = scope(&["--role", "reader"]).unwrap_err();
+        assert!(err.to_string().contains("needs --value"), "{err}");
+
+        let err = scope(&[
+            "--role", "reader", "--scope", "default", "--value", "a@b.org",
+        ])
+        .unwrap_err();
+        assert!(err.to_string().contains("takes no --value"), "{err}");
+
+        let user = scope(&["--role", "reader", "--value", "a@b.org"]).unwrap();
+        assert_eq!(user.value.as_deref(), Some("a@b.org"));
+        let everyone = scope(&["--role", "reader", "--scope", "default"]).unwrap();
+        assert_eq!(everyone.value, None);
     }
 }

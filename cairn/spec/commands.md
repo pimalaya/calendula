@@ -41,9 +41,9 @@ It SHALL also cover `events`, the Calendar API's Events resource (hidden alias `
 
 An access role, a scope type or an event status the API returns and calendula does not know SHALL print as the API spells it, in text and in JSON, never fail the listing. The `acl` flags SHALL keep taking the values calendula knows alone.
 
-An ACL rule id is `<scope type>:<scope value>` (`default` for everyone), which the API mints, so `create` SHALL take the scope and the role as flags and derive it, `update` SHALL read the scope from the id it is given, its `--scope` and `--value` optional and refused `usage-invalid` before any request when they disagree with the id (the value compared case-insensitively), as an id naming no scope is, and `delete` SHALL accept the id a listing showed.
+An ACL rule id is `<scope type>:<scope value>` (`default` for everyone), which the API mints, so `create` SHALL take the scope and the role as flags and derive it, `update` SHALL read the scope from the id it is given, its `--scope` and `--value` optional and refused `usage-invalid` before any request when they disagree with the id (the value compared case-insensitively), as an id naming no scope is, and `delete` SHALL accept the id a listing showed. `create` SHALL refuse, before any request, a `user`, `group` or `domain` scope with no `--value`, and a `default` scope given one, rather than drop it and grant everyone.
 
-`free-busy` and `events instances` SHALL take `--from` / `--to` as inclusive days, as `event list` does, so one date spelling serves the whole CLI.
+`free-busy` and `events instances` SHALL take `--from` / `--to` as inclusive days, as `event list` does, so one date spelling serves the whole CLI. `free-busy` SHALL need both, the API answering no window without them.
 
 `calendars`, `acl list`, `events instances` and `settings` SHALL read every page and print under `--json` every item as Google sent it, read as JSON and never through a type (pimalaya-cli output.md, *Protocol commands are raw-faithful*), under `calendars`, `rules`, `instances` and `settings`; their text reads the same items. `request <METHOD> <PATH> [JSON]` SHALL send any Calendar API request, the path joined onto the `v3/` base or a full URL, and print `{response}`, the JSON Google answered, as `msgraph request` and cardamum's `gpeople request` do.
 
