@@ -214,7 +214,7 @@ impl fmt::Display for PimdirIntentOutput {
             Some(partstat) => write!(f, "Reply {partstat} to event `{id}`")?,
             None => write!(f, "Cancellation of event `{id}`")?,
         }
-        writeln!(f, " queued; the next sync sends it")
+        writeln!(f, " queued as row {}; the next sync sends it", self.row)
     }
 }
 
@@ -253,6 +253,10 @@ mod tests {
                 "comment": null,
                 "source": "caldav",
             })
+        );
+        assert_eq!(
+            output.to_string(),
+            "Reply ACCEPTED to event `7` queued as row 12; the next sync sends it\n"
         );
     }
 }

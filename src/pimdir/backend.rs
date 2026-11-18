@@ -831,7 +831,24 @@ impl PimdirBackend {
         let declared = syncing.iter().any(|source| source.declared.is_some());
 
         let performer = match (declared, source) {
-            (false, Some(chosen)) => chosen.to_owned(),
+            (false, Some(chosen)) => {
+                if !syncing.iter().any(|source| source.source == chosen) {
+                    let sources: Vec<&str> = syncing
+                        .iter()
+                        .map(|source| source.source.as_str())
+                        .collect();
+                    return Err(CodedError::new(
+                        ErrorCode::NoPerformer,
+                        format!(
+                            "Source `{chosen}` does not sync calendar `{calendar_id}`, so it \
+                             cannot perform {capability} there; choose one of: {}",
+                            sources.join(", ")
+                        ),
+                    )
+                    .into());
+                }
+                chosen.to_owned()
+            }
             (false, None) => match syncing.as_slice() {
                 [only] => only.source.clone(),
                 [] => {
@@ -1762,6 +1779,29 @@ mod tests {
                 "source": "caldav",
             })
         );
+    }
+
+    /// CAL-17: in a store whose sources declare nothing, a `--source`
+    /// syncing nothing of the calendar is refused, a row naming it being
+    /// one the sync engine would skip for ever.
+    #[test]
+    fn a_chosen_source_syncing_nothing_of_the_calendar_is_refused() {
+        use pimalaya_cli::error::code_of;
+
+        let (_dir, mut backend, ids) = store(&[INVITATION]);
+
+        let reply = backend
+            .reply("cal", &ids[0], "ACCEPTED", None, None, Some("bogus"))
+            .unwrap_err();
+        let cancel = backend
+            .cancel("cal", &ids[0], None, None, Some("bogus"))
+            .unwrap_err();
+
+        for err in [reply, cancel] {
+            assert_eq!(code_of(&err), Some(ErrorCode::NoPerformer), "{err:#}");
+            assert!(err.to_string().contains("choose one of: caldav"), "{err:#}");
+        }
+        assert!(queued(&backend).is_empty());
     }
 
     #[test]
