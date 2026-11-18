@@ -146,6 +146,7 @@ dependencies = [
  "anyhow",
  "ariadne",
  "base64-codec",
+ "blake3",
  "chrono",
  "clap",
  "getrandom 0.4.3",
@@ -154,6 +155,7 @@ dependencies = [
  "idna_adapter",
  "io-gcal",
  "io-http",
+ "io-jmap",
  "io-msgraph",
  "io-oauth",
  "io-pimdir",
@@ -771,6 +773,7 @@ dependencies = [
  "jiff",
  "jiff-tzdb",
  "memchr",
+ "serde_json",
 ]
 
 [[package]]
@@ -844,6 +847,24 @@ dependencies = [
  "log",
  "pimalaya-stream",
  "secrecy",
+ "thiserror",
+ "url",
+]
+
+[[package]]
+name = "io-jmap"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0590fe7ab8e2bac4b3bcb219dc4f9a300505ad1bbf544163b9a05c36a2f6be8d"
+dependencies = [
+ "anyhow",
+ "ical-rs",
+ "io-http",
+ "log",
+ "pimalaya-stream",
+ "secrecy",
+ "serde",
+ "serde_json",
  "thiserror",
  "url",
 ]

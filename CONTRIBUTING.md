@@ -24,6 +24,7 @@ Each backend sits behind its own cargo feature, and a network backend needs one 
 | Feature       | What it pulls in                                                          |
 |---------------|---------------------------------------------------------------------------|
 | `caldav`      | io-webdav and io-http: the CalDAV backend                                 |
+| `jmap`        | io-jmap and ical-rs's JSCalendar conversion: the JMAP for Calendars backend |
 | `gcal`        | io-gcal: the Google Calendar API v3 backend and its iCalendar projection  |
 | `msgraph`     | io-msgraph: the Microsoft Graph calendar backend and its iCalendar projection |
 | `vdir`        | io-vdir: the local vdir home                                              |
@@ -35,12 +36,13 @@ Each backend sits behind its own cargo feature, and a network backend needs one 
 
 A build with no backend compiles too: it serves `account list`, `completion`, `manual` and `json-schema`, the commands needing a backend failing.
 
-The unified client is cfg-gated per backend, so the default build hides what a single-backend build breaks. Before a change lands, run clippy and the tests over the eleven sets the `features` job of .github/workflows/tests.yml checks:
+The unified client is cfg-gated per backend, so the default build hides what a single-backend build breaks. Before a change lands, run clippy and the tests over the twelve sets the `features` job of .github/workflows/tests.yml checks:
 
 ```sh
 for set in "" "--all-features" \
   "--no-default-features --features rustls-ring" \
   "--no-default-features --features rustls-ring,caldav" \
+  "--no-default-features --features rustls-ring,jmap" \
   "--no-default-features --features rustls-ring,gcal" \
   "--no-default-features --features rustls-ring,msgraph" \
   "--no-default-features --features rustls-ring,vdir" \

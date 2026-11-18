@@ -18,34 +18,61 @@ use std::collections::HashMap;
 #[cfg(any(
     feature = "vdir",
     feature = "caldav",
+    feature = "jmap",
     feature = "pimdir",
     feature = "gcal",
     feature = "msgraph"
 ))]
 use std::path::PathBuf;
 
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+#[cfg(any(
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
 use anyhow::{Result, bail};
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+#[cfg(any(
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
 use pimalaya_config::secret::{Secret, SecretResolver};
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+#[cfg(any(
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
 use pimalaya_config::toml::opt_shell_expanded_path;
 #[cfg(any(feature = "vdir", feature = "pimdir"))]
 use pimalaya_config::toml::shell_expanded_path;
-#[cfg(feature = "caldav")]
+#[cfg(any(feature = "caldav", feature = "jmap"))]
 use pimalaya_config::toml::shell_expanded_string;
 use pimalaya_config::{command::CommandConfig, toml::TomlConfig};
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+#[cfg(any(
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
 use pimalaya_stream::{
     proxy::{Proxy, ProxyAuth},
     tls::{Rustls, RustlsCrypto, Tls, TlsProvider, TlsServer},
 };
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+#[cfg(any(
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
 use secrecy::SecretString;
 use serde::Deserialize;
 #[cfg(not(all(
     feature = "vdir",
     feature = "caldav",
+    feature = "jmap",
     feature = "pimdir",
     feature = "gcal",
     feature = "msgraph"
@@ -53,7 +80,7 @@ use serde::Deserialize;
 use serde::de::IgnoredAny;
 #[cfg(feature = "caldav")]
 use serde::{Deserializer, de::Error as _};
-#[cfg(feature = "caldav")]
+#[cfg(any(feature = "caldav", feature = "jmap"))]
 use url::{ParseError, Url};
 
 /// The whole configuration file: global options and every account,
@@ -93,7 +120,12 @@ impl TomlConfig for Config {
     fn take_named_account(&mut self, name: &str) -> Option<(String, Self::Account)> {
         let entry = self.accounts.remove_entry(name);
 
-        #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+        #[cfg(any(
+            feature = "caldav",
+            feature = "jmap",
+            feature = "gcal",
+            feature = "msgraph"
+        ))]
         let entry = entry.map(|(name, mut account)| {
             account.inherit_proxy();
             (name, account)
@@ -122,7 +154,12 @@ pub struct AccountConfig {
     pub item: ItemConfig,
     /// Proxy every network backend of this account goes through, unless
     /// its own block names one.
-    #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+    #[cfg(any(
+        feature = "caldav",
+        feature = "jmap",
+        feature = "gcal",
+        feature = "msgraph"
+    ))]
     #[serde(default)]
     pub proxy: Option<ProxyConfig>,
     /// vdir backend: one local directory per calendar.
@@ -134,6 +171,9 @@ pub struct AccountConfig {
     /// CalDAV backend: a remote calendar home-set.
     #[cfg(feature = "caldav")]
     pub caldav: Option<CaldavConfig>,
+    /// JMAP backend: a JMAP for Calendars account.
+    #[cfg(feature = "jmap")]
+    pub jmap: Option<JmapConfig>,
     /// Google Calendar backend, over the vendor API.
     #[cfg(feature = "gcal")]
     pub gcal: Option<GcalConfig>,
@@ -152,6 +192,10 @@ pub struct AccountConfig {
     #[cfg(not(feature = "caldav"))]
     #[serde(default)]
     pub caldav: Option<IgnoredAny>,
+    /// The JMAP block, loaded unread by a build without JMAP.
+    #[cfg(not(feature = "jmap"))]
+    #[serde(default)]
+    pub jmap: Option<IgnoredAny>,
     /// The Google Calendar block, loaded unread by a build without gcal.
     #[cfg(not(feature = "gcal"))]
     #[serde(default)]
@@ -161,7 +205,12 @@ pub struct AccountConfig {
     #[serde(default)]
     pub msgraph: Option<IgnoredAny>,
     /// The account proxy, loaded unread by a build with no network backend.
-    #[cfg(not(any(feature = "caldav", feature = "gcal", feature = "msgraph")))]
+    #[cfg(not(any(
+        feature = "caldav",
+        feature = "jmap",
+        feature = "gcal",
+        feature = "msgraph"
+    )))]
     #[serde(default)]
     #[allow(dead_code)]
     pub proxy: Option<IgnoredAny>,
@@ -176,6 +225,7 @@ impl AccountConfig {
             ("vdir", self.vdir.is_some(), cfg!(feature = "vdir")),
             ("pimdir", self.pimdir.is_some(), cfg!(feature = "pimdir")),
             ("caldav", self.caldav.is_some(), cfg!(feature = "caldav")),
+            ("jmap", self.jmap.is_some(), cfg!(feature = "jmap")),
             ("gcal", self.gcal.is_some(), cfg!(feature = "gcal")),
             ("msgraph", self.msgraph.is_some(), cfg!(feature = "msgraph")),
         ];
@@ -204,7 +254,12 @@ impl AccountConfig {
 
     /// Hands the account proxy to every network backend naming none of
     /// its own.
-    #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+    #[cfg(any(
+        feature = "caldav",
+        feature = "jmap",
+        feature = "gcal",
+        feature = "msgraph"
+    ))]
     fn inherit_proxy(&mut self) {
         let Some(proxy) = &self.proxy else {
             return;
@@ -213,6 +268,8 @@ impl AccountConfig {
         let slots = [
             #[cfg(feature = "caldav")]
             self.caldav.as_mut().map(|c| &mut c.proxy),
+            #[cfg(feature = "jmap")]
+            self.jmap.as_mut().map(|c| &mut c.proxy),
             #[cfg(feature = "gcal")]
             self.gcal.as_mut().map(|c| &mut c.proxy),
             #[cfg(feature = "msgraph")]
@@ -356,7 +413,7 @@ pub fn default_caldav_alpn() -> Vec<String> {
 
 /// Parses `input` into a URL, a host that is not ASCII refused with the
 /// way out: its Punycode form, url linking no Unicode IDNA back end.
-#[cfg(feature = "caldav")]
+#[cfg(any(feature = "caldav", feature = "jmap"))]
 pub fn parse_url(input: &str) -> Result<Url> {
     match Url::parse(input) {
         Err(ParseError::IdnaError) => bail!(
@@ -377,7 +434,7 @@ fn ascii_url<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Url>, 
 
 /// The host `input` names, as written: what follows the scheme, short of
 /// the path, the user info and the port.
-#[cfg(feature = "caldav")]
+#[cfg(any(feature = "caldav", feature = "jmap"))]
 fn host_of(input: &str) -> &str {
     let rest = input.split_once("://").map_or(input, |(_, rest)| rest);
     let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
@@ -417,6 +474,77 @@ pub enum CaldavAuthConfig {
         /// like any other.
         token: Secret,
     },
+}
+
+/// JMAP configuration (RFC 8620 and draft-ietf-jmap-calendars), shaped as
+/// cardamum's and himalaya's.
+#[cfg(feature = "jmap")]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct JmapConfig {
+    /// The JMAP server address.
+    ///
+    /// A bare authority (`fastmail.com`, `mail.example.com:8080`) is
+    /// discovered through `GET /.well-known/jmap`, a full URL reaches the
+    /// session endpoint directly. Schemes: `http`, `https`, `jmap` and
+    /// `jmaps`, the last two mapping to the first two.
+    pub server: String,
+    /// TLS configuration.
+    #[serde(default)]
+    pub tls: TlsConfig,
+    /// ALPN identifiers offered during the TLS handshake, `["http/1.1"]`
+    /// by default since JMAP rides on HTTP/1.1.
+    ///
+    /// An empty list skips ALPN negotiation. Only rustls reads it,
+    /// `native-tls` ignores ALPN.
+    #[serde(default = "io_jmap::client::JmapClientStd::default_alpn")]
+    pub alpn: Vec<String>,
+    /// Proxy the connection goes through, falling back to the account one
+    /// and then to the `all_proxy`/`https_proxy` environment variables.
+    #[serde(default)]
+    pub proxy: Option<ProxyConfig>,
+    /// Authentication configuration.
+    pub auth: JmapAuthConfig,
+}
+
+/// JMAP authentication configuration.
+#[cfg(feature = "jmap")]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum JmapAuthConfig {
+    /// A whole Authorization header value, sent verbatim.
+    Header(Secret),
+    /// A bearer token, OAuth 2.0 access token or provider API token.
+    Bearer { token: Secret },
+    /// HTTP Basic authentication.
+    Basic {
+        /// The username the server knows the account by.
+        #[serde(deserialize_with = "shell_expanded_string")]
+        username: String,
+        /// The matching password, read from the configured secret.
+        password: Secret,
+    },
+}
+
+/// Parses a `server` config string into a URL.
+///
+/// A full URL is taken verbatim, a bare `host[:port]` takes
+/// `default_scheme`, and a scheme outside `allowed` is rejected.
+#[cfg(feature = "jmap")]
+pub fn parse_server(server: &str, default_scheme: &str, allowed: &[&str]) -> Result<Url> {
+    let url = if server.contains("://") {
+        parse_url(server)?
+    } else {
+        parse_url(&format!("{default_scheme}://{server}"))?
+    };
+
+    let scheme = url.scheme();
+
+    if !allowed.contains(&scheme) {
+        bail!("Invalid server scheme `{scheme}`: expected one of {allowed:?}");
+    }
+
+    Ok(url)
 }
 
 /// Google Calendar backend configuration.
@@ -523,7 +651,12 @@ pub struct MsgraphAuthConfig {
 /// `url` is a `socks5://`, `socks5h://` or `http://` proxy URL. Its user
 /// info authenticates too, but `username` and `password` keep the secret
 /// out of the URL.
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+#[cfg(any(
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ProxyConfig {
@@ -536,7 +669,12 @@ pub struct ProxyConfig {
     pub password: Option<Secret>,
 }
 
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+#[cfg(any(
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
 impl ProxyConfig {
     /// Resolves an optional configuration, an absent one reading the
     /// environment at connect time.
@@ -576,7 +714,12 @@ impl ProxyConfig {
 }
 
 /// SSL/TLS configuration.
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+#[cfg(any(
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct TlsConfig {
@@ -595,7 +738,12 @@ pub struct TlsConfig {
 }
 
 /// Which TLS implementation carries the connection.
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+#[cfg(any(
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum TlsProviderConfig {
@@ -606,7 +754,12 @@ pub enum TlsProviderConfig {
 }
 
 /// rustls-specific options.
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+#[cfg(any(
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct RustlsConfig {
@@ -615,7 +768,12 @@ pub struct RustlsConfig {
 }
 
 /// Which cryptographic provider backs rustls.
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+#[cfg(any(
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum RustlsCryptoConfig {
@@ -625,7 +783,12 @@ pub enum RustlsCryptoConfig {
     Ring,
 }
 
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+#[cfg(any(
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
 impl TlsConfig {
     /// Builds the runtime [`Tls`] handle the connect helpers expect,
     /// folding in the protocol-level `alpn` list.
@@ -663,8 +826,9 @@ mod tests {
 
     /// The sections of config.sample.toml, one of which a user uncomments,
     /// each with whether this build compiles its backend.
-    const SECTIONS: [(&str, bool); 7] = [
+    const SECTIONS: [(&str, bool); 8] = [
         ("# CalDAV", cfg!(feature = "caldav")),
+        ("# JMAP", cfg!(feature = "jmap")),
         ("# Google Calendar", cfg!(feature = "gcal")),
         ("# Google CalDAV", cfg!(feature = "caldav")),
         ("# Microsoft Graph", cfg!(feature = "msgraph")),
@@ -677,6 +841,7 @@ mod tests {
     #[cfg(any(
         feature = "vdir",
         feature = "caldav",
+        feature = "jmap",
         feature = "pimdir",
         feature = "gcal",
         feature = "msgraph"
@@ -722,7 +887,12 @@ mod tests {
 
     /// The optional path takes the same treatment, and an absent key
     /// still reaches `None` rather than the deserializer.
-    #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+    #[cfg(any(
+        feature = "caldav",
+        feature = "jmap",
+        feature = "gcal",
+        feature = "msgraph"
+    ))]
     #[test]
     fn a_tls_certificate_expands_its_tilde_and_stays_optional() {
         let config: TlsConfig = toml::from_str(r#"cert = "~/ca.pem""#).unwrap();
@@ -833,6 +1003,8 @@ mod tests {
                         pimdir.root = \"~/store\"\n\
                         caldav.server = \"example.org\"\n\
                         caldav.auth = \"none\"\n\
+                        jmap.server = \"jmap.example.org\"\n\
+                        jmap.auth.bearer.token.raw = \"token\"\n\
                         gcal.auth.token.raw = \"token\"\n\
                         msgraph.auth.token.raw = \"token\"\n";
         toml::from_str::<Config>(document).unwrap();
@@ -853,7 +1025,12 @@ mod tests {
 
     /// The account `proxy` reaches every network backend naming none of its
     /// own, and a backend's own wins.
-    #[cfg(all(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+    #[cfg(all(
+        feature = "caldav",
+        feature = "jmap",
+        feature = "gcal",
+        feature = "msgraph"
+    ))]
     #[test]
     fn an_account_proxy_fills_every_backend_naming_none() {
         use pimalaya_config::toml::TomlConfig;
@@ -862,6 +1039,8 @@ mod tests {
                         proxy.url = \"socks5h://localhost:1080\"\n\
                         caldav.server = \"example.org\"\n\
                         caldav.auth = \"none\"\n\
+                        jmap.server = \"jmap.example.org\"\n\
+                        jmap.auth.bearer.token.raw = \"token\"\n\
                         gcal.auth.token.raw = \"token\"\n\
                         msgraph.auth.token.raw = \"token\"\n\
                         msgraph.proxy.url = \"http://proxy.example.org:3128\"\n";
@@ -869,17 +1048,24 @@ mod tests {
         let (_, account) = config.take_account(Some("a")).unwrap();
 
         let caldav = account.caldav.unwrap().proxy.unwrap();
+        let jmap = account.jmap.unwrap().proxy.unwrap();
         let gcal = account.gcal.unwrap().proxy.unwrap();
         let msgraph = account.msgraph.unwrap().proxy.unwrap();
 
         assert_eq!(caldav.url, "socks5h://localhost:1080");
+        assert_eq!(jmap.url, "socks5h://localhost:1080");
         assert_eq!(gcal.url, "socks5h://localhost:1080");
         assert_eq!(msgraph.url, "http://proxy.example.org:3128");
     }
 
     /// A password needs a username, and both reach the runtime proxy, the
     /// password through the resolver.
-    #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+    #[cfg(any(
+        feature = "caldav",
+        feature = "jmap",
+        feature = "gcal",
+        feature = "msgraph"
+    ))]
     #[test]
     fn a_proxy_password_needs_a_username() {
         use pimalaya_config::secret::SecretResolver;
@@ -932,6 +1118,7 @@ mod tests {
                 not(any(
                     feature = "vdir",
                     feature = "caldav",
+                    feature = "jmap",
                     feature = "pimdir",
                     feature = "gcal",
                     feature = "msgraph"
@@ -945,6 +1132,8 @@ mod tests {
             let blocks: &[bool] = &[
                 #[cfg(feature = "caldav")]
                 account_config.caldav.is_some(),
+                #[cfg(feature = "jmap")]
+                account_config.jmap.is_some(),
                 #[cfg(feature = "gcal")]
                 account_config.gcal.is_some(),
                 #[cfg(feature = "msgraph")]
@@ -967,7 +1156,15 @@ mod tests {
 /// Every network backend reaches its server through the proxy it names,
 /// checked against a local HTTP proxy that reads the `CONNECT` and refuses
 /// it, so nothing goes past it.
-#[cfg(all(test, any(feature = "caldav", feature = "gcal", feature = "msgraph")))]
+#[cfg(all(
+    test,
+    any(
+        feature = "caldav",
+        feature = "jmap",
+        feature = "gcal",
+        feature = "msgraph"
+    )
+))]
 mod proxy_tests {
     use std::{
         io::{BufRead, BufReader, Write},
@@ -1028,6 +1225,25 @@ mod proxy_tests {
         assert!(result.is_err());
         let line = lines.recv().unwrap();
         assert!(line.starts_with("CONNECT calendars.invalid:80 "), "{line}");
+    }
+
+    #[cfg(feature = "jmap")]
+    #[test]
+    fn jmap_connects_through_the_account_proxy() {
+        use pimalaya_config::secret::SecretResolver;
+
+        let (url, lines) = refusing_proxy();
+        let account = account(&format!(
+            "proxy.url = \"{url}\"\njmap.server = \"jmap.invalid\"\n\
+             jmap.auth.bearer.token.raw = \"made-up\"\n"
+        ));
+
+        let config = account.jmap.unwrap();
+        let result = crate::jmap::client::connect(config, &mut SecretResolver::new());
+
+        assert!(result.is_err());
+        let line = lines.recv().unwrap();
+        assert!(line.starts_with("CONNECT jmap.invalid:443 "), "{line}");
     }
 
     #[cfg(feature = "gcal")]

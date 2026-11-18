@@ -76,16 +76,16 @@ The configuration SHALL hold no colour and no table shape. A `table` table (`tab
 - THEN it fails naming the unknown field `table`
 
 ### Requirement: Backend blocks
-An account SHALL carry an optional block per compiled backend: `vdir` with a `root`, `pimdir` with a `root` and an optional `account`, `caldav` with its endpoint, TLS, ALPN and authentication, `gcal` and `msgraph` with TLS, ALPN and authentication.
+An account SHALL carry an optional block per compiled backend: `vdir` with a `root`, `pimdir` with a `root` and an optional `account`, `caldav` with its endpoint, TLS, ALPN and authentication, `jmap` with its server, TLS, ALPN and authentication, `gcal` and `msgraph` with TLS, ALPN and authentication.
 
 An account MAY carry several; which one a unified command uses is the backend capability's business.
 
-An account MAY carry a `proxy`, and `caldav`, `gcal` and `msgraph` each one of their own ("A proxy is set per account and per backend").
+An account MAY carry a `proxy`, and `caldav`, `jmap`, `gcal` and `msgraph` each one of their own ("A proxy is set per account and per backend").
 
 Every paged listing family SHALL additionally carry a block naming its default page size: `event.list` and `item.list`.
 
 ### Requirement: A proxy is set per account and per backend
-An account's `proxy` SHALL apply to every network backend of that account (CalDAV, Google Calendar, Microsoft Graph) whose own block names no `proxy`, and a backend's own `proxy` SHALL win over it. With neither, the connection SHALL read the `all_proxy` and `https_proxy` environment variables, honouring `no_proxy`.
+An account's `proxy` SHALL apply to every network backend of that account (CalDAV, JMAP, Google Calendar, Microsoft Graph) whose own block names no `proxy`, and a backend's own `proxy` SHALL win over it. With neither, the connection SHALL read the `all_proxy` and `https_proxy` environment variables, honouring `no_proxy`.
 
 `proxy.url` SHALL take `socks5://`, `socks5h://` or `http://`. `proxy.username` and `proxy.password` SHALL override the URL's user info, the password being a secret like any credential; a password without a username SHALL be rejected.
 
@@ -108,6 +108,9 @@ A server answering a request 401 to a block sending no credential SHALL fail wit
 - GIVEN an account whose `caldav` block names no `auth`, its server answering 401
 - WHEN `calendula --json account check` runs
 - THEN the `caldav` row is `ok: false`, `code` `null`, its `error` saying the server asks for credentials and the account configures no `auth`
+
+### Requirement: The jmap block
+An account MAY carry a `jmap` block with `server`, `tls`, `alpn`, `proxy` and `auth`, shaped as cardamum's and himalaya's, so one JMAP account reads the same in all three. `server` SHALL take a full URL, fetched as the session endpoint, or a bare `host[:port]`, taken over `https` and discovered through `GET /.well-known/jmap`; its schemes SHALL be `http`, `https`, `jmap` and `jmaps`, the last two mapping to the first two, any other refused, and its host ASCII, an internationalised one written in Punycode. `auth` SHALL be one of `header` (a whole `Authorization` value), `bearer.token` and `basic` (`username`, `password`), each secret read as any credential. No DNS discovery runs: a server name is used as written.
 
 ### Requirement: gcal has nothing to discover
 The Calendar API lives at one fixed base URL, so the `gcal` block SHALL name no server and offer no discovery route: a bearer token and a TLS profile are the whole block.
@@ -161,7 +164,7 @@ A caller opening a single backend SHALL keep resolving through a resolver of its
 ### Requirement: A backend names the ALPN it offers
 A backend whose protocol pins an HTTP version SHALL expose an `alpn` key, a list of identifiers offered during the TLS handshake. Unset offers the protocol default, an explicit empty list skips ALPN negotiation and a non-empty list replaces the default.
 
-`caldav.alpn`, `gcal.alpn` and `msgraph.alpn` default to `http/1.1`, the only version io-http speaks.
+`caldav.alpn`, `jmap.alpn`, `gcal.alpn` and `msgraph.alpn` default to `http/1.1`, the only version io-http speaks.
 
 The runtime TLS profile SHALL be built through `TlsConfig::into_tls(alpn)`, never through a conversion assuming a list, so no caller can negotiate a protocol it did not name.
 
@@ -171,7 +174,7 @@ The runtime TLS profile SHALL be built through `TlsConfig::into_tls(alpn)`, neve
 The key SHALL sit under `item` rather than under `event`: `event` and `item` are views over the same resources, and what is edited is an iCalendar object, which is what `item` names.
 
 ### Requirement: One sample configuration, with a section per backend
-The repository SHALL ship config.sample.toml holding one `[accounts.example]` table with dotted keys and no other table header. It SHALL list the options every account shares and each of their values, the default active and the others commented as `#key = value`, every line ending in one tab-aligned comment, and every password command a failing `exit 127` placeholder. It SHALL end with one section per way in (CalDAV, Google Calendar, Google CalDAV, Microsoft Graph, Fastmail, vdir, pimdir), each a paragraph of commented code headed by its name, its own alternatives commented twice, an OAuth 2.0 token read through `ortie token show -a example`, so the file holds a working account once one section is uncommented. The test suite SHALL parse config.sample.toml through the loader `-c` uses with each section of a compiled backend uncommented whole, then on top of it each line commented twice inside it and each line of commented code outside the sections, in place of the active lines of its field, and SHALL resolve `example` as the default account declaring a backend each time, so a configuration change breaking one fails the build.
+The repository SHALL ship config.sample.toml holding one `[accounts.example]` table with dotted keys and no other table header. It SHALL list the options every account shares and each of their values, the default active and the others commented as `#key = value`, every line ending in one tab-aligned comment, and every password command a failing `exit 127` placeholder. It SHALL end with one section per way in (CalDAV, JMAP, Google Calendar, Google CalDAV, Microsoft Graph, Fastmail, vdir, pimdir), each a paragraph of commented code headed by its name, its own alternatives commented twice, an OAuth 2.0 token read through `ortie token show -a example`, so the file holds a working account once one section is uncommented. The test suite SHALL parse config.sample.toml through the loader `-c` uses with each section of a compiled backend uncommented whole, then on top of it each line commented twice inside it and each line of commented code outside the sections, in place of the active lines of its field, and SHALL resolve `example` as the default account declaring a backend each time, so a configuration change breaking one fails the build.
 
 #### Scenario: A field is renamed
 - GIVEN config.sample.toml, whose CalDAV section sets `caldav.tls.cert`

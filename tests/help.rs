@@ -41,7 +41,7 @@ fn an_unknown_backend_lists_the_possible_values() {
 
     assert_eq!(output.status.code(), Some(2), "{stderr}");
     assert!(
-        stderr.contains("[possible values: auto, vdir, pimdir, caldav, gcal, msgraph]"),
+        stderr.contains("[possible values: auto, vdir, pimdir, caldav, jmap, gcal, msgraph]"),
         "{stderr}"
     );
 }

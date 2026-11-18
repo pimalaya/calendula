@@ -12,16 +12,17 @@ homepage = "https://pimalaya.org"
 repository = "https://github.com/pimalaya/calendula"
 
 [features]
-default = ["rustls-ring", "caldav", "gcal", "msgraph", "vdir", "pimdir", "vendored"]
-native-tls = ["pimalaya-stream/native-tls", "io-webdav?/native-tls", "io-gcal?/native-tls", "io-msgraph?/native-tls"]
-rustls-aws = ["pimalaya-stream/rustls-aws", "io-webdav?/rustls-aws", "io-gcal?/rustls-aws", "io-msgraph?/rustls-aws"]
-rustls-ring = ["pimalaya-stream/rustls-ring", "io-webdav?/rustls-ring", "io-gcal?/rustls-ring", "io-msgraph?/rustls-ring"]
+default = ["rustls-ring", "caldav", "jmap", "gcal", "msgraph", "vdir", "pimdir", "vendored"]
+native-tls = ["pimalaya-stream/native-tls", "io-webdav?/native-tls", "io-jmap?/native-tls", "io-gcal?/native-tls", "io-msgraph?/native-tls"]
+rustls-aws = ["pimalaya-stream/rustls-aws", "io-webdav?/rustls-aws", "io-jmap?/rustls-aws", "io-gcal?/rustls-aws", "io-msgraph?/rustls-aws"]
+rustls-ring = ["pimalaya-stream/rustls-ring", "io-webdav?/rustls-ring", "io-jmap?/rustls-ring", "io-gcal?/rustls-ring", "io-msgraph?/rustls-ring"]
 caldav = ["dep:io-webdav", "dep:io-http", "dep:secrecy"]
+jmap = ["dep:io-jmap", "dep:blake3", "dep:secrecy", "io-jmap/client", "io-jmap/ical", "ical-rs/jscalendar"]
 gcal = ["dep:io-gcal", "dep:secrecy", "io-gcal/ical"]
 msgraph = ["dep:io-msgraph", "dep:secrecy", "io-msgraph/client", "io-msgraph/ical"]
 vdir = ["dep:io-vdir"]
 pimdir = ["dep:ariadne", "dep:io-pimdir", "io-pimdir/search"]
-vendored = ["pimalaya-stream/vendored", "io-webdav?/vendored", "io-gcal?/vendored", "io-msgraph?/vendored", "io-pimdir?/vendored"]
+vendored = ["pimalaya-stream/vendored", "io-webdav?/vendored", "io-jmap?/vendored", "io-gcal?/vendored", "io-msgraph?/vendored", "io-pimdir?/vendored"]
 
 [profile.release]
 lto = "fat"
@@ -42,6 +43,7 @@ toml = { version = "1.1", default-features = false, features = ["parse", "serde"
 [dependencies]
 anyhow = { version = "1", default-features = false }
 ariadne = { version = "0.6", default-features = false, optional = true }
+blake3 = { version = "1", default-features = false, optional = true }
 base64-codec = { version = "0.1", default-features = false, features = ["alloc"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "unstable-locales"] }
 clap = { version = "4.4", default-features = false, features = ["derive", "error-context", "help", "std", "suggestions", "usage"] }
@@ -51,6 +53,7 @@ ical-rs = { version = "0.7.1", default-features = false, features = ["parser", "
 idna_adapter = { version = "=1.0.0", default-features = false }
 io-gcal = { version = "0.5.2", default-features = false, features = ["client"], optional = true }
 io-http = { version = "0.8", default-features = false, optional = true }
+io-jmap = { version = "0.10", default-features = false, features = ["client"], optional = true }
 io-msgraph = { version = "0.9.3", default-features = false, optional = true }
 io-pimdir = { version = "0.16.0", default-features = false, features = ["client"], optional = true }
 io-vdir = { version = "0.3", default-features = false, features = ["client"], optional = true }

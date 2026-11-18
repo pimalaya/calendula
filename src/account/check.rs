@@ -10,13 +10,19 @@ use clap::Parser;
 #[cfg(any(
     feature = "vdir",
     feature = "caldav",
+    feature = "jmap",
     feature = "pimdir",
     feature = "gcal",
     feature = "msgraph"
 ))]
 use pimalaya_cli::error::with_code;
 use pimalaya_cli::{account::AccountCheckOutput, error::PartialOutcome, printer::Printer};
-#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+#[cfg(any(
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
 use pimalaya_config::secret::SecretResolver;
 
 use crate::{backend::Backend, cli::resolve_account, config::AccountConfig, error::ErrorCode};
@@ -30,7 +36,9 @@ pub type BackendCheck = pimalaya_cli::account::BackendCheck<ErrorCode>;
 /// every backend the `--backend` flag allows: a local backend is
 /// checked against the filesystem, CalDAV by resolving the calendar
 /// home-set or, on a pinned `home`, by a PROPFIND on it, so a refused
-/// credential fails either way, gcal by listing the calendars. Under
+/// credential fails either way, JMAP by opening its session, refused
+/// when it advertises no calendars, and listing the calendars, gcal by
+/// listing the calendars. Under
 /// `auto`, a block of a backend this build leaves out fails its row with
 /// `backend-not-built`, naming the cargo feature bringing it back.
 ///
@@ -85,7 +93,12 @@ impl AccountCheckCommand {
 fn check_account(account_config: &AccountConfig, backend: Backend) -> Vec<BackendCheck> {
     let mut checks = Vec::new();
 
-    #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+    #[cfg(any(
+        feature = "caldav",
+        feature = "jmap",
+        feature = "gcal",
+        feature = "msgraph"
+    ))]
     let mut resolver = SecretResolver::new();
 
     #[cfg(feature = "vdir")]
@@ -107,6 +120,13 @@ fn check_account(account_config: &AccountConfig, backend: Backend) -> Vec<Backen
         && let Some(config) = account_config.caldav.clone()
     {
         checks.push(checked("caldav", check_caldav(config, &mut resolver)));
+    }
+
+    #[cfg(feature = "jmap")]
+    if backend.allows_jmap()
+        && let Some(config) = account_config.jmap.clone()
+    {
+        checks.push(checked("jmap", check_jmap(config, &mut resolver)));
     }
 
     #[cfg(feature = "msgraph")]
@@ -206,6 +226,16 @@ fn check_caldav(config: crate::config::CaldavConfig, resolver: &mut SecretResolv
     check().map_err(|err| unauthenticated(err, &config.auth))
 }
 
+/// Opening the session is the check: it resolves the credential, fetches
+/// the session over TLS, which exercises the authorization, and fails when
+/// the session advertises no JMAP for Calendars; listing the calendars then
+/// exercises the calendar account.
+#[cfg(feature = "jmap")]
+fn check_jmap(config: crate::config::JmapConfig, resolver: &mut SecretResolver) -> Result<()> {
+    crate::jmap::backend::JmapBackend::new(config, resolver)?.list_calendars()?;
+    Ok(())
+}
+
 /// Listing the calendars is the check: it resolves the token secret,
 /// opens the TLS connection and exercises the authorization in one go,
 /// which a bare connect would not.
@@ -239,6 +269,7 @@ fn left_out(backend: &'static str) -> BackendCheck {
 #[cfg(any(
     feature = "vdir",
     feature = "caldav",
+    feature = "jmap",
     feature = "pimdir",
     feature = "gcal",
     feature = "msgraph"

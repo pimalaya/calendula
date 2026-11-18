@@ -259,6 +259,7 @@ pub struct CalendarItemQuery<'a> {
         not(any(
             feature = "vdir",
             feature = "caldav",
+            feature = "jmap",
             feature = "pimdir",
             feature = "gcal",
             feature = "msgraph"
@@ -272,6 +273,7 @@ pub struct CalendarItemQuery<'a> {
         not(any(
             feature = "vdir",
             feature = "caldav",
+            feature = "jmap",
             feature = "pimdir",
             feature = "gcal",
             feature = "msgraph"

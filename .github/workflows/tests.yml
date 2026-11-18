@@ -79,7 +79,7 @@ jobs:
             "--no-default-features --features rustls-aws,caldav"
             "--no-default-features --features rustls-ring,vdir,pimdir"
           )
-          for backend in caldav gcal msgraph vdir pimdir; do
+          for backend in caldav jmap gcal msgraph vdir pimdir; do
             sets+=("--no-default-features --features rustls-ring,$backend")
           done
           for set in "${sets[@]}"; do

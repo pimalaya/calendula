@@ -151,7 +151,7 @@ type Row = (Capability, Support);
 
 /// The backends declaring capabilities, by the name `--backend` takes, in
 /// the order `auto` tries them.
-pub const BACKENDS: [&str; 5] = ["vdir", "pimdir", "caldav", "gcal", "msgraph"];
+pub const BACKENDS: [&str; 6] = ["vdir", "pimdir", "caldav", "jmap", "gcal", "msgraph"];
 
 /// What `backend` declares, nothing for a name serving no unified verb.
 pub fn declared(backend: &str) -> &'static [Row] {
@@ -159,6 +159,7 @@ pub fn declared(backend: &str) -> &'static [Row] {
         "vdir" => VDIR,
         "pimdir" => PIMDIR,
         "caldav" => CALDAV,
+        "jmap" => JMAP,
         "gcal" => GCAL,
         "msgraph" => MSGRAPH,
         _ => &[],
@@ -433,6 +434,46 @@ const CALDAV: &[Row] = &[
         C::SchedulingSendUpdates,
         Not(
             "an RFC 6638 server notifies the attendees as it decides; `--send-updates` needs \
+             the gcal backend",
+        ),
+    ),
+];
+
+/// What a JMAP event write leaves out.
+const JMAP_EVENT: &str = "an event only: a to-do or a journal entry is refused, and so is a \
+     document holding more than one UID";
+
+/// What a version a JMAP server does not keep leaves open.
+const JMAP_HASH: &str = "compared with the hash of the event read just before the write, \
+     so a write landing in between is not caught";
+
+/// JMAP for Calendars (draft-ietf-jmap-calendars).
+const JMAP: &[Row] = &[
+    (C::CalendarList, Full),
+    (
+        C::CalendarCreate,
+        Server("refused when the account may not create calendars (`mayCreateCalendar`)"),
+    ),
+    (C::CalendarCreateId, Not(MINTED_ID)),
+    (C::CalendarRename, Full),
+    (
+        C::CalendarDelete,
+        Server("the server may refuse to delete a calendar (`mayDelete`)"),
+    ),
+    (C::CalendarDescription, Full),
+    (C::CalendarColor, Full),
+    (C::ItemList, Full),
+    (C::ItemRead, Full),
+    (C::ItemAdd, Partial(JMAP_EVENT)),
+    (C::ItemUpdate, Partial(JMAP_EVENT)),
+    (C::ItemRemove, Full),
+    (C::ItemUpdateIfMatch, Partial(JMAP_HASH)),
+    (C::ItemRemoveIfMatch, Partial(JMAP_HASH)),
+    (C::OnlineMeeting, Not(NO_MEETING)),
+    (
+        C::SchedulingSendUpdates,
+        Not(
+            "calendula asks the JMAP server for no scheduling message; `--send-updates` needs \
              the gcal backend",
         ),
     ),

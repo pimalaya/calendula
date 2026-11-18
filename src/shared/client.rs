@@ -19,6 +19,7 @@
     not(any(
         feature = "vdir",
         feature = "caldav",
+        feature = "jmap",
         feature = "pimdir",
         feature = "gcal",
         feature = "msgraph"
@@ -31,6 +32,7 @@ use std::path::PathBuf;
 #[cfg(not(any(
     feature = "vdir",
     feature = "caldav",
+    feature = "jmap",
     feature = "pimdir",
     feature = "gcal",
     feature = "msgraph"
@@ -82,7 +84,7 @@ pub struct CalendarClient {
 
 /// The backend the unified commands run against: the first one the account
 /// configures that `backend` allows, in priority order (vdir, pimdir,
-/// CalDAV, gcal, msgraph), `None` when it configures none.
+/// CalDAV, JMAP, gcal, msgraph), `None` when it configures none.
 ///
 /// `auto` stops on the block of a backend this build leaves out, returned
 /// as the error, rather than falls through to the next one: a configuration
@@ -118,6 +120,8 @@ enum BackendConfig {
     Vdir(crate::config::VdirConfig),
     #[cfg(feature = "caldav")]
     Caldav(Box<crate::config::CaldavConfig>),
+    #[cfg(feature = "jmap")]
+    Jmap(Box<crate::config::JmapConfig>),
     #[cfg(feature = "pimdir")]
     Pimdir(crate::config::PimdirConfig),
     #[cfg(feature = "gcal")]
@@ -129,6 +133,7 @@ enum BackendConfig {
     #[cfg(not(any(
         feature = "vdir",
         feature = "caldav",
+        feature = "jmap",
         feature = "pimdir",
         feature = "gcal",
         feature = "msgraph"
@@ -143,6 +148,8 @@ enum BackendClient {
     Vdir(crate::vdir::backend::VdirBackend),
     #[cfg(feature = "caldav")]
     Caldav(Box<crate::caldav::backend::CaldavBackend>),
+    #[cfg(feature = "jmap")]
+    Jmap(Box<crate::jmap::backend::JmapBackend>),
     #[cfg(feature = "pimdir")]
     Pimdir(Box<crate::pimdir::backend::PimdirBackend>),
     #[cfg(feature = "gcal")]
@@ -154,6 +161,7 @@ enum BackendClient {
     #[cfg(not(any(
         feature = "vdir",
         feature = "caldav",
+        feature = "jmap",
         feature = "pimdir",
         feature = "gcal",
         feature = "msgraph"
@@ -166,7 +174,7 @@ impl CalendarClient {
     /// Selects the backend from the account configuration.
     ///
     /// The first configured backend `backend` allows wins, in calendula's
-    /// priority order: vdir, pimdir, CalDAV, gcal, msgraph. That order
+    /// priority order: vdir, pimdir, CalDAV, JMAP, gcal, msgraph. That order
     /// prefers a local store to a network round-trip, and a
     /// protocol-standard server to a vendor API. It skips no backend for
     /// a capability it lacks, every unified verb exchanging ids the
@@ -193,6 +201,11 @@ impl CalendarClient {
                 .caldav
                 .take()
                 .map(|config| BackendConfig::Caldav(Box::new(config))),
+            #[cfg(feature = "jmap")]
+            Some(Backend::Jmap) => account_config
+                .jmap
+                .take()
+                .map(|config| BackendConfig::Jmap(Box::new(config))),
             #[cfg(feature = "gcal")]
             Some(Backend::Gcal) => account_config
                 .gcal
@@ -268,6 +281,7 @@ impl CalendarClient {
             #[cfg(not(any(
                 feature = "vdir",
                 feature = "caldav",
+                feature = "jmap",
                 feature = "pimdir",
                 feature = "gcal",
                 feature = "msgraph"
@@ -277,6 +291,8 @@ impl CalendarClient {
             BackendConfig::Vdir(_) => "vdir",
             #[cfg(feature = "caldav")]
             BackendConfig::Caldav(_) => "caldav",
+            #[cfg(feature = "jmap")]
+            BackendConfig::Jmap(_) => "jmap",
             #[cfg(feature = "pimdir")]
             BackendConfig::Pimdir(_) => "pimdir",
             #[cfg(feature = "gcal")]
@@ -299,6 +315,7 @@ impl CalendarClient {
             #[cfg(not(any(
                 feature = "vdir",
                 feature = "caldav",
+                feature = "jmap",
                 feature = "pimdir",
                 feature = "gcal",
                 feature = "msgraph"
@@ -308,6 +325,8 @@ impl CalendarClient {
             BackendConfig::Vdir(_) => false,
             #[cfg(feature = "caldav")]
             BackendConfig::Caldav(_) => false,
+            #[cfg(feature = "jmap")]
+            BackendConfig::Jmap(_) => false,
             #[cfg(feature = "pimdir")]
             BackendConfig::Pimdir(_) => true,
             #[cfg(feature = "gcal")]
@@ -420,6 +439,7 @@ impl CalendarClient {
             #[cfg(not(any(
                 feature = "vdir",
                 feature = "caldav",
+                feature = "jmap",
                 feature = "pimdir",
                 feature = "gcal",
                 feature = "msgraph"
@@ -429,6 +449,8 @@ impl CalendarClient {
             BackendClient::Vdir(client) => client.list_calendars(),
             #[cfg(feature = "caldav")]
             BackendClient::Caldav(client) => client.list_calendars(),
+            #[cfg(feature = "jmap")]
+            BackendClient::Jmap(client) => client.list_calendars(),
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.list_calendars(),
             #[cfg(feature = "gcal")]
@@ -456,6 +478,7 @@ impl CalendarClient {
             #[cfg(not(any(
                 feature = "vdir",
                 feature = "caldav",
+                feature = "jmap",
                 feature = "pimdir",
                 feature = "gcal",
                 feature = "msgraph"
@@ -465,6 +488,8 @@ impl CalendarClient {
             BackendClient::Vdir(client) => client.create_calendar(id, name, description, color),
             #[cfg(feature = "caldav")]
             BackendClient::Caldav(client) => client.create_calendar(id, name, description, color),
+            #[cfg(feature = "jmap")]
+            BackendClient::Jmap(client) => client.create_calendar(id, name, description, color),
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.create_calendar(id, name, description, color),
             #[cfg(feature = "gcal")]
@@ -483,6 +508,7 @@ impl CalendarClient {
             #[cfg(not(any(
                 feature = "vdir",
                 feature = "caldav",
+                feature = "jmap",
                 feature = "pimdir",
                 feature = "gcal",
                 feature = "msgraph"
@@ -492,6 +518,8 @@ impl CalendarClient {
             BackendClient::Vdir(client) => client.update_calendar(id, patch),
             #[cfg(feature = "caldav")]
             BackendClient::Caldav(client) => client.update_calendar(id, patch),
+            #[cfg(feature = "jmap")]
+            BackendClient::Jmap(client) => client.update_calendar(id, patch),
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.update_calendar(id, patch),
             #[cfg(feature = "gcal")]
@@ -510,6 +538,7 @@ impl CalendarClient {
             #[cfg(not(any(
                 feature = "vdir",
                 feature = "caldav",
+                feature = "jmap",
                 feature = "pimdir",
                 feature = "gcal",
                 feature = "msgraph"
@@ -519,6 +548,8 @@ impl CalendarClient {
             BackendClient::Vdir(client) => client.delete_calendar(id),
             #[cfg(feature = "caldav")]
             BackendClient::Caldav(client) => client.delete_calendar(id),
+            #[cfg(feature = "jmap")]
+            BackendClient::Jmap(client) => client.delete_calendar(id),
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.delete_calendar(id),
             #[cfg(feature = "gcal")]
@@ -588,6 +619,7 @@ impl CalendarClient {
             #[cfg(not(any(
                 feature = "vdir",
                 feature = "caldav",
+                feature = "jmap",
                 feature = "pimdir",
                 feature = "gcal",
                 feature = "msgraph"
@@ -597,6 +629,8 @@ impl CalendarClient {
             BackendClient::Vdir(client) => client.list_items(calendar_id, query),
             #[cfg(feature = "caldav")]
             BackendClient::Caldav(client) => client.list_items(calendar_id, query),
+            #[cfg(feature = "jmap")]
+            BackendClient::Jmap(client) => client.list_items(calendar_id, query),
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.list_items(calendar_id, query),
             #[cfg(feature = "gcal")]
@@ -614,6 +648,7 @@ impl CalendarClient {
             #[cfg(not(any(
                 feature = "vdir",
                 feature = "caldav",
+                feature = "jmap",
                 feature = "pimdir",
                 feature = "gcal",
                 feature = "msgraph"
@@ -623,6 +658,8 @@ impl CalendarClient {
             BackendClient::Vdir(client) => client.get_item(calendar_id, item_id),
             #[cfg(feature = "caldav")]
             BackendClient::Caldav(client) => client.get_item(calendar_id, item_id),
+            #[cfg(feature = "jmap")]
+            BackendClient::Jmap(client) => client.get_item(calendar_id, item_id),
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.get_item(calendar_id, item_id),
             #[cfg(feature = "gcal")]
@@ -653,6 +690,7 @@ impl CalendarClient {
             #[cfg(not(any(
                 feature = "vdir",
                 feature = "caldav",
+                feature = "jmap",
                 feature = "pimdir",
                 feature = "gcal",
                 feature = "msgraph"
@@ -662,6 +700,8 @@ impl CalendarClient {
             BackendClient::Vdir(client) => client.create_item(calendar_id, contents),
             #[cfg(feature = "caldav")]
             BackendClient::Caldav(client) => client.create_item(calendar_id, contents),
+            #[cfg(feature = "jmap")]
+            BackendClient::Jmap(client) => client.create_item(calendar_id, contents),
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.create_item(calendar_id, contents),
             #[cfg(feature = "gcal")]
@@ -696,6 +736,7 @@ impl CalendarClient {
             #[cfg(not(any(
                 feature = "vdir",
                 feature = "caldav",
+                feature = "jmap",
                 feature = "pimdir",
                 feature = "gcal",
                 feature = "msgraph"
@@ -707,6 +748,10 @@ impl CalendarClient {
             }
             #[cfg(feature = "caldav")]
             BackendClient::Caldav(client) => {
+                client.update_item(calendar_id, item_id, contents, if_match)
+            }
+            #[cfg(feature = "jmap")]
+            BackendClient::Jmap(client) => {
                 client.update_item(calendar_id, item_id, contents, if_match)
             }
             #[cfg(feature = "pimdir")]
@@ -748,6 +793,7 @@ impl CalendarClient {
             #[cfg(not(any(
                 feature = "vdir",
                 feature = "caldav",
+                feature = "jmap",
                 feature = "pimdir",
                 feature = "gcal",
                 feature = "msgraph"
@@ -757,6 +803,8 @@ impl CalendarClient {
             BackendClient::Vdir(client) => client.delete_item(calendar_id, item_id, if_match),
             #[cfg(feature = "caldav")]
             BackendClient::Caldav(client) => client.delete_item(calendar_id, item_id, if_match),
+            #[cfg(feature = "jmap")]
+            BackendClient::Jmap(client) => client.delete_item(calendar_id, item_id, if_match),
             #[cfg(feature = "pimdir")]
             BackendClient::Pimdir(client) => client.delete_item(calendar_id, item_id, if_match),
             #[cfg(feature = "gcal")]
@@ -773,7 +821,12 @@ impl BackendConfig {
     /// Opens the backend this configuration describes, its credentials
     /// resolved through `resolver`.
     #[cfg_attr(
-        not(any(feature = "caldav", feature = "gcal", feature = "msgraph")),
+        not(any(
+            feature = "caldav",
+            feature = "jmap",
+            feature = "gcal",
+            feature = "msgraph"
+        )),
         allow(unused_variables)
     )]
     fn open(&self, resolver: &mut SecretResolver) -> Result<BackendClient> {
@@ -781,6 +834,7 @@ impl BackendConfig {
             #[cfg(not(any(
                 feature = "vdir",
                 feature = "caldav",
+                feature = "jmap",
                 feature = "pimdir",
                 feature = "gcal",
                 feature = "msgraph"
@@ -802,6 +856,12 @@ impl BackendConfig {
                 use crate::caldav::backend::CaldavBackend;
                 let client = CaldavBackend::new(config.as_ref().clone(), resolver)?;
                 Ok(BackendClient::Caldav(Box::new(client)))
+            }
+            #[cfg(feature = "jmap")]
+            Self::Jmap(config) => {
+                use crate::jmap::backend::JmapBackend;
+                let client = JmapBackend::new(config.as_ref().clone(), resolver)?;
+                Ok(BackendClient::Jmap(Box::new(client)))
             }
             #[cfg(feature = "gcal")]
             Self::Gcal(config) => {

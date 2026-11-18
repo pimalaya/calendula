@@ -12,7 +12,8 @@
 //! ## The stack below
 //!
 //! [`io_webdav`] carries the CalDAV coroutines (RFC 4791 over RFC 4918),
-//! [`io_gcal`] the Google Calendar API v3 ones, [`io_msgraph`] the
+//! [`io_jmap`] the JMAP for Calendars ones (draft-ietf-jmap-calendars over
+//! RFC 8620), [`io_gcal`] the Google Calendar API v3 ones, [`io_msgraph`] the
 //! Microsoft Graph calendar ones, [`io_vdir`] the local vdir filesystem,
 //! [`io_pimdir`] the offline store a sync engine fills, its reader, its
 //! producer queueing writes and its search index.
@@ -35,10 +36,11 @@
 //! own dispatcher ([`shared::client::CalendarClient`]), an enum holding
 //! exactly one backend.
 //!
-//! Five backends sit behind it, each behind its own cargo feature: caldav
-//! over io-webdav, gcal over io-gcal, msgraph over io-msgraph, vdir over
-//! io-vdir and pimdir over io-pimdir. Each protocol module carries a backend
-//! submodule adapting that library to the unified surface.
+//! Six backends sit behind it, each behind its own cargo feature: caldav
+//! over io-webdav, jmap over io-jmap, gcal over io-gcal, msgraph over
+//! io-msgraph, vdir over io-vdir and pimdir over io-pimdir. Each protocol
+//! module carries a backend submodule adapting that library to the unified
+//! surface.
 //!
 //! ### The capability union
 //!
@@ -60,15 +62,19 @@
 //! ### The projected backends
 //!
 //! CalDAV, vdir and pimdir speak iCalendar natively and store the bytes
-//! verbatim. Google Calendar and Microsoft Graph do not: each holds a JSON
-//! event and exposes no per-event iCalendar representation.
+//! verbatim. JMAP, Google Calendar and Microsoft Graph do not: each holds a
+//! JSON event and exposes no per-event iCalendar representation.
 //!
 //! So the `ical` features of io-gcal and io-msgraph synthesize
 //! [`shared::item::CalendarItem`]'s contents on read and re-project them on
 //! write, a recurring series and its exceptions folded into one item,
 //! stashing whatever the projection neither manages nor mints so it
-//! survives a round-trip. The policy is written down in
-//! cairn/spec/projection.md, Graph's limits in cairn/spec/backends.md.
+//! survives a round-trip. A JMAP event is JSCalendar, which ical-rs
+//! converts both ways losslessly, a series carrying its overrides in
+//! itself, so the jmap module's own projection strips the JMAP envelope
+//! and refuses a document that is not one event. The policy is written
+//! down in cairn/spec/projection.md, Graph's limits in
+//! cairn/spec/backends.md.
 //!
 //! ## Three command families
 //!
@@ -109,7 +115,7 @@
 //!
 //! The unified commands target the backend the global `--backend` flag picks
 //! ([`backend::Backend`]). Its default, `auto`, takes the first configured
-//! backend in calendula's priority order: vdir, pimdir, CalDAV, gcal,
+//! backend in calendula's priority order: vdir, pimdir, CalDAV, JMAP, gcal,
 //! msgraph. A backend this build leaves out stops it with the
 //! `backend-not-built` code, naming the cargo feature, rather than falls
 //! through to the next: one configuration reaches the same backend in every
@@ -214,6 +220,8 @@ mod config;
 mod error;
 #[cfg(feature = "gcal")]
 mod gcal;
+#[cfg(feature = "jmap")]
+mod jmap;
 mod json_schema;
 mod mcp;
 #[cfg(feature = "msgraph")]
@@ -221,7 +229,15 @@ mod msgraph;
 #[cfg(feature = "pimdir")]
 mod pimdir;
 mod repl;
-#[cfg(all(test, any(feature = "caldav", feature = "gcal", feature = "msgraph")))]
+#[cfg(all(
+    test,
+    any(
+        feature = "caldav",
+        feature = "jmap",
+        feature = "gcal",
+        feature = "msgraph"
+    )
+))]
 mod script;
 mod session;
 mod shared;

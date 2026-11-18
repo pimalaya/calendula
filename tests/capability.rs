@@ -433,10 +433,11 @@ fn the_help_names_what_each_backend_serves() {
 
     let footer = "\
 Backends:
-  item.remove: full on vdir, caldav, gcal, msgraph; partial on pimdir
+  item.remove: full on vdir, caldav, jmap, gcal, msgraph; partial on pimdir
     pimdir: queued for the next sync, and refused when a source of the store does not support it
-  item.remove.if-match: none on vdir; full on pimdir, caldav, gcal; partial on msgraph
+  item.remove.if-match: none on vdir; full on pimdir, caldav, gcal; partial on jmap, msgraph
     vdir: the backend exposes no version to compare, so `--if-match` is refused
+    jmap: compared with the hash of the event read just before the write, so a write landing in between is not caught
     msgraph: compared with the event's `changeKey` read just before the write, so a write landing in between is not caught
 ";
     assert!(stdout.ends_with(footer), "{stdout}");

@@ -231,20 +231,14 @@ pub fn registry() -> JsonSchemaRegistry {
         ] {
             refusable!(key, IdReceipt);
         }
-        refusable!(
-            "calendula-gcal-free-busy",
-            crate::shared::raw_json::RawRead
-        );
+        refusable!("calendula-gcal-free-busy", crate::shared::raw_json::RawRead);
         for key in [
             "calendula-gcal-events-instances",
             "calendula-gcal-instances",
         ] {
             refusable!(key, crate::gcal::events::instances::GcalInstancesOutput);
         }
-        refusable!(
-            "calendula-gcal-colors",
-            crate::shared::raw_json::RawRead
-        );
+        refusable!("calendula-gcal-colors", crate::shared::raw_json::RawRead);
         refusable!(
             "calendula-gcal-settings",
             crate::gcal::settings::GcalSettingsOutput

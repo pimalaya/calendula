@@ -33,6 +33,21 @@ item.list.page-size = 25		# items per page without -s
 ##caldav.tls.cert = "/path/to/cert.pem"			# a PEM certificate to trust
 ##caldav.proxy.url = "socks5h://localhost:1080"		# the proxy keys, for CalDAV alone
 
+# JMAP
+#
+#jmap.server = "https://jmap.example.org/jmap/session"	# the session URL, fetched as is
+##jmap.server = "jmap.example.org"			# its /.well-known/jmap, over https
+##jmap.server = "https://api.fastmail.com/jmap/session"	# Fastmail's JMAP session
+#jmap.auth.basic.username = "alice@example.org"		# HTTP Basic; or bearer.token, or header
+#jmap.auth.basic.password.command = "exit 127"		# prints the password
+##jmap.auth.basic.password.raw = "secret"		# the password itself
+#jmap.alpn = ["http/1.1"]				# the ALPN id rustls offers
+##jmap.alpn = []					# none
+##jmap.tls.provider = "native-tls"			# as caldav.tls
+##jmap.tls.rustls.crypto = "aws"			# as caldav.tls.rustls
+##jmap.tls.cert = "/path/to/cert.pem"			# as caldav.tls
+##jmap.proxy.url = "socks5h://localhost:1080"		# the proxy keys, for JMAP alone
+
 # Google Calendar
 #
 #gcal.auth.token.command = ["ortie", "token", "show", "-a", "example"]	# an access token, from Ortie's Google section

@@ -18,7 +18,7 @@ pub mod ical;
 pub mod item;
 #[cfg(any(feature = "gcal", feature = "msgraph"))]
 pub mod raw_json;
+pub mod receipt;
 #[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
 pub mod refusal;
-pub mod receipt;
 pub mod uuid;

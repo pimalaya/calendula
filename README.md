@@ -28,7 +28,7 @@ CLI to manage calendars.
 ## Features
 
 - **Unified API**: `calendar`, `event` and `item` serve the union of the backends, refusing what one does not serve.
-- **Remote backends**: CalDAV, the Google Calendar API, and Microsoft Graph for Outlook and Microsoft 365.
+- **Remote backends**: CalDAV, JMAP for Calendars, the Google Calendar API, and Microsoft Graph for Outlook and Microsoft 365.
 - **Local stores**: a vdir home, or a pimdir store a sync engine fills, its writes queued and its index searched.
 - **Protocol-specific APIs**: `caldav` (the WebDAV methods), `msgraph`, `gcal`, `pimdir` and `vdir` each expose what only that backend has, down to a raw REPORT or request.
 - **Tested sample**: config.sample.toml holds a section per backend and provider, the first run printing how to copy it.
@@ -38,7 +38,7 @@ CLI to manage calendars.
 - **Full client**: TLS via Rustls (`rustls-ring` default, `rustls-aws`) or Native TLS (`native-tls`).
 
 > [!TIP]
-> Each backend sits behind its own cargo feature (`caldav`, `gcal`, `msgraph`, `vdir`, `pimdir`), all enabled by default. Build with `--no-default-features` and pick the ones you need. One configuration serves every build: the block of a backend the build leaves out still loads, and a command reaching it fails with `backend-not-built`, naming the feature to rebuild with.
+> Each backend sits behind its own cargo feature (`caldav`, `jmap`, `gcal`, `msgraph`, `vdir`, `pimdir`), all enabled by default. Build with `--no-default-features` and pick the ones you need. One configuration serves every build: the block of a backend the build leaves out still loads, and a command reaching it fails with `backend-not-built`, naming the feature to rebuild with.
 >
 > The default `vendored` feature builds SQLite, and OpenSSL under `native-tls`, from source; leave it out to link the system ones.
 
@@ -54,6 +54,8 @@ CLI to manage calendars.
 | [6750] | HTTP Bearer authentication, for a provider-issued or broker-refreshed API token               |
 | [7617] | HTTP Basic authentication                                                                     |
 | [7986] | iCalendar extensions: the conference property an event's online meeting link is read from     |
+| [8620] | JMAP core: the session, its capabilities and the method calls the JMAP backend sends            |
+| [8984] | JSCalendar: the JMAP backend's events, converted to and from iCalendar                        |
 
 [4791]: https://www.rfc-editor.org/rfc/rfc4791
 [4918]: https://www.rfc-editor.org/rfc/rfc4918
@@ -63,6 +65,8 @@ CLI to manage calendars.
 [6750]: https://www.rfc-editor.org/rfc/rfc6750
 [7617]: https://www.rfc-editor.org/rfc/rfc7617
 [7986]: https://www.rfc-editor.org/rfc/rfc7986
+[8620]: https://www.rfc-editor.org/rfc/rfc8620
+[8984]: https://www.rfc-editor.org/rfc/rfc8984
 
 ## Installation
 
@@ -125,7 +129,7 @@ nix run
 
 ## Configuration
 
-calendula reads a TOML configuration you write, and never writes one. [config.sample.toml](./config.sample.toml) holds one account: the options every account shares with their values, then one commented section per backend or provider, each a working account once uncommented: CalDAV, Google Calendar, Google CalDAV, Microsoft Graph, Fastmail, vdir and pimdir. Releases and packages ship it as share/doc/calendula/config.sample.toml.
+calendula reads a TOML configuration you write, and never writes one. [config.sample.toml](./config.sample.toml) holds one account: the options every account shares with their values, then one commented section per backend or provider, each a working account once uncommented: CalDAV, JMAP, Google Calendar, Google CalDAV, Microsoft Graph, Fastmail, vdir and pimdir. Releases and packages ship it as share/doc/calendula/config.sample.toml.
 
 The OAuth 2.0 sections read their token from `ortie token show`: calendula runs no OAuth flow and refreshes no token, so [Ortie](https://github.com/pimalaya/ortie), whose sample has the matching Google and Microsoft Graph sections, or another broker printing a fresh token, does it.
 
@@ -133,7 +137,7 @@ Run without a configuration at a terminal, calendula welcomes you with the comma
 
 The `caldav` block reaches its server one way: `caldav.server`, a URL or a bare authority to walk from, or `caldav.home`, the calendar home set itself. calendula resolves no domain through DNS: name the CalDAV root your provider documents, as the sections below do.
 
-It takes one authentication: `basic` with a `username` and a `password`, `bearer` with a `token`, or `caldav.auth = "none"` for a server asking for none. `gcal.auth` and `msgraph.auth` take a `token`. A secret is given as `raw` or as `command`, a shell string or an argument list printing it.
+It takes one authentication: `basic` with a `username` and a `password`, `bearer` with a `token`, or `caldav.auth = "none"` for a server asking for none. `jmap.server` names the JMAP session URL, or a bare server name whose `/.well-known/jmap` leads there, and `jmap.auth` takes `basic`, `bearer` or a whole `header`. `gcal.auth` and `msgraph.auth` take a `token`. A secret is given as `raw` or as `command`, a shell string or an argument list printing it.
 
 `calendar.default`, `event.list.page-size`, `item.list.page-size` and `item.composer` may also sit at the top level, before any table, as the fallback of every account not setting them: drop the sample's default lines from an account for the top level to apply.
 

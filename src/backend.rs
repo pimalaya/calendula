@@ -13,7 +13,7 @@ use clap::{
 
 /// Every backend calendula knows, as `--backend` and its cargo feature
 /// spell it, in the order `auto` tries them.
-pub const ALL: [&str; 5] = ["vdir", "pimdir", "caldav", "gcal", "msgraph"];
+pub const ALL: [&str; 6] = ["vdir", "pimdir", "caldav", "jmap", "gcal", "msgraph"];
 
 /// Why nothing reaches `backend`, one of [`ALL`] this build leaves out.
 pub fn not_built(backend: &str) -> String {
@@ -31,6 +31,7 @@ pub fn parser() -> impl TypedValueParser<Value = Backend> {
     let values = ALL.map(|name| {
         let label = match name {
             "caldav" => "CalDAV",
+            "jmap" => "JMAP",
             "gcal" => "Google Calendar",
             "msgraph" => "Microsoft Graph",
             name => name,
@@ -46,7 +47,7 @@ pub fn parser() -> impl TypedValueParser<Value = Backend> {
 /// Selects which backend a cross-protocol command targets.
 ///
 /// [`Auto`](Self::Auto) takes the first configured backend of calendula's
-/// priority order (vdir, pimdir, CalDAV, gcal, msgraph): a local store
+/// priority order (vdir, pimdir, CalDAV, JMAP, gcal, msgraph): a local store
 /// before a network round-trip, a standard protocol before a vendor API,
 /// whatever capability the command needs, one this build leaves out
 /// refused. A named variant pins that one instead.
@@ -61,6 +62,9 @@ pub enum Backend {
     /// The Google Calendar API only.
     #[cfg(feature = "gcal")]
     Gcal,
+    /// JMAP for Calendars only.
+    #[cfg(feature = "jmap")]
+    Jmap,
     /// The Microsoft Graph API only.
     #[cfg(feature = "msgraph")]
     Msgraph,
@@ -77,6 +81,12 @@ impl Backend {
     #[cfg(feature = "caldav")]
     pub fn allows_caldav(self) -> bool {
         matches!(self, Self::Auto | Self::Caldav)
+    }
+
+    /// Whether the JMAP arm of a unified command may run.
+    #[cfg(feature = "jmap")]
+    pub fn allows_jmap(self) -> bool {
+        matches!(self, Self::Auto | Self::Jmap)
     }
 
     /// Whether the gcal arm of a unified command may run.
@@ -114,6 +124,8 @@ impl FromStr for Backend {
             "caldav" => Ok(Self::Caldav),
             #[cfg(feature = "gcal")]
             "gcal" => Ok(Self::Gcal),
+            #[cfg(feature = "jmap")]
+            "jmap" => Ok(Self::Jmap),
             #[cfg(feature = "msgraph")]
             "msgraph" => Ok(Self::Msgraph),
             #[cfg(feature = "pimdir")]
@@ -134,6 +146,8 @@ impl fmt::Display for Backend {
             Self::Caldav => write!(f, "caldav"),
             #[cfg(feature = "gcal")]
             Self::Gcal => write!(f, "gcal"),
+            #[cfg(feature = "jmap")]
+            Self::Jmap => write!(f, "jmap"),
             #[cfg(feature = "msgraph")]
             Self::Msgraph => write!(f, "msgraph"),
             #[cfg(feature = "pimdir")]
@@ -153,6 +167,7 @@ mod tests {
         not(any(
             feature = "vdir",
             feature = "caldav",
+            feature = "jmap",
             feature = "pimdir",
             feature = "gcal",
             feature = "msgraph"
@@ -166,6 +181,8 @@ mod tests {
             Backend::Caldav,
             #[cfg(feature = "gcal")]
             Backend::Gcal,
+            #[cfg(feature = "jmap")]
+            Backend::Jmap,
             #[cfg(feature = "msgraph")]
             Backend::Msgraph,
             #[cfg(feature = "pimdir")]

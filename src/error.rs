@@ -72,8 +72,8 @@ pub enum ErrorCode {
     /// CalDAV `valid-calendar-data`, `supported-calendar-data`,
     /// `valid-calendar-object-resource` or `supported-calendar-component`
     /// precondition, a refusal naming the iCalendar, a 400 answering a
-    /// Google or Graph event write): nothing was written, and the caller
-    /// fixes the item rather than its rights.
+    /// Google or Graph event write, a JMAP `invalidProperties`): nothing
+    /// was written, and the caller fixes the item rather than its rights.
     ItemInvalid,
     /// The server refused the request to the account: an HTTP 403 that
     /// is no rate limit and, on CalDAV, names no precondition but
@@ -210,7 +210,10 @@ pub fn partial_when(errors: &[ItemError]) -> Result<(), Error> {
 
 /// A refusal under `item-not-found`: the item a command names is not in
 /// the calendar.
-#[cfg_attr(not(any(feature = "gcal", feature = "pimdir")), allow(dead_code))]
+#[cfg_attr(
+    not(any(feature = "jmap", feature = "gcal", feature = "pimdir")),
+    allow(dead_code)
+)]
 pub fn item_not_found(message: impl Into<String>) -> Error {
     CodedError::new(ErrorCode::ItemNotFound, message.into()).into()
 }
@@ -244,6 +247,7 @@ pub fn event_missing(err: Error, event_id: &str, calendar_id: &str) -> Error {
 #[cfg_attr(
     not(any(
         feature = "caldav",
+        feature = "jmap",
         feature = "gcal",
         feature = "msgraph",
         feature = "vdir"
@@ -282,7 +286,12 @@ fn missing(err: Error, sentence: impl FnOnce() -> String) -> Error {
 /// A refusal under `calendar-not-found`: the calendar a command names does
 /// not exist.
 #[cfg_attr(
-    not(any(feature = "caldav", feature = "pimdir", feature = "vdir")),
+    not(any(
+        feature = "caldav",
+        feature = "jmap",
+        feature = "pimdir",
+        feature = "vdir"
+    )),
     allow(dead_code)
 )]
 pub fn calendar_not_found(message: impl Into<String>) -> Error {
@@ -386,6 +395,8 @@ fn refusal_code(err: &Error) -> Option<ErrorCode> {
     let refusals: &[Refusal] = &[
         #[cfg(feature = "caldav")]
         crate::caldav::client::refusal_code,
+        #[cfg(feature = "jmap")]
+        crate::jmap::error::refusal_code,
         #[cfg(feature = "gcal")]
         crate::gcal::client::refusal_code,
         #[cfg(feature = "msgraph")]
