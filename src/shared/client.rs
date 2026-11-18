@@ -392,6 +392,28 @@ impl CalendarClient {
         Ok(())
     }
 
+    /// Refuses, inside an MCP server without `--allow-send`, to delete the
+    /// calendar `calendar_id` while one of its items names an attendee, or
+    /// cannot be read to tell: deleting the calendar deletes the item.
+    fn refuse_held_invitations(&mut self, calendar_id: &str) -> Result<()> {
+        if !sending_closed() {
+            return Ok(());
+        }
+
+        let listed = self.list_items(calendar_id, None, None, Default::default())?;
+        let unread = !listed.errors.is_empty();
+
+        if unread || listed.items.iter().any(|item| invites(&item.contents)) {
+            bail!(
+                "Cannot delete calendar `{calendar_id}` holding an item that names an attendee \
+                 (ATTENDEE), or one that cannot be read to tell, without --allow-send: the \
+                 server or a sync may notify them"
+            );
+        }
+
+        Ok(())
+    }
+
     /// Lists every calendar available to the active account.
     pub fn list_calendars(&mut self) -> Result<Vec<Calendar>> {
         match self.open()? {
@@ -482,6 +504,7 @@ impl CalendarClient {
     /// Deletes the calendar `id` and every item it contains.
     pub fn delete_calendar(&mut self, id: &str) -> Result<()> {
         self.check_ids(id, None)?;
+        self.refuse_held_invitations(id)?;
 
         match self.open()? {
             #[cfg(not(any(

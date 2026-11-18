@@ -198,14 +198,20 @@ pub fn may_hold_kind(contents: &[u8], kind: IcalComponentKind) -> bool {
         .any(|component| component.name.eq_ignore_ascii_case(&kind))
 }
 
-/// Whether an item names an attendee (`ATTENDEE`) in any component, an
-/// alarm's included; bytes that do not parse answer yes.
+/// Whether an item names an attendee (`ATTENDEE`) in any component of any
+/// of its calendars, an alarm's included; bytes that do not parse, or hold
+/// no calendar, answer yes.
 pub fn invites(contents: &[u8]) -> bool {
-    let Ok(cst) = IcalCst::parse(contents) else {
-        return true;
-    };
+    let mut calendars = IcalCst::parse_many(contents).peekable();
 
-    cst.decode().components.iter().any(names_attendee)
+    if calendars.peek().is_none() {
+        return true;
+    }
+
+    calendars.any(|cst| match cst {
+        Ok(cst) => cst.decode().components.iter().any(names_attendee),
+        Err(_) => true,
+    })
 }
 
 /// Whether `component`, or a component it nests, names an attendee.
@@ -455,5 +461,12 @@ mod tests {
         ));
         assert!(invites(item(alarm).as_bytes()));
         assert!(invites(b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\n"));
+
+        let second = format!(
+            "{}{}",
+            item("ORGANIZER:mailto:jane@example.org\r\n"),
+            item("ATTENDEE:mailto:bob@example.org\r\n")
+        );
+        assert!(invites(second.as_bytes()), "CAL-13: a second VCALENDAR");
     }
 }

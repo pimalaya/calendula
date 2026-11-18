@@ -610,6 +610,25 @@ fn a_write_naming_attendees_needs_allow_send() {
     assert!(!stored.contains(&String::from("review.ics")), "{stored:?}");
 }
 
+/// CAL-4: deleting a calendar deletes its items, so one holding an item
+/// naming attendees is guarded as deleting that item is.
+#[test]
+fn a_calendar_holding_an_invitation_needs_allow_send_to_go() {
+    let home = account();
+    let delete = call(1, "calendar_delete", json!({ "calendar": "personal" }));
+
+    let responses = serve(home.path(), &["--allow-write"], std::slice::from_ref(&delete));
+    let error = refusal(&responses[0]);
+    assert!(error.contains("--allow-send"), "{error}");
+    assert!(error.contains("ATTENDEE"), "{error}");
+    assert_eq!(stored(home.path()).len(), 2);
+
+    let flags = ["--allow-write", "--allow-send"];
+    let responses = serve(home.path(), &flags, &[delete]);
+    assert_ne!(responses[0]["result"]["isError"], true, "{}", responses[0]);
+    assert!(!home.path().join("calendars/personal").exists());
+}
+
 /// A pimdir store takes no calendar write, so a server over it lists none.
 #[cfg(feature = "pimdir")]
 #[test]
