@@ -274,7 +274,9 @@ impl CaldavBackend {
         }
     }
 
-    /// PUTs over an existing resource, optionally gated on `if_match`.
+    /// PUTs over an existing resource, gated on `if_match`, else on
+    /// `If-Match: *`, so an id the calendar does not hold is refused as
+    /// `item-not-found` rather than created.
     pub fn update_item(
         &mut self,
         calendar_id: &str,
@@ -282,8 +284,25 @@ impl CaldavBackend {
         contents: Vec<u8>,
         if_match: Option<&str>,
     ) -> Result<()> {
+        let Some(if_match) = if_match else {
+            return match self
+                .client
+                .update_item(calendar_id, item_id, contents, Some("*"))
+            {
+                Ok(_) => Ok(()),
+                Err(
+                    err @ WebdavClientStdError::Send(WebdavSendError::HttpStatus {
+                        status: 412,
+                        ..
+                    }),
+                ) => Err(recoded(ErrorCode::ItemNotFound, err)
+                    .context(format!("Item `{item_id}` not found in `{calendar_id}`"))),
+                Err(err) => Err(update_error(err)),
+            };
+        };
+
         self.client
-            .update_item(calendar_id, item_id, contents, if_match)
+            .update_item(calendar_id, item_id, contents, Some(if_match))
             .map_err(update_error)?;
         Ok(())
     }
@@ -964,6 +983,20 @@ mod tests {
             .update_item("cal", "e1.ics", EVENT.to_vec(), Some("\"1\""))
             .unwrap_err();
         assert_eq!(code(&err), Some(ErrorCode::PreconditionFailed), "{err:#}");
+    }
+
+    /// CAL-2: an update given no version is gated on the item existing.
+    #[test]
+    fn an_update_of_a_missing_item_creates_nothing() {
+        let (mut backend, written) = scripted(&[(412, "")]);
+
+        let err = backend
+            .update_item("cal", "nope.ics", EVENT.to_vec(), None)
+            .unwrap_err();
+
+        assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+        let written = String::from_utf8(written.lock().unwrap().clone()).unwrap();
+        assert!(written.contains("If-Match: *\r\n"), "{written}");
     }
 
     #[test]
