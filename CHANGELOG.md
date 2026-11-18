@@ -152,6 +152,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed the Graph backend ignoring the calendar named on an item read, update and delete: `item read -k A <id of B>` printed the event as A's, and `event delete -k A <id of B>` deleted it from B. An event of another calendar now fails `item-not-found`.
 - Fixed a windowed `event list -s` paging in the backend's order and sorting inside each page, and counting items that listed nothing: it pages its occurrences sorted across the window.
 - Fixed a recurring series begun long before a window vanishing from it once its walk passed 200,000 steps (a minutely series 139 days on), and listing a series whose zone the calendar's own `VTIMEZONE` defines (as Outlook writes them) taking seconds a day of window: the walk starts at the window.
 - Fixed `gcal acl create` posting a `user`, `group` or `domain` scope with no value, and a `default` scope given `--value a@b.org` dropping the value and granting everyone: both are refused before any request. `gcal free-busy` needs `--from` and `--to`.

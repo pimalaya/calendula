@@ -38,10 +38,12 @@ use io_msgraph::v1::{
             list::MsgraphEventsListParams,
         },
     },
+    send::{MSGRAPH_API_BASE, MsgraphSend},
 };
 use jiff::{Timestamp, ToSpan, civil::Date, tz::TimeZone};
 use log::warn;
 use pimalaya_config::secret::SecretResolver;
+use url::Url;
 
 use pimalaya_cli::error::{CodedError, code_of};
 
@@ -257,6 +259,8 @@ impl MsgraphBackend {
 
     /// Reads one event, with the exceptions of a series folded into it.
     pub fn get_item(&mut self, calendar_id: &str, item_id: &str) -> Result<CalendarItem> {
+        self.check_held(calendar_id, item_id)
+            .map_err(|err| error::read_failed(err, item_id, calendar_id))?;
         let event = self
             .event(item_id)
             .map_err(|err| error::read_failed(err, item_id, calendar_id))?;
@@ -295,11 +299,12 @@ impl MsgraphBackend {
     /// moved since `if_match`.
     pub fn update_item(
         &mut self,
-        _calendar_id: &str,
+        calendar_id: &str,
         item_id: &str,
         contents: Vec<u8>,
         if_match: Option<&str>,
     ) -> Result<()> {
+        self.check_held(calendar_id, item_id)?;
         let current = self.event(item_id)?;
         if let Some(expected) = if_match
             && current.change_key.as_deref() != Some(expected)
@@ -388,10 +393,11 @@ impl MsgraphBackend {
     /// first, as an update checks it.
     pub fn delete_item(
         &mut self,
-        _calendar_id: &str,
+        calendar_id: &str,
         item_id: &str,
         if_match: Option<&str>,
     ) -> Result<()> {
+        self.check_held(calendar_id, item_id)?;
         if let Some(expected) = if_match
             && self.event(item_id)?.change_key.as_deref() != Some(expected)
         {
@@ -399,6 +405,39 @@ impl MsgraphBackend {
         }
         self.client.event_delete(item_id).map_err(event_refusal)?;
         Ok(())
+    }
+
+    /// Refuses an event the calendar `calendar_id` does not hold, coded
+    /// `item-not-found`: Graph addresses an event by its id alone, so a
+    /// read, an update or a delete would reach it in any calendar.
+    fn check_held(&mut self, calendar_id: &str, item_id: &str) -> Result<()> {
+        let mut url = Url::parse(MSGRAPH_API_BASE)?;
+        {
+            let mut segments = url
+                .path_segments_mut()
+                .map_err(|()| anyhow::anyhow!("Cannot build the Graph URL of `{item_id}`"))?;
+            segments.pop_if_empty();
+            match self.client.user_id.as_str() {
+                "me" => segments.push("me"),
+                user => segments.push("users").push(user),
+            };
+            segments.extend(["calendars", calendar_id, "events", item_id]);
+        }
+        url.set_query(Some("$select=id"));
+
+        let send: MsgraphSend<serde_json::Value> = MsgraphSend::get(&self.client.auth, url);
+        match self.client.run(send) {
+            Ok(_) => Ok(()),
+            Err(err) => {
+                let err = event_refusal(err);
+                match code_of::<ErrorCode>(&err) {
+                    Some(ErrorCode::ItemNotFound) => Err(err.context(format!(
+                        "Item `{item_id}` not found in calendar `{calendar_id}`"
+                    ))),
+                    _ => Err(err),
+                }
+            }
+        }
     }
 
     /// Reads one event with everything the projection reads.
@@ -822,6 +861,9 @@ pub(crate) mod scripted {
     /// An event as a read by id answers it.
     const EVENT: &str = r#"{"id":"E1","changeKey":"k1","subject":"Standup"}"#;
 
+    /// What Graph answers an event the calendar holds, read through it.
+    pub(crate) const HELD: &str = r#"{"id":"E1"}"#;
+
     /// A weekly series cancelling its second occurrence (an EXDATE) and
     /// moving its third (an override).
     const SERIES: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n\
@@ -1093,18 +1135,43 @@ pub(crate) mod scripted {
         );
     }
 
+    /// CAL-9: an event of another calendar is not found in the one named,
+    /// so no read, update or delete reaches it there.
+    #[test]
+    fn an_event_of_another_calendar_is_not_found() {
+        let missing = refusal("ErrorItemNotFound");
+        let mut backend = answering(&[(404, &missing), (404, &missing)]);
+
+        let read = backend.get_item("cal", "E1").unwrap_err();
+        let delete = backend.delete_item("cal", "E1", None).unwrap_err();
+
+        for err in [read, delete] {
+            assert_eq!(code_of(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+            assert!(
+                err.to_string().contains("not found in calendar `cal`"),
+                "{err:#}"
+            );
+        }
+        let sent = requests(&mut backend);
+        assert!(
+            sent.iter()
+                .all(|line| line.contains("/calendars/cal/events/E1")),
+            "{sent:?}"
+        );
+    }
+
     /// A version that moved since `--if-match` read it refuses the write
     /// before it is sent, coded as a 412 would be.
     #[test]
     fn a_moved_change_key_refuses_the_delete_as_a_precondition() {
-        let mut backend = answering(&[(200, EVENT)]);
+        let mut backend = answering(&[(200, HELD), (200, EVENT)]);
         let err = backend.delete_item("cal", "E1", Some("k0")).unwrap_err();
 
         assert_eq!(
             pimalaya_cli::error::code_of(&err),
             Some(ErrorCode::PreconditionFailed)
         );
-        assert_eq!(requests(&mut backend).len(), 1, "no DELETE sent");
+        assert_eq!(requests(&mut backend).len(), 2, "no DELETE sent");
     }
 
     /// The Monday of this week, in UTC.
@@ -1225,7 +1292,13 @@ pub(crate) mod scripted {
         let empty = r#"{"value":[]}"#;
 
         for master in [&open, &bounded] {
-            let mut backend = answering(&[(200, master), (200, empty), (200, empty), (200, empty)]);
+            let mut backend = answering(&[
+                (200, HELD),
+                (200, master),
+                (200, empty),
+                (200, empty),
+                (200, empty),
+            ]);
             backend.get_item("cal", "S").unwrap();
 
             let windows = instance_windows(&mut backend);
