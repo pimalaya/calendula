@@ -558,6 +558,23 @@ impl EventFieldsArgs {
             }
         }
 
+        if let (None, Some(end)) = (&start, &end)
+            && let Some(stored) = stored_start(ical)
+        {
+            if stored.is_date() != end.is_date() {
+                bail!(
+                    "--end must be a {} as the event's start is; give --start as well to change both",
+                    if stored.is_date() { "date" } else { "time" }
+                );
+            }
+
+            if let (Some(from), Some(to)) = (stored.comparable(end), end.comparable(&stored))
+                && to < from
+            {
+                bail!("--end comes before the event's start; give --start as well to move both");
+            }
+        }
+
         let duration = match &self.duration {
             Some(value) => Some(duration(value)?),
             None => None,
@@ -1020,6 +1037,38 @@ fn start_zone(ical: &[u8]) -> Option<String> {
     })?;
 
     TimeZone::get(&tzid).is_ok().then_some(tzid)
+}
+
+/// The `DTSTART` of the first VEVENT of `ical` as a time a flag names,
+/// `None` when there is none or its zone is one the database does not
+/// know.
+fn stored_start(ical: &[u8]) -> Option<Moment> {
+    let cst = IcalCst::parse(ical).ok()?;
+    let vevent = cst.component::<VEVENT>()?;
+
+    let line = vevent.items.iter().find_map(|item| match item {
+        IcalItem::Prop(line) if line.name.get().eq_ignore_ascii_case("DTSTART") => Some(line),
+        _ => None,
+    })?;
+
+    let value = line.raw_value_str();
+    let value = value.trim();
+
+    if let Ok(date) = Date::strptime("%Y%m%d", value) {
+        return Some(Moment::Date(date));
+    }
+
+    let (time, utc) = match value.strip_suffix(['Z', 'z']) {
+        Some(time) => (time, true),
+        None => (value, false),
+    };
+    let civil = DateTime::strptime("%Y%m%dT%H%M%S", time).ok()?;
+
+    match (line.param::<TZID>(), utc) {
+        (_, true) => Some(Moment::Utc(civil)),
+        (Some(tzid), false) => Some(Moment::Zoned(Zone::named(&tzid).ok()?, civil)),
+        (None, false) => Some(Moment::Floating(civil)),
+    }
 }
 
 /// The end an update moves with its new start, `None` when the event
@@ -2053,6 +2102,19 @@ mod tests {
             &["--start", "2026-10-19T10:00Z", "--end", "2026-10-19T09:00Z"],
         );
         assert!(err.contains("before"), "{err}");
+    }
+
+    /// CAL-10: an `--end` alone is held to the start the event carries.
+    #[test]
+    fn an_end_alone_is_checked_against_the_stored_start() {
+        let err = refusal(EVENT, &["--end", "2020-01-01T00:00Z"]);
+        assert!(err.contains("before the event's start"), "{err}");
+
+        let err = refusal(EVENT, &["--end", "2026-10-20"]);
+        assert!(err.contains("must be a time"), "{err}");
+
+        let out = apply(EVENT, &["--end", "2026-10-19T11:00Z"]);
+        assert!(out.contains("DTEND:20261019T110000Z\r\n"), "{out}");
     }
 
     #[test]
