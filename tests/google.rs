@@ -294,6 +294,9 @@ mod credentialed {
 
         let triggers = alarm_round_trip(&config, caldav_token(), "calendula-live-alarm");
         assert_eq!(triggers[..3], ["-PT15M", "-PT60M", "|"], "{triggers:?}");
-        assert!(!triggers[3..].contains(&"-PT60M".to_owned()), "{triggers:?}");
+        assert!(
+            !triggers[3..].contains(&"-PT60M".to_owned()),
+            "{triggers:?}"
+        );
     }
 }
