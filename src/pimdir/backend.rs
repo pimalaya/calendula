@@ -181,9 +181,10 @@ impl PimdirBackend {
     /// An unhydrated item lists with empty contents, and a range still
     /// filters it off the stored summary: a cache hiding its own
     /// undownloaded items from a window would answer another question.
-    /// One whose body cannot be read, or that the blob tree does not hold,
-    /// lists with empty contents too, beside an `item-unreadable` entry
-    /// kept with it in the window.
+    /// So does one whose blob is gone or fails its name, not hydrated
+    /// either (pimdir GUIDE §14). One whose body cannot be read lists with
+    /// empty contents too, beside an `item-unreadable` entry kept with it
+    /// in the window.
     ///
     /// The collection streams through in keyset batches, one body held
     /// at a time: what the listing keeps is the window, and the scan stops
@@ -255,14 +256,7 @@ impl PimdirBackend {
         let stored = self.item(calendar_id, item_id)?;
 
         let Some(contents) = self.body(calendar_id, &stored)? else {
-            return Err(CodedError::new(
-                ErrorCode::BodyPending,
-                format!(
-                    "Item `{item_id}` in calendar `{calendar_id}` is not downloaded yet \
-                     (body not fetched); run a sync to hydrate it"
-                ),
-            )
-            .into());
+            return Err(body_pending(item_id, calendar_id));
         };
 
         Ok(CalendarItem {
@@ -635,10 +629,10 @@ impl PimdirBackend {
     /// Projects a stored item onto the shared type, body when local.
     ///
     /// Empty contents mean two things and only one is ordinary: the
-    /// sync has not hydrated the item, or its object's body cannot be
-    /// read or is gone from the blob tree, an inconsistent store, whose
-    /// `item-unreadable` entry comes beside it since the row renders
-    /// alike.
+    /// item is not hydrated, never fetched or its blob gone or failing its
+    /// name (pimdir GUIDE §14), or its object's body cannot be read, an
+    /// inconsistent store, whose `item-unreadable` entry comes beside it
+    /// since the row renders alike. Either way it has no version.
     fn item_from(
         &self,
         calendar_id: &str,
@@ -648,27 +642,28 @@ impl PimdirBackend {
 
         let read = match &stored.object {
             Some(hash) => match self.client.blobs.get(hash) {
-                Ok(Some(contents)) => Ok(contents),
-                Ok(None) => Err(anyhow!(
-                    "Body blob missing for item `{id}` in calendar `{calendar_id}`"
-                )),
+                Ok(contents) => Ok(contents),
                 Err(err) => Err(anyhow::Error::from(err).context(format!(
                     "Cannot read the body of item `{id}` in calendar `{calendar_id}`"
                 ))),
             },
-            None => Ok(Vec::new()),
+            None => Ok(None),
         };
 
         let (contents, error) = match read {
             Ok(contents) => (contents, None),
-            Err(err) => (Vec::new(), Some(error::unreadable(Some(&id), err))),
+            Err(err) => (None, Some(error::unreadable(Some(&id), err))),
+        };
+        let etag = match contents {
+            Some(_) => stored.object.as_ref().map(|hash| hash.0.clone()),
+            None => None,
         };
 
         let item = CalendarItem {
             id,
             calendar_id: calendar_id.to_owned(),
-            etag: stored.object.as_ref().map(|hash| hash.0.clone()),
-            contents,
+            etag,
+            contents: contents.unwrap_or_default(),
         };
 
         (item, error)
@@ -890,9 +885,9 @@ impl PimdirBackend {
 
     /// An item's local body, `None` when the sync has not fetched it.
     ///
-    /// An item naming an object whose blob is absent fails: the store is
-    /// inconsistent rather than partially synced, and a write or an
-    /// intent checked against no body would pass unchecked.
+    /// An item naming an object whose blob is absent, or fails its name,
+    /// fails `body-pending`: not hydrated (pimdir GUIDE §14), and a write
+    /// or an intent checked against no body would pass unchecked.
     fn body(&self, calendar_id: &str, stored: &PimdirItem) -> Result<Option<Vec<u8>>> {
         let Some(hash) = &stored.object else {
             return Ok(None);
@@ -900,12 +895,22 @@ impl PimdirBackend {
 
         match self.client.blobs.get(hash)? {
             Some(contents) => Ok(Some(contents)),
-            None => bail!(
-                "Body blob missing for item `{}` in calendar `{calendar_id}`",
-                stored.seq
-            ),
+            None => Err(body_pending(&stored.seq.to_string(), calendar_id)),
         }
     }
+}
+
+/// The failure of a read of an item whose body is not local, coded
+/// `body-pending`: the cue to sync, as Himalaya reads such a message.
+fn body_pending(item_id: &str, calendar_id: &str) -> anyhow::Error {
+    CodedError::new(
+        ErrorCode::BodyPending,
+        format!(
+            "Item `{item_id}` in calendar `{calendar_id}` is not downloaded yet \
+             (body not fetched); run a sync to hydrate it"
+        ),
+    )
+    .into()
 }
 
 /// Stages `body` and appends the action `action` builds from its hash
@@ -2847,10 +2852,12 @@ mod tests {
 
     /// A reply or a cancel reads the event's body to check it is an
     /// invitation and holds the occurrence named: a body the store lists
-    /// but no longer has fails them, rather than letting them through
-    /// unchecked.
+    /// but no longer has fails them `body-pending`, as its read, rather
+    /// than letting them through unchecked.
     #[test]
     fn a_reply_or_a_cancel_over_a_missing_body_queues_nothing() {
+        use pimalaya_cli::error::code_of;
+
         let (dir, mut backend, ids) = store(&[INVITATION]);
         for blob in blob_files(dir.path()) {
             std::fs::remove_file(blob).unwrap();
@@ -2864,18 +2871,22 @@ mod tests {
             .unwrap_err();
 
         for err in [replied, cancelled] {
-            assert!(err.to_string().contains("Body blob missing"), "{err}");
+            assert_eq!(code_of(&err), Some(ErrorCode::BodyPending), "{err:#}");
         }
         assert_eq!(pending(&backend), 0);
     }
 
-    /// A body the store cannot read, and one its blob tree no longer
-    /// holds, list empty beside an `item-unreadable` entry each, kept on
-    /// the page holding their item: the item past a page takes its entry
-    /// to the next.
+    /// A body the store cannot read lists empty beside an `item-unreadable`
+    /// entry, kept on the page holding its item: the item past a page takes
+    /// its entry to the next. One its blob tree no longer holds is not
+    /// hydrated and not an error (pimdir GUIDE §14): it lists as an
+    /// unfetched one, no entry and no version, and its read answers
+    /// `body-pending`, as Himalaya reads such a message.
     #[cfg(unix)]
     #[test]
     fn a_body_the_store_cannot_serve_is_an_entry_on_its_page() {
+        use pimalaya_cli::error::code_of;
+
         let (dir, mut backend, ids) = store(&[INVITATION, ALONE]);
         poison(&backend, &[&ids[0]]);
         let stored = backend.item("cal", &ids[1]).unwrap();
@@ -2890,8 +2901,9 @@ mod tests {
         let listed_ids: Vec<&str> = listed.items.iter().map(|item| item.id.as_str()).collect();
         assert_eq!(listed_ids, [ids[0].as_str(), ids[1].as_str()]);
         assert!(listed.items.iter().all(|item| item.contents.is_empty()));
+        assert_eq!(listed.items[1].etag, None);
 
-        let [unread, missing] = &listed.errors[..] else {
+        let [unread] = &listed.errors[..] else {
             panic!("{:?}", listed.errors);
         };
         assert_eq!(unread.id.as_deref(), Some(ids[0].as_str()));
@@ -2901,11 +2913,16 @@ mod tests {
             "{unread:?}"
         );
         assert!(!unread.sources.is_empty(), "{unread:?}");
-        assert_eq!(missing.id.as_deref(), Some(ids[1].as_str()));
-        assert_eq!(missing.code, Some(ErrorCode::ItemUnreadable));
-        assert!(
-            missing.error.starts_with("Body blob missing"),
-            "{missing:?}"
+
+        let err = backend.get_item("cal", &ids[1]).unwrap_err();
+        assert_eq!(code_of(&err), Some(ErrorCode::BodyPending), "{err:#}");
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "Item `{}` in calendar `cal` is not downloaded yet (body not \
+                 fetched); run a sync to hydrate it",
+                ids[1]
+            )
         );
 
         let second = CalendarItemQuery {
@@ -2914,8 +2931,8 @@ mod tests {
             ..events
         };
         let listed = backend.list_items("cal", second).unwrap();
-        assert_eq!(listed.errors.len(), 1, "{:?}", listed.errors);
-        assert_eq!(listed.errors[0].id.as_deref(), Some(ids[1].as_str()));
+        assert!(listed.errors.is_empty(), "{:?}", listed.errors);
+        assert_eq!(listed.items[0].id, ids[1]);
 
         let account = AccountConfig {
             pimdir: Some(PimdirConfig {

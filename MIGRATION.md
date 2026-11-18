@@ -90,6 +90,8 @@ The store keeps its path, so `pimdir.root` does not change. The new sync builds 
 
 An update or a delete gated on a version (`--if-match`, or an update starting from the stored event) names the body it read: when a sync replaces that body before the queue drains, the sync engine parks the write rather than apply it. It parks an update or a delete over an event a sync left conflicted too, calendula resolving no conflict. `calendula pimdir status` lists what is parked.
 
+An item whose body is gone from the store (a `pimdir item erase`, a quarantine) reads as not downloaded: it lists as usual, with no bytes and no `etag`, and `item read`, `event read`, `pimdir reply` and `pimdir cancel` fail coded `body-pending`, as for an item never fetched: run a sync to bring the body back. Nothing exits 3 for it.
+
 With `pimdir.account` unset, the backend reads the one account the store groups its collections under, and refuses a store several accounts share, naming them, where 0.2 merged their calendars: set `pimdir.account` to the one to read.
 
 ```toml

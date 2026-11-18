@@ -289,12 +289,12 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 | `calendar-not-found` | the calendar a command names does not exist, or no calendar can have its id (not one vdir directory name, refused by io-webdav on CalDAV); nothing was read or written |
 | `calendar-duplicate` | a create names a calendar that already exists (backends, "A calendar created twice is a duplicate"); nothing was written |
 | `calendar-default-missing` | a unified or pimdir command names no calendar and the account sets no `calendar.default`; nothing was read |
-| `item-unreadable` | the backend answered for an item calendula could not read: its file could not be read (vdir), its iCalendar did not parse, the server refused it while it was read again (Graph), its body could not be read or is missing from the store (pimdir); an `errors` entry |
+| `item-unreadable` | the backend answered for an item calendula could not read: its file could not be read (vdir), its iCalendar did not parse, the server refused it while it was read again (Graph), its body could not be read (pimdir); an `errors` entry |
 | `item-invalid` | the server refused the item written as no iCalendar it takes (CalDAV, Google Calendar, see backends "A server's refusal carries its code"); nothing was written, and the item is what to fix, not the account's rights |
 | `permission-denied` | the server refused the request to the account (see "A server's refusal carries its code") |
 | `quota-exceeded` | the write would exceed the account's quota |
 | `rate-limited` | the server throttled the request; calendula retries nothing |
-| `body-pending` | a listed item's body is not local yet (pimdir); a sync brings it |
+| `body-pending` | the failure of `item read` or `event read` on a listed item whose body is not local (pimdir): never fetched, or its blob file gone or failing its name; a sync brings it |
 | `precondition-failed` | a write's `--if-match` names a version the item no longer has, on any backend that takes one |
 | `occurrence-unsupported` | `pimdir reply` or `pimdir cancel` names an occurrence its performer cannot act on alone |
 | `invitation-missing` | `pimdir reply` names an event naming no `ORGANIZER` to answer or no `ATTENDEE` to answer as, or `pimdir cancel` one naming no `ATTENDEE` to notify; nothing was queued |

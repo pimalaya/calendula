@@ -66,7 +66,7 @@ A backend SHALL report an item it could not read as an `errors` entry and SHALL 
 - every backend: an item whose iCalendar does not parse SHALL be an `item-unreadable` entry in `event list`, `event search` and the agenda, no event row printed for it; `item list` SHALL list it as it lists any item, with no entry. A kind or a range filter applied after parsing SHALL keep such an item, whose kind and dates cannot be read;
 - vdir: an item file that cannot be read SHALL be an `item-unreadable` entry naming the item, its error in `sources`; an item removed while it lists SHALL be left out with no entry;
 - Graph: an event whose series master or instances the server refused while they were read again SHALL be an entry coded by the refusal (`item-unreadable` when the refusal carries no code), the other events listed; one answered 404 SHALL be left out with no entry;
-- pimdir: a body that cannot be read, or that the blob tree does not hold, SHALL be an `item-unreadable` entry, the item listed with no bytes; a hydrated body that does not parse SHALL be an entry where the kind filter dropped it; an item whose body is not local yet SHALL be no entry;
+- pimdir: a body that cannot be read SHALL be an `item-unreadable` entry, the item listed with no bytes; a hydrated body that does not parse SHALL be an entry where the kind filter dropped it; an item whose body is not local SHALL be no entry, whether it was never fetched or the item names a body its blob tree no longer holds (the blob file gone, or failing its name), which is not hydrated and not an error (pimdir GUIDE §14), as Himalaya and cardamum list such an item;
 - CalDAV: a row the server answered without the item's data (refused whole, its `calendar-data` refused, or missing) SHALL be an entry naming the item, coded from its status, a 403 `permission-denied`, else `item-unreadable`, each refused property in `sources`; a listing the server truncated (a 507 row) SHALL be an entry with a `null` id and no code saying the listing is incomplete;
 - CalDAV, Google Calendar: an answer or a page that fails SHALL fail the listing whole.
 
@@ -284,11 +284,17 @@ It SHALL resolve that id to the `link_id` before reading a body or staging a cha
 Addressing by the public id is what keeps two duplicated resources distinguishable: they carry one `UID` between them and have two `seq`s, so an address derived from the body would be ambiguous where a `seq` is not.
 
 ### Requirement: pimdir is an availability-aware cache
-An item whose body is not local (`level < Full`, no stored object) SHALL still list, carrying no bytes. `get_item` on such an item SHALL report a clear "body not fetched" state, the cue to sync, not a data-loss error.
+An item whose body is not local SHALL still list, carrying no bytes and no `etag`: one never fetched (`level < Full`, no stored object), and one naming an object the blob tree holds no body for, the blob file absent or its entry no body at all (a directory, a link, bytes that do not hash to its name), which the store reads as absent (pimdir STORAGE §5, §7) and which is not hydrated and not an error (pimdir GUIDE §14). `get_item` on such an item SHALL fail coded `body-pending`, ``Item `<id>` in calendar `<calendar>` is not downloaded yet (body not fetched); run a sync to hydrate it``, the cue to sync, not a data-loss error, exit 1, as Himalaya reads such a message.
 
 A range filter SHALL still apply to it, read off the stored `text/calendar` summary rather than off bytes that are not local: a cache that hid its own undownloaded items from a date window would answer a different question than the one asked.
 
-An item naming an object the blob tree holds no body for is a different state: the store is inconsistent rather than partially synced. The blob file may be absent, or its entry no body at all (a directory, a link, bytes that do not hash to its name), which the store reads as absent (pimdir STORAGE §5, §7). It SHALL still list, carrying no bytes, and the listing SHALL name it in its `errors`, coded `item-unreadable`, since the row renders the same as an unhydrated one and `get_item` refuses it outright.
+A body the store fails to read (an I/O error) is a different state: the item SHALL still list, carrying no bytes, and the listing SHALL name it in its `errors`, coded `item-unreadable`, since the row renders the same as an unhydrated one.
+
+#### Scenario: A body gone from the blob tree
+- GIVEN a pimdir calendar holding a synced event whose blob file was removed
+- WHEN `calendula --json item list` runs
+- THEN it lists the item with no bytes and `etag` `null`, `errors` empty, exit 0
+- AND `calendula --json item read <id>` fails coded `body-pending`, exit 1
 
 ### Requirement: pimdir writes are staged queue actions
 A pimdir write SHALL append one action to the store's queue (pimdir STORAGE §15.1) through one producer opened for that write, before anything is written, and dropped after it: `create_item` to `add`, `update_item` to `update`, `delete_item` to `remove`.
@@ -353,7 +359,7 @@ Each SHALL print `{row, id, calendarId, recurrenceId, partstat, comment, source}
 
 `-r/--recurrence-id` SHALL limit either to one occurrence, carried as `recurrence_id`, spelled as the `recurrenceId` an expanded listing shows (the series' `DTSTART` form). When the body is local, a value naming no occurrence of the series, or naming one in another spelling, SHALL be refused. A performer not declaring `calendar.reply.occurrence` or `calendar.cancel.occurrence`, and a store declaring nothing, SHALL be refused with the code `occurrence-unsupported` and an error starting `Occurrence not supported:`, naming the capability and the source, or saying no source of the store declares it; nothing is queued.
 
-A reply to an event naming no `ORGANIZER` or no `ATTENDEE`, or a cancellation of one naming no `ATTENDEE`, SHALL be refused when its body is local, coded `invitation-missing`, the last pointing at `event delete`: an event naming no attendee is the account's own or invites nobody, and the account answers as one of its attendees. An event naming an object whose blob is absent SHALL refuse both, as `get_item` refuses its read, rather than queue them unchecked.
+A reply to an event naming no `ORGANIZER` or no `ATTENDEE`, or a cancellation of one naming no `ATTENDEE`, SHALL be refused when its body is local, coded `invitation-missing`, the last pointing at `event delete`: an event naming no attendee is the account's own or invites nobody, and the account answers as one of its attendees. An event naming an object whose blob is absent SHALL refuse both coded `body-pending`, as `get_item` refuses its read, rather than queue them unchecked.
 
 #### Scenario: A reply to the account's own event
 - GIVEN a pimdir event whose `ORGANIZER` is the account and which names no `ATTENDEE`, as Graph writes one the account made

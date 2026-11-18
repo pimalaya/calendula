@@ -228,7 +228,7 @@ pending.ics  -      -
 
         let denied = io::Error::from(io::ErrorKind::PermissionDenied);
         let file = anyhow::Error::from(denied).context("Cannot read item file /home/c.ics");
-        let blob = anyhow!("Body blob missing for item `7` in calendar `personal`");
+        let blob = anyhow!("Cannot read the body of item `7` in calendar `personal`");
 
         let output = ItemListOutput {
             listing,
@@ -253,7 +253,7 @@ Page:      2, item 2
 Next page: --page 3
 
 Error:  c  item-unreadable  Cannot read item file /home/c.ics
-Error:  7  item-unreadable  Body blob missing for item `7` in calendar `personal`
+Error:  7  item-unreadable  Cannot read the body of item `7` in calendar `personal`
 ";
         assert_eq!(output.to_string(), expected);
     }
