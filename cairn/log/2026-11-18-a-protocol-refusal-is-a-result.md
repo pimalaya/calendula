@@ -6,7 +6,7 @@ landed: 2026-11-18
 
 # A protocol refusal is a result
 
-Landed without a proposal: COH-5 with the `request` half of D26, ruled by the owner on 2026-11-18, the shape himalaya landed in 002bf012.
+Landed without a proposal: COH-5 with the `request` half of D26, ruled by the owner on 2026-11-18, the shape himalaya landed in e440b4e4.
 
 - src/shared/refusal.rs, himalaya's module: `RefusalOutput`, `Refusal`, `Refusable<T>` for the schemas, and `print`, which ends a protocol command by printing the refusal a reader finds in its error chain as the result, exit 3 (`PartialOutcome`), any other error staying the failure.
 - Readers: `caldav::client::refusal` (the status and body of a WebDAV refusal, no reason), `gcal::client::refusal` (the status, the first reason, the message and `retryAfter` of `GcalApiError`), `msgraph::backend::refusal` (the status, `error.code`, `error.message` and `retryAfter`). `code` is the code the failure would carry, through `error::code`.

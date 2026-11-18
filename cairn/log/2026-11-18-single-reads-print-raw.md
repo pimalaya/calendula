@@ -6,7 +6,7 @@ landed: 2026-11-18
 
 # Single reads print raw
 
-Landed without a proposal: the owner's ruling of 2026-11-18 that a single protocol read prints the provider's payload raw, as D18 made the protocol listings raw, which named calendula's `gcal colors` and `gcal free-busy`; himalaya landed its half in 002bf012.
+Landed without a proposal: the owner's ruling of 2026-11-18 that a single protocol read prints the provider's payload raw, as D18 made the protocol listings raw, which named calendula's `gcal colors` and `gcal free-busy`; himalaya landed its half in e440b4e4.
 
 This corrects the log of a-protocol-refusal-is-a-result of the same day, which said these reads already printed raw: `gcal colors` printed a flattened `{colors}`, `gcal free-busy` a designed `{calendars: [{id, busy, queryErrors}]}`, and the `msgraph` gets io-msgraph's typed structs serialized again, dropping what they do not model.
 
