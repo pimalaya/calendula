@@ -139,6 +139,7 @@ impl EventUpdateCommand {
         self.fields.inherit_zone(&base);
         self.fields.anchor_floating(client.backend_name());
 
+        let read = (self.if_match.is_none() && etag.is_some()).then_some(base.as_slice());
         let if_match = self.if_match.or(etag);
         let send_updates = self.send_updates.send_updates;
         let seed = self.fields.apply_keeping_length(&base)?;
@@ -151,6 +152,7 @@ impl EventUpdateCommand {
                     &self.event_id,
                     contents,
                     if_match.as_deref(),
+                    read,
                     ItemOrigin::User,
                     send_updates,
                 )
@@ -185,6 +187,7 @@ impl EventUpdateCommand {
                     &self.event_id,
                     contents,
                     if_match.as_deref(),
+                    read,
                     ItemOrigin::User,
                     send_updates,
                 )

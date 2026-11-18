@@ -160,6 +160,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed `event update` and `item update -i` on Microsoft Graph failing `precondition-failed` right after the event was created, in about one run out of four: Exchange moves an event's `changeKey` by itself about a second after a create, restamping only `DTSTAMP` and `LAST-MODIFIED`, so the key calendula read before the write no longer matched the one it read again. Against calendula's own read, a moved key whose body differs in those two lines alone now lets the update through; any other difference, and a `--if-match` given on the command line, still refuse it.
 - Fixed install.sh saving an HTTP error page as the archive and letting `tar` fail on it: it downloads with `curl -fsSLo` and stops on the error.
 - Fixed a pimdir store shared with an account holding no calendar (a mail account) refusing an unset `pimdir.account` as ambiguous: only the accounts holding calendars count. The two refusals are coded `store-account-ambiguous` and `store-account-unknown`, as himalaya and cardamum code them.
 - Fixed the Graph backend ignoring the calendar named on an item read, update and delete: `item read -k A <id of B>` printed the event as A's, and `event delete -k A <id of B>` deleted it from B. An event of another calendar now fails `item-not-found`.

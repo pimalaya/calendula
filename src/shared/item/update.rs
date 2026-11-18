@@ -88,6 +88,7 @@ impl ItemUpdateCommand {
             }
         };
 
+        let own_read = self.if_match.is_none() && etag.is_some();
         let if_match = self.if_match.or(etag);
         let origin = ItemOrigin::of_source(self.ical.as_deref());
 
@@ -98,6 +99,7 @@ impl ItemUpdateCommand {
                     &self.item_id,
                     seed,
                     if_match.as_deref(),
+                    None,
                     origin,
                     None,
                 )
@@ -129,6 +131,7 @@ impl ItemUpdateCommand {
                 &self.item_id,
                 draft.contents.clone(),
                 if_match.as_deref(),
+                own_read.then_some(seed.as_slice()),
                 origin,
                 None,
             )

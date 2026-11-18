@@ -723,13 +723,17 @@ impl CalendarClient {
     /// unconditionally. A backend with no guard concept ignores it.
     /// `send_updates` is read by gcal alone, as on
     /// [`create_item`](Self::create_item), and `origin` by pimdir
-    /// alone.
+    /// alone. `read` is the body `if_match` was read with when calendula's
+    /// own read gave it, `None` for the caller's `--if-match`, read by
+    /// msgraph alone.
+    #[allow(clippy::too_many_arguments)]
     pub fn update_item(
         &mut self,
         calendar_id: &str,
         item_id: &str,
         contents: Vec<u8>,
         if_match: Option<&str>,
+        read: Option<&[u8]>,
         origin: ItemOrigin,
         send_updates: Option<SendUpdates>,
     ) -> Result<()> {
@@ -738,6 +742,8 @@ impl CalendarClient {
         let _ = send_updates;
         #[cfg(not(feature = "pimdir"))]
         let _ = origin;
+        #[cfg(not(feature = "msgraph"))]
+        let _ = read;
 
         self.check_ids(calendar_id, Some(item_id))?;
         self.refuse_invitations("update", calendar_id, Some(item_id), Some(&contents))?;
@@ -774,7 +780,7 @@ impl CalendarClient {
             }
             #[cfg(feature = "msgraph")]
             BackendClient::Msgraph(client) => {
-                client.update_item(calendar_id, item_id, contents, if_match)
+                client.update_item(calendar_id, item_id, contents, if_match, read)
             }
         }
     }

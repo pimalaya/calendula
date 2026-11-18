@@ -297,26 +297,35 @@ impl MsgraphBackend {
     /// Replaces a series master from an iCalendar document, sending only
     /// what changed against the server copy, refused when its `changeKey`
     /// moved since `if_match`.
+    ///
+    /// `read` is the body `if_match` was read with, when calendula's own
+    /// read gave it rather than the caller: Exchange moves a `changeKey`
+    /// by itself about a second after a create, restamping `DTSTAMP` and
+    /// `LAST-MODIFIED` alone, so a moved key whose body differs from
+    /// `read` in those two only is no conflict and the write proceeds.
     pub fn update_item(
         &mut self,
         calendar_id: &str,
         item_id: &str,
         contents: Vec<u8>,
         if_match: Option<&str>,
+        read: Option<&[u8]>,
     ) -> Result<()> {
         self.check_held(calendar_id, item_id)?;
         let current = self.event(item_id)?;
-        if let Some(expected) = if_match
-            && current.change_key.as_deref() != Some(expected)
-        {
-            return Err(changed(item_id));
-        }
 
         // NOTE: the base is read over the range `get_item` reads, so an
         // exception outside it is in neither and the delta leaves it be.
         let exceptions = self.exceptions(&current, read_within(None, today())?)?;
         let exceptions: Vec<&MsgraphEvent> = exceptions.iter().collect();
         let base = current.to_ical_series(&exceptions);
+
+        if let Some(expected) = if_match
+            && current.change_key.as_deref() != Some(expected)
+            && !read.is_some_and(|read| restamped_only(read, base.as_bytes()))
+        {
+            return Err(changed(item_id));
+        }
 
         let series = MsgraphEventSeries::update_from_ical(&contents, base.as_bytes())?;
         left_out(&series.left_out);
@@ -571,6 +580,25 @@ fn unique(events: Vec<MsgraphEvent>) -> Result<Vec<MsgraphEvent>> {
     }
 
     Ok(unique)
+}
+
+/// Whether `a` and `b` hold one iCalendar but for their `DTSTAMP` and
+/// `LAST-MODIFIED` lines, compared unfolded (RFC 5545 3.1).
+fn restamped_only(a: &[u8], b: &[u8]) -> bool {
+    fn lines(ical: &[u8]) -> Vec<String> {
+        String::from_utf8_lossy(ical)
+            .replace("\r\n ", "")
+            .replace("\r\n\t", "")
+            .lines()
+            .filter(|line| {
+                let name = line.split([':', ';']).next().unwrap_or_default();
+                !name.eq_ignore_ascii_case("DTSTAMP") && !name.eq_ignore_ascii_case("LAST-MODIFIED")
+            })
+            .map(str::to_owned)
+            .collect()
+    }
+
+    lines(a) == lines(b)
 }
 
 /// The refusal of a write whose `--if-match` names a `changeKey` the event
@@ -1184,6 +1212,78 @@ pub(crate) mod scripted {
                 .all(|line| line.contains("/calendars/cal/events/E1")),
             "{sent:?}"
         );
+    }
+
+    /// Exchange moves a `changeKey` by itself after a create, restamping
+    /// the event alone: against calendula's own read, a moved key whose
+    /// body differs only in `DTSTAMP` and `LAST-MODIFIED` lets the update
+    /// through, and one whose summary moved too, or any moved key against
+    /// a `--if-match`, refuses it `precondition-failed` before it is sent.
+    #[test]
+    fn a_restamped_event_is_no_conflict_against_its_own_read() {
+        let at = |key: &str, subject: &str, stamp: &str| {
+            format!(
+                r#"{{"id":"E1","changeKey":"{key}","subject":"{subject}",
+                "lastModifiedDateTime":"2026-11-18T19:55:{stamp}Z",
+                "start":{{"dateTime":"2026-12-01T09:00:00","timeZone":"UTC"}},
+                "end":{{"dateTime":"2026-12-01T10:00:00","timeZone":"UTC"}}}}"#
+            )
+        };
+        let first = at("k1", "Standup", "26");
+        let restamped = at("k2", "Standup", "27");
+        let renamed = at("k2", "Retro", "27");
+
+        let read = answering(&[(200, HELD), (200, &first)])
+            .get_item("cal", "E1")
+            .unwrap();
+        assert_ne!(
+            read.contents,
+            answering(&[(200, HELD), (200, &restamped)])
+                .get_item("cal", "E1")
+                .unwrap()
+                .contents
+        );
+        let edited = String::from_utf8(read.contents.clone())
+            .unwrap()
+            .replace("SUMMARY:Standup", "SUMMARY:Standup moved");
+
+        let mut backend = answering(&[(200, HELD), (200, &restamped), (200, &restamped)]);
+        backend
+            .update_item(
+                "cal",
+                "E1",
+                edited.clone().into_bytes(),
+                Some("k1"),
+                Some(&read.contents),
+            )
+            .unwrap();
+        let sent = requests(&mut backend);
+        assert!(
+            sent.last().unwrap().starts_with("PATCH ") && sent.last().unwrap().contains("/E1 "),
+            "{sent:?}"
+        );
+
+        let refused = [
+            (renamed.as_str(), Some(read.contents.as_slice())),
+            (restamped.as_str(), None),
+        ];
+        for (answer, own) in refused {
+            let mut backend = answering(&[(200, HELD), (200, answer)]);
+            let err = backend
+                .update_item("cal", "E1", edited.clone().into_bytes(), Some("k1"), own)
+                .unwrap_err();
+            assert_eq!(
+                code_of(&err),
+                Some(ErrorCode::PreconditionFailed),
+                "{err:#}"
+            );
+            assert!(
+                requests(&mut backend)
+                    .iter()
+                    .all(|l| !l.starts_with("PATCH ")),
+                "{err:#}"
+            );
+        }
     }
 
     /// A version that moved since `--if-match` read it refuses the write
