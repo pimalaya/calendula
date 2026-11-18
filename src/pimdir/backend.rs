@@ -317,13 +317,14 @@ impl PimdirBackend {
         self.check_synced(calendar_id)?;
 
         let stored = self.item(calendar_id, item_id)?;
-        check_version(&stored, calendar_id, item_id, if_match)?;
-        let current = self.body(calendar_id, &stored)?;
+        let current = self.local_body(&stored)?;
+        let held = current.as_ref().and(stored.object.clone());
+        check_version(held.as_ref(), calendar_id, item_id, if_match)?;
         self.check_online_meeting(calendar_id, Some(stored.seq), current.as_deref(), &contents)?;
 
         // NOTE: `check_version` passed, so `if_match` names the body the
         // item holds.
-        let read = if_match.and(stored.object);
+        let read = if_match.and(held);
 
         let mut producer = self.client.producer()?;
         enqueue_with_body(&mut producer, calendar_id, &contents, |hash| {
@@ -444,13 +445,17 @@ impl PimdirBackend {
         self.check_synced(calendar_id)?;
 
         let stored = self.item(calendar_id, item_id)?;
-        check_version(&stored, calendar_id, item_id, if_match)?;
+        let held = match self.local_body(&stored)? {
+            Some(_) => stored.object.clone(),
+            None => None,
+        };
+        check_version(held.as_ref(), calendar_id, item_id, if_match)?;
 
         // NOTE: `check_version` passed, so `if_match` names the body the
         // item holds.
         let action = PimdirAction::Remove {
             seq: stored.seq,
-            if_match: if_match.and(stored.object),
+            if_match: if_match.and(held),
             resolves: None,
         };
 
@@ -919,6 +924,15 @@ impl PimdirBackend {
         })
     }
 
+    /// The body the blob tree holds for `stored`, `None` when it is not
+    /// local: never fetched, or its blob gone (pimdir STORAGE §7).
+    fn local_body(&self, stored: &PimdirItem) -> Result<Option<Vec<u8>>> {
+        match &stored.object {
+            Some(hash) => Ok(self.client.blobs.get(hash)?),
+            None => Ok(None),
+        }
+    }
+
     /// An item's local body, `None` when the sync has not fetched it.
     ///
     /// An item naming an object whose blob is absent, or fails its name,
@@ -1081,7 +1095,7 @@ pub const PRECONDITION_FAILED: &str = "Precondition failed";
 /// whose body is not local has no version to match. Surrounding double
 /// quotes are dropped, so an HTTP-quoted tag matches as well.
 fn check_version(
-    stored: &PimdirItem,
+    held: Option<&PimdirHash>,
     calendar_id: &str,
     item_id: &str,
     if_match: Option<&str>,
@@ -1090,7 +1104,7 @@ fn check_version(
         return Ok(());
     };
     let expected = expected.trim().trim_matches('"');
-    let current = stored.object.as_ref().map(|hash| hash.0.as_str());
+    let current = held.map(|hash| hash.0.as_str());
 
     if current == Some(expected) {
         return Ok(());
@@ -2938,6 +2952,43 @@ mod tests {
             assert_eq!(code_of(&err), Some(ErrorCode::BodyPending), "{err:#}");
         }
         assert_eq!(pending(&backend), 0);
+    }
+
+    /// An item whose blob is gone holds no version: `--if-match` naming
+    /// its former hash is stale, and an update naming none is queued over
+    /// whatever the item holds, as cardamum does.
+    #[test]
+    fn a_write_over_a_missing_body_matches_no_version() {
+        use pimalaya_cli::error::code_of;
+
+        let (dir, mut backend, ids) = store(&[ALONE]);
+        let former = backend.item("cal", &ids[0]).unwrap().object.unwrap().0;
+        for blob in blob_files(dir.path()) {
+            std::fs::remove_file(blob).unwrap();
+        }
+
+        let stale = backend
+            .update_item("cal", &ids[0], ALONE.as_bytes().to_vec(), Some(&former))
+            .unwrap_err();
+        assert_eq!(
+            code_of(&stale),
+            Some(ErrorCode::PreconditionFailed),
+            "{stale:#}"
+        );
+        let stale = backend
+            .delete_item("cal", &ids[0], Some(&former))
+            .unwrap_err();
+        assert_eq!(
+            code_of(&stale),
+            Some(ErrorCode::PreconditionFailed),
+            "{stale:#}"
+        );
+        assert_eq!(pending(&backend), 0);
+
+        backend
+            .update_item("cal", &ids[0], ALONE.as_bytes().to_vec(), None)
+            .unwrap();
+        assert_eq!(pending(&backend), 1);
     }
 
     /// A body the store cannot read lists empty beside an `item-unreadable`

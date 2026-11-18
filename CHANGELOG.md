@@ -152,6 +152,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed a pimdir `item update` or `event update` given a source over an event whose body is gone failing `body-pending` where cardamum queues it, and `--if-match` naming the hash of that gone body passing: it is queued, and any `--if-match` fails `precondition-failed`.
 - Fixed a pimdir event whose body is not downloaded yet vanishing from `event list`, `event search` and `event agenda` while the page line counted it: it shows from the store's summary, as `pimdir search` shows it.
 - Fixed a pimdir write to a calendar no source syncs being queued for nobody: it is refused before anything is queued, coded `no-performer`, as cardamum refuses one.
 - Fixed a `pimdir.account` naming no account of the store loading as an empty one, `account check` passing: it is refused, naming the accounts the store holds.
