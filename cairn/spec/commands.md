@@ -319,6 +319,8 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 | `store-not-current` | the pimdir store holds no schema yet and the verb creates none: its sync engine creates it |
 | `store-hash-algo` | the pimdir store names its bodies by a hash this calendula does not know: upgrade calendula |
 | `sync-version` | the pimdir store's sync state was written by another version of its sync engine |
+| `store-account-ambiguous` | `pimdir.account` is unset and several accounts of the pimdir store hold calendars; name one |
+| `store-account-unknown` | `pimdir.account` names no account of the pimdir store |
 | `store-busy` | another process holds the pimdir store; retry |
 | `store-owned` | a sync owns the pimdir store; retry once it ends |
 | `store-staging` | a producer is staging a body in the pimdir store; retry |

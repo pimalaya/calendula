@@ -105,18 +105,25 @@ impl PimdirClient {
 ///
 /// A store one account syncs groups its collections under that name, or
 /// under none in a store predating the grouping, so the common case
-/// needs no configuration. A store several accounts share is what
-/// `pimdir.account` answers, and leaving it unset there errors rather
-/// than merging their calendars into one view.
+/// needs no configuration. A store whose calendars several accounts hold
+/// is what `pimdir.account` answers, and leaving it unset there errors
+/// rather than merging their calendars into one view; an account holding
+/// no calendar is not counted.
 fn resolve_account(reader: &PimdirReader, configured: Option<String>) -> Result<Option<String>> {
-    let mut accounts: Vec<Option<String>> = reader
+    let collections = reader
         .list_collections()
-        .map_err(|err| store_error(err, "List pimdir collections"))?
-        .into_iter()
-        .map(|collection| collection.account)
-        .collect();
-    accounts.sort();
-    accounts.dedup();
+        .map_err(|err| store_error(err, "List pimdir collections"))?;
+
+    let accounts_of = |calendars_only: bool| {
+        let mut accounts: Vec<Option<String>> = collections
+            .iter()
+            .filter(|collection| !calendars_only || is_calendar_kind(&collection.kind))
+            .map(|collection| collection.account.clone())
+            .collect();
+        accounts.sort();
+        accounts.dedup();
+        accounts
+    };
 
     let names = |accounts: &[Option<String>]| {
         accounts
@@ -127,23 +134,39 @@ fn resolve_account(reader: &PimdirReader, configured: Option<String>) -> Result<
     };
 
     if let Some(account) = &configured {
+        let accounts = accounts_of(false);
+
         if !accounts.is_empty() && !accounts.contains(&configured) {
-            return Err(anyhow!(
+            let message = format!(
                 "The pimdir store holds no account `{account}` ({}); fix `pimdir.account`",
                 names(&accounts),
-            ));
+            );
+            return Err(CodedError::new(ErrorCode::StoreAccountUnknown, message).into());
         }
 
         return Ok(configured);
     }
 
+    let accounts = accounts_of(true);
+
     match accounts.as_slice() {
         [] | [_] => Ok(accounts.into_iter().next().flatten()),
-        _ => Err(anyhow!(
-            "The pimdir store holds several accounts ({}); name one with `pimdir.account`",
-            names(&accounts),
-        )),
+        _ => {
+            let message = format!(
+                "The pimdir store holds several accounts of calendars ({}); name one with \
+                 `pimdir.account`",
+                names(&accounts),
+            );
+            Err(CodedError::new(ErrorCode::StoreAccountAmbiguous, message).into())
+        }
     }
+}
+
+/// Whether a collection of `kind` holds calendar objects: `text/calendar`,
+/// its parameters aside, or no kind at all, as a store synced before
+/// kinds were recorded writes.
+fn is_calendar_kind(kind: &str) -> bool {
+    kind.is_empty() || kind.split(';').next().unwrap_or_default().trim() == "text/calendar"
 }
 
 /// The pimdir codes calendula relays, by io-pimdir's spelling, which

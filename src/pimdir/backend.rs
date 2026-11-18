@@ -1440,6 +1440,52 @@ mod tests {
         assert!(err.contains("pimdir.account"), "{err}");
     }
 
+    /// An account holding no calendar makes no store ambiguous, as
+    /// himalaya counts accounts holding mail; several holding calendars
+    /// do, coded.
+    #[test]
+    fn an_account_holding_no_calendar_is_not_counted() {
+        use pimalaya_cli::error::code_of;
+
+        let dir = tempfile::tempdir().unwrap();
+        let open = || {
+            PimdirBackend::new(crate::config::PimdirConfig {
+                root: dir.path().to_path_buf(),
+                account: None,
+            })
+        };
+        for (account, collection, kind) in [
+            ("work", "caldav/work", CALENDAR_KIND),
+            ("cards", "carddav/book", "text/vcard"),
+        ] {
+            io_pimdir::client::PimdirStore::open(dir.path())
+                .unwrap()
+                .for_account(account)
+                .ensure_collection(collection, kind)
+                .unwrap();
+        }
+        let mut backend = open().unwrap();
+        assert_eq!(backend.status().unwrap().account.as_deref(), Some("work"));
+        drop(backend);
+
+        io_pimdir::client::PimdirStore::open(dir.path())
+            .unwrap()
+            .for_account("home")
+            .ensure_collection("caldav/home", CALENDAR_KIND)
+            .unwrap();
+        let err = open().err().unwrap();
+        assert_eq!(
+            code_of(&err),
+            Some(ErrorCode::StoreAccountAmbiguous),
+            "{err:#}"
+        );
+        assert!(
+            err.to_string()
+                .contains("accounts of calendars (home, work)"),
+            "{err:#}"
+        );
+    }
+
     /// CAL-14: a `pimdir.account` the store holds no collection of is
     /// refused, naming those it holds, rather than read as empty.
     #[test]
@@ -1456,9 +1502,13 @@ mod tests {
             account: Some("wrok".into()),
         })
         .err()
-        .unwrap()
-        .to_string();
+        .unwrap();
 
+        assert_eq!(
+            pimalaya_cli::error::code_of(&err),
+            Some(ErrorCode::StoreAccountUnknown)
+        );
+        let err = err.to_string();
         assert!(err.contains("no account `wrok` (work)"), "{err}");
     }
 

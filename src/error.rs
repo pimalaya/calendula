@@ -128,6 +128,12 @@ pub enum ErrorCode {
     /// The pimdir store's sync state was written by another version of
     /// its sync engine.
     SyncVersion,
+    /// The pimdir store holds several accounts of calendars and
+    /// `pimdir.account` names none: nothing was read.
+    StoreAccountAmbiguous,
+    /// The pimdir store holds no collection of the account
+    /// `pimdir.account` names: nothing was read.
+    StoreAccountUnknown,
     /// Another process holds the pimdir store: the caller retries.
     StoreBusy,
     /// A sync owns the pimdir store: the caller retries once it ends.
