@@ -166,6 +166,10 @@ impl MsgraphBackend {
 
     /// Lists the lone events and series masters of a calendar, projected
     /// onto iCalendar documents, a range filtering them locally.
+    ///
+    /// A window without a range is cut over the listed events before a
+    /// series master is read again, so a page reads its own masters alone,
+    /// an event it could not read keeping its place beside its entry.
     pub fn list_items(
         &mut self,
         calendar_id: &str,
@@ -201,11 +205,20 @@ impl MsgraphBackend {
             page = self.client.events_list_from_link(&next)?.response;
         }
 
+        let mut events = unique(events)?;
+        let places = match (query.range, query.take) {
+            (None, Some(take)) => {
+                events = window(events, query.skip, Some(take));
+                Some(events.iter().map(|event| event.id.clone()).collect())
+            }
+            _ => None,
+        };
+
         let days = range_days(query.range)?;
         let within = read_within(query.range, today())?;
         let mut items = Vec::new();
         let mut errors = Vec::new();
-        for event in unique(events)? {
+        for event in events {
             // NOTE: a series out of the range lists nothing, so it is not
             // read again: a calendar keeps every series it ever had.
             if !reaches(&event, days) {
@@ -231,6 +244,14 @@ impl MsgraphBackend {
 
         // NOTE: the whole calendar is read for each window, so its errors
         // are named on the first alone.
+        if places.is_some() {
+            return Ok(CalendarItemList {
+                items,
+                errors,
+                places,
+            });
+        }
+
         if query.skip > 0 {
             errors.clear();
         }
@@ -238,6 +259,7 @@ impl MsgraphBackend {
         Ok(CalendarItemList {
             items: window(items, query.skip, query.take),
             errors,
+            places: None,
         })
     }
 
@@ -1469,5 +1491,67 @@ pub(crate) mod scripted {
         };
         assert_eq!(entry.id.as_deref(), Some("S1"));
         assert_eq!(entry.code, Some(ErrorCode::PermissionDenied));
+    }
+
+    /// A window of `take` places past `skip`.
+    fn places(skip: usize, take: usize) -> CalendarItemQuery<'static> {
+        CalendarItemQuery {
+            skip,
+            take: Some(take),
+            ..Default::default()
+        }
+    }
+
+    /// CAL-9: a window without a range is cut before a series master is
+    /// read again, so a master past the page is never requested.
+    #[test]
+    fn a_graph_page_reads_its_own_masters() {
+        let listing = r#"{"value":[
+            {"id":"L1","changeKey":"k1","subject":"One","type":"singleInstance"},
+            {"id":"L2","changeKey":"k1","subject":"Two","type":"singleInstance"},
+            {"id":"S1","changeKey":"k1","type":"seriesMaster"}
+        ]}"#;
+
+        let mut backend = answering(&[(200, listing)]);
+        let listed = backend.list_items("cal", places(0, 2)).unwrap();
+        let ids: Vec<&str> = listed.items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(ids, ["L1", "L2"]);
+        assert!(listed.errors.is_empty(), "{:?}", listed.errors);
+
+        let requests = requests(&mut backend);
+        assert_eq!(requests.len(), 1, "{requests:?}");
+        assert!(!requests.iter().any(|line| line.contains("S1")));
+    }
+
+    /// A master the server refuses to read again keeps its place, its entry
+    /// on its own page, so the pages of 1 item show each event once.
+    #[test]
+    fn an_unreadable_master_keeps_its_place_and_no_event_shifts() {
+        let listing = r#"{"value":[
+            {"id":"S1","changeKey":"k1","type":"seriesMaster"},
+            {"id":"L1","changeKey":"k1","subject":"One","type":"singleInstance"}
+        ]}"#;
+        let denied = refusal("ErrorAccessDenied");
+
+        let first = answering(&[(200, listing), (403, &denied)])
+            .list_items("cal", places(0, 2))
+            .unwrap()
+            .into_page(Some(1));
+        assert!(first.items.is_empty(), "{:?}", first.items);
+        assert!(first.more);
+        let [entry] = &first.errors[..] else {
+            panic!("{:?}", first.errors);
+        };
+        assert_eq!(entry.id.as_deref(), Some("S1"));
+        assert_eq!(entry.code, Some(ErrorCode::PermissionDenied));
+
+        let second = answering(&[(200, listing)])
+            .list_items("cal", places(1, 2))
+            .unwrap()
+            .into_page(Some(1));
+        let ids: Vec<&str> = second.items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(ids, ["L1"]);
+        assert!(!second.more);
+        assert!(second.errors.is_empty(), "{:?}", second.errors);
     }
 }

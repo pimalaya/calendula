@@ -255,6 +255,44 @@ pub struct CalendarItemList {
     pub items: Vec<CalendarItem>,
     /// The error of each item the backend could not read.
     pub errors: Vec<ItemError>,
+    /// The ids of the listed places the window covers, in order, from a
+    /// backend cutting its window before it reads the bodies: an item it
+    /// could not read keeps its place. `None` when the window counts the
+    /// items read alone.
+    pub places: Option<Vec<String>>,
+}
+
+impl CalendarItemList {
+    /// Cuts a window read one place past a page of `size` into that page,
+    /// every item when `size` is `None`.
+    ///
+    /// The place past the page is the next page's, and so are its item and
+    /// an entry naming it; that it exists says another page follows.
+    pub fn into_page(self, size: Option<usize>) -> CalendarItemPage {
+        let Self {
+            mut items,
+            mut errors,
+            places,
+        } = self;
+
+        let mut places =
+            places.unwrap_or_else(|| items.iter().map(|item| item.id.clone()).collect());
+        let more = size.is_some_and(|size| places.len() > size);
+
+        if let Some(size) = size
+            && more
+        {
+            let past: Vec<String> = places.drain(size..).collect();
+            items.retain(|item| !past.contains(&item.id));
+            errors.retain(|error| error.id.as_ref().is_none_or(|id| !past.contains(id)));
+        }
+
+        CalendarItemPage {
+            items,
+            more,
+            errors,
+        }
+    }
 }
 
 /// One page of an item listing, and whether an item follows it.
@@ -312,7 +350,7 @@ pub struct CalendarItemQuery<'a> {
     /// without reading it, and the caller still compares every event it
     /// gets. Leaving items out would shift a window, so a backend honours
     /// it only on a listing taking every item.
-    #[cfg_attr(not(feature = "pimdir"), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "pimdir", feature = "gcal")), allow(dead_code))]
     pub uid: Option<&'a str>,
 }
 

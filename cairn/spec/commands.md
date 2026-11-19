@@ -263,7 +263,7 @@ An item SHALL print as one row in `item list`, `item read` and `event read`: `{i
 `event search <UID>` SHALL list, unexpanded, every VEVENT of the calendar carrying that `UID`, with the id the other `event` commands take. `find` SHALL stay its hidden alias.
 
 ### Requirement: A UID hint narrows a search
-The listing query MAY carry a `UID`, which `event search` sets. A backend MAY leave out an item it can tell carries another `UID` without reading it, and SHALL ignore the hint on a listing naming a page size, which leaving items out would shift. The caller SHALL still compare the `UID` of every event it gets.
+The listing query MAY carry a `UID`, which `event search` sets. A backend MAY leave out an item it can tell carries another `UID` without reading it, and SHALL ignore the hint on a listing naming a page size, which leaving items out would shift. pimdir rules an item out by its summary, and Google Calendar SHALL send it as the `iCalUID` filter of `events.list`, so a search reads the series and its exceptions alone rather than every page of the calendar. The caller SHALL still compare the `UID` of every event it gets.
 
 ### Requirement: An event is named by its id alone
 `event read`, `event update` and `event delete` SHALL take the id `event list` reports and never an iCalendar `UID`, which `event search` turns into that id: resolving a `UID` costs a listing of the whole calendar on every backend but pimdir. `event delete` SHALL read the id first: a read answering `item-not-found` SHALL fail the command coded `item-not-found`, its message naming `event search <UID>` ("A missing item reads one sentence"), and list nothing; any other failure of the read SHALL fail the command with its code; a read answering `body-pending` (pimdir) names the item all the same. The item SHALL be deleted whole.
@@ -525,7 +525,7 @@ A composer SHALL be a command the configuration names, spawned on the path of a 
 
 The file SHALL be created afresh in the temporary directory (pimalaya-cli's `file::private_options`, `create_new`): on Unix readable by its owner alone whatever the umask, and never written through a file or a symbolic link another user planted at its path, which fails the command instead.
 
-The path SHALL be appended as the command's last argument. For a shell line that means interpolating it into the line, single-quoted, since a shell invoked as `sh -c <line> <path>` binds the path to `$0` rather than passing it on.
+The path SHALL be appended as the command's last argument. For a shell line that means interpolating it into the line through pimalaya-cli's `shell::quote`, single-quoted on a POSIX shell and double-quoted on Windows, where the line runs under `cmd /C`, since a shell invoked as `sh -c <line> <path>` binds the path to `$0` rather than passing it on.
 
 ### Requirement: The composer's own exit is the decision
 When the composer exits, what it left in the file SHALL settle the edit, and nothing SHALL be asked after it. A file that came back changed is the item, and the command writes it. A file the composer emptied, and one handed back byte for byte as it was given, are an edit given up on: nothing is written, and nothing failed. A non-zero exit status is a failure and SHALL be reported as one.

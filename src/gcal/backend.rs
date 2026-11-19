@@ -178,7 +178,9 @@ impl GcalBackend {
     /// A range narrows the query server-side, and the pagination stops as
     /// soon as the requested window is covered, counted in the resources
     /// the events fold into, so a page the caller never reaches is never
-    /// fetched.
+    /// fetched. A listing taking every item narrows to the `UID` asked
+    /// for through the `iCalUID` filter, which keeps a series with its
+    /// exceptions.
     pub fn list_items(
         &mut self,
         calendar_id: &str,
@@ -198,6 +200,7 @@ impl GcalBackend {
         let time_min = range.and_then(|range| range.start.as_deref()).map(rfc3339);
         let time_max = range.and_then(|range| range.end.as_deref()).map(rfc3339);
         let wanted = query.take.map(|take| query.skip.saturating_add(take));
+        let ical_uid = query.uid.filter(|_| query.take.is_none());
 
         let mut events = Vec::new();
         let mut page_token: Option<String> = None;
@@ -208,6 +211,7 @@ impl GcalBackend {
                 page_token: page_token.as_deref(),
                 time_min: time_min.as_deref(),
                 time_max: time_max.as_deref(),
+                ical_uid,
                 ..Default::default()
             };
             let current = self.client.events_list(calendar_id, &params)?.response;
@@ -228,6 +232,7 @@ impl GcalBackend {
         Ok(CalendarItemList {
             items: window(items, query.skip, query.take),
             errors: Vec::new(),
+            places: None,
         })
     }
 
@@ -937,6 +942,36 @@ mod tests {
         assert_eq!(requests.matches("GET ").count(), 2, "{requests}");
         assert!(requests.contains("iCalUID=e1%40example.org"), "{requests}");
         assert!(!requests.contains("POST "), "{requests}");
+    }
+
+    /// CAL-9: a search for one `UID` asks Google for it alone, where a
+    /// page holds a window and so no filter.
+    #[test]
+    fn a_uid_search_lists_through_the_ical_uid_filter() {
+        let held = r#"{"items":[{"id":"e1","iCalUID":"e1@example.org"}]}"#;
+
+        let mut searched = backend(&[held]);
+        let query = CalendarItemQuery {
+            uid: Some("e1@example.org"),
+            ..Default::default()
+        };
+        let listed = searched.list_items("primary", query).unwrap();
+        assert_eq!(listed.items.len(), 1);
+
+        let requests = written(&mut searched);
+        assert_eq!(requests.matches("GET ").count(), 1, "{requests}");
+        assert!(requests.contains("iCalUID=e1%40example.org"), "{requests}");
+
+        let mut paged = backend(&[held]);
+        let query = CalendarItemQuery {
+            take: Some(1),
+            uid: Some("e1@example.org"),
+            ..Default::default()
+        };
+        paged.list_items("primary", query).unwrap();
+
+        let requests = written(&mut paged);
+        assert!(!requests.contains("iCalUID="), "{requests}");
     }
 
     /// An event write answered 400 refuses the event sent, every parameter

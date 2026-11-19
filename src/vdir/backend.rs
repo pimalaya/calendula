@@ -175,6 +175,7 @@ impl VdirBackend {
         Ok(CalendarItemList {
             items: window(items, query.skip, query.take),
             errors,
+            places: None,
         })
     }
 

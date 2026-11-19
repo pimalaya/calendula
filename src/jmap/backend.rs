@@ -224,7 +224,11 @@ impl JmapBackend {
             }
         }
 
-        Ok(CalendarItemList { items, errors })
+        Ok(CalendarItemList {
+            items,
+            errors,
+            places: None,
+        })
     }
 
     /// The events `filter` matches, the `take` after the first `skip`, in

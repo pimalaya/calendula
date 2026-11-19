@@ -194,13 +194,21 @@ impl CaldavBackend {
     ///
     /// A range narrows the query server-side rather than locally. Each row
     /// the server answered without the item's data is an entry, as is a
-    /// listing the server truncated, on the first window alone since the
-    /// whole calendar is read before the window is cut.
+    /// listing the server truncated, on the first window alone.
+    ///
+    /// A window enumerates the references, cuts its places over them and
+    /// fetches their bodies alone through a `calendar-multiget`, a place
+    /// whose body the server refused kept beside its entry; a listing
+    /// taking every item reads every body in the one REPORT.
     pub fn list_items(
         &mut self,
         calendar_id: &str,
         query: CalendarItemQuery<'_>,
     ) -> Result<CalendarItemList> {
+        if let Some(take) = query.take {
+            return self.list_places(calendar_id, &query, take);
+        }
+
         let listed = self.client.list_items(calendar_id, &comp_filter(&query))?;
 
         let items = listed
@@ -224,6 +232,65 @@ impl CaldavBackend {
         Ok(CalendarItemList {
             items: window(items, query.skip, query.take),
             errors,
+            places: None,
+        })
+    }
+
+    /// The window of `take` places past `query.skip`, read through an
+    /// enumeration and one `calendar-multiget` of its bodies.
+    fn list_places(
+        &mut self,
+        calendar_id: &str,
+        query: &CalendarItemQuery<'_>,
+        take: usize,
+    ) -> Result<CalendarItemList> {
+        let listed = self.client.enum_items(calendar_id, &comp_filter(query))?;
+        let refs = listed.refs.into_iter().skip(query.skip).take(take);
+        let places: Vec<String> = refs.map(|reference| reference.id).collect();
+
+        let mut errors = Vec::new();
+        if listed.truncated && query.skip == 0 {
+            errors.push(truncated());
+        }
+
+        if places.is_empty() {
+            return Ok(CalendarItemList {
+                items: Vec::new(),
+                errors,
+                places: Some(places),
+            });
+        }
+
+        let ids: Vec<&str> = places.iter().map(String::as_str).collect();
+        let fetched = self.client.multiget_items(calendar_id, &ids)?;
+
+        let mut items: Vec<CalendarItem> = fetched
+            .items
+            .into_iter()
+            .filter(|entry| places.contains(&entry.id))
+            .map(|entry| item_from(calendar_id, entry))
+            .collect();
+        items.sort_by_key(|item| places.iter().position(|id| *id == item.id));
+
+        let mut refused: Vec<ItemError> =
+            fetched.unreadable.into_iter().map(unreadable_row).collect();
+        for id in &places {
+            let read = items.iter().any(|item| item.id == *id);
+            let named = refused.iter().any(|error| error.id.as_ref() == Some(id));
+            if !read && !named {
+                refused.push(unanswered(id));
+            }
+        }
+        refused.sort_by_key(|error| {
+            let id = error.id.as_ref();
+            places.iter().position(|place| Some(place) == id)
+        });
+        errors.extend(refused);
+
+        Ok(CalendarItemList {
+            items,
+            errors,
+            places: Some(places),
         })
     }
 
@@ -427,6 +494,16 @@ pub(crate) fn unreadable_row(row: WebdavUnreadableEntry) -> ItemError {
         code: Some(code),
         error,
         sources: row.failures.iter().map(ToString::to_string).collect(),
+    }
+}
+
+/// The entry of a place a `calendar-multiget` answered no row for.
+fn unanswered(id: &str) -> ItemError {
+    ItemError {
+        id: Some(id.to_owned()),
+        code: Some(ErrorCode::ItemUnreadable),
+        error: String::from("The server sent nothing for the item"),
+        sources: Vec::new(),
     }
 }
 
@@ -1137,19 +1214,94 @@ END:VCALENDAR&#13;
         );
     }
 
-    /// The whole calendar is read before the window is cut, so the entries
-    /// print on the first window only.
-    #[test]
-    fn a_caldav_listing_names_its_rows_on_the_first_window_only() {
-        let query = CalendarItemQuery {
-            skip: 1,
-            take: Some(2),
-            ..Default::default()
-        };
-        let listed = answering(207, LISTING).list_items("cal", query).unwrap();
+    /// A `calendar-query` naming `e1.ics` to `e4.ics` by their entity tags
+    /// alone.
+    const REFERENCES: &str = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response><d:href>/calendars/me/cal/e1.ics</d:href><d:propstat><d:prop><d:getetag>"1"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+  <d:response><d:href>/calendars/me/cal/e2.ics</d:href><d:propstat><d:prop><d:getetag>"2"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+  <d:response><d:href>/calendars/me/cal/e3.ics</d:href><d:propstat><d:prop><d:getetag>"3"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+  <d:response><d:href>/calendars/me/cal/e4.ics</d:href><d:propstat><d:prop><d:getetag>"4"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+</d:multistatus>"#;
 
-        assert!(listed.items.is_empty());
-        assert!(listed.errors.is_empty(), "{:?}", listed.errors);
+    /// A `calendar-multiget` answering each of `ids` with its body, or
+    /// with a 403 for the one named `refused`.
+    fn bodies(ids: &[&str], refused: Option<&str>) -> String {
+        let row = |id: &&str| match refused == Some(*id) {
+            true => format!(
+                "<d:response><d:href>/calendars/me/cal/{id}</d:href>\
+                 <d:status>HTTP/1.1 403 Forbidden</d:status></d:response>"
+            ),
+            false => format!(
+                "<d:response><d:href>/calendars/me/cal/{id}</d:href><d:propstat><d:prop>\
+                 <d:getetag>\"1\"</d:getetag><c:calendar-data>BEGIN:VCALENDAR&#13;\n\
+                 END:VCALENDAR&#13;\n</c:calendar-data></d:prop>\
+                 <d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+            ),
+        };
+        let rows: String = ids.iter().map(row).collect();
+        format!(
+            "<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\" \
+             xmlns:c=\"urn:ietf:params:xml:ns:caldav\">{rows}</d:multistatus>"
+        )
+    }
+
+    /// A window of `take` places past `skip`.
+    fn places(skip: usize, take: usize) -> CalendarItemQuery<'static> {
+        CalendarItemQuery {
+            skip,
+            take: Some(take),
+            ..Default::default()
+        }
+    }
+
+    /// CAL-9: a window asks the references with no body, then the bodies
+    /// of its own places alone.
+    #[test]
+    fn a_caldav_page_reads_its_own_bodies() {
+        let answer = bodies(&["e2.ics", "e3.ics"], None);
+        let (mut backend, written) = scripted(&[(207, REFERENCES), (207, &answer)]);
+        let listed = backend.list_items("cal", places(1, 2)).unwrap();
+
+        let ids: Vec<&str> = listed.items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(ids, ["e2.ics", "e3.ics"]);
+        assert_eq!(
+            listed.places,
+            Some(vec![String::from("e2.ics"), String::from("e3.ics")])
+        );
+
+        let requests = requests(&written);
+        let (query, multiget) = requests.split_once("calendar-multiget").unwrap();
+        assert!(!query.contains("calendar-data"), "{requests}");
+        assert!(multiget.contains("e2.ics") && multiget.contains("e3.ics"));
+        assert!(!multiget.contains("e1.ics") && !multiget.contains("e4.ics"));
+    }
+
+    /// A body the server refuses keeps its place, its entry on its own
+    /// page, so the pages of 2 items show each item once and in order.
+    #[test]
+    fn an_unreadable_row_keeps_its_place_and_no_item_shifts() {
+        let page = |skip, answer: &str| {
+            let (mut backend, _) = scripted(&[(207, REFERENCES), (207, answer)]);
+            backend
+                .list_items("cal", places(skip, 3))
+                .unwrap()
+                .into_page(Some(2))
+        };
+
+        let first = page(0, &bodies(&["e1.ics", "e2.ics", "e3.ics"], Some("e2.ics")));
+        let ids: Vec<&str> = first.items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(ids, ["e1.ics"]);
+        assert!(first.more);
+        assert_eq!(first.errors.len(), 1, "{:?}", first.errors);
+        assert_eq!(first.errors[0].id.as_deref(), Some("e2.ics"));
+        assert_eq!(first.errors[0].code, Some(ErrorCode::PermissionDenied));
+
+        let second = page(2, &bodies(&["e3.ics", "e4.ics"], None));
+        let ids: Vec<&str> = second.items.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(ids, ["e3.ics", "e4.ics"]);
+        assert!(!second.more);
+        assert!(second.errors.is_empty(), "{:?}", second.errors);
     }
 
     /// A listed item is the whole body the server sent, the final CRLF it

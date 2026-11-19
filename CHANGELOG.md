@@ -55,6 +55,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
+- Changed a paged `item list` and `event list` without a range on CalDAV to read the bodies of its page alone (a `calendar-query` for the references, then one `calendar-multiget`), and on Microsoft Graph to read again the series masters of its page alone, where both read the whole calendar for each page. A row the server refuses is now named on the page it falls on, holding its place there, where it was named on the first page only.
+- Changed `event search <UID>` on Google Calendar to list through the `iCalUID` filter of `events.list`, reading the series and its exceptions alone where it walked every page of the calendar.
 - Changed `item create` and `item update` given an iCalendar (a file, raw contents or stdin) on a pimdir account to queue it without its `X-PIMDIR-` properties (pimdir STORAGE §18), where an `X-PIMDIR-ONLINE-MEETING` it carried was read as the user's ask and gated: an imported file asks the sync engine for nothing. The `event` commands, and an item composed with `-i` from the blank or the stored item, keep queueing the body whole. **Breaking.**
 - **BREAKING**: made `gcal colors`, `gcal free-busy`, `msgraph calendars get`, `msgraph events get` and `msgraph profile get` print under `--json` what the API answered, as it sent it, every property kept, where `gcal colors` printed `{colors}` and `gcal free-busy` `{calendars: [{id, busy, queryErrors}]}`, and the Graph reads the properties io-msgraph models. Their text forms are unchanged.
 - **BREAKING**: made a server's refusal of a `caldav`, `gcal` or `msgraph` command, the `request` commands included, the command's result, `{refusal: {status, reason, message, code, retryAfter}}`, exit 3, where it failed with exit 1, as himalaya's protocol namespaces do.
@@ -160,6 +162,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed a shell composer failing to open its draft on Windows: the path is double-quoted there, where the line runs under `cmd /C`, and single-quoted elsewhere as before.
 - Fixed `event update` and `item update -i` on Microsoft Graph failing `precondition-failed` right after the event was created, in about one run out of four: Exchange moves an event's `changeKey` by itself about a second after a create, restamping only `DTSTAMP` and `LAST-MODIFIED`, so the key calendula read before the write no longer matched the one it read again. Against calendula's own read, a moved key whose body differs in those two lines alone now lets the update through; any other difference, and a `--if-match` given on the command line, still refuse it.
 - Fixed install.sh saving an HTTP error page as the archive and letting `tar` fail on it: it downloads with `curl -fsSLo` and stops on the error.
 - Fixed a pimdir store shared with an account holding no calendar (a mail account) refusing an unset `pimdir.account` as ambiguous: only the accounts holding calendars count. The two refusals are coded `store-account-ambiguous` and `store-account-unknown`, as himalaya and cardamum code them.

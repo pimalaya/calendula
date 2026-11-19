@@ -20,7 +20,7 @@ use std::{
 
 use anyhow::{Context, Error, Result, anyhow, bail};
 use log::{debug, info};
-use pimalaya_cli::{file::private_options, printer::Printer, prompt};
+use pimalaya_cli::{file::private_options, printer::Printer, prompt, shell::quote};
 use pimalaya_config::command::{self, CommandConfig};
 
 use crate::shared::{ical::check, uuid::uuid_v4};
@@ -187,11 +187,6 @@ impl IcalDraft {
     }
 }
 
-/// Single-quotes a path for a shell command line.
-fn quote(path: &str) -> String {
-    format!("'{}'", path.replace('\'', r"'\''"))
-}
-
 /// Writes `seed` to a new file at `path`, the composer's draft.
 ///
 /// The draft can hold private data (an attendee, a description), so it is
@@ -210,7 +205,7 @@ fn write_draft(path: &Path, seed: &[u8]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{quote, write_draft};
+    use super::write_draft;
 
     /// The draft is its owner's alone, and a path another user holds
     /// first, a file or a link to one, is refused rather than written
@@ -236,12 +231,5 @@ mod tests {
         assert!(write_draft(&planted, b"mine").is_err());
         assert!(write_draft(&target, b"mine").is_err());
         assert_eq!(std::fs::read(&target).unwrap(), b"theirs");
-    }
-
-    #[test]
-    fn a_quoted_path_survives_a_quote_of_its_own() {
-        assert_eq!(quote("/tmp/plain.ics"), "'/tmp/plain.ics'");
-        assert_eq!(quote("/tmp/a b.ics"), "'/tmp/a b.ics'");
-        assert_eq!(quote("/tmp/it's.ics"), r"'/tmp/it'\''s.ics'");
     }
 }
