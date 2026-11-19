@@ -384,8 +384,8 @@ mod tests {
 
     /// A store holding the calendars `cal` and `other`, one event queued
     /// for creation in `cal`, and a backend over it.
-    fn store() -> (tempfile::TempDir, PimdirBackend) {
-        let dir = tempfile::tempdir().unwrap();
+    fn store() -> (crate::pimdir::client::StoreDir, PimdirBackend) {
+        let dir = crate::pimdir::client::store_dir();
         let store = PimdirStore::open(dir.path()).unwrap();
         store.ensure_collection("cal", "text/calendar").unwrap();
         store.ensure_collection("other", "text/calendar").unwrap();

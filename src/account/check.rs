@@ -364,7 +364,7 @@ mod pimdir_tests {
     /// not reach, and the check stages nothing into the blob tree.
     #[test]
     fn a_held_staging_lock_fails_the_check_as_busy() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::pimdir::client::store_dir();
         PimdirStore::open(dir.path())
             .unwrap()
             .ensure_collection("cal", "text/calendar")

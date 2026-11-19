@@ -239,6 +239,37 @@ fn version_message(found: Option<&str>, own: &str, context: impl fmt::Display) -
     format!("{context}: {refusal}")
 }
 
+/// A temporary directory holding a pimdir store this process owns for as
+/// long as the directory lives.
+///
+/// A store opened again after its last handle dropped takes its owner lock
+/// anew, and a child another test spawns holds the dropped lock until it
+/// executes, so that open finds the store owned. The handle held here keeps
+/// the lock in this process: every later open shares it.
+#[cfg(test)]
+pub(crate) struct StoreDir {
+    _owner: io_pimdir::client::PimdirStore,
+    dir: tempfile::TempDir,
+}
+
+#[cfg(test)]
+impl std::ops::Deref for StoreDir {
+    type Target = tempfile::TempDir;
+
+    fn deref(&self) -> &tempfile::TempDir {
+        &self.dir
+    }
+}
+
+/// A fresh [`StoreDir`], its store created.
+#[cfg(test)]
+pub(crate) fn store_dir() -> StoreDir {
+    let dir = tempfile::tempdir().unwrap();
+    let owner = io_pimdir::client::PimdirStore::open(dir.path()).unwrap();
+
+    StoreDir { _owner: owner, dir }
+}
+
 /// Records the `caldav` source as syncing `collection` of the store at
 /// `root`, under `account` when given, as a complete sync round does.
 #[cfg(test)]

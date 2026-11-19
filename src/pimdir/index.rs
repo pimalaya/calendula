@@ -651,8 +651,8 @@ mod tests {
 
     /// An indexed store of two calendars, `cal` and `work`, one item of
     /// the latter bodiless.
-    fn indexed_store() -> (tempfile::TempDir, PimdirBackend) {
-        let dir = tempfile::tempdir().unwrap();
+    fn indexed_store() -> (crate::pimdir::client::StoreDir, PimdirBackend) {
+        let dir = crate::pimdir::client::store_dir();
         let store = PimdirStore::open(dir.path()).unwrap();
         store.ensure_collection("cal", "text/calendar").unwrap();
         store.ensure_collection("work", "text/calendar").unwrap();
@@ -819,8 +819,11 @@ mod tests {
 
     /// A store of `items` in `cal`, indexed at [`NOW`] reading floating
     /// times and dates in `zone`.
-    fn zoned_store(zone: &str, items: &[String]) -> (tempfile::TempDir, PimdirBackend) {
-        let dir = tempfile::tempdir().unwrap();
+    fn zoned_store(
+        zone: &str,
+        items: &[String],
+    ) -> (crate::pimdir::client::StoreDir, PimdirBackend) {
+        let dir = crate::pimdir::client::store_dir();
         PimdirStore::open(dir.path())
             .unwrap()
             .ensure_collection("cal", "text/calendar")
@@ -1208,7 +1211,7 @@ mod tests {
 
     #[test]
     fn a_search_reads_the_configured_account_alone() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::pimdir::client::store_dir();
         for account in ["work", "home"] {
             PimdirStore::open(dir.path())
                 .unwrap()

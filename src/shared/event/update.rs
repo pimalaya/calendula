@@ -460,8 +460,8 @@ mod tests {
 
         /// A store holding one calendar, `cal`, carrying `EVENT` as an item
         /// the `caldav` source applied, and its public id.
-        fn store() -> (tempfile::TempDir, String) {
-            let dir = tempfile::tempdir().unwrap();
+        fn store() -> (crate::pimdir::client::StoreDir, String) {
+            let dir = crate::pimdir::client::store_dir();
             let store = io_pimdir::client::PimdirStore::open(dir.path()).unwrap();
             store.ensure_collection("cal", "text/calendar").unwrap();
             drop(store);

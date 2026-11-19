@@ -1401,7 +1401,7 @@ mod tests {
     /// from the role the sync engine recorded (pimdir STORAGE §14).
     #[test]
     fn the_default_calendar_is_the_one_its_store_marks() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::pimdir::client::store_dir();
         {
             let store = io_pimdir::client::PimdirStore::open(dir.path())
                 .unwrap()
@@ -1438,7 +1438,7 @@ mod tests {
     /// under when `pimdir.account` is unset, and never several merged.
     #[test]
     fn an_unset_account_reads_the_only_one_and_refuses_several() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::pimdir::client::store_dir();
         let open = || {
             PimdirBackend::new(crate::config::PimdirConfig {
                 root: dir.path().to_path_buf(),
@@ -1472,7 +1472,7 @@ mod tests {
     fn an_account_holding_no_calendar_is_not_counted() {
         use pimalaya_cli::error::code_of;
 
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::pimdir::client::store_dir();
         let open = || {
             PimdirBackend::new(crate::config::PimdirConfig {
                 root: dir.path().to_path_buf(),
@@ -1515,7 +1515,7 @@ mod tests {
     /// store ambiguous, and no listing shows it.
     #[test]
     fn a_collection_of_no_kind_is_no_calendar() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::pimdir::client::store_dir();
         let open = |account: Option<&str>| {
             PimdirBackend::new(crate::config::PimdirConfig {
                 root: dir.path().to_path_buf(),
@@ -1545,7 +1545,7 @@ mod tests {
     /// a first sync not having run.
     #[test]
     fn a_configured_account_reads_an_empty_store() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::pimdir::client::store_dir();
         io_pimdir::client::PimdirStore::open(dir.path()).unwrap();
 
         let mut backend = PimdirBackend::new(crate::config::PimdirConfig {
@@ -1562,7 +1562,7 @@ mod tests {
     /// refused, naming those it holds, rather than read as empty.
     #[test]
     fn a_configured_account_the_store_lacks_is_refused() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::pimdir::client::store_dir();
         io_pimdir::client::PimdirStore::open(dir.path())
             .unwrap()
             .for_account("work")
@@ -1588,7 +1588,7 @@ mod tests {
     /// queue row, for the account read alone.
     #[test]
     fn status_shows_the_parked_actions_of_the_account_read() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::pimdir::client::store_dir();
         for (account, collection) in [("work", "caldav/work"), ("home", "caldav/home")] {
             io_pimdir::client::PimdirStore::open(dir.path())
                 .unwrap()
@@ -1808,8 +1808,8 @@ mod tests {
     /// A store holding one calendar, `cal`, synced by `caldav` and
     /// carrying `bodies` as items a sync applied, and the backend over it
     /// with their public ids.
-    fn store(bodies: &[&str]) -> (tempfile::TempDir, PimdirBackend, Vec<String>) {
-        let dir = tempfile::tempdir().unwrap();
+    fn store(bodies: &[&str]) -> (crate::pimdir::client::StoreDir, PimdirBackend, Vec<String>) {
+        let dir = crate::pimdir::client::store_dir();
         let store = io_pimdir::client::PimdirStore::open(dir.path()).unwrap();
         store.ensure_collection("cal", CALENDAR_KIND).unwrap();
         drop(store);
@@ -3130,12 +3130,17 @@ mod tests {
             .unwrap()
         };
 
+        let created = || {
+            let dir = tempfile::tempdir().unwrap();
+            io_pimdir::client::PimdirStore::open(dir.path()).unwrap();
+            dir
+        };
         let uncreated = open(&tempfile::tempdir().unwrap());
 
         // NOTE: SQLite keeps `PRAGMA user_version` big-endian at offset 60
         // of the database header.
         let stamped = |version: u32| {
-            let (dir, _, _) = store(&[]);
+            let dir = created();
             let mut db = OpenOptions::new()
                 .write(true)
                 .open(dir.path().join("pimdir.db"))
@@ -3151,7 +3156,7 @@ mod tests {
         // spells its version, so a version of the same length is written
         // over it in place, the page staying well-formed.
         let versioned = |version: &str| {
-            let (dir, _, _) = store(&[]);
+            let dir = created();
             let path = dir.path().join("pimdir.db");
             let ours = io_pimdir::sql::FORMAT_VERSION.as_bytes();
             assert_eq!(version.len(), ours.len());
@@ -3376,7 +3381,7 @@ mod tests {
     fn a_write_no_source_would_push_is_refused() {
         use pimalaya_cli::error::code_of;
 
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::pimdir::client::store_dir();
         let store = io_pimdir::client::PimdirStore::open(dir.path()).unwrap();
         store.ensure_collection("cal", CALENDAR_KIND).unwrap();
         drop(store);
