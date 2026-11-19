@@ -30,10 +30,10 @@ use crate::{
 /// series once and each of its overrides once, with the id the other
 /// `event` commands take.
 ///
-/// The calendar is scanned whole, so this costs a full listing on a
-/// remote backend and a full read on a local one. On pimdir, whose stored
-/// summary names each resource's `UID`, only the bodies that may carry
-/// this one are read.
+/// Google Calendar is asked for the UID alone. Another remote backend
+/// scans the calendar whole, a full listing, and a local one reads it
+/// whole. On pimdir, whose stored summary names each resource's `UID`,
+/// only the bodies that may carry this one are read.
 ///
 /// Every match is listed on one page unless `--page-size` cuts it, a page
 /// counting resources as `event list` does: a series and its overrides
