@@ -24,7 +24,7 @@ use io_webdav::{
         calendar::{CaldavCalendar, CaldavCalendarPatch},
         item::CaldavItemEntry,
     },
-    rfc4918::{collection_path, send::WebdavSendError, typed::WebdavUnreadableEntry},
+    rfc4918::{collection_path, encode_id, send::WebdavSendError, typed::WebdavUnreadableEntry},
 };
 use log::warn;
 use pimalaya_config::secret::SecretResolver;
@@ -520,9 +520,11 @@ fn truncated() -> ItemError {
 
 /// Derives the resource name a create PUTs to from the item's `UID`.
 ///
-/// A content digest stands in when the bytes carry none. Only a
-/// proposal: a server naming the resource itself reports its choice in
-/// `Location`, which io-webdav returns instead.
+/// The `UID` is minted through [`encode_id`], so `@` goes as `%40`: the
+/// spelling servers answer in listings, and the id the create returns is
+/// the one a listing gives. A content digest stands in when the bytes
+/// carry none. Only a proposal: a server naming the resource itself
+/// reports its choice in `Location`, which io-webdav returns instead.
 fn new_resource_name(contents: &[u8]) -> String {
     let uid = IcalCst::parse(contents).ok().and_then(|cst| {
         let components = cst.components::<VEVENT>();
@@ -536,14 +538,13 @@ fn new_resource_name(contents: &[u8]) -> String {
     });
 
     match uid {
-        Some(uid) if is_safe_segment(&uid) => uid,
+        Some(uid) if is_safe_segment(&uid) => encode_id(&uid),
         _ => format!("{:016x}", fnv1a(contents)),
     }
 }
 
-/// Whether a `UID` can be a URL path segment verbatim.
-///
-/// No empty value, no separator, nothing needing percent-encoding.
+/// Whether a `UID` can name a resource: no empty value, no separator, no
+/// character but `@` needing percent-encoding.
 fn is_safe_segment(uid: &str) -> bool {
     !uid.is_empty()
         && uid.len() <= 128
@@ -943,6 +944,31 @@ mod tests {
 
         assert_eq!(listed.items[0].id, "My Event.ics");
         assert_eq!(listed.errors[0].id.as_deref(), Some("a%2Fb.ics"));
+    }
+
+    /// An item created from a `UID` holding `@` is named by the id the
+    /// listing gives it, the `%40` the server serves back, not by the raw
+    /// `UID`: one item, one id.
+    #[test]
+    fn a_created_item_is_named_as_the_listing_names_it() {
+        let event = String::from_utf8(EVENT.to_vec())
+            .unwrap()
+            .replace("UID:e1", "UID:e1@example.org");
+        let listing = LISTING.replace("cal/e1.ics", "cal/e1%40example.org.ics");
+        let (mut backend, written) = scripted(&[(201, ""), (207, &listing)]);
+
+        let created = backend.create_item("cal", event.into_bytes()).unwrap();
+        let listed = backend
+            .list_items("cal", CalendarItemQuery::default())
+            .unwrap();
+
+        assert_eq!(created, "e1%40example.org.ics");
+        assert_eq!(created, listed.items[0].id);
+        let written = requests(&written);
+        assert!(
+            written.contains("PUT /calendars/me/cal/e1%40example.org.ics "),
+            "{written}"
+        );
     }
 
     /// A `DAV:error` body naming the precondition `name` of `namespace`.
@@ -1356,7 +1382,7 @@ END:VCALENDAR&#13;
 
         assert_eq!(
             new_resource_name(calendar.as_bytes()),
-            "event-1@example.org"
+            "event-1%40example.org"
         );
     }
 
