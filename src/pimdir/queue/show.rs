@@ -33,9 +33,9 @@ use crate::pimdir::backend::PimdirBackend;
 /// calendar is gone; past that, and for a cancelled row, the state is
 /// `unknown`, as for a row of another account.
 ///
-/// JSON output: `{"row", "state", "collection", "kind", "attempts",
-/// "error", "appliedAt", "seq", "refusals": [{"collection", "source",
-/// "reason", "refusedAt"}]}`, as cardamum prints it.
+/// JSON output: `{"row", "handle", "state", "collection", "kind",
+/// "attempts", "error", "appliedAt", "seq", "refusals": [{"collection",
+/// "source", "reason", "refusedAt"}]}`, as Himalaya prints it.
 #[derive(Debug, Parser)]
 pub struct PimdirQueueShowCommand {
     /// The queue row: its id, as `pimdir queue list` prints it, or its
@@ -49,7 +49,8 @@ impl PimdirQueueShowCommand {
     /// Looks the row up in the account's queue and receipts.
     pub fn execute(self, printer: &mut impl Printer, backend: PimdirBackend) -> Result<()> {
         let status = backend.queue_row(&self.row)?;
-        printer.out(PimdirQueueShowOutput::new(self.row.id, status))
+        let handle = backend.named(&self.row)?;
+        printer.out(PimdirQueueShowOutput::new(&handle, status))
     }
 }
 
@@ -81,8 +82,11 @@ pub enum PimdirQueueState {
 #[serde(rename_all = "camelCase")]
 pub struct PimdirQueueShowOutput {
     /// The queue row id.
-    #[serde(rename = "row")]
-    pub queue_id: i64,
+    pub row: i64,
+    /// The row's handle, its id under the store's identity (pimdir STORAGE
+    /// §4.5): the handle given, or the bare id given named under this
+    /// store's identity.
+    pub handle: String,
     /// Where it stands.
     pub state: PimdirQueueState,
     /// The calendar it is anchored on: `null` when unknown, and for an
@@ -132,10 +136,11 @@ impl From<PimdirReceiptRefusal> for PimdirQueueRefusal {
 }
 
 impl PimdirQueueShowOutput {
-    /// Projects io-pimdir's status of row `queue_id`.
-    pub fn new(queue_id: i64, status: PimdirActionStatus) -> Self {
+    /// Projects io-pimdir's status of the row `handle` names.
+    pub fn new(handle: &PimdirActionHandle, status: PimdirActionStatus) -> Self {
         let row = Self {
-            queue_id,
+            row: handle.id,
+            handle: handle.to_string(),
             state: PimdirQueueState::Unknown,
             collection: None,
             kind: None,
@@ -208,7 +213,7 @@ impl PimdirQueueShowOutput {
 
 impl fmt::Display for PimdirQueueShowOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let id = self.queue_id;
+        let id = &self.handle;
         let collection = sanitize::text(self.collection.as_deref().unwrap_or_default());
         let kind = sanitize::text(self.kind.as_deref().unwrap_or_default());
 
@@ -264,12 +269,27 @@ impl fmt::Display for PimdirQueueShowOutput {
 
 #[cfg(test)]
 mod tests {
+    use io_pimdir::codec::PimdirStoreIdentity;
+
     use super::*;
+
+    const STORE: &str = "e2646df031cd876334410c4df14ebd86";
+
+    /// The handle of row `id` of the store `STORE`.
+    fn handle(id: i64) -> PimdirActionHandle {
+        PimdirActionHandle {
+            id,
+            store: Some(PimdirStoreIdentity {
+                store_id: STORE.into(),
+                incarnation: 1,
+            }),
+        }
+    }
 
     #[test]
     fn an_applied_add_prints_its_seq() {
         let row = PimdirQueueShowOutput::new(
-            12,
+            &handle(12),
             PimdirActionStatus::Applied {
                 applied_at: "2026-10-04T20:00:00Z".into(),
                 collection: Some("personal".into()),
@@ -282,6 +302,7 @@ mod tests {
             json,
             serde_json::json!({
                 "row": 12,
+                "handle": format!("{STORE}.1.12"),
                 "state": "applied",
                 "collection": "personal",
                 "kind": null,
@@ -300,7 +321,7 @@ mod tests {
     #[test]
     fn an_applied_row_prints_the_refusals_on_its_event() {
         let row = PimdirQueueShowOutput::new(
-            12,
+            &handle(12),
             PimdirActionStatus::Applied {
                 applied_at: "2026-11-15T20:00:00.000Z".into(),
                 collection: Some("work".into()),
@@ -327,8 +348,10 @@ mod tests {
         );
         assert_eq!(
             row.to_string(),
-            "Row 12 was applied in work, on event 42\n\
-             Refused by caldav in work at 2026-11-15T20:05:00.000Z: 403 Forbidden\n"
+            format!(
+                "Row {STORE}.1.12 was applied in work, on event 42\n\
+                 Refused by caldav in work at 2026-11-15T20:05:00.000Z: 403 Forbidden\n"
+            )
         );
     }
 
@@ -338,7 +361,7 @@ mod tests {
     #[test]
     fn an_unconfirmed_row_says_it_may_have_taken_effect() {
         let row = PimdirQueueShowOutput::new(
-            9,
+            &handle(9),
             PimdirActionStatus::Unconfirmed {
                 collection: "work".into(),
                 kind: "calendar-reply".into(),
@@ -363,7 +386,7 @@ mod tests {
     #[test]
     fn an_applied_row_of_a_deleted_calendar_names_no_collection() {
         let row = PimdirQueueShowOutput::new(
-            4,
+            &handle(4),
             PimdirActionStatus::Applied {
                 applied_at: "2026-11-13T09:00:00Z".into(),
                 collection: None,
@@ -380,12 +403,16 @@ mod tests {
 
     #[test]
     fn an_unknown_row_prints_its_id_and_state() {
-        let json = serde_json::to_value(PimdirQueueShowOutput::new(7, PimdirActionStatus::Unknown))
-            .unwrap();
+        let json = serde_json::to_value(PimdirQueueShowOutput::new(
+            &handle(7),
+            PimdirActionStatus::Unknown,
+        ))
+        .unwrap();
         assert_eq!(
             json,
             serde_json::json!({
                 "row": 7,
+                "handle": format!("{STORE}.1.7"),
                 "state": "unknown",
                 "collection": null,
                 "kind": null,

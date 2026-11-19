@@ -76,6 +76,20 @@ impl PimdirBackend {
         })
     }
 
+    /// The handle `given` names under this store: as given when it names a
+    /// store, a bare id named under this store's identity, as `pimdir queue
+    /// list` prints its handle.
+    pub(crate) fn named(&self, given: &PimdirActionHandle) -> Result<PimdirActionHandle> {
+        if given.store.is_some() {
+            return Ok(given.clone());
+        }
+
+        Ok(PimdirActionHandle {
+            id: given.id,
+            store: Some(self.store_identity()?),
+        })
+    }
+
     /// The calendars a queue listing reads: `calendar` alone, refused
     /// `calendar-not-found` unless the account holds it, else every one of
     /// the account's.
@@ -330,8 +344,6 @@ struct Addressed {
     summary: Option<String>,
 }
 
-/// The title a calendar summary carries, `None` when empty or when the
-/// summary is no calendar one.
 /// The handle of the row `id` of the store `identity`, as `pimdir queue
 /// show` and `cancel` take it.
 pub(crate) fn handle(identity: &PimdirStoreIdentity, id: i64) -> String {
@@ -342,6 +354,8 @@ pub(crate) fn handle(identity: &PimdirStoreIdentity, id: i64) -> String {
     .to_string()
 }
 
+/// The title a calendar summary carries, `None` when empty or when the
+/// summary is no calendar one.
 fn title(summary: PimdirSummary) -> Option<String> {
     let title = match summary {
         PimdirSummary::Event(event) => event.summary,
@@ -480,6 +494,30 @@ mod tests {
         let parsed: PimdirActionHandle = handle.to_string().parse().unwrap();
         assert_eq!(backend.cancel_queued(&parsed).unwrap(), "add");
         assert_eq!(backend.queued_rows(Some("cal")).unwrap().len(), 1);
+    }
+
+    /// A bare row id is named under the store's identity, the handle
+    /// `queue list` prints for it, and a handle is kept as given, another
+    /// store's included, so `queue show` and `cancel` print the row as it
+    /// was named.
+    #[test]
+    fn a_row_is_named_under_the_store_identity() {
+        use io_pimdir::codec::PimdirActionHandle;
+
+        let (_dir, backend) = store();
+        let listed = backend.queued_rows(None).unwrap().remove(0).handle;
+        let given: PimdirActionHandle = listed.parse().unwrap();
+
+        let bare = PimdirActionHandle {
+            id: given.id,
+            store: None,
+        };
+        assert_eq!(backend.named(&bare).unwrap().to_string(), listed);
+        assert_eq!(backend.named(&given).unwrap(), given);
+
+        let mut restored = given.clone();
+        restored.store.as_mut().unwrap().incarnation += 1;
+        assert_eq!(backend.named(&restored).unwrap(), restored);
     }
 
     /// The queue of a calendar the store does not hold is refused
