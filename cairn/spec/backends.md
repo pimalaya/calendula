@@ -270,9 +270,20 @@ pimdir SHALL adapt io-pimdir, the store and the sync engine in one crate. The st
 
 Collections come from the sync, so pimdir SHALL declare `calendar.create`, `calendar.create.id`, `calendar.rename`, `calendar.delete`, `calendar.description` and `calendar.color` `none`, a calendar write refused before the store is opened with a detail pointing at the account the store syncs; `create_calendar`, `update_calendar` and `delete_calendar` SHALL refuse it again.
 
-A collection SHALL be listed as a calendar when it declares `text/calendar`, or when it declares no kind at all (a sync created it before any consumer declared one).
+A collection SHALL be listed as a calendar when its kind's media type (io-pimdir's `collection::media_type`, parameters aside) is `text/calendar`. A collection declaring no kind belongs to no application's kind and SHALL NOT be listed.
 
-The backend SHALL read one account of the store (pimdir STORAGE §9.2): `pimdir.account` when set, else the one account every calendar collection of the store (`text/calendar`, or one recording no kind) is grouped under, or none when the store groups none, an account holding no calendar not counted, as himalaya counts the accounts holding mail and cardamum those holding cards. A store whose calendars are grouped under several accounts, or partly ungrouped, SHALL be refused while `pimdir.account` is unset, coded `store-account-ambiguous`, the error naming the accounts and the key, and a `pimdir.account` naming none of the accounts a store holding collections (of any kind) groups them under SHALL be refused, coded `store-account-unknown`, naming those it holds, `account check` included. Reads and writes SHALL be narrowed to that account's collections, and the producer bound to it.
+The backend SHALL read one account of the store (pimdir STORAGE §9.2), through io-pimdir's `PimdirReader::accounts_of`: `pimdir.account` when set, else the one account every calendar collection of the store (`text/calendar`) is grouped under, or none when the store groups none, an account holding no calendar not counted, a collection declaring no kind included, as himalaya counts the accounts holding mail and cardamum those holding cards. A store whose calendars are grouped under several accounts, or partly ungrouped, SHALL be refused while `pimdir.account` is unset, coded `store-account-ambiguous`, the error naming the accounts and the key, and a `pimdir.account` naming none of the accounts a store holding collections (of any kind) groups them under SHALL be refused, coded `store-account-unknown`, naming those it holds, `account check` included. A `pimdir.account` on a store holding no collection yet (no first sync has run) SHALL be taken as configured. Reads and writes SHALL be narrowed to that account's collections, and the producer bound to it.
+
+#### Scenario: A collection of no kind is no calendar
+- GIVEN a store whose account `work` holds the collection `caldav/work` of kind `text/calendar` and whose account `old` holds `legacy`, declaring no kind
+- WHEN calendula reads it with `pimdir.account` unset
+- THEN it reads the account `work`, `old` not making the store ambiguous
+- AND with `pimdir.account = "old"`, `calendar list` lists nothing
+
+#### Scenario: A configured account on an empty store
+- GIVEN a store holding no collection
+- WHEN calendula reads it with `pimdir.account = "work"`
+- THEN it reads the account `work`, listing no calendar, rather than refusing it `store-account-unknown`
 
 ### Requirement: pimdir takes the reader and producer roles, the owner for one cancel
 The pimdir backend SHALL read through a `PimdirReader` and write through a `PimdirProducer`, and SHALL NOT open a `PimdirStore`, but in `pimdir queue cancel`, which drops one queue row as Himalaya's does: it opens the store as its owner for that call alone, through `PimdirStore::open_current`, which creates nothing, and fails `store-owned` at once while a sync holds it.

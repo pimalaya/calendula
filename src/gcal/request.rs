@@ -62,13 +62,16 @@ fn parse_body(body: Option<&str>) -> Result<Value> {
 /// The request URL: a path joined onto the Calendar base, a full URL
 /// as-is when it is on Google's API origin and refused otherwise.
 fn resolve_url(path: &str) -> Result<Url> {
-    request_url(GCAL_API_BASE, path, "Google Calendar")
+    request_url(GCAL_API_BASE, path)
 }
 
 #[cfg(test)]
 mod tests {
     use io_gcal::v3::client::GcalClientStd;
-    use pimalaya_cli::printer::CapturePrinter;
+    use pimalaya_cli::{
+        error::{CommonCode, code_of},
+        printer::CapturePrinter,
+    };
     use serde_json::json;
 
     use super::*;
@@ -147,6 +150,7 @@ mod tests {
         let mut printer = CapturePrinter::default();
         let err = command.execute(&mut printer, client).unwrap_err();
         assert!(err.to_string().contains("collector.example.org"), "{err}");
+        assert_eq!(code_of::<CommonCode>(&err), Some(CommonCode::RequestOrigin));
         assert!(requests.lock().unwrap().is_empty());
     }
 }

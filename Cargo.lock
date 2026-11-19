@@ -766,9 +766,9 @@ dependencies = [
 
 [[package]]
 name = "ical-rs"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e390dd6dbfc13b572c448002e57878c151204010b8249c4d3e0d2b758d734cf"
+checksum = "a8faed65fdd66abcf29ae40582afeee2a3698ddc107a9f44fcd5132f5e30434e"
 dependencies = [
  "jiff",
  "jiff-tzdb",
@@ -911,9 +911,9 @@ dependencies = [
 
 [[package]]
 name = "io-pimdir"
-version = "0.17.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63fc488dcec28fa1165a5f41c0e439994d6de4e4ddc4ed2ff0e78f0a9b4a811f"
+checksum = "a606fa3ba5f6f559d53683cb7fc017dc9df41d5fca83b98fb916ae1e3fb1aec2"
 dependencies = [
  "blake3",
  "encoding_rs",
@@ -1324,9 +1324,9 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pimalaya-cli"
-version = "0.6.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "056e26afbb62acc7398ee2750e62c917e4c3552d92088fab4d4de941ae973dc9"
+checksum = "e13aefc2eb5d1b208af04a51f2e80acdd40f5e8523cd17cf9cf811b5a1bfa88a"
 dependencies = [
  "anyhow",
  "base64-codec",

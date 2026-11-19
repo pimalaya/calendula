@@ -28,7 +28,7 @@ use io_pimdir::{
 };
 use pimalaya_cli::error::CodedError;
 
-use crate::{config::PimdirConfig, error::ErrorCode};
+use crate::{config::PimdirConfig, error::ErrorCode, pimdir::backend::CALENDAR_KIND};
 
 /// The process name each staged action records (pimdir STORAGE §15.1).
 ///
@@ -111,19 +111,10 @@ impl PimdirClient {
 /// rather than merging their calendars into one view; an account holding
 /// no calendar is not counted.
 fn resolve_account(reader: &PimdirReader, configured: Option<String>) -> Result<Option<String>> {
-    let collections = reader
-        .list_collections()
-        .map_err(|err| store_error(err, "List pimdir collections"))?;
-
-    let accounts_of = |calendars_only: bool| {
-        let mut accounts: Vec<Option<String>> = collections
-            .iter()
-            .filter(|collection| !calendars_only || is_calendar_kind(&collection.kind))
-            .map(|collection| collection.account.clone())
-            .collect();
-        accounts.sort();
-        accounts.dedup();
-        accounts
+    let accounts_of = |kind| {
+        reader
+            .accounts_of(kind)
+            .map_err(|err| store_error(err, "List pimdir collections"))
     };
 
     let names = |accounts: &[Option<String>]| {
@@ -135,7 +126,7 @@ fn resolve_account(reader: &PimdirReader, configured: Option<String>) -> Result<
     };
 
     if let Some(account) = &configured {
-        let accounts = accounts_of(false);
+        let accounts = accounts_of(None)?;
 
         if !accounts.is_empty() && !accounts.contains(&configured) {
             let message = format!(
@@ -148,7 +139,7 @@ fn resolve_account(reader: &PimdirReader, configured: Option<String>) -> Result<
         return Ok(configured);
     }
 
-    let accounts = accounts_of(true);
+    let accounts = accounts_of(Some(CALENDAR_KIND))?;
 
     match accounts.as_slice() {
         [] | [_] => Ok(accounts.into_iter().next().flatten()),
@@ -161,13 +152,6 @@ fn resolve_account(reader: &PimdirReader, configured: Option<String>) -> Result<
             Err(CodedError::new(ErrorCode::StoreAccountAmbiguous, message).into())
         }
     }
-}
-
-/// Whether a collection of `kind` holds calendar objects: `text/calendar`,
-/// its parameters aside, or no kind at all, as a store synced before
-/// kinds were recorded writes.
-fn is_calendar_kind(kind: &str) -> bool {
-    kind.is_empty() || kind.split(';').next().unwrap_or_default().trim() == "text/calendar"
 }
 
 /// The pimdir codes calendula relays, by io-pimdir's spelling, which

@@ -259,6 +259,7 @@ impl fmt::Display for PimdirSearchOutput {
 
 #[cfg(test)]
 mod tests {
+    use io_pimdir::search::coverage::PimdirSearchUnread;
     use jiff::tz::TimeZone;
     use pimalaya_cli::listing::{Listing, ListingPage};
 
@@ -279,7 +280,10 @@ mod tests {
     fn output() -> PimdirSearchOutput {
         let coverage = PimdirCalendarCoverage {
             bodiless: 1,
-            counts_bodiless: true,
+            counted: PimdirSearchUnread {
+                bodiless: 1,
+                ..Default::default()
+            },
             ..Default::default()
         };
         let zones = PimdirCalendarZones {

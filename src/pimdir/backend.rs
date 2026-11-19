@@ -38,6 +38,7 @@ use io_pimdir::{
         reader::{PimdirCollection, PimdirItem},
     },
     codec::{PimdirAction, PimdirActionHandle},
+    collection::media_type,
     intent::{PimdirIntentItem, PimdirInvitation, PimdirPartstat},
     object::PimdirHash,
     placement::PimdirFlags,
@@ -69,7 +70,7 @@ use crate::{
 };
 
 /// The media type a pimdir collection carries to be a calendar.
-const CALENDAR_KIND: &str = "text/calendar";
+pub(crate) const CALENDAR_KIND: &str = "text/calendar";
 
 /// How many items to pull per keyset page when scanning a collection.
 #[cfg(not(test))]
@@ -570,7 +571,7 @@ impl PimdirBackend {
 
         Ok(collections
             .into_iter()
-            .filter(|collection| collection.kind.is_empty() || collection.kind == CALENDAR_KIND)
+            .filter(|collection| media_type(&collection.kind) == CALENDAR_KIND)
             .collect())
     }
 
@@ -1508,6 +1509,53 @@ mod tests {
                 .contains("accounts of calendars (home, work)"),
             "{err:#}"
         );
+    }
+
+    /// A collection declaring no kind is no calendar: its account makes no
+    /// store ambiguous, and no listing shows it.
+    #[test]
+    fn a_collection_of_no_kind_is_no_calendar() {
+        let dir = tempfile::tempdir().unwrap();
+        let open = |account: Option<&str>| {
+            PimdirBackend::new(crate::config::PimdirConfig {
+                root: dir.path().to_path_buf(),
+                account: account.map(Into::into),
+            })
+        };
+        for (account, collection, kind) in [
+            ("work", "caldav/work", CALENDAR_KIND),
+            ("old", "legacy", ""),
+        ] {
+            io_pimdir::client::PimdirStore::open(dir.path())
+                .unwrap()
+                .for_account(account)
+                .ensure_collection(collection, kind)
+                .unwrap();
+        }
+
+        let mut backend = open(None).unwrap();
+        assert_eq!(backend.status().unwrap().account.as_deref(), Some("work"));
+        drop(backend);
+
+        let mut backend = open(Some("old")).unwrap();
+        assert!(backend.list_calendars().unwrap().is_empty());
+    }
+
+    /// A `pimdir.account` is taken on a store holding no collection yet,
+    /// a first sync not having run.
+    #[test]
+    fn a_configured_account_reads_an_empty_store() {
+        let dir = tempfile::tempdir().unwrap();
+        io_pimdir::client::PimdirStore::open(dir.path()).unwrap();
+
+        let mut backend = PimdirBackend::new(crate::config::PimdirConfig {
+            root: dir.path().to_path_buf(),
+            account: Some("work".into()),
+        })
+        .unwrap();
+
+        assert_eq!(backend.status().unwrap().account.as_deref(), Some("work"));
+        assert!(backend.list_calendars().unwrap().is_empty());
     }
 
     /// CAL-14: a `pimdir.account` the store holds no collection of is

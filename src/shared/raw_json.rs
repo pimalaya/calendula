@@ -5,18 +5,19 @@
 
 use core::fmt;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
+use pimalaya_cli::error::request_origin;
 use schemars::JsonSchema;
 use serde::Serialize;
 use serde_json::Value;
 use url::Url;
 
 /// The URL a raw request to the API at `base` goes to: `path` joined onto
-/// `base`, or a full URL on the origin of `base`, `provider` naming the API.
+/// `base`, or a full URL on the origin of `base`.
 ///
-/// A full URL on another origin is refused before anything is sent, so
-/// the bearer token never leaves for another host.
-pub fn request_url(base: &str, path: &str, provider: &str) -> Result<Url> {
+/// A full URL on another origin is refused before anything is sent, coded
+/// `request-origin`, so the bearer token never leaves for another host.
+pub fn request_url(base: &str, path: &str) -> Result<Url> {
     let base = Url::parse(base)?;
 
     if !path.starts_with("http") {
@@ -26,12 +27,10 @@ pub fn request_url(base: &str, path: &str, provider: &str) -> Result<Url> {
     let url = Url::parse(path)?;
 
     if url.origin() != base.origin() {
-        bail!(
-            "Cannot send a {provider} request to `{}`: a full URL must be on `{}`, so the \
-             token never leaves for another host",
-            url.origin().ascii_serialization(),
-            base.origin().ascii_serialization(),
-        );
+        return Err(request_origin(
+            &url.origin().ascii_serialization(),
+            &base.origin().ascii_serialization(),
+        ));
     }
 
     Ok(url)
@@ -64,29 +63,26 @@ impl fmt::Display for RawJsonOutput {
 
 #[cfg(test)]
 mod tests {
+    use pimalaya_cli::error::{CommonCode, code_of};
     use serde_json::json;
 
     use super::*;
 
-    /// A full URL off the API's origin is refused, so the token stays
-    /// with the provider, where it was sent wherever the URL named.
+    /// A full URL off the API's origin is refused, coded `request-origin`,
+    /// so the token stays with the provider, where it was sent wherever
+    /// the URL named.
     #[test]
-    fn a_full_url_off_the_api_origin_is_refused() {
+    fn a_full_url_off_the_api_origin_is_coded_request_origin() {
         let graph = "https://graph.microsoft.com/v1.0/";
         let google = "https://www.googleapis.com/calendar/v3/";
 
-        let joined = request_url(graph, "/me/calendars", "Microsoft Graph").unwrap();
+        let joined = request_url(graph, "/me/calendars").unwrap();
         assert_eq!(
             joined.as_str(),
             "https://graph.microsoft.com/v1.0/me/calendars"
         );
         let full = "https://graph.microsoft.com/v1.0/me/events?%24skip=10";
-        assert_eq!(
-            request_url(graph, full, "Microsoft Graph")
-                .unwrap()
-                .as_str(),
-            full
-        );
+        assert_eq!(request_url(graph, full).unwrap().as_str(), full);
 
         for (base, url) in [
             (graph, "https://evil.example.org/v1.0/me"),
@@ -98,11 +94,13 @@ mod tests {
                 "https://www.googleapis.com.evil.example.org/calendar/v3/colors",
             ),
         ] {
-            let err = request_url(base, url, "API").unwrap_err().to_string();
-            assert!(
-                err.contains("never leaves for another host"),
+            let err = request_url(base, url).unwrap_err();
+            assert_eq!(
+                code_of::<CommonCode>(&err),
+                Some(CommonCode::RequestOrigin),
                 "{url}: {err}"
             );
+            assert!(err.to_string().contains("off the API origin"), "{err}");
         }
     }
 

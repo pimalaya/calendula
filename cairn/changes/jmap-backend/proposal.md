@@ -40,7 +40,7 @@ A `jmap` cargo feature and backend serving the whole unified API, in the default
 ### Prerequisites outside calendula
 
 - **io-jmap writes**: `Calendar/set` and `CalendarEvent/set` (create, update as PatchObject, destroy with `onDestroyRemoveEvents`), mirroring `AddressBook/set` and `ContactCard/set`, then a release. `CalendarEvent/query` paging (`position`, `limit`) if the query options lack it.
-- **ical-rs `UNTIL` shift**: ical-rs carries an `RRULE`'s `UNTIL` across unshifted, exact for floating and UTC series, off by the zone's offset for a zoned one (its own module doc says so). Over a JMAP backend that moves the end of every zoned series stored with a UTC `UNTIL`, gaining or losing its last instance, on read and on write. The shift belongs in ical-rs behind its `tzdb` feature, not in calendula, and lands before this backend writes.
+- **ical-rs `UNTIL` shift**: released in ical-rs 0.7.2 (2026-11-19): behind its `tzdb` feature, which calendula enables, a zoned series' `UNTIL` is told between UTC and the zone both ways, on the calendar's `VTIMEZONE` or the bundled database, so a zoned series keeps its last instance. Two limits remain: a UTC `UNTIL` in the second pass of a daylight-saving fold comes back as the first pass, and one of a zone neither the calendar nor the database knows travels unshifted.
 - **io-pim-discovery 0.8** with `rfc8620`, for `GET /.well-known/jmap` on a bare server name (cardamum is on it, calendula on 0.7).
 
 ## To verify before coding

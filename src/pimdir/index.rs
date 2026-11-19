@@ -17,10 +17,7 @@ use io_pimdir::{
     },
     search::{
         coverage::{PimdirSearchCoverage, PimdirSearchTemporal, PimdirSearchUnread},
-        query::{
-            PimdirQuery, PimdirQueryError, PimdirQueryErrorCode, PimdirQueryKind,
-            PimdirQueryPredicate, PimdirQueryTerm,
-        },
+        query::{PimdirQuery, PimdirQueryError, PimdirQueryErrorCode, PimdirQueryKind},
     },
     summary::{PimdirSummary, calendar::PimdirTime},
 };
@@ -149,31 +146,13 @@ impl PimdirClient {
         })
     }
 
-    /// `query` scoped by top-level `kind:event`, `account:` and
-    /// `collection:` conjuncts.
-    // NOTE: only a conjunct of the whole query scopes its coverage.
+    /// `query` scoped to the account's events, of `calendar` when named.
     fn scope(&self, query: PimdirQuery, calendar: Option<&str>) -> PimdirQuery {
-        let mut conjuncts = match query {
-            PimdirQuery::And(conjuncts) => conjuncts,
-            query => vec![query],
-        };
-        let term = |predicate| {
-            PimdirQuery::Term(PimdirQueryTerm {
-                predicate,
-                start: 0,
-                end: 0,
-            })
-        };
-
-        conjuncts.push(term(PimdirQueryPredicate::Kind(PimdirQueryKind::Event)));
-        if let Some(account) = &self.account {
-            conjuncts.push(term(PimdirQueryPredicate::Account(account.clone())));
-        }
-        if let Some(calendar) = calendar {
-            conjuncts.push(term(PimdirQueryPredicate::Collection(calendar.into())));
-        }
-
-        PimdirQuery::And(conjuncts)
+        query.scoped(
+            Some(PimdirQueryKind::Event),
+            self.account.as_deref(),
+            calendar,
+        )
     }
 }
 
@@ -401,14 +380,10 @@ pub struct PimdirCalendarCoverage {
     /// Whether a date term reads its days in another zone than the index
     /// read floating times and dates in, which leaves the answer complete.
     pub zone_differs: bool,
-    /// Whether a term of the query reads a calendar body, so a `missing`
-    /// or an `unparseable` one leaves the answer incomplete.
+    /// The counts io-pimdir holds against the answer, those of a body a
+    /// term of the query reads, which leave it incomplete.
     #[serde(skip)]
-    pub reads: bool,
-    /// Whether a `bodiless` item leaves the answer incomplete: a term
-    /// reads a calendar body, or io-pimdir counts the kind's without one.
-    #[serde(skip)]
-    pub counts_bodiless: bool,
+    pub counted: PimdirSearchUnread,
 }
 
 impl From<&PimdirSearchCoverage> for PimdirCalendarCoverage {
@@ -426,10 +401,6 @@ impl From<&PimdirSearchCoverage> for PimdirCalendarCoverage {
         let unread = |count: fn(&PimdirSearchUnread) -> u64| -> u64 {
             coverage.local.kinds.values().map(count).sum()
         };
-        let terms = &coverage.local.reads;
-        let kinds = || coverage.local.kinds.keys();
-        let reads = kinds().any(|kind| terms.kinds.contains(kind));
-        let counts_bodiless = reads || kinds().any(|kind| terms.counts_bodiless(kind));
 
         Self {
             complete: coverage.is_complete(),
@@ -444,8 +415,7 @@ impl From<&PimdirSearchCoverage> for PimdirCalendarCoverage {
             horizon_left: coverage.horizon_left,
             cut: coverage.cut,
             zone_differs: coverage.zone_differs,
-            reads,
-            counts_bodiless,
+            counted: coverage.unread_counted(),
         }
     }
 }
@@ -475,24 +445,24 @@ impl PimdirCalendarCoverage {
         let mut parts = Vec::new();
 
         // NOTE: a count no term of the query reads leaves it complete.
-        if self.bodiless > 0 && self.counts_bodiless {
+        if self.counted.bodiless > 0 {
             parts.push(format!(
                 "{} item(s) have no local body and matched on their summary alone",
-                self.bodiless
+                self.counted.bodiless
             ));
         }
-        if self.missing > 0 && self.reads {
+        if self.counted.missing > 0 {
             parts.push(format!(
                 "{} item(s) have a body the index could not read and matched on their \
                  summary alone",
-                self.missing
+                self.counted.missing
             ));
         }
-        if self.unparseable > 0 && self.reads {
+        if self.counted.unparseable > 0 {
             parts.push(format!(
                 "{} item(s) have a body the index could not parse and matched on their \
                  summary alone",
-                self.unparseable
+                self.counted.unparseable
             ));
         }
         if let Some(since) = &self.since {
@@ -1429,8 +1399,12 @@ mod tests {
             horizon_left: true,
             cut: 4,
             zone_differs: true,
-            reads: true,
-            counts_bodiless: true,
+            counted: PimdirSearchUnread {
+                bodiless: 2,
+                missing: 5,
+                unparseable: 6,
+                encrypted: 0,
+            },
         };
 
         assert_eq!(

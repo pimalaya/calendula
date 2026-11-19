@@ -61,5 +61,5 @@ fn parse_body(body: Option<&str>) -> Result<Value> {
 /// Resolves a Graph path onto the `v1.0/` base, a full URL taken as-is
 /// when it is on Graph's origin and refused otherwise.
 fn resolve_url(path: &str) -> Result<Url> {
-    request_url(MSGRAPH_API_BASE, path, "Microsoft Graph")
+    request_url(MSGRAPH_API_BASE, path)
 }

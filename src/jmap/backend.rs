@@ -705,6 +705,33 @@ mod tests {
         assert!(event.get("id").is_none(), "{event}");
     }
 
+    /// A zoned series' `until`, local to its zone on the server, reads as
+    /// the UTC `UNTIL` its zone gives, and goes back as the same local time.
+    #[test]
+    fn a_zoned_series_until_round_trips() {
+        let zoned = answer(
+            "CalendarEvent/get",
+            json!({"accountId": "a1", "state": "s1", "notFound": [], "list": [{
+                "id": "E1", "calendarIds": {"C1": true}, "@type": "Event",
+                "uid": "u1", "title": "Standup", "start": "2026-07-01T09:00:00",
+                "timeZone": "Europe/Paris", "duration": "PT30M",
+                "recurrenceRules": [{"@type": "RecurrenceRule", "frequency": "daily",
+                    "until": "2026-07-31T09:00:00"}],
+            }]}),
+        );
+
+        let (mut backend, _) = scripted(&[&zoned]);
+        let read = backend.get_item("C1", "E1").unwrap();
+        let text = String::from_utf8(read.contents).unwrap();
+        assert!(text.contains("UNTIL=20260731T070000Z"), "{text}");
+
+        let (mut backend, requests) = scripted(&[&set()]);
+        backend.create_item("C1", text.into_bytes()).unwrap();
+        let sent = calls(&requests);
+        let rule = &sent[0][1]["create"]["c0"]["recurrenceRule"];
+        assert_eq!(rule["until"], "2026-07-31T09:00:00", "{rule}");
+    }
+
     /// A range reaches the query as its `after` and `before`, recurrences
     /// unexpanded, a page as its `position` and `limit`, in start order;
     /// a page the server answers short is followed.
