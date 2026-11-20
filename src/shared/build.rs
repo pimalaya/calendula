@@ -107,12 +107,12 @@ impl IcalBuildArgs {
             ical,
         } = self;
 
-        if ical.is_none() && fields.is_empty() && !composer.interactive {
-            if family == IcalFamily::Event {
-                bail!("Nothing to build; give an iCalendar, a field flag, or -i to compose one");
-            }
-
-            bail!("Nothing to build; give an iCalendar, or -i to compose one");
+        if family == IcalFamily::Event
+            && ical.is_none()
+            && fields.is_empty()
+            && !composer.interactive
+        {
+            bail!("Nothing to build; give an iCalendar, a field flag, or -i to compose one");
         }
 
         let base = match &ical {

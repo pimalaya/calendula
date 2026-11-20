@@ -190,6 +190,25 @@ fn the_calendar_commands_take_the_calendar_as_an_argument() {
     assert_eq!(error["code"], "usage-invalid", "{error}");
 }
 
+/// `item add` and `item build` given no source name the commands that
+/// mint an item rather than offering `-i`, which refuses it too.
+#[test]
+fn an_item_given_no_source_names_who_mints_one() {
+    let home = account("calendar.default = \"personal\"\n");
+    let home = home.path();
+
+    for args in [&["--json", "item", "add"][..], &["--json", "item", "build"]] {
+        let error = json(&run(home, args), 1);
+        let message = error["error"].as_str().unwrap_or_default();
+
+        for way_out in ["`calendula event`", "`unfog`", "`journal`"] {
+            assert!(message.contains(way_out), "{args:?}: {message}");
+        }
+
+        assert!(!message.contains("-i"), "{args:?}: {message}");
+    }
+}
+
 /// `create` stays a hidden alias of `event add` and `item add`.
 #[test]
 fn create_still_adds() {

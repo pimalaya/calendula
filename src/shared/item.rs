@@ -61,8 +61,8 @@ pub struct CalendarItem {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ItemOrigin {
     /// Written by the user: through the `event` commands, or composed by
-    /// a raw `item` command from the blank or the stored item. An
-    /// `X-PIMDIR-ONLINE-MEETING` it carries is their ask, queued whole.
+    /// `item update -i` from the stored item. An `X-PIMDIR-ONLINE-MEETING`
+    /// it carries is their ask, queued whole.
     User,
     /// An iCalendar a raw `item` command was given (a file, raw contents
     /// or stdin), which the user did not write as it stands: a pimdir
@@ -73,7 +73,7 @@ pub enum ItemOrigin {
 impl ItemOrigin {
     /// The origin of a raw `item` write: [`Foreign`](Self::Foreign) for an
     /// iCalendar `source` gave, [`User`](Self::User) for one composed from
-    /// the blank item or from the stored one.
+    /// the stored item.
     pub fn of_source(source: Option<&str>) -> Self {
         match source {
             Some(_) => Self::Foreign,

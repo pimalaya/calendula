@@ -5,7 +5,7 @@
 
 use core::fmt;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use clap::Parser;
 use pimalaya_cli::{printer::Printer, sanitize};
 use schemars::JsonSchema;
@@ -52,16 +52,12 @@ impl ItemCreateCommand {
     pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
         client.require(&[Capability::ItemAdd])?;
 
-        if self.ical.is_none() && !self.composer.interactive {
-            bail!("Nothing to create; give an iCalendar, or -i to compose one");
-        }
-
-        let calendar_id = client.account.calendar_id(self.calendar.id)?;
-
         let seed = match &self.ical {
             Some(source) => read_source(source)?,
             None => blank_item(IcalFamily::Item)?,
         };
+
+        let calendar_id = client.account.calendar_id(self.calendar.id)?;
         let origin = ItemOrigin::of_source(self.ical.as_deref());
 
         if !self.composer.interactive {
