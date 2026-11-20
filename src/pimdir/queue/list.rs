@@ -1,8 +1,7 @@
 //! # Pimdir queue list
 //!
-//! The `pimdir queue list` command, listing the creations and the intents
-//! staged and the rows the store's owner parked in the account's
-//! calendars.
+//! The `pimdir queue list` command, listing the rows staged and the rows
+//! the store's owner parked in the account's calendars.
 
 use std::fmt;
 
@@ -12,29 +11,34 @@ use pimalaya_cli::{listing::Listing, printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::pimdir::backend::PimdirBackend;
+use crate::{
+    error::{ItemError, partial_when},
+    pimdir::backend::PimdirBackend,
+};
 
-/// List the items staged for creation, the replies and cancellations
-/// staged, and the parked rows.
+/// List the rows staged and the parked rows.
 ///
-/// An item added on pimdir waits in the store's queue until the sync
-/// engine applies it, and has no id until then, so `event list` cannot
-/// show it; a reply or a cancellation waits there until the engine sends
-/// it. This is where both show: the row handle to cancel one by, when it was
-/// queued, its kind, the link id `event add` reported or the event a reply
-/// or a cancellation addresses, and its summary.
+/// A write on pimdir waits in the store's queue until the sync engine
+/// applies it, a reply or a cancellation until the engine sends it; an
+/// item added has no id until then, so `event list` cannot show it. This
+/// is where every staged row shows, of every kind: the row handle to
+/// cancel it by, when it was queued, its kind, the link id `event add`
+/// reported or the event it addresses, and its summary.
 ///
-/// Staged updates and deletions need no such view, addressing events that
-/// already exist. A row of any kind the sync engine parked, refusing to
+/// A row of any kind the sync engine parked, refusing to
 /// apply it without an operator, is listed `parked` with why: cancel it,
 /// or fix what parked it. One the engine sent without learning its outcome
 /// is listed `unconfirmed` instead: it may have taken effect.
 ///
-/// JSON output: `{"items": [<row>], "parked": [<row>]}`, each row, pending
-/// or parked, `{"row", "handle", "kind", "collection", "linkId", "itemId",
-/// "producer", "queuedAt", "attempts", "unconfirmed", "error",
-/// "summary"}`, as every Pimalaya program prints a queue row, plus the
-/// row's handle.
+/// A queued row the store cannot decode leaves its calendar's pending rows
+/// out and lists an item error naming the calendar, the command then
+/// exiting 3.
+///
+/// JSON output: `{"actions": [<row>], "parked": [<row>], "errors": [{"id",
+/// "code", "error", "sources"}]}`, each row, pending or parked, `{"row",
+/// "handle", "kind", "collection", "linkId", "itemId", "producer",
+/// "queuedAt", "attempts", "unconfirmed", "error", "summary"}`, as every
+/// Pimalaya program prints a queue row.
 #[derive(Debug, Parser)]
 pub struct PimdirQueueListCommand {
     /// Calendar to list, every one of the account's when omitted.
@@ -46,15 +50,19 @@ impl PimdirQueueListCommand {
     /// Lists the staged rows and the parked ones, and prints them.
     pub fn execute(self, printer: &mut impl Printer, backend: PimdirBackend) -> Result<()> {
         let calendar = self.calendar.as_deref();
-        let items = backend.queued_rows(calendar)?;
+        let (actions, errors) = backend.pending_rows(calendar)?;
         let parked = backend.parked_rows(calendar)?;
 
-        printer.out(PimdirQueueListOutput {
+        let output = PimdirQueueListOutput {
             account: backend.name.clone(),
             calendar: self.calendar,
-            items,
+            actions,
             parked,
-        })
+            errors,
+        };
+
+        printer.out(&output)?;
+        partial_when(&output.errors)
     }
 }
 
@@ -111,10 +119,13 @@ pub struct PimdirQueueListOutput {
     /// The calendar listed, `None` for every one of the account's.
     #[serde(skip)]
     pub calendar: Option<String>,
-    /// The creations and the intents staged.
-    pub items: Vec<PimdirQueueRow>,
+    /// The pending rows, any kind.
+    pub actions: Vec<PimdirQueueRow>,
     /// The parked rows, any kind.
     pub parked: Vec<PimdirQueueRow>,
+    /// The error of each calendar whose pending rows could not be decoded,
+    /// left out of `actions`.
+    pub errors: Vec<ItemError>,
 }
 
 impl fmt::Display for PimdirQueueListOutput {
@@ -123,7 +134,7 @@ impl fmt::Display for PimdirQueueListOutput {
         listing.head("Calendar", self.calendar.as_deref().unwrap_or("all"));
         listing.empty = Some("Nothing queued nor parked");
 
-        for queued in &self.items {
+        for queued in &self.actions {
             let what = queued.summary.as_deref().or(queued.item_id.as_deref());
             listing.items.push(cells(queued, "queued", what));
         }
@@ -141,6 +152,10 @@ impl fmt::Display for PimdirQueueListOutput {
         if !listing.items.rows.is_empty() {
             let cancel = String::from("calendula pimdir queue cancel <ROW>");
             listing.header.push(("Cancel", cancel));
+        }
+
+        for error in &self.errors {
+            listing.errors.push(error);
         }
 
         write!(f, "{listing}")
@@ -195,7 +210,7 @@ mod tests {
         let output = PimdirQueueListOutput {
             account: "perso".into(),
             calendar: None,
-            items: vec![
+            actions: vec![
                 PimdirQueueRow {
                     link_id: Some("standup@example.org".into()),
                     summary: Some("Standup".into()),
@@ -215,6 +230,7 @@ mod tests {
                 summary: Some("Review".into()),
                 ..row(2, "update")
             }],
+            errors: Vec::new(),
         };
 
         let expected = "\
@@ -230,7 +246,7 @@ e2646df031cd876334410c4df14ebd86.1.2  parked  2026-11-14T09:00:00Z  update      
 
         let json = serde_json::to_value(&output).unwrap();
         assert_eq!(
-            json["items"][0],
+            json["actions"][0],
             json!({
                 "row": 3,
                 "handle": format!("{STORE}.1.3"),
@@ -271,8 +287,9 @@ e2646df031cd876334410c4df14ebd86.1.2  parked  2026-11-14T09:00:00Z  update      
         let output = PimdirQueueListOutput {
             account: "perso".into(),
             calendar: Some("cal".into()),
-            items: Vec::new(),
+            actions: Vec::new(),
             parked: Vec::new(),
+            errors: Vec::new(),
         };
 
         let expected = "\

@@ -24,7 +24,7 @@ use crate::{
 /// every override it carries.
 ///
 /// The event is named by the id `event list` shows, never by its
-/// iCalendar `UID`, which `event search` turns into that id.
+/// iCalendar `UID`, which `event read --uid` reads it by.
 ///
 /// JSON output: `{"id", "queued"}`.
 #[derive(Debug, Parser)]
@@ -51,9 +51,9 @@ pub struct EventDeleteCommand {
 
 impl EventDeleteCommand {
     pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
-        let mut capabilities = vec![Capability::ItemRemove];
+        let mut capabilities = vec![Capability::ItemDelete];
         if self.if_match.is_some() {
-            capabilities.push(Capability::ItemRemoveIfMatch);
+            capabilities.push(Capability::ItemDeleteIfMatch);
         }
         if self.send_updates.send_updates.is_some() {
             capabilities.push(Capability::SchedulingSendUpdates);
@@ -83,7 +83,7 @@ impl EventDeleteCommand {
 ///
 /// A read by id settles it in one call: an item whose body is not local is
 /// there all the same. A read answering `item-not-found` is a miss, never
-/// looked for as a `UID`, which `event search` resolves; any other failure
+/// looked for as a `UID`, which `event read --uid` reads by; any other failure
 /// of the read (a refusal, a dropped connection) fails the command with
 /// its code.
 fn check(client: &mut CalendarClient, calendar_id: &str, event_id: &str) -> Result<()> {
@@ -142,7 +142,10 @@ mod msgraph_tests {
 
         let err = check(&mut client, "cal", "abc@example.org").unwrap_err();
         assert_eq!(error::code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
-        assert!(err.to_string().contains("`event search <UID>`"), "{err}");
+        assert!(
+            err.to_string().contains("`event read --uid <UID>`"),
+            "{err}"
+        );
 
         let mut backend = client.into_msgraph();
         assert_eq!(requests(&mut backend).len(), 1);

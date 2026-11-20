@@ -119,7 +119,7 @@ fn a_backend_left_out_fails_coded_backend_not_built() {
 
     let out = run(&path, &["--json", "account", "check"]);
     let report = json(&out, 3);
-    let check = &report["backends"][0];
+    let check = &report["accounts"][0]["backends"][0];
     assert_eq!(check["backend"], "gcal", "{report}");
     assert_eq!(check["code"], "backend-not-built", "{report}");
 

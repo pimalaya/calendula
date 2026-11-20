@@ -18,9 +18,10 @@ pub mod create;
 pub mod delete;
 pub mod expand;
 pub mod fields;
-pub mod find;
 pub mod list;
 pub mod read;
+#[cfg(feature = "pimdir")]
+pub mod search;
 pub mod update;
 
 use anyhow::Result;
@@ -28,7 +29,7 @@ use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use ical::tree::error::IcalParseError;
 use jiff::{Timestamp, tz::TimeZone};
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 use crate::{
     error::{self, ItemError},
@@ -45,7 +46,15 @@ use crate::{
 #[serde(rename_all = "camelCase")]
 pub struct Event {
     /// The id of the item the event was projected from.
+    /// `null` for an event no item holds yet, as `event build` prints it.
+    #[serde(serialize_with = "nonempty")]
+    #[schemars(with = "Option<String>")]
     pub id: String,
+    /// The calendar holding that item, `null` for an event no item holds
+    /// yet.
+    #[serde(serialize_with = "nonempty")]
+    #[schemars(with = "Option<String>")]
+    pub calendar_id: String,
     /// The entity tag of that item: the version a write to it can be
     /// gated on (`--if-match`), `null` when the backend has none.
     pub etag: Option<String>,
@@ -229,6 +238,7 @@ impl Event {
     pub fn occurrence(item: &CalendarItem, recurrence_id: &str) -> Option<Self> {
         expand::occurrence(item, recurrence_id).map(|event| Event {
             etag: item.etag.clone(),
+            calendar_id: item.calendar_id.clone(),
             ..event
         })
     }
@@ -259,7 +269,6 @@ impl Event {
     }
 }
 
-/// Stamps every event projected from `item` with the item's entity tag.
 /// The failure of an item whose bytes do not parse as iCalendar.
 fn unparsed(item: &CalendarItem, err: IcalParseError) -> anyhow::Error {
     anyhow::Error::from(err).context(format!("Cannot parse item `{}` as iCalendar", item.id))
@@ -269,18 +278,32 @@ fn unparsed(item: &CalendarItem, err: IcalParseError) -> anyhow::Error {
 fn stand_in(item: &CalendarItem) -> Vec<Event> {
     item.stand_in
         .iter()
-        .map(|event| (**event).clone())
+        .map(|event| Event {
+            calendar_id: item.calendar_id.clone(),
+            ..(**event).clone()
+        })
         .collect()
 }
 
+/// Stamps every event projected from `item` with the item's entity tag
+/// and calendar.
 fn tagged(item: &CalendarItem, events: Vec<Event>) -> Vec<Event> {
     events
         .into_iter()
         .map(|event| Event {
             etag: item.etag.clone(),
+            calendar_id: item.calendar_id.clone(),
             ..event
         })
         .collect()
+}
+
+/// Serializes an empty `value` as `null`, an id an event lacks.
+fn nonempty<S: Serializer>(value: &str, serializer: S) -> Result<S::Ok, S::Error> {
+    match value.is_empty() {
+        true => serializer.serialize_none(),
+        false => serializer.serialize_str(value),
+    }
 }
 
 /// Parses an iCalendar DATE or DATE-TIME into a [`NaiveDateTime`].

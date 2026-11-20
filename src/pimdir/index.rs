@@ -110,7 +110,6 @@ impl PimdirClient {
         // NOTE: an item dropped since the refresh has no row, only a title.
         Ok(PimdirCalendarHit {
             event: event_hit(&item, stored.as_ref(), hit.title),
-            calendar_id,
             matched: hit.matched.map(PimdirCalendarMatched::from),
             snippet: hit.snippet,
         })
@@ -312,8 +311,6 @@ pub struct PimdirCalendarHit {
     /// The event, projected as `event read` projects it.
     #[serde(flatten)]
     pub event: Event,
-    /// The calendar holding it.
-    pub calendar_id: String,
     /// What a text term matched, `null` when only field terms did.
     pub matched: Option<PimdirCalendarMatched>,
     /// A passage naming a query word, `null` without an indexed body.
@@ -902,7 +899,7 @@ mod tests {
         let hit = &hits[0];
         assert_eq!(hit.event.summary.as_deref(), Some("Offsite"));
         assert_eq!(hit.event.location.as_deref(), Some("Lisbon"));
-        assert_eq!(hit.calendar_id, "cal");
+        assert_eq!(hit.event.calendar_id, "cal");
         assert_eq!(hit.matched, Some(PimdirCalendarMatched::Body));
         assert!(
             hit.snippet.as_deref().unwrap().contains("quarter"),
@@ -1049,7 +1046,7 @@ mod tests {
         let hits = &invoice.hits;
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].matched, Some(PimdirCalendarMatched::Summary));
-        assert_eq!(hits[0].calendar_id, "work");
+        assert_eq!(hits[0].event.calendar_id, "work");
         assert_eq!(hits[0].event.summary.as_deref(), Some("Invoice review"));
         assert_eq!(hits[0].event.uid.as_deref(), Some("invoice@example.org"));
         assert_eq!(hits[0].event.start.as_deref(), Some("2026-11-20T14:00:00Z"));
@@ -1243,7 +1240,7 @@ mod tests {
         for (backend, calendar) in [(&work, "work/cal"), (&home, "home/cal")] {
             let hits = page(&backend.client, "lunch", None).hits;
             assert_eq!(hits.len(), 1);
-            assert_eq!(hits[0].calendar_id, calendar);
+            assert_eq!(hits[0].event.calendar_id, calendar);
         }
     }
 

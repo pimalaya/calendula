@@ -91,7 +91,7 @@ fn a_calendar_id_out_of_the_home_is_not_found() {
             &["calendar", "delete", id],
             &["event", "list", "-k", id],
             &["event", "agenda", "-k", id],
-            &["event", "search", "-k", id, "e1"],
+            &["event", "read", "-k", id, "--uid", "e1"],
             &["event", "read", "-k", id, "e1.ics"],
             &["event", "add", "-k", id, "--summary", "Bob"],
             &["event", "update", "-k", id, "e1.ics", "--summary", "Bob"],
@@ -101,7 +101,8 @@ fn a_calendar_id_out_of_the_home_is_not_found() {
             &["item", "add", "-k", id, ICAL],
             &["item", "update", "-k", id, "e1.ics", ICAL],
             &["item", "delete", "-k", id, "e1.ics"],
-            &["caldav", "delete", id],
+            &["caldav", "delete", id, "e1.ics"],
+            &["caldav", "rmcol", id],
         ];
 
         for args in commands {
@@ -135,7 +136,7 @@ fn an_item_id_out_of_its_calendar_is_not_found() {
         // NOTE: an `event` command names the event in its own sentence.
         let error = format!(
             "Event `{id}` not found in calendar `cal`; an event is named by the id \
-             `event list` shows, `event search <UID>` finding it by its iCalendar UID"
+             `event list` shows, `event read --uid <UID>` reading it by its iCalendar UID"
         );
 
         let commands: &[&[&str]] = &[

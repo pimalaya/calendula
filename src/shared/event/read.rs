@@ -1,24 +1,27 @@
 //! # Event read
 //!
 //! The `calendula event read` command, printing one VEVENT as the
-//! calendar stores it, and what it projects to.
+//! calendar stores it, and what it projects to, the item named by its id
+//! or by the iCalendar `UID` it carries.
 
 use std::fmt;
 
 use anyhow::{Result, anyhow};
 use clap::Parser;
+use log::warn;
 use pimalaya_cli::printer::Printer;
 use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::{
     capability::Capability,
-    error::event_missing,
+    error::{event_missing, item_not_found},
     shared::{
         arg::CalendarIdArg,
         client::CalendarClient,
         event::Event,
-        item::{ItemReadRow, read::printable},
+        ical::IcalFamily,
+        item::{CalendarItem, CalendarItemQuery, ItemReadRow, read::printable},
     },
 };
 
@@ -29,6 +32,13 @@ use crate::{
 /// drive the terminal replaced. With `--recurrence-id`, the one
 /// occurrence it names is projected as well, at its own times, an
 /// override applied.
+///
+/// An invitation names its event by `UID`, which is not the id a backend
+/// addresses it by: `--uid` reads the item carrying it instead of an id.
+/// Google Calendar is asked for the UID alone; another remote backend
+/// scans the calendar whole, and a local one reads it whole. On pimdir,
+/// whose stored summary names each resource's `UID`, only the bodies that
+/// may carry it are read.
 ///
 /// JSON output: `{"id", "calendarId", "etag", "contents", "encoding",
 /// "events": [...]}`, the row `item list` prints of the item holding the
@@ -42,8 +52,17 @@ pub struct EventReadCommand {
     pub calendar: CalendarIdArg,
 
     /// Identifier of the event, as a listing shows it.
-    #[arg(value_name = "EVENT-ID")]
-    pub event_id: String,
+    #[arg(
+        value_name = "EVENT-ID",
+        required_unless_present = "uid",
+        conflicts_with = "uid"
+    )]
+    pub event_id: Option<String>,
+
+    /// The iCalendar UID of the event, compared exactly, in place of its
+    /// id.
+    #[arg(long, value_name = "UID")]
+    pub uid: Option<String>,
 
     /// The occurrence to project, by the `recurrenceId` an expanded
     /// listing shows (`YYYYMMDD`, `YYYYMMDDTHHMMSS` or with a `Z`).
@@ -53,21 +72,27 @@ pub struct EventReadCommand {
 
 impl EventReadCommand {
     pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
-        client.require(&[Capability::ItemRead])?;
-
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
-        let item = client
-            .get_item(&calendar_id, &self.event_id)
-            .map_err(|err| event_missing(err, &self.event_id, &calendar_id))?;
+
+        let item = match &self.uid {
+            Some(uid) => {
+                client.require(&[Capability::ItemList])?;
+                read_uid(client, &calendar_id, uid)?
+            }
+            None => {
+                let event_id = self.event_id.as_deref().unwrap_or_default();
+                client.require(&[Capability::ItemRead])?;
+                client
+                    .get_item(&calendar_id, event_id)
+                    .map_err(|err| event_missing(err, event_id, &calendar_id))?
+            }
+        };
 
         let events = match &self.recurrence_id {
             None => Event::project(&item),
             Some(recurrence_id) => {
                 let occurrence = Event::occurrence(&item, recurrence_id).ok_or_else(|| {
-                    anyhow!(
-                        "Event `{}` has no occurrence `{recurrence_id}`",
-                        self.event_id
-                    )
+                    anyhow!("Event `{}` has no occurrence `{recurrence_id}`", item.id)
                 })?;
                 vec![occurrence]
             }
@@ -79,6 +104,37 @@ impl EventReadCommand {
             bytes: item.contents,
         })
     }
+}
+
+/// The item of `calendar_id` holding a VEVENT whose `UID` is `uid`,
+/// refused `item-not-found` when none does. A calendar holding several,
+/// which one calendar object resource should not, reads the first listed
+/// and warns of the others.
+fn read_uid(client: &mut CalendarClient, calendar_id: &str, uid: &str) -> Result<CalendarItem> {
+    let query = CalendarItemQuery {
+        kind: IcalFamily::Event.kind(),
+        uid: Some(uid),
+        ..Default::default()
+    };
+    let listed = client.list_items(calendar_id, None, None, query)?;
+
+    let carries = |item: &CalendarItem| {
+        let events = Event::project(item);
+        events.iter().any(|event| event.uid.as_deref() == Some(uid))
+    };
+    let mut items = listed.items.into_iter().filter(carries);
+
+    let Some(item) = items.next() else {
+        return Err(item_not_found(format!(
+            "No event with UID `{uid}` found in calendar `{calendar_id}`"
+        )));
+    };
+
+    for other in items {
+        warn!("item {} carries UID {uid} too, left unread", other.id);
+    }
+
+    Ok(item)
 }
 
 /// The read event, as the calendar stores it: the row `item list` prints

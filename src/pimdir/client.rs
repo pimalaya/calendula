@@ -20,7 +20,7 @@
 
 use std::{fmt, path::PathBuf};
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use io_pimdir::{
     client::{PimdirError, blobs::PimdirBlobs, producer::PimdirProducer, reader::PimdirReader},
     sql::FORMAT_VERSION,
@@ -211,32 +211,30 @@ impl ErrorCode {
 /// none. The message is io-pimdir's, but for a store of another format
 /// version, worded by [`version_message`].
 pub(crate) fn store_error(err: PimdirError, context: impl fmt::Display) -> anyhow::Error {
-    let Some(code) = ErrorCode::of_pimdir(&err) else {
-        return anyhow!("{context}: {err}");
-    };
-
+    let context = context.to_string();
     let message = match &err {
-        PimdirError::Version { found } => {
-            version_message(found.as_deref(), FORMAT_VERSION, context)
-        }
-        err => format!("{context}: {err}"),
+        PimdirError::Version { found } => version_message(found.as_deref(), FORMAT_VERSION),
+        err => err.to_string(),
     };
 
-    CodedError::new(code, message).into()
+    match ErrorCode::of_pimdir(&err) {
+        Some(code) => anyhow::Error::new(CodedError::new(code, message)).context(context),
+        None => anyhow::Error::new(err).context(context),
+    }
 }
 
 /// What a store of another format version than `own` reads as, `found`
 /// being the version it names, `None` for one naming none: io-pimdir's
 /// one wording ([`PimdirFormatRefusal`]), naming calendula, which orders
 /// the two by pimdir STORAGE §4.2 and never advises deleting the store.
-fn version_message(found: Option<&str>, own: &str, context: impl fmt::Display) -> String {
+fn version_message(found: Option<&str>, own: &str) -> String {
     let refusal = PimdirFormatRefusal {
         found,
         own,
         program: "calendula",
     };
 
-    format!("{context}: {refusal}")
+    refusal.to_string()
 }
 
 /// A temporary directory holding a pimdir store this process owns for as
@@ -389,9 +387,7 @@ mod tests {
     /// store is the earlier; neither says to delete the store.
     #[test]
     fn a_store_of_another_version_names_the_drain_or_the_upgrade() {
-        let refused = |found: Option<&str>, own: &str| {
-            super::version_message(found, own, "Open pimdir store")
-        };
+        let refused = |found: Option<&str>, own: &str| super::version_message(found, own);
 
         for (found, own) in [
             (None, "storage-draft-14"),

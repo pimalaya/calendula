@@ -9,10 +9,13 @@ pub mod cancel;
 pub mod list;
 pub mod show;
 
-use anyhow::{Result, bail};
+use anyhow::{Error, Result, anyhow};
 use clap::Subcommand;
 use io_pimdir::{
-    client::{PimdirError, PimdirStore, producer::PimdirActionStatus},
+    client::{
+        PimdirError, PimdirStore,
+        producer::{PimdirActionStatus, PimdirPendingAction},
+    },
     codec::{PimdirAction, PimdirActionHandle, PimdirStoreIdentity, action_from_payload},
     intent::{PimdirIntentItem, PimdirInvitation},
     object::PimdirHash,
@@ -21,7 +24,7 @@ use io_pimdir::{
 use pimalaya_cli::{error::CodedError, printer::Printer};
 
 use crate::{
-    error::ErrorCode,
+    error::{ErrorCode, ItemError},
     pimdir::{
         backend::PimdirBackend,
         client::store_error,
@@ -107,51 +110,94 @@ impl PimdirBackend {
         }
     }
 
-    /// The creations and the intents waiting in the queue of `calendar`,
-    /// or of every calendar of the account, in append order.
-    ///
-    /// An update or a removal is left out: it addresses an item that
-    /// already exists, which the listings show it on.
-    pub(crate) fn queued_rows(&self, calendar: Option<&str>) -> Result<Vec<PimdirQueueRow>> {
+    /// The pending rows of every kind in `calendar`, or in every calendar
+    /// of the account, in append order, and an item error for each
+    /// calendar whose queue holds a row that does not decode, whose rows
+    /// are then left out.
+    pub(crate) fn pending_rows(
+        &self,
+        calendar: Option<&str>,
+    ) -> Result<(Vec<PimdirQueueRow>, Vec<ItemError>)> {
         let identity = self.store_identity()?;
         let mut rows = Vec::new();
+        let mut errors = Vec::new();
 
         for collection in self.queue_calendars(calendar)? {
-            let pending = self
-                .client
-                .reader
-                .pending_actions(&collection)
-                .map_err(|err| store_error(err, "Read the pimdir queue"))?;
-
-            for queued in pending {
-                if !matches!(
-                    queued.action,
-                    PimdirAction::Add { .. } | PimdirAction::Unknown { .. }
-                ) {
+            let pending = match self.client.reader.pending_actions(&collection) {
+                Ok(pending) => pending,
+                Err(err @ PimdirError::Action(_)) => {
+                    let context = format!("Decode the pimdir queue of calendar `{collection}`");
+                    errors.push(ItemError::new(None, &store_error(err, context)));
                     continue;
                 }
+                Err(err) => return Err(store_error(err, "Read the pimdir queue")),
+            };
 
-                let addressed = self.addressed(&collection, &queued.action);
-
-                rows.push(PimdirQueueRow {
-                    row: queued.id,
-                    handle: handle(&identity, queued.id),
-                    kind: queued.action.kind().to_owned(),
-                    collection: queued.collection,
-                    link_id: addressed.link_id,
-                    item_id: addressed.item_id,
-                    producer: queued.producer,
-                    queued_at: queued.created_at,
-                    attempts: u64::try_from(queued.attempts).unwrap_or_default(),
-                    unconfirmed: false,
-                    error: None,
-                    summary: addressed.summary,
-                });
+            for queued in pending {
+                rows.push(self.pending_row(&identity, queued));
             }
         }
 
         rows.sort_by_key(|row| row.row);
-        Ok(rows)
+        Ok((rows, errors))
+    }
+
+    /// The queue row `handle` names, pending or parked in `collection`, as
+    /// `pimdir queue list` prints it, refused `row-not-found` when the
+    /// queue holds it no more.
+    pub(crate) fn listed_row(
+        &self,
+        handle: &PimdirActionHandle,
+        collection: &str,
+    ) -> Result<PimdirQueueRow> {
+        let parked = self.parked_rows(Some(collection))?;
+
+        if let Some(row) = parked.into_iter().find(|row| row.row == handle.id) {
+            return Ok(row);
+        }
+
+        let identity = self.store_identity()?;
+        let pending = self
+            .client
+            .reader
+            .pending_actions(collection)
+            .map_err(|err| store_error(err, format!("Read queue row {handle}")))?;
+
+        match pending.into_iter().find(|queued| queued.id == handle.id) {
+            Some(queued) => Ok(self.pending_row(&identity, queued)),
+            None => Err(row_not_found(handle)),
+        }
+    }
+
+    /// The listed row of the pending action `queued`.
+    fn pending_row(
+        &self,
+        identity: &PimdirStoreIdentity,
+        queued: PimdirPendingAction,
+    ) -> PimdirQueueRow {
+        let addressed = self.addressed(&queued.collection, &queued.action);
+
+        PimdirQueueRow {
+            row: queued.id,
+            handle: handle(identity, queued.id),
+            kind: queued.action.kind().to_owned(),
+            collection: queued.collection,
+            link_id: addressed.link_id,
+            item_id: addressed.item_id,
+            producer: queued.producer,
+            queued_at: queued.created_at,
+            attempts: u64::try_from(queued.attempts).unwrap_or_default(),
+            unconfirmed: false,
+            error: None,
+            summary: addressed.summary,
+        }
+    }
+
+    /// The summary of the event `seq` of `collection`, `None` when the
+    /// store holds no such event or it has none.
+    pub(crate) fn summary(&self, collection: &str, seq: i64) -> Option<String> {
+        let item = self.item(collection, &seq.to_string()).ok()?;
+        title(item.summary?)
     }
 
     /// The rows the store's owner parked in `calendar`, or in every
@@ -293,18 +339,7 @@ impl PimdirBackend {
             PimdirActionStatus::Pending { kind, .. }
             | PimdirActionStatus::Parked { kind, .. }
             | PimdirActionStatus::Unconfirmed { kind, .. } => kind,
-            PimdirActionStatus::Applied { .. } => bail!("Row {handle} was applied already"),
-            PimdirActionStatus::Reset => {
-                let message = format!(
-                    "The pimdir store is not the one row {handle} was queued in, a copy restored \
-                     since, where the id may name another row; nothing is cancelled"
-                );
-                return Err(CodedError::new(ErrorCode::StoreReset, message).into());
-            }
-            PimdirActionStatus::Unknown => bail!(
-                "No queued action with row {handle} in this account's queue; it may have been \
-                 synced already"
-            ),
+            status => return Err(uncancellable(handle, &status)),
         };
 
         let root = &self.client.root;
@@ -326,7 +361,7 @@ impl PimdirBackend {
             .map_err(|err| store_error(err, format!("Cancel queued action {handle}")))?;
 
         if !dropped {
-            bail!("No queued action with row {handle}; it may have been synced already");
+            return Err(row_not_found(handle));
         }
 
         Ok(kind)
@@ -342,6 +377,33 @@ struct Addressed {
     item_id: Option<String>,
     /// The summary of the body the row pins, else of the item.
     summary: Option<String>,
+}
+
+/// Why queue row `row`, standing at `status`, cannot be cancelled nor
+/// shown as a queued row: applied already, queued in another store than
+/// this one under `store-reset`, or not a row of the account's queue under
+/// `row-not-found`. A bare row id states no store, so io-pimdir follows it
+/// unchecked and never answers a reset for it.
+pub(crate) fn uncancellable(row: &PimdirActionHandle, status: &PimdirActionStatus) -> Error {
+    match status {
+        PimdirActionStatus::Applied { .. } => anyhow!("Row {row} was applied already"),
+        PimdirActionStatus::Reset => {
+            let message = format!(
+                "Row {row} was queued in another store: a copy restored since, where \
+                 its id may name another row"
+            );
+            CodedError::new(ErrorCode::StoreReset, message).into()
+        }
+        _ => row_not_found(row),
+    }
+}
+
+/// The refusal of a queue row the account's queue does not hold.
+pub(crate) fn row_not_found(row: &PimdirActionHandle) -> Error {
+    let message = format!(
+        "No queued action with row {row} in this account's queue; it may have been synced already"
+    );
+    CodedError::new(ErrorCode::RowNotFound, message).into()
 }
 
 /// The handle of the row `id` of the store `identity`, as `pimdir queue
@@ -414,9 +476,9 @@ mod tests {
     fn a_queued_creation_lists_shows_and_cancels() {
         let (_dir, backend) = store();
 
-        let rows = backend.queued_rows(None).unwrap();
+        let rows = backend.pending_rows(None).unwrap().0;
         assert_eq!(rows.len(), 1, "{rows:?}");
-        assert!(backend.queued_rows(Some("other")).unwrap().is_empty());
+        assert!(backend.pending_rows(Some("other")).unwrap().0.is_empty());
         assert!(backend.parked_rows(None).unwrap().is_empty());
 
         let row = &rows[0];
@@ -435,7 +497,7 @@ mod tests {
         );
 
         assert_eq!(backend.cancel_queued(&row).unwrap(), "add");
-        assert!(backend.queued_rows(Some("cal")).unwrap().is_empty());
+        assert!(backend.pending_rows(Some("cal")).unwrap().0.is_empty());
         assert_eq!(
             backend.queue_row(&row).unwrap(),
             PimdirActionStatus::Unknown
@@ -443,6 +505,7 @@ mod tests {
 
         let err = backend.cancel_queued(&row).unwrap_err();
         assert!(err.to_string().contains("No queued action"), "{err}");
+        assert_eq!(error::code(&err), Some(ErrorCode::RowNotFound), "{err}");
     }
 
     /// A row named by the handle its enqueue answered is followed and
@@ -489,11 +552,11 @@ mod tests {
             let err = backend.cancel_queued(&other).unwrap_err();
             assert_eq!(error::code(&err), Some(ErrorCode::StoreReset), "{err}");
         }
-        assert_eq!(backend.queued_rows(Some("cal")).unwrap().len(), 2);
+        assert_eq!(backend.pending_rows(Some("cal")).unwrap().0.len(), 2);
 
         let parsed: PimdirActionHandle = handle.to_string().parse().unwrap();
         assert_eq!(backend.cancel_queued(&parsed).unwrap(), "add");
-        assert_eq!(backend.queued_rows(Some("cal")).unwrap().len(), 1);
+        assert_eq!(backend.pending_rows(Some("cal")).unwrap().0.len(), 1);
     }
 
     /// A bare row id is named under the store's identity, the handle
@@ -505,7 +568,7 @@ mod tests {
         use io_pimdir::codec::PimdirActionHandle;
 
         let (_dir, backend) = store();
-        let listed = backend.queued_rows(None).unwrap().remove(0).handle;
+        let listed = backend.pending_rows(None).unwrap().0.remove(0).handle;
         let given: PimdirActionHandle = listed.parse().unwrap();
 
         let bare = PimdirActionHandle {
@@ -526,7 +589,32 @@ mod tests {
     fn an_unknown_calendar_has_no_queue() {
         let (_dir, backend) = store();
 
-        let err = backend.queued_rows(Some("nope")).unwrap_err();
+        let err = backend.pending_rows(Some("nope")).unwrap_err();
         assert_eq!(error::code(&err), Some(ErrorCode::CalendarNotFound));
+    }
+
+    /// A pending row that does not decode is an item error naming its
+    /// calendar, coded `action-malformed`, the other calendars still
+    /// listed, rather than a failure of the whole listing.
+    #[test]
+    fn an_undecodable_pending_row_is_an_item_error() {
+        let (dir, backend) = store();
+        drop(backend);
+
+        let db = rusqlite::Connection::open(dir.path().join("pimdir.db")).unwrap();
+        let sql = "UPDATE queue SET payload = replace(payload, '\"v\":1', '\"w\":1')";
+        assert_eq!(db.execute(sql, []).unwrap(), 1);
+        drop(db);
+
+        let config = PimdirConfig {
+            root: dir.path().to_path_buf(),
+            account: None,
+        };
+        let backend = PimdirBackend::new(config).unwrap();
+        let (rows, errors) = backend.pending_rows(None).unwrap();
+        assert!(rows.is_empty(), "{rows:?}");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].code, Some(ErrorCode::ActionMalformed));
+        assert!(errors[0].error.contains("`cal`"), "{errors:?}");
     }
 }

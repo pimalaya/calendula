@@ -663,6 +663,7 @@ impl<'a> Context<'a> {
     ) -> Event {
         Event {
             id: item_id.to_owned(),
+            calendar_id: String::new(),
             etag: None,
             uid: text(component, IcalPropKind::Uid),
             recurrence_id,
@@ -1504,6 +1505,7 @@ mod tests {
             value,
             json!({
                 "id": "7",
+                "calendarId": "cal",
                 "etag": null,
                 "uid": "meet@example.org",
                 "recurrenceId": null,

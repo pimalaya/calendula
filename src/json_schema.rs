@@ -82,9 +82,10 @@ pub fn registry() -> JsonSchemaRegistry {
         "calendula-event-read",
         crate::shared::event::read::EventReadOutput
     );
+    #[cfg(feature = "pimdir")]
     insert!(
         "calendula-event-search",
-        crate::shared::event::list::EventListOutput
+        crate::shared::event::search::EventSearchOutput
     );
     insert!(
         "calendula-item-list",
@@ -147,6 +148,7 @@ pub fn registry() -> JsonSchemaRegistry {
         );
         refusable!("calendula-caldav-proppatch", IdReceipt);
         refusable!("calendula-caldav-mkcalendar", IdReceipt);
+        refusable!("calendula-caldav-rmcol", IdReceipt);
         for key in [
             "calendula-caldav-report-query",
             "calendula-caldav-report-multiget",

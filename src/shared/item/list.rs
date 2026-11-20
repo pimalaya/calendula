@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 use humansize::{BINARY, format_size};
 use pimalaya_cli::{
@@ -70,7 +70,7 @@ impl ItemListCommand {
             Some(token) => Some(
                 token
                     .parse::<u32>()
-                    .with_context(|| format!("Invalid page token `{token}`"))?,
+                    .map_err(|_| error::page_token_invalid(token))?,
             ),
             None => self.page,
         };

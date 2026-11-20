@@ -14,8 +14,8 @@ use crate::{
     session::Session,
     shared::event::{
         agenda::EventAgendaCommand, build::EventBuildCommand, create::EventCreateCommand,
-        delete::EventDeleteCommand, find::EventFindCommand, list::EventListCommand,
-        read::EventReadCommand, update::EventUpdateCommand,
+        delete::EventDeleteCommand, list::EventListCommand, read::EventReadCommand,
+        update::EventUpdateCommand,
     },
 };
 
@@ -29,8 +29,9 @@ pub enum EventCommand {
     List(EventListCommand),
     #[command(after_long_help = capability::help("event", "read"))]
     Read(EventReadCommand),
-    #[command(alias = "find", after_long_help = capability::help("event", "search"))]
-    Search(EventFindCommand),
+    #[cfg(feature = "pimdir")]
+    #[command(after_long_help = capability::help("event", "search"))]
+    Search(crate::shared::event::search::EventSearchCommand),
     #[command(alias = "create", after_long_help = capability::help("event", "add"))]
     Add(Box<EventCreateCommand>),
     #[command(after_long_help = capability::help("event", "update"))]
@@ -53,6 +54,7 @@ impl EventCommand {
             Self::Agenda(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
             Self::List(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
             Self::Read(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
+            #[cfg(feature = "pimdir")]
             Self::Search(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
             Self::Add(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
             Self::Update(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),

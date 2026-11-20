@@ -54,7 +54,7 @@ use crate::{
     account::context::Account,
     cli::resolve_account,
     config::PimdirConfig,
-    error::{self, ErrorCode, ItemError, calendar_not_found, item_not_found},
+    error::{self, ErrorCode, ItemError, calendar_duplicate, calendar_not_found, item_not_found},
     pimdir::{
         client::{PimdirClient, store_error},
         status::{
@@ -148,6 +148,20 @@ impl PimdirBackend {
 
         calendars.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(calendars)
+    }
+
+    /// Refuses a create naming the calendar `id` the store holds already,
+    /// coded `calendar-duplicate`.
+    pub fn check_new_calendar(&self, id: &str) -> Result<()> {
+        if self
+            .calendar_collections()?
+            .iter()
+            .any(|held| held.id == id)
+        {
+            return Err(calendar_duplicate(id));
+        }
+
+        Ok(())
     }
 
     /// Refuses to create a calendar.
@@ -541,7 +555,7 @@ impl PimdirBackend {
             .map(|parked| PimdirParkedStatus {
                 row: parked.id,
                 handle: crate::pimdir::queue::handle(&identity, parked.id),
-                calendar_id: parked.collection,
+                collection: parked.collection,
                 kind: parked.action,
                 error: parked.error,
             })
@@ -660,11 +674,9 @@ impl PimdirBackend {
     /// value, and saying so beats a lookup that silently finds nothing.
     /// Both are `item-not-found`, an id naming no item.
     pub(crate) fn item(&self, calendar_id: &str, item_id: &str) -> Result<PimdirItem> {
-        let seq = item_id.parse::<i64>().map_err(|_| {
-            item_not_found(format!(
-                "Invalid pimdir item id `{item_id}`: expected the number a listing showed"
-            ))
-        })?;
+        let seq = item_id
+            .parse::<i64>()
+            .map_err(|_| error::invalid_item_id(item_id, "a number"))?;
 
         self.client
             .reader
@@ -1030,14 +1042,15 @@ fn enqueue_with_body(
 /// What a write the store refuses to stage reads as, naming the way out
 /// where there is one.
 fn staging_error(err: PimdirError) -> anyhow::Error {
-    let unsupported = |message: String| -> anyhow::Error {
-        CodedError::new(ErrorCode::Unsupported, message).into()
+    let staged = |code: ErrorCode, message: String| -> anyhow::Error {
+        anyhow::Error::new(CodedError::new(code, message)).context("Stage the pimdir action")
     };
+    let unsupported = |message: String| staged(ErrorCode::Unsupported, message);
 
     match err {
         PimdirError::Unsupported(refusal) if refusal.capability == CALENDAR_SCHEDULING => {
             unsupported(format!(
-                "Stage the pimdir action: {refusal}; to write it without notifying \
+                "{refusal}; to write it without notifying \
                  anyone, first mark its ORGANIZER and ATTENDEE with \
                  SCHEDULE-AGENT=NONE"
             ))
@@ -1048,7 +1061,7 @@ fn staging_error(err: PimdirError) -> anyhow::Error {
                 false => format!("source {} does not support it", refusal.source),
             };
             unsupported(format!(
-                "Stage the pimdir action: an online meeting (X-PIMDIR-ONLINE-MEETING) needs \
+                "An online meeting (X-PIMDIR-ONLINE-MEETING) needs \
                  {}, and {who}; drop --online-meeting to write the event without one",
                 refusal.capability,
             ))
@@ -1059,7 +1072,7 @@ fn staging_error(err: PimdirError) -> anyhow::Error {
                 None => String::new(),
             };
             unsupported(format!(
-                "Stage the pimdir action: this calendar takes no to-do, source {} \
+                "This calendar takes no to-do, source {} \
                  states {} none{why}; store it in another calendar with -k/--calendar",
                 refusal.source, refusal.capability,
             ))
@@ -1071,15 +1084,15 @@ fn staging_error(err: PimdirError) -> anyhow::Error {
         } => {
             let message = match existing {
                 PimdirDuplicate::Live(seq) => format!(
-                    "Stage the pimdir action: calendar `{collection}` already holds \
+                    "Calendar `{collection}` already holds \
                      `{link_id}` as item {seq}; update that item instead"
                 ),
                 PimdirDuplicate::Pending(row) => format!(
-                    "Stage the pimdir action: calendar `{collection}` already has a \
+                    "Calendar `{collection}` already has a \
                      create of `{link_id}` queued (row {row}) for the next sync"
                 ),
             };
-            CodedError::new(ErrorCode::ItemDuplicate, message).into()
+            staged(ErrorCode::ItemDuplicate, message)
         }
         err => store_error(err, "Stage the pimdir action"),
     }
@@ -1633,7 +1646,7 @@ mod tests {
         let status = open("work").status().unwrap();
         assert_eq!(status.parked.len(), 1, "{:?}", status.parked);
         let parked = &status.parked[0];
-        assert_eq!(parked.calendar_id, "caldav/work");
+        assert_eq!(parked.collection, "caldav/work");
         assert_eq!(parked.kind, "add");
         let json = serde_json::to_value(&status).unwrap();
         assert_eq!(json["parked"][0]["kind"], "add", "{json}");
@@ -2506,7 +2519,7 @@ mod tests {
         let code = pimalaya_cli::error::code_of(&err);
         assert_eq!(code, Some(ErrorCode::Unsupported), "{err:#}");
 
-        let err = err.to_string();
+        let err = format!("{err:#}");
         assert!(err.starts_with("Stage the pimdir action"), "{err}");
         assert!(err.contains("calendar.online-meeting"), "{err}");
         assert!(err.contains("no source of this store declares it"), "{err}");
@@ -2570,8 +2583,8 @@ mod tests {
 
         let err = backend
             .create_item("cal", MEETING.into(), ItemOrigin::User)
-            .unwrap_err()
-            .to_string();
+            .unwrap_err();
+        let err = format!("{err:#}");
         assert!(err.contains("source caldav does not support it"), "{err}");
         assert_eq!(pending(&backend), 0);
     }
@@ -2670,8 +2683,8 @@ mod tests {
         let asked = ALONE.replace("SUMMARY", "X-PIMDIR-ONLINE-MEETING:TRUE\r\nSUMMARY");
         let err = backend
             .update_item("cal", &ids[0], asked.into(), None, ItemOrigin::User)
-            .unwrap_err()
-            .to_string();
+            .unwrap_err();
+        let err = format!("{err:#}");
 
         assert!(err.contains("calendar.online-meeting"), "{err}");
         assert_eq!(pending(&backend), 0);
@@ -2716,8 +2729,8 @@ mod tests {
 
         let created = backend
             .create_item("cal", todo("todo@example.org").into(), ItemOrigin::User)
-            .unwrap_err()
-            .to_string();
+            .unwrap_err();
+        let created = format!("{created:#}");
         let updated = backend
             .update_item(
                 "cal",
@@ -2726,8 +2739,8 @@ mod tests {
                 None,
                 ItemOrigin::User,
             )
-            .unwrap_err()
-            .to_string();
+            .unwrap_err();
+        let updated = format!("{updated:#}");
 
         for err in [created, updated] {
             assert!(err.starts_with("Stage the pimdir action:"), "{err}");
@@ -2869,9 +2882,12 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(code_of(&live), Some(ErrorCode::ItemDuplicate));
-        assert!(live.to_string().contains("as item 1; update"), "{live}");
+        assert!(
+            format!("{live:#}").contains("as item 1; update"),
+            "{live:#}"
+        );
         assert_eq!(code_of(&queued), Some(ErrorCode::ItemDuplicate));
-        assert!(queued.to_string().contains("queued"), "{queued}");
+        assert!(format!("{queued:#}").contains("queued"), "{queued:#}");
         assert_eq!(pending(&backend), 1);
     }
 
@@ -2952,7 +2968,7 @@ mod tests {
         assert!(!parked.unconfirmed);
         assert!(parked.error.as_ref().is_some_and(|err| err.contains(&etag)));
 
-        let queued = backend.queued_rows(None).unwrap();
+        let queued = backend.pending_rows(None).unwrap().0;
         let [queued] = &queued[..] else {
             panic!("{queued:?}");
         };
@@ -3180,12 +3196,15 @@ mod tests {
         assert_eq!(code_of(&earlier), Some(ErrorCode::StoreVersion));
         assert_eq!(code_of(&newer), Some(ErrorCode::StoreVersion));
         assert!(
-            earlier.to_string().contains("move its directory aside"),
-            "{earlier}"
+            format!("{earlier:#}").contains("move its directory aside"),
+            "{earlier:#}"
         );
-        assert!(newer.to_string().contains("upgrade calendula"), "{newer}");
+        assert!(
+            format!("{newer:#}").contains("upgrade calendula"),
+            "{newer:#}"
+        );
         for err in [uncreated, foreign, earlier, newer] {
-            assert!(!err.to_string().contains("delete"), "{err}");
+            assert!(!format!("{err:#}").contains("delete"), "{err:#}");
         }
     }
 

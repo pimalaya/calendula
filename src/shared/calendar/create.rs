@@ -58,6 +58,7 @@ impl CalendarCreateCommand {
         if self.color.is_some() {
             capabilities.push(Capability::CalendarColor);
         }
+        client.check_new_calendar(self.id.as_deref().unwrap_or(&self.name))?;
         client.require(&capabilities)?;
 
         let id = client.create_calendar(

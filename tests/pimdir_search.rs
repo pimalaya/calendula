@@ -156,7 +156,8 @@ fn a_search_resumes_at_the_next_page_it_names() {
     let text = run(home, &["pimdir", "search", "-s", "2", "budget"]);
     let text = String::from_utf8(text.stdout).unwrap();
     assert!(text.contains("Page:      1, events 1 to 2\n"), "{text}");
-    assert!(text.contains("\nNext page: --page 2\n"), "{text}");
+    let next = format!("\nNext page: --page-token {token}\n");
+    assert!(text.contains(&next), "{text}");
 }
 
 #[test]
@@ -174,6 +175,47 @@ fn an_unreadable_page_token_is_refused() {
         ];
         let error = json(&run(home.path(), &args), 1);
         let message = error["error"].as_str().unwrap_or_default();
+        assert_eq!(error["code"], "page-token-invalid", "{error}");
         assert!(message.contains("Invalid page token"), "{error}");
     }
+}
+
+/// `event search` takes the query `pimdir search` takes and answers the
+/// same events as `event list` rows, paged by the index's cursor; a query
+/// the language refuses is `query-refused`.
+#[test]
+fn an_event_search_answers_the_query_as_event_rows() {
+    let home = account();
+    let home = home.path();
+
+    let first = json(
+        &run(home, &["--json", "event", "search", "-s", "2", "budget"]),
+        0,
+    );
+    let events = first["events"].as_array().unwrap();
+    assert_eq!(events.len(), 2, "{first}");
+    assert_eq!(events[0]["calendarId"], "cal", "{first}");
+    assert_eq!(first["complete"], true, "{first}");
+    let token = first["nextPage"].as_str().unwrap().to_owned();
+
+    let args = ["--json", "pimdir", "search", "-s", "2", "budget"];
+    let hits = json(&run(home, &args), 0);
+    assert_eq!(hits["nextPage"].as_str(), Some(token.as_str()), "{hits}");
+
+    let args = [
+        "--json",
+        "event",
+        "search",
+        "-s",
+        "2",
+        "--page-token",
+        &token,
+        "budget",
+    ];
+    let last = json(&run(home, &args), 0);
+    assert_eq!(last["events"].as_array().unwrap().len(), 1, "{last}");
+    assert_eq!(last["nextPage"], Value::Null, "{last}");
+
+    let refused = json(&run(home, &["--json", "event", "search", "summary:"]), 1);
+    assert_eq!(refused["code"], "query-refused", "{refused}");
 }

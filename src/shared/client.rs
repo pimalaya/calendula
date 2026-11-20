@@ -41,6 +41,7 @@ use std::convert::Infallible;
 
 use anyhow::{Error, Result, bail};
 use log::debug;
+use pimalaya_cli::error::CodedError;
 use pimalaya_config::secret::SecretResolver;
 
 use crate::{
@@ -49,7 +50,7 @@ use crate::{
     capability::{self, Capability},
     cli::resolve_account,
     config::{AccountConfig, Config},
-    error,
+    error::{self, ErrorCode},
     mcp::sending_closed,
     shared::{
         arg::SendUpdates,
@@ -402,10 +403,11 @@ impl CalendarClient {
         }
 
         if invited {
-            bail!(
+            let message = format!(
                 "Cannot {verb} an item naming an attendee (ATTENDEE) without --allow-send: the \
                  server or a sync may notify them"
             );
+            return Err(CodedError::new(ErrorCode::SendingClosed, message).into());
         }
 
         Ok(())
@@ -423,11 +425,12 @@ impl CalendarClient {
         let unread = !listed.errors.is_empty();
 
         if unread || listed.items.iter().any(|item| invites(&item.contents)) {
-            bail!(
+            let message = format!(
                 "Cannot delete calendar `{calendar_id}` holding an item that names an attendee \
                  (ATTENDEE), or one that cannot be read to tell, without --allow-send: the \
                  server or a sync may notify them"
             );
+            return Err(CodedError::new(ErrorCode::SendingClosed, message).into());
         }
 
         Ok(())
@@ -457,6 +460,72 @@ impl CalendarClient {
             BackendClient::Gcal(client) => client.list_calendars(),
             #[cfg(feature = "msgraph")]
             BackendClient::Msgraph(client) => client.list_calendars(),
+        }
+    }
+
+    /// Searches the events `search` asks for in a pimdir store's index,
+    /// the one backend answering the query language.
+    #[cfg(feature = "pimdir")]
+    pub fn search_events(
+        &mut self,
+        search: &crate::shared::event::search::EventSearch,
+    ) -> Result<crate::shared::event::search::EventSearchPage> {
+        use crate::shared::event::search::pimdir_page;
+
+        self.require(&[Capability::EventSearch])?;
+
+        match self.open()? {
+            #[cfg(feature = "vdir")]
+            BackendClient::Vdir(_) => bail!("The vdir backend answers no event search"),
+            #[cfg(feature = "caldav")]
+            BackendClient::Caldav(_) => bail!("The caldav backend answers no event search"),
+            #[cfg(feature = "jmap")]
+            BackendClient::Jmap(_) => bail!("The jmap backend answers no event search"),
+            BackendClient::Pimdir(client) => pimdir_page(client, search),
+            #[cfg(feature = "gcal")]
+            BackendClient::Gcal(_) => bail!("The gcal backend answers no event search"),
+            #[cfg(feature = "msgraph")]
+            BackendClient::Msgraph(_) => bail!("The msgraph backend answers no event search"),
+        }
+    }
+
+    /// Refuses, on pimdir, the one backend queuing its writes, a create
+    /// naming the calendar `id` the store holds already, coded
+    /// `calendar-duplicate` before the capability check refuses the create
+    /// itself; every other backend answers on the create, and a store it
+    /// cannot open leaves the refusal to that check.
+    #[cfg_attr(not(feature = "pimdir"), allow(unused_variables))]
+    pub fn check_new_calendar(&mut self, id: &str) -> Result<()> {
+        if !self.queues_writes() {
+            return Ok(());
+        }
+
+        let Ok(client) = self.open() else {
+            return Ok(());
+        };
+
+        match client {
+            #[cfg(not(any(
+                feature = "vdir",
+                feature = "caldav",
+                feature = "jmap",
+                feature = "pimdir",
+                feature = "gcal",
+                feature = "msgraph"
+            )))]
+            BackendClient::Unused(never) => match *never {},
+            #[cfg(feature = "vdir")]
+            BackendClient::Vdir(_) => Ok(()),
+            #[cfg(feature = "caldav")]
+            BackendClient::Caldav(_) => Ok(()),
+            #[cfg(feature = "jmap")]
+            BackendClient::Jmap(_) => Ok(()),
+            #[cfg(feature = "pimdir")]
+            BackendClient::Pimdir(client) => client.check_new_calendar(id),
+            #[cfg(feature = "gcal")]
+            BackendClient::Gcal(_) => Ok(()),
+            #[cfg(feature = "msgraph")]
+            BackendClient::Msgraph(_) => Ok(()),
         }
     }
 

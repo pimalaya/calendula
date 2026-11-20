@@ -31,7 +31,7 @@ use crate::pimdir::backend::PimdirBackend;
 /// STORAGE §15.4).
 ///
 /// JSON output: `{"account", "accounts", "calendars": [{"id", "name",
-/// "total", "hydrated", "queued"}], "parked": [{"row", "handle", "calendarId",
+/// "total", "hydrated", "queued"}], "parked": [{"row", "handle", "collection",
 /// "kind", "error"}], "refused": [{"calendarId", "itemId", "source",
 /// "reason", "refusedAt"}]}`, `kind` kebab-case as the queue spells it.
 #[derive(Debug, Parser)]
@@ -88,8 +88,8 @@ pub struct PimdirParkedStatus {
     /// The row's handle, its id under the store's identity (pimdir STORAGE
     /// §4.5), which `pimdir queue show` and `cancel` take and check.
     pub handle: String,
-    /// The calendar the action targets.
-    pub calendar_id: String,
+    /// The calendar the action is queued on, as a queue row names it.
+    pub collection: String,
     /// The action kind, as the queue spells it: `add`, `update`, `remove`,
     /// `calendar-reply`...
     pub kind: String,
@@ -130,12 +130,14 @@ impl fmt::Display for PimdirStatusOutput {
         write!(f, "{fields}")?;
 
         if !self.calendars.is_empty() {
-            let mut columns = Columns::new(["ID", "DOWNLOADED", "QUEUED", "NAME"]);
+            let header = ["ID", "ITEMS", "DOWNLOADED", "QUEUED", "NAME"];
+            let mut columns = Columns::new(header);
 
             for calendar in &self.calendars {
                 columns.push([
                     sanitize::text(&calendar.id).into_owned(),
-                    format!("{}/{}", calendar.hydrated, calendar.total),
+                    calendar.total.to_string(),
+                    calendar.hydrated.to_string(),
                     calendar.queued.to_string(),
                     sanitize::text(&calendar.name).into_owned(),
                 ]);
@@ -152,7 +154,7 @@ impl fmt::Display for PimdirStatusOutput {
                 columns.push([
                     sanitize::text(&parked.handle).into_owned(),
                     sanitize::text(&parked.kind).into_owned(),
-                    sanitize::text(&parked.calendar_id).into_owned(),
+                    sanitize::text(&parked.collection).into_owned(),
                     sanitize::text(&parked.error).into_owned(),
                 ]);
             }

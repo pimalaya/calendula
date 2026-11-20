@@ -15,3 +15,4 @@ pub mod propfind;
 pub mod proppatch;
 pub mod put;
 pub mod report;
+pub mod rmcol;

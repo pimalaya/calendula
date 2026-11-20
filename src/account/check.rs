@@ -8,6 +8,13 @@ use std::path::PathBuf;
 use anyhow::{Result, bail};
 use clap::Parser;
 #[cfg(any(
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
+use pimalaya_cli::account::BackendCheckTls;
+#[cfg(any(
     feature = "vdir",
     feature = "caldav",
     feature = "jmap",
@@ -16,7 +23,11 @@ use clap::Parser;
     feature = "msgraph"
 ))]
 use pimalaya_cli::error::with_code;
-use pimalaya_cli::{account::AccountCheckOutput, error::PartialOutcome, printer::Printer};
+use pimalaya_cli::{
+    account::{AccountCheck, AccountCheckOutput},
+    error::PartialOutcome,
+    printer::Printer,
+};
 #[cfg(any(
     feature = "caldav",
     feature = "jmap",
@@ -47,8 +58,9 @@ pub type BackendCheck = pimalaya_cli::account::BackendCheck<ErrorCode>;
 /// the command with status 3, the report being the output rather than a
 /// failure object.
 ///
-/// JSON output: `{"account", "backends": [{"backend", "ok", "code",
-/// "error"}]}`.
+/// JSON output: `{"accounts": [{"account", "backends": [{"backend", "ok",
+/// "code", "error", "tls"}]}]}`, `tls` `null` for a local backend or a
+/// cleartext connection.
 #[derive(Debug, Parser)]
 pub struct AccountCheckCommand;
 
@@ -68,12 +80,15 @@ impl AccountCheckCommand {
             bail!("No backend matching `{backend}` is configured for this account");
         }
 
-        let failed = backends.iter().any(|check| !check.ok);
+        let output = AccountCheckOutput {
+            accounts: vec![AccountCheck {
+                account: name,
+                backends,
+            }],
+        };
+        let failed = !output.ok();
 
-        printer.out(AccountCheckOutput {
-            account: name,
-            backends,
-        })?;
+        printer.out(output)?;
 
         if failed {
             return Err(PartialOutcome::default().into());
@@ -119,28 +134,40 @@ fn check_account(account_config: &AccountConfig, backend: Backend) -> Vec<Backen
     if backend.allows_caldav()
         && let Some(config) = account_config.caldav.clone()
     {
-        checks.push(checked("caldav", check_caldav(config, &mut resolver)));
+        let tls = caldav_tls(&config);
+        let mut check = checked("caldav", check_caldav(config, &mut resolver));
+        check.tls = tls;
+        checks.push(check);
     }
 
     #[cfg(feature = "jmap")]
     if backend.allows_jmap()
         && let Some(config) = account_config.jmap.clone()
     {
-        checks.push(checked("jmap", check_jmap(config, &mut resolver)));
+        let tls = (!is_cleartext(&config.server)).then(|| trust(&config.tls));
+        let mut check = checked("jmap", check_jmap(config, &mut resolver));
+        check.tls = tls;
+        checks.push(check);
     }
 
     #[cfg(feature = "msgraph")]
     if backend.allows_msgraph()
         && let Some(config) = account_config.msgraph.clone()
     {
-        checks.push(checked("msgraph", check_msgraph(config, &mut resolver)));
+        let tls = Some(trust(&config.tls));
+        let mut check = checked("msgraph", check_msgraph(config, &mut resolver));
+        check.tls = tls;
+        checks.push(check);
     }
 
     #[cfg(feature = "gcal")]
     if backend.allows_gcal()
         && let Some(config) = account_config.gcal.clone()
     {
-        checks.push(checked("gcal", check_gcal(config, &mut resolver)));
+        let tls = Some(trust(&config.tls));
+        let mut check = checked("gcal", check_gcal(config, &mut resolver));
+        check.tls = tls;
+        checks.push(check);
     }
 
     // NOTE: `auto` reports a backend this build leaves out rather than
@@ -162,7 +189,7 @@ fn check_account(account_config: &AccountConfig, backend: Backend) -> Vec<Backen
 fn check_vdir(config: crate::config::VdirConfig) -> Result<()> {
     if !config.root.is_dir() {
         bail!(
-            "vdir home `{}` does not exist or is not a directory",
+            "Vdir home `{}` does not exist or is not a directory",
             config.root.display()
         );
     }
@@ -254,6 +281,55 @@ fn check_gcal(config: crate::config::GcalConfig, resolver: &mut SecretResolver) 
     Ok(())
 }
 
+/// The TLS of a CalDAV block, `None` when its home or server names a
+/// cleartext `http` URL.
+#[cfg(feature = "caldav")]
+fn caldav_tls(config: &crate::config::CaldavConfig) -> Option<BackendCheckTls> {
+    let cleartext = match (&config.home, &config.server) {
+        (Some(home), _) => home.scheme() == "http",
+        (None, Some(server)) => is_cleartext(server),
+        (None, None) => false,
+    };
+
+    (!cleartext).then(|| trust(&config.tls))
+}
+
+/// Whether `server` names a cleartext scheme, `http` or JMAP's `jmap`.
+#[cfg(any(feature = "caldav", feature = "jmap"))]
+fn is_cleartext(server: &str) -> bool {
+    let scheme = server.split_once("://").map(|(scheme, _)| scheme);
+    scheme.is_some_and(|s| s.eq_ignore_ascii_case("http") || s.eq_ignore_ascii_case("jmap"))
+}
+
+/// The check row's TLS, as `tls` configures it: `None` where the build's
+/// default answers.
+#[cfg(any(
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
+fn trust(tls: &crate::config::TlsConfig) -> BackendCheckTls {
+    use crate::config::{RustlsCryptoConfig, TlsProviderConfig};
+
+    let provider = tls.provider.as_ref().map(|provider| match provider {
+        TlsProviderConfig::Rustls => "rustls",
+        TlsProviderConfig::NativeTls => "native-tls",
+    });
+    let crypto = tls.rustls.crypto.as_ref().map(|crypto| match crypto {
+        RustlsCryptoConfig::Aws => "aws",
+        RustlsCryptoConfig::Ring => "ring",
+    });
+    let client = tls.client.as_ref();
+
+    BackendCheckTls {
+        provider: provider.map(String::from),
+        crypto: crypto.map(String::from),
+        cert: tls.cert.as_ref().map(|cert| cert.display().to_string()),
+        client_cert: client.map(|client| client.cert.display().to_string()),
+    }
+}
+
 /// The row of `backend`, a backend this build leaves out.
 fn left_out(backend: &'static str) -> BackendCheck {
     BackendCheck {
@@ -261,6 +337,7 @@ fn left_out(backend: &'static str) -> BackendCheck {
         ok: false,
         code: Some(ErrorCode::BackendNotBuilt),
         error: Some(crate::backend::not_built(backend)),
+        tls: None,
     }
 }
 
@@ -428,7 +505,7 @@ mod caldav_tests {
     use pimalaya_config::secret::SecretResolver;
 
     use crate::{
-        account::check::{BackendCheck, check_caldav, checked},
+        account::check::{BackendCheck, caldav_tls, check_caldav, checked},
         config::CaldavConfig,
     };
 
@@ -513,6 +590,38 @@ mod caldav_tests {
         let config: CaldavConfig = toml::from_str(&document).unwrap();
 
         checked("caldav", check_caldav(config, &mut SecretResolver::new()))
+    }
+
+    /// A row names the TLS its block configures over an `https` URL, and
+    /// none over a cleartext `http` one.
+    #[test]
+    fn a_row_names_its_tls_unless_cleartext() {
+        let row = |document: &str| {
+            let config: CaldavConfig = toml::from_str(document).unwrap();
+            let mut row = checked("caldav", Ok(()));
+            row.tls = caldav_tls(&config);
+            serde_json::to_value(row).unwrap()
+        };
+
+        let secure = row("server = \"https://example.org\"\n\
+             tls.provider = \"native-tls\"\ntls.cert = \"/ca.pem\"");
+        assert_eq!(
+            secure.get("tls"),
+            Some(&serde_json::json!({
+                "provider": "native-tls",
+                "crypto": null,
+                "cert": "/ca.pem",
+                "clientCert": null,
+            })),
+            "{secure}"
+        );
+
+        let cleartext = row("home = \"http://example.org/calendars/\"");
+        assert_eq!(
+            cleartext.get("tls"),
+            Some(&serde_json::Value::Null),
+            "{cleartext}"
+        );
     }
 
     /// A credential the server refuses fails a pinned `home` as it fails

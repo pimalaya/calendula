@@ -47,8 +47,9 @@ events with event_list, a page at a time (give `nextPage` back as \
 `page-token`), or between two days with `from` and `to` (YYYY-MM-DD), \
 which also lists each occurrence of a recurring event. An event's `id` \
 names it, in that calendar, for event_read, event_update and \
-event_delete, which take no UID; event_search looks one up by the \
-iCalendar UID an invitation carries. item_list and item_read give the \
+event_delete; event_read takes the iCalendar UID an invitation carries \
+in `uid` instead. event_search takes a query in the pimdir search \
+language, which a pimdir store answers. item_list and item_read give the \
 raw iCalendar of any component. event_add and event_update take the \
 event as field arguments (`summary`, `start`, `end`, `location`) or as \
 iCalendar text in `ical`, never as a path. account_capability says \

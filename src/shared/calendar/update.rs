@@ -53,7 +53,7 @@ impl CalendarUpdateCommand {
     pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
         let mut capabilities = Vec::new();
         if self.name.is_some() {
-            capabilities.push(Capability::CalendarRename);
+            capabilities.push(Capability::CalendarUpdate);
         }
         if self.description.is_some() {
             capabilities.push(Capability::CalendarDescription);

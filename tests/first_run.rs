@@ -67,6 +67,21 @@ fn a_bare_invocation_prints_the_help_over_a_broken_configuration() {
     assert!(text(&output.stdout).contains("Usage: calendula"));
 }
 
+/// A JSON caller giving no command gets a refused command line, not the
+/// help, whether a configuration exists or not.
+#[test]
+fn a_bare_json_invocation_is_a_refused_command_line() {
+    for toml in [Some("[accounts.a]\ndefault = true\n"), None] {
+        let (home, path) = home(toml);
+        let output = run(home.path(), &["--json", "-c", path.to_str().unwrap()]);
+        let stdout = text(&output.stdout);
+
+        assert_eq!(output.status.code(), Some(2), "{stdout}");
+        let json: Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(json["code"], "usage-invalid", "{json}");
+    }
+}
+
 #[test]
 fn a_bare_invocation_without_configuration_names_the_missing_path() {
     let (home, path) = home(None);

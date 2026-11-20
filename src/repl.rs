@@ -13,9 +13,9 @@
 //! (`pimalaya_cli::session::check_stdin`), and so is the composer, whose
 //! editor would fight the session for the terminal.
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use clap::Parser;
-use pimalaya_cli::{printer::Printer, repl::Repl};
+use pimalaya_cli::{error::CodedError, printer::Printer, repl::Repl};
 
 use crate::{
     cli::{Command, resolve_account},
@@ -50,10 +50,11 @@ impl ReplCommand {
         repl.fixed.extend(["-b", "--backend"]);
 
         repl.run::<Command, ErrorCode>(|printer, cmd| match cmd {
-            cmd if composes(&cmd) => Err(anyhow!(
-                "Cannot run the composer (-i) inside a session; pass the iCalendar or the \
-                 field flags instead"
-            )),
+            cmd if composes(&cmd) => {
+                let message = "Cannot run the composer (-i) inside a session; pass the iCalendar or \
+                               the field flags instead";
+                Err(CodedError::new(ErrorCode::StdinTaken, message).into())
+            }
             cmd => cmd.execute(printer, session),
         })
     }

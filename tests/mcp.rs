@@ -170,12 +170,11 @@ const SCHEDULING: [&str; 5] = [
     "send-updates",
 ];
 
-const READS: [&str; 7] = [
+const READS: [&str; 6] = [
     "account_capability",
     "calendar_list",
     "event_list",
     "event_read",
-    "event_search",
     "item_list",
     "item_read",
 ];
@@ -202,7 +201,6 @@ fn initialize_tells_the_agent_how_to_use_the_tools() {
     for word in [
         "calendar_list",
         "event_list",
-        "event_search",
         "--allow-write",
         "--allow-send",
         "ATTENDEE",
@@ -585,6 +583,7 @@ fn a_write_naming_attendees_needs_allow_send() {
     assert_eq!(responses.len(), 8, "{responses:#?}");
 
     for response in &responses[..6] {
+        assert_eq!(report(response)["code"], "sending-closed", "{response}");
         let error = refusal(response);
         assert!(error.contains("--allow-send"), "{error}");
         assert!(error.contains("ATTENDEE"), "{error}");
@@ -622,6 +621,7 @@ fn a_calendar_holding_an_invitation_needs_allow_send_to_go() {
         &["--allow-write"],
         std::slice::from_ref(&delete),
     );
+    assert_eq!(report(&responses[0])["code"], "sending-closed");
     let error = refusal(&responses[0]);
     assert!(error.contains("--allow-send"), "{error}");
     assert!(error.contains("ATTENDEE"), "{error}");

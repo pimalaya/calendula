@@ -84,6 +84,14 @@ An account MAY carry a `proxy`, and `caldav`, `jmap`, `gcal` and `msgraph` each 
 
 Every paged listing family SHALL additionally carry a block naming its default page size: `event.list` and `item.list`.
 
+### Requirement: TLS is set per account and per backend
+Every network backend block SHALL take a `tls` table spelled as pimalaya-config's toml.md writes it (*Every binary spells its TLS table alike*) and as Himalaya's: `provider` (`rustls` or `native-tls`), `rustls.crypto` (`aws` or `ring`), `cert` (a PEM certificate to trust) and `client` (`cert` and `key`, a PEM client certificate and its PEM private key, PKCS#8 under native-tls, both required once `client` is given), each optional, its paths shell-expanded. An account MAY carry a `tls` table of the same keys, which each network backend's `tls` SHALL take from, field by field, for what it leaves unset, `client` as one so a certificate is never paired with another table's key. A key the table does not read SHALL be refused by serde's `deny_unknown_fields` alone.
+
+#### Scenario: A backend table over the account's
+- GIVEN an account holding `tls.provider = "native-tls"`, `tls.cert = "/ca.pem"` and `tls.client`, and its `caldav.tls.cert = "/dav.pem"`
+- WHEN the configuration is loaded
+- THEN that backend runs native-tls trusting `/dav.pem` and presenting the account's client certificate, and every other network backend of the account native-tls trusting `/ca.pem`
+
 ### Requirement: A proxy is set per account and per backend
 An account's `proxy` SHALL apply to every network backend of that account (CalDAV, JMAP, Google Calendar, Microsoft Graph) whose own block names no `proxy`, and a backend's own `proxy` SHALL win over it. With neither, the connection SHALL read the `all_proxy` and `https_proxy` environment variables, honouring `no_proxy`.
 
@@ -118,7 +126,7 @@ The Calendar API lives at one fixed base URL, so the `gcal` block SHALL name no 
 ### Requirement: Paths are shell-expanded
 Every configured filesystem path SHALL be shell-expanded by the deserializer that reads it, so `~` and environment variables both work and no call site can forget. A path used raw would resolve against the working directory, which for a store root silently creates an empty one.
 
-`vdir.root`, `pimdir.root` and `tls.cert` are the paths concerned; the optional one goes through a local deserializer until pimalaya-config ships an optional variant of its own.
+`vdir.root`, `pimdir.root`, `tls.cert`, `tls.client.cert` and `tls.client.key` are the paths concerned; the optional one goes through a local deserializer until pimalaya-config ships an optional variant of its own.
 
 ### Requirement: The vdir home is `vdir.root`
 An account's `vdir` block SHALL name the vdir home, the directory holding one calendar per immediate subdirectory, in `root`, its `~` and environment variables expanded as it is read ("Paths are shell-expanded"), as `pimdir.root` names a store. `vdir.home-dir`, the key 0.2 read, SHALL fail as an unknown field. A build without `vdir` loads the block unread.

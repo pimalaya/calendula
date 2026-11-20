@@ -17,6 +17,7 @@ use crate::caldav::{
     proppatch::CaldavProppatchCommand,
     put::CaldavPutCommand,
     report::cli::CaldavReportCommand,
+    rmcol::CaldavRmcolCommand,
 };
 
 /// CalDAV-specific API.
@@ -35,6 +36,7 @@ pub enum CaldavCommand {
     Proppatch(CaldavProppatchCommand),
     #[command(alias = "create")]
     Mkcalendar(CaldavMkcalendarCommand),
+    Rmcol(CaldavRmcolCommand),
     #[command(subcommand)]
     Report(CaldavReportCommand),
     Get(CaldavGetCommand),
@@ -52,6 +54,7 @@ impl CaldavCommand {
             Self::Propfind(cmd) => cmd.calendar_id.as_deref().map_or(Ok(()), check_calendar_id),
             Self::Proppatch(cmd) => check_calendar_id(&cmd.id),
             Self::Mkcalendar(cmd) => check_new_calendar_id(&cmd.id),
+            Self::Rmcol(cmd) => check_calendar_id(&cmd.calendar_id),
             Self::Report(cmd) => cmd.check(),
             Self::Get(cmd) => {
                 check_calendar_id(&cmd.calendar_id)?;
@@ -63,7 +66,7 @@ impl CaldavCommand {
             }
             Self::Delete(cmd) => {
                 check_calendar_id(&cmd.calendar_id)?;
-                cmd.item_id.as_deref().map_or(Ok(()), check_item_id)
+                check_item_id(&cmd.item_id)
             }
         }
     }
@@ -74,6 +77,7 @@ impl CaldavCommand {
             Self::Propfind(cmd) => cmd.execute(printer, client),
             Self::Proppatch(cmd) => cmd.execute(printer, client),
             Self::Mkcalendar(cmd) => cmd.execute(printer, client),
+            Self::Rmcol(cmd) => cmd.execute(printer, client),
             Self::Report(cmd) => cmd.execute(printer, client),
             Self::Get(cmd) => cmd.execute(printer, client),
             Self::Put(cmd) => cmd.execute(printer, client),
@@ -81,5 +85,30 @@ impl CaldavCommand {
         };
 
         crate::shared::refusal::print(printer, &[crate::caldav::client::refusal], result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use crate::{
+        caldav::cli::CaldavCommand,
+        cli::{Cli, Command},
+    };
+
+    /// `caldav delete` deletes one item, its id required, so an empty
+    /// shell variable never turns it into a collection delete; `rmcol`
+    /// deletes the collection.
+    #[test]
+    fn an_item_delete_requires_its_id_and_rmcol_deletes_the_collection() {
+        assert!(Cli::try_parse_from(["calendula", "caldav", "delete", "cal"]).is_err());
+        assert!(Cli::try_parse_from(["calendula", "caldav", "delete", "cal", ""]).is_ok());
+
+        let cli = Cli::try_parse_from(["calendula", "caldav", "rmcol", "cal"]).unwrap();
+        let Some(Command::Caldav(CaldavCommand::Rmcol(cmd))) = cli.cmd else {
+            panic!("not a rmcol");
+        };
+        assert_eq!(cmd.calendar_id, "cal");
     }
 }

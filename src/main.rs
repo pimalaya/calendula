@@ -47,9 +47,10 @@
 //! The unified API is the union of what the backends serve, not their
 //! least common denominator. [`capability`] declares, in one table per
 //! backend compiled into every build, each unified capability at `full`,
-//! `partial`, `server` or `none`, named after pimdir STORAGE Annex B
-//! without its domain word (`item.add`, `item.remove.if-match`,
-//! `online-meeting`).
+//! `partial`, `server` or `none`, named after the unified command it stands
+//! for, `<noun>.<verb>`, or `<noun>.<verb>.<argument>` for a flag a backend
+//! may not serve (`item.add`, `item.delete.if-match`,
+//! `event.add.online-meeting`).
 //!
 //! A unified command requires the capabilities its verb and its flags
 //! reach before anything connects, so one the backend does not serve fails
@@ -247,18 +248,20 @@ mod vdir;
 use std::process;
 
 use anyhow::Result;
+use clap::CommandFactory;
 use pimalaya_cli::{
-    clap::parse,
+    clap::{meet_bare_invocation, parse},
     error::{EXIT_FAILURE, ErrorReport},
     log::Logger,
     printer::StdoutPrinter,
     welcome::{is_wanted, shipped_sample},
 };
-use pimalaya_config::toml::ConfigMissingError;
+use pimalaya_config::toml::{ConfigMissingError, TomlConfig};
 use simd_cpu::SimdCpu;
 
 use crate::{
     cli::Cli,
+    config::Config,
     error::ErrorCode,
     session::{Session, SessionAccount},
 };
@@ -299,7 +302,11 @@ fn execute(cli: Cli, printer: &mut StdoutPrinter) -> Result<()> {
     };
 
     let Some(cmd) = cli.cmd else {
-        return cli::meet_bare_invocation(account.config_paths);
+        let config_missing = || {
+            let config = Config::load(account.config_paths);
+            config.err().filter(|err| err.is::<ConfigMissingError>())
+        };
+        return meet_bare_invocation(printer, Cli::command(), config_missing);
     };
 
     let mut session = Session {

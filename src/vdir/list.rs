@@ -8,7 +8,12 @@ use std::fmt;
 use anyhow::Result;
 use clap::Parser;
 use io_vdir::collection::VdirCollection;
-use pimalaya_cli::{columns::Columns, printer::Printer, sanitize};
+use pimalaya_cli::{
+    fields::Fields,
+    printer::Printer,
+    records::{Record, Records},
+    sanitize,
+};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -45,21 +50,33 @@ pub struct VdirCollectionListOutput {
 
 impl fmt::Display for VdirCollectionListOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut columns = Columns::new(["ID", "PATH", "COLOR", "NAME"]);
+        let mut records = Records::default();
 
         for collection in &self.rows {
-            let name = collection.display_name.as_deref().unwrap_or_default();
-            let color = collection.color.as_deref().unwrap_or_default();
+            let mut fields = Fields::default();
+            let metadata = [
+                ("Name", &collection.display_name),
+                ("Description", &collection.description),
+                ("Color", &collection.color),
+            ];
 
-            columns.push([
-                sanitize::text(&collection.id).into_owned(),
-                sanitize::text(&collection.path).into_owned(),
-                sanitize::text(color).into_owned(),
-                sanitize::text(name).into_owned(),
-            ]);
+            for (label, value) in metadata {
+                if let Some(value) = value {
+                    fields.push(label, sanitize::text(value));
+                }
+            }
+
+            fields.push("Path", sanitize::text(&collection.path));
+
+            records.push(Record {
+                title: sanitize::text(&collection.id).into_owned(),
+                state: Vec::new(),
+                fields,
+                body: String::new(),
+            });
         }
 
-        write!(f, "{columns}")
+        write!(f, "{records}")
     }
 }
 
@@ -97,8 +114,8 @@ mod tests {
 
     use super::*;
 
-    /// A row carries the metadata its marker files hold, as cardamum's
-    /// does: the description under `--json` alone, the colour in both.
+    /// A collection prints the metadata its marker files hold as a record,
+    /// as cardamum's does, and no empty line for a file it lacks.
     #[test]
     fn a_row_carries_the_description_and_the_colour() {
         let output = VdirCollectionListOutput {
@@ -121,9 +138,14 @@ mod tests {
         };
 
         let expected = "\
-ID    PATH        COLOR    NAME
-work  /vdir/work  #ABCDEF  Work
-bare  /vdir/bare  -        -
+work
+Name:         Work
+Description:  Meetings
+Color:        #ABCDEF
+Path:         /vdir/work
+
+bare
+Path:  /vdir/bare
 ";
         assert_eq!(output.to_string(), expected);
 

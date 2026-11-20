@@ -15,6 +15,11 @@ item.list.page-size = 25		# items per page without -s
 
 #proxy = { url = "socks5h://localhost:1080", username = "alice", password.command = "exit 127" }	# with credentials
 
+#tls.provider = "rustls"			# the build's first otherwise, for every network backend
+#tls.rustls.crypto = "ring"			# the build's first otherwise
+#tls.cert = "/path/to/cert.pem"			# a PEM certificate to trust
+#tls.client = { cert = "/path/to/client.pem", key = "/path/to/client.key.pem" }	# a PEM client certificate and its PEM key (PKCS#8 under native-tls), for mutual TLS
+
 # CalDAV
 #
 #caldav.server = "https://caldav.example.org"		# the context root the principal walk starts from
@@ -30,7 +35,8 @@ item.list.page-size = 25		# items per page without -s
 ##caldav.tls.provider = "native-tls"			# the platform's TLS
 ##caldav.tls.rustls.crypto = "ring"			# rustls on ring, the build's first otherwise
 ##caldav.tls.rustls.crypto = "aws"			# rustls on aws-lc-rs
-##caldav.tls.cert = "/path/to/cert.pem"			# a PEM certificate to trust
+##caldav.tls.cert = "/path/to/cert.pem"			# the tls keys, for CalDAV alone, field by field
+##caldav.tls.client = { cert = "/path/to/client.pem", key = "/path/to/client.key.pem" }	# a client certificate and its key
 ##caldav.proxy.url = "socks5h://localhost:1080"		# the proxy keys, for CalDAV alone
 
 # JMAP

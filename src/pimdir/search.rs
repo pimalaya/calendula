@@ -4,9 +4,12 @@
 
 use std::fmt;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{Parser, ValueEnum};
-use io_pimdir::client::search::{PimdirSearchCursor, PimdirSearchOptions, PimdirSearchSort};
+use io_pimdir::{
+    client::search::{PimdirSearchCursor, PimdirSearchOptions, PimdirSearchSort},
+    search::query::PimdirQuery,
+};
 use jiff::tz::TimeZone;
 use pimalaya_cli::{
     clap::args::PageTokenArg,
@@ -18,10 +21,13 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::{
-    error::{ItemError, partial_when},
+    error::{ItemError, page_token_invalid, partial_when},
     pimdir::{
         backend::PimdirBackend,
-        index::{PimdirCalendarCoverage, PimdirCalendarHit, parse_query, search_clock},
+        index::{
+            PimdirCalendarCoverage, PimdirCalendarHit, PimdirCalendarPage, parse_query,
+            search_clock,
+        },
     },
     shared::event::list::{EVENT_NOUNS, local_zone, row_times},
 };
@@ -86,63 +92,13 @@ impl PimdirSearchCommand {
     pub fn execute(self, printer: &mut impl Printer, backend: PimdirBackend) -> Result<()> {
         let words = self.query.join(" ");
         let query = parse_query(&self.query, printer.is_json())?;
-        if let Some(calendar) = &self.calendar {
-            backend.known_collection(calendar)?;
-        }
-
-        let account = &backend.account;
-        let page_size = self.page_size.unwrap_or(account.events_list_page_size());
-        let limit = match page_size {
-            0 => u32::MAX,
-            size => size,
-        };
-        let mut options = PimdirSearchOptions {
-            sort: self.sort.into(),
-            limit: limit as usize,
-            after: None,
-            clock: search_clock(),
-        };
         let calendar = self.calendar.as_deref();
-        let mut past_end = None;
+        let limit = page_limit(&backend, self.page_size);
+        let token = self.page_token.token.as_deref();
 
-        let page = match &self.page_token.token {
-            Some(token) => {
-                let cursor = PimdirSearchCursor::from_token(token)
-                    .with_context(|| format!("Invalid page token `{token}`"))?;
-                options.after = Some(cursor);
-                None
-            }
-            None => {
-                let page = self.page.unwrap_or(1).max(1);
-
-                for _ in 1..page {
-                    let skipped = backend
-                        .client
-                        .search_items(query.clone(), calendar, &options)?;
-
-                    match skipped.next.clone() {
-                        Some(next) => options.after = Some(next),
-                        None => {
-                            past_end = Some(skipped);
-                            break;
-                        }
-                    }
-                }
-
-                Some(page)
-            }
-        };
-
-        let answer = match past_end {
-            Some(mut last) => {
-                last.hits.clear();
-                last.errors.clear();
-                last.next = None;
-                last
-            }
-            None => backend.client.search_items(query, calendar, &options)?,
-        };
-
+        let (answer, page) = search_page(
+            &backend, query, calendar, self.sort, limit, self.page, token,
+        )?;
         let next_page = answer.next.as_ref().map(PimdirSearchCursor::token);
 
         let mut listing = Listing::new(&backend.name, Some("pimdir"));
@@ -155,11 +111,7 @@ impl PimdirSearchCommand {
             },
             None => ListingPage::Token,
         };
-        let next_hint = match page {
-            Some(page) => next_page.as_ref().map(|_| (page + 1).to_string()),
-            None => next_page.clone(),
-        };
-        listing.page(held, answer.hits.len(), EVENT_NOUNS, next_hint.as_deref());
+        listing.page(held, answer.hits.len(), EVENT_NOUNS, next_page.as_deref());
         answer.coverage.note(&mut listing);
         if let Some(zones) = &answer.zones {
             zones.note(&mut listing);
@@ -177,6 +129,82 @@ impl PimdirSearchCommand {
         printer.out(&output)?;
         partial_when(&output.errors)
     }
+}
+
+/// The number of hits a page holds: `page_size`, else the account's `event
+/// list` one, zero meaning every hit.
+pub fn page_limit(backend: &PimdirBackend, page_size: Option<u32>) -> u32 {
+    match page_size.unwrap_or(backend.account.events_list_page_size()) {
+        0 => u32::MAX,
+        size => size,
+    }
+}
+
+/// The page of the events `query` matches in the account, or in
+/// `calendar` alone, `limit` of them a page, ordered by `sort`: the one
+/// after the place `token` names, else the `page`th from 1, walked to
+/// through the cursor of each page before it, a page past the end holding
+/// no hit. Answers the page number too, `None` for a page a token reached.
+pub fn search_page(
+    backend: &PimdirBackend,
+    query: PimdirQuery,
+    calendar: Option<&str>,
+    sort: PimdirSearchSortArg,
+    limit: u32,
+    page: Option<u32>,
+    token: Option<&str>,
+) -> Result<(PimdirCalendarPage, Option<u32>)> {
+    if let Some(calendar) = calendar {
+        backend.known_collection(calendar)?;
+    }
+
+    let mut options = PimdirSearchOptions {
+        sort: sort.into(),
+        limit: limit as usize,
+        after: None,
+        clock: search_clock(),
+    };
+    let mut past_end = None;
+
+    let page = match token {
+        Some(token) => {
+            let cursor =
+                PimdirSearchCursor::from_token(token).ok_or_else(|| page_token_invalid(token))?;
+            options.after = Some(cursor);
+            None
+        }
+        None => {
+            let page = page.unwrap_or(1).max(1);
+
+            for _ in 1..page {
+                let skipped = backend
+                    .client
+                    .search_items(query.clone(), calendar, &options)?;
+
+                match skipped.next.clone() {
+                    Some(next) => options.after = Some(next),
+                    None => {
+                        past_end = Some(skipped);
+                        break;
+                    }
+                }
+            }
+
+            Some(page)
+        }
+    };
+
+    let answer = match past_end {
+        Some(mut last) => {
+            last.hits.clear();
+            last.errors.clear();
+            last.next = None;
+            last
+        }
+        None => backend.client.search_items(query, calendar, &options)?,
+    };
+
+    Ok((answer, page))
 }
 
 /// The order of a search (pimdir SEARCH §8.2).
@@ -226,6 +254,8 @@ pub struct PimdirSearchOutput {
 impl fmt::Display for PimdirSearchOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut listing = self.listing.clone();
+        let next = self.next_page.as_deref();
+        listing.next_page = next.map(|next| format!("--page-token {}", sanitize::text(next)));
         let matched = self.hits.iter().any(|hit| hit.matched.is_some());
 
         for hit in &self.hits {
@@ -235,7 +265,7 @@ impl fmt::Display for PimdirSearchOutput {
                 sanitize::text(&hit.event.id).into_owned(),
                 sanitize::text(&start).into_owned(),
                 sanitize::text(&end).into_owned(),
-                sanitize::text(&hit.calendar_id).into_owned(),
+                sanitize::text(&hit.event.calendar_id).into_owned(),
             ];
 
             if matched {
@@ -305,6 +335,7 @@ mod tests {
             hits: vec![PimdirCalendarHit {
                 event: Event {
                     id: "7".into(),
+                    calendar_id: "cal".into(),
                     summary: Some("Budget review".into()),
                     start: Some("2026-11-10".into()),
                     end: Some("2026-11-11".into()),
@@ -313,7 +344,6 @@ mod tests {
                     wire_end: "20261111".into(),
                     ..Default::default()
                 },
-                calendar_id: "cal".into(),
                 matched: Some(PimdirCalendarMatched::Summary),
                 snippet: Some("the\nbudget".into()),
             }],
@@ -343,7 +373,7 @@ Zones:       the index reads floating times and dates in UTC, this search reads 
 
 7  2026-11-10  2026-11-10  cal  summary  Budget review
 
-Next page: --page 2
+Next page: --page-token 2
 
 Error:  9  item-unreadable  Read item `9`
 ";

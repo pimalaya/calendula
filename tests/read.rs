@@ -104,7 +104,7 @@ fn an_unknown_id_is_coded_not_found() {
 
     let item = "Item `nope` not found in calendar `personal`";
     let event = "Event `nope` not found in calendar `personal`; an event is named by \
-                 the id `event list` shows, `event search <UID>` finding it by its \
+                 the id `event list` shows, `event read --uid <UID>` reading it by its \
                  iCalendar UID";
 
     let ical = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n";

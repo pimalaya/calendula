@@ -115,7 +115,7 @@ pub struct EventBuildOutput {
     /// `REPLY`...), `null` when it carries none.
     pub method: Option<String>,
     /// Every VEVENT it carries, in source order, a series once at its own
-    /// start; the item id is empty, the etag `null`.
+    /// start; `id`, `calendarId` and `etag` `null`, no item holding it.
     pub events: Vec<Event>,
 }
 
@@ -214,6 +214,8 @@ mod tests {
         assert_eq!(events.len(), 1, "{out}");
 
         let event = &events[0];
+        assert_eq!(event["id"], serde_json::Value::Null, "{out}");
+        assert_eq!(event["calendarId"], serde_json::Value::Null, "{out}");
         assert_eq!(event["uid"], "1@example.org");
         assert_eq!(event["summary"], "Review");
         assert_eq!(event["start"], "2026-10-19T09:00:00+02:00");

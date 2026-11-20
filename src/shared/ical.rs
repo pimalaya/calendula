@@ -24,7 +24,7 @@ use ical::{
     value::{IcalValue, datetime::IcalDateTime, text::IcalText},
     version::IcalVersion,
 };
-use pimalaya_cli::session::check_stdin;
+use pimalaya_cli::{error::CodedError, session::check_stdin};
 
 use crate::{error::ErrorCode, mcp::paths_closed, shared::uuid::uuid_v4};
 
@@ -91,7 +91,8 @@ pub fn read_source(source: &str) -> Result<Vec<u8>> {
         return Ok(source.as_bytes().to_vec());
     }
 
-    bail!("Source `{source}` is neither a readable file nor iCalendar contents")
+    let message = format!("Source `{source}` is neither a readable file nor iCalendar contents");
+    Err(CodedError::new(ErrorCode::ItemInvalid, message).into())
 }
 
 /// What is wrong with an item, empty when nothing is.
@@ -357,9 +358,13 @@ mod tests {
 
     #[test]
     fn a_source_that_is_neither_a_file_nor_an_item_is_refused() {
-        let err = read_source("not an ical").unwrap_err().to_string();
+        let err = read_source("not an ical").unwrap_err();
 
-        assert!(err.contains("neither a readable file"), "{err}");
+        assert_eq!(
+            crate::error::code(&err),
+            Some(crate::error::ErrorCode::ItemInvalid)
+        );
+        assert!(err.to_string().contains("neither a readable file"), "{err}");
     }
 
     #[test]

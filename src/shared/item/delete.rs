@@ -39,9 +39,9 @@ pub struct ItemDeleteCommand {
 
 impl ItemDeleteCommand {
     pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
-        let mut capabilities = vec![Capability::ItemRemove];
+        let mut capabilities = vec![Capability::ItemDelete];
         if self.if_match.is_some() {
-            capabilities.push(Capability::ItemRemoveIfMatch);
+            capabilities.push(Capability::ItemDeleteIfMatch);
         }
         client.require(&capabilities)?;
 

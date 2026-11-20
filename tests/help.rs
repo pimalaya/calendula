@@ -106,3 +106,21 @@ fn the_abouts_read_as_himalayas() {
     let list = "list        List all accounts declared in the configuration";
     assert!(account.contains(list), "{account}");
 }
+
+/// Every protocol command, nested ones included, says what exit status 3
+/// means, a refusal of the server printed as the result.
+#[cfg(all(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+#[test]
+fn every_protocol_command_documents_exit_status_3() {
+    let commands: [&[&str]; 4] = [
+        &["caldav", "propfind", "--help"],
+        &["caldav", "report", "sync", "--help"],
+        &["gcal", "acl", "list", "--help"],
+        &["msgraph", "calendars", "list", "--help"],
+    ];
+
+    for args in commands {
+        let help = help(args);
+        assert!(help.contains("\nExit status 3: "), "{args:?}: {help}");
+    }
+}

@@ -385,9 +385,8 @@ mod tests {
         fn an_online_meeting_is_refused_off_pimdir_by_name() {
             let (dir, id) = home(EVENT);
 
-            let err = update(client(&dir), &["-k", "cal", "--online-meeting", &id])
-                .unwrap_err()
-                .to_string();
+            let err = update(client(&dir), &["-k", "cal", "--online-meeting", &id]).unwrap_err();
+            let err = format!("{err:#}");
 
             assert!(err.contains("--online-meeting"), "{err}");
             assert!(err.contains("vdir backend"), "{err}");
@@ -523,9 +522,8 @@ mod tests {
         fn an_online_meeting_no_source_declares_is_refused_before_it_is_queued() {
             let (dir, id) = store();
 
-            let err = update(client(&dir), &["-k", "cal", "--online-meeting", &id])
-                .unwrap_err()
-                .to_string();
+            let err = update(client(&dir), &["-k", "cal", "--online-meeting", &id]).unwrap_err();
+            let err = format!("{err:#}");
 
             assert!(err.contains("calendar.online-meeting"), "{err}");
             assert!(err.contains("no source of this store declares it"), "{err}");

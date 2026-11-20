@@ -7,6 +7,8 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+use clap::Command as ClapCommand;
 use clap::{CommandFactory, Parser, Subcommand};
 use pimalaya_cli::{
     clap::{
@@ -101,13 +103,13 @@ pub enum Command {
     #[command(subcommand, alias = "items")]
     Item(ItemCommand),
     #[cfg(feature = "caldav")]
-    #[command(subcommand)]
+    #[command(subcommand, mut_subcommands = protocol_exit)]
     Caldav(CaldavCommand),
     #[cfg(feature = "msgraph")]
-    #[command(subcommand)]
+    #[command(subcommand, mut_subcommands = protocol_exit)]
     Msgraph(MsgraphCommand),
     #[cfg(feature = "gcal")]
-    #[command(subcommand)]
+    #[command(subcommand, mut_subcommands = protocol_exit)]
     Gcal(GcalCommand),
     #[cfg(feature = "pimdir")]
     #[command(subcommand)]
@@ -117,7 +119,7 @@ pub enum Command {
     Vdir(VdirCommand),
     Repl(ReplCommand),
     Mcp(McpCommand),
-    #[command(subcommand)]
+    #[command(subcommand, alias = "accounts")]
     Account(AccountCommand),
     #[command(alias = "completions")]
     Completion(CompletionCommand),
@@ -140,21 +142,6 @@ pub fn resolve_account(
     let mut config = Config::load(config_paths)?;
     let (name, account_config) = config.take_account(account_name)?;
     Ok((config, name, account_config))
-}
-
-/// Meets a bare `calendula`: the help when a configuration exists, the
-/// missing configuration otherwise, which a person meets as the welcome.
-pub fn meet_bare_invocation(config_paths: &[PathBuf]) -> Result<()> {
-    // NOTE: a broken file counts as a configuration, its error left to
-    // the first command reading it.
-    if let Err(err) = Config::load(config_paths)
-        && err.is::<ConfigMissingError>()
-    {
-        return Err(err);
-    }
-
-    Cli::command().print_help()?;
-    Ok(())
 }
 
 /// The welcome a person meets when no configuration exists at `path`:
@@ -248,6 +235,19 @@ impl Command {
             Self::JsonSchema(cmd) => cmd.execute(printer, json_schema::registry()),
         }
     }
+}
+
+/// What exit status 3 means, under the help of every protocol command.
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+const PROTOCOL_EXIT: &str =
+    "Exit status 3: the server refused the request, its answer printed as the result.";
+
+/// Gives `cmd` and every command under it the meaning of exit status 3,
+/// which a protocol command exits with when the server refuses it.
+#[cfg(any(feature = "caldav", feature = "gcal", feature = "msgraph"))]
+fn protocol_exit(cmd: ClapCommand) -> ClapCommand {
+    cmd.mut_subcommands(protocol_exit)
+        .after_long_help(PROTOCOL_EXIT)
 }
 
 #[cfg(test)]
@@ -487,7 +487,7 @@ mod namespace_tests {
         let Command::Caldav(Delete(cmd)) = parse("caldav delete cal e1.ics") else {
             panic!()
         };
-        assert_eq!(cmd.item_id.as_deref(), Some("e1.ics"));
+        assert_eq!(cmd.item_id, "e1.ics");
     }
 
     /// The former `caldav` names run the methods they became, flags
@@ -510,11 +510,6 @@ mod namespace_tests {
         assert_eq!(cmd.id, "cal");
         assert_eq!(cmd.name.as_deref(), Some("Work"));
         assert_eq!(cmd.description.as_deref(), Some("Team"));
-
-        let Command::Caldav(Delete(cmd)) = parse("caldav delete cal") else {
-            panic!()
-        };
-        assert_eq!(cmd.item_id, None);
 
         let caldav = Cli::command();
         let caldav = caldav.find_subcommand("caldav").unwrap();

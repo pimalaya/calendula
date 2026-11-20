@@ -49,8 +49,9 @@ pub enum ErrorCode {
     /// the command reaches, refused before connecting: the caller picks
     /// another backend or leaves the option out.
     CapabilityMissing,
-    /// A command would read its input off stdin inside a session, which
-    /// reads its commands there: the caller passes the input as text.
+    /// A command would read its input off stdin, or run a composer, inside
+    /// a session, which reads its commands there: the caller passes the
+    /// input as text.
     StdinTaken,
     /// The item a command names is not in the calendar: the failure of a
     /// command reading or writing that one item, or an `errors` entry.
@@ -68,7 +69,8 @@ pub enum ErrorCode {
     /// The backend answered for an item calendula could not read: an
     /// `errors` entry, or the failure of a command reading that one item.
     ItemUnreadable,
-    /// The server refused the item written as no iCalendar it takes (a
+    /// The source given is neither a readable file nor iCalendar contents,
+    /// or the server refused the item written as no iCalendar it takes (a
     /// CalDAV `valid-calendar-data`, `supported-calendar-data`,
     /// `valid-calendar-object-resource` or `supported-calendar-component`
     /// precondition, a refusal naming the iCalendar, a 400 answering a
@@ -193,6 +195,18 @@ pub enum ErrorCode {
     /// The pimdir search index could not answer an accepted query, an
     /// implementation fault.
     QueryUnanswerable,
+    /// No pimdir queue row of the account has the id given: nothing was
+    /// read or cancelled.
+    RowNotFound,
+    /// The command asks to confirm, and no terminal can answer: pass
+    /// `--yes`. Nothing was done.
+    ConfirmationRequired,
+    /// The page token is not one the command printed: nothing was listed.
+    PageTokenInvalid,
+    /// Inside an MCP server started without `--allow-send`, a write would
+    /// touch an item naming an attendee, whom the server or a sync may
+    /// notify: nothing was written.
+    SendingClosed,
 }
 
 /// The error of one item a command could not list or act on.
@@ -242,8 +256,8 @@ pub fn event_missing(err: Error, event_id: &str, calendar_id: &str) -> Error {
     missing(err, || {
         format!(
             "Event `{event_id}` not found in calendar `{calendar_id}`; an event is \
-             named by the id `event list` shows, `event search <UID>` finding it by \
-             its iCalendar UID"
+             named by the id `event list` shows, `event read --uid <UID>` reading it \
+             by its iCalendar UID"
         )
     })
 }
@@ -284,10 +298,22 @@ fn missing(err: Error, sentence: impl FnOnce() -> String) -> Error {
     let sentence = sentence();
 
     // NOTE: the pimdir backend words its miss so already.
-    match err.to_string() == sentence {
+    let worded = err.to_string();
+    match worded == sentence || worded.starts_with(INVALID_ITEM_ID) {
         true => err,
         false => err.context(sentence),
     }
+}
+
+/// How the refusal of an id no item can have starts, as cardamum words it.
+const INVALID_ITEM_ID: &str = "Invalid item id";
+
+/// A refusal under `item-not-found` of `item_id`, which no item of the
+/// backend can have: it reads its own sentence, not the not-found one.
+#[cfg_attr(not(feature = "pimdir"), allow(dead_code))]
+pub fn invalid_item_id(item_id: &str, expected: &str) -> Error {
+    let message = format!("{INVALID_ITEM_ID} `{item_id}` (expected {expected})");
+    CodedError::new(ErrorCode::ItemNotFound, message).into()
 }
 
 /// A refusal under `calendar-not-found`: the calendar a command names does
@@ -308,7 +334,12 @@ pub fn calendar_not_found(message: impl Into<String>) -> Error {
 /// The family sentence of a create naming the calendar `name` that exists
 /// already.
 #[cfg_attr(
-    not(any(feature = "caldav", feature = "msgraph", feature = "vdir")),
+    not(any(
+        feature = "caldav",
+        feature = "msgraph",
+        feature = "vdir",
+        feature = "pimdir"
+    )),
     allow(dead_code)
 )]
 fn calendar_exists(name: &str) -> String {
@@ -317,7 +348,7 @@ fn calendar_exists(name: &str) -> String {
 
 /// A refusal under `calendar-duplicate`: a create names the calendar
 /// `name` that the store holds already.
-#[cfg_attr(not(feature = "vdir"), allow(dead_code))]
+#[cfg_attr(not(any(feature = "vdir", feature = "pimdir")), allow(dead_code))]
 pub fn calendar_duplicate(name: &str) -> Error {
     CodedError::new(ErrorCode::CalendarDuplicate, calendar_exists(name)).into()
 }
@@ -328,6 +359,13 @@ pub fn calendar_duplicate(name: &str) -> Error {
 #[cfg_attr(not(any(feature = "caldav", feature = "msgraph")), allow(dead_code))]
 pub fn existing_calendar(name: &str, cause: impl Into<Error>) -> Error {
     with_code(cause.into(), |_| Some(ErrorCode::CalendarDuplicate)).context(calendar_exists(name))
+}
+
+/// The refusal of a page token the command did not print, under
+/// `page-token-invalid`.
+pub fn page_token_invalid(token: &str) -> Error {
+    let message = format!("Invalid page token {token}");
+    CodedError::new(ErrorCode::PageTokenInvalid, message).into()
 }
 
 /// A refusal under `calendar-default-missing`: a command naming no calendar

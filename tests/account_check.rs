@@ -65,12 +65,12 @@ fn a_failed_backend_is_the_json_result_with_its_code() {
     let json: Value = serde_json::from_slice(&output.stdout).unwrap();
 
     assert_eq!(output.status.code(), Some(3), "{json}");
-    assert_eq!(json["account"], "test", "{json}");
+    assert_eq!(json["accounts"][0]["account"], "test", "{json}");
 
-    let vdir = json!({"backend": "vdir", "ok": true, "code": null, "error": null});
-    assert_eq!(json["backends"][0], vdir, "{json}");
+    let vdir = json!({"backend": "vdir", "ok": true, "code": null, "error": null, "tls": null});
+    assert_eq!(json["accounts"][0]["backends"][0], vdir, "{json}");
 
-    let pimdir = &json["backends"][1];
+    let pimdir = &json["accounts"][0]["backends"][1];
     assert_eq!(pimdir["backend"], "pimdir", "{json}");
     assert_eq!(pimdir["ok"], false, "{json}");
     assert_eq!(pimdir["code"], "store-uncreated", "{json}");

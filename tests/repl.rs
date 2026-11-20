@@ -262,6 +262,7 @@ fn what_cannot_run_in_a_session_is_refused_and_the_session_goes_on() {
     for answer in &answers[2..5] {
         let error = answer["error"].as_str().unwrap_or_default();
         assert!(error.contains("composer (-i)"), "{answer}");
+        assert_eq!(answer["code"], "stdin-taken", "{answer}");
     }
 
     assert_eq!(answers[5]["code"], "stdin-taken", "{}", answers[5]);

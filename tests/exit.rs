@@ -72,19 +72,19 @@ fn a_json_word_after_the_separator_leaves_the_refusal_on_stderr() {
     assert!(!output.stderr.is_empty());
 }
 
-/// `completion`, `manual` and `json-schema` with no argument fail as any
-/// command does, the error on stdout, rather than printing their help.
+/// `completion`, `manual` and `json-schema` with no argument are a refused
+/// command line: clap's usage error, exit 2, rather than their help.
 #[test]
-fn a_standard_command_without_its_argument_fails_on_stdout() {
+fn a_standard_command_without_its_argument_is_a_refused_command_line() {
     let home = TempDir::new().unwrap();
 
     for command in ["completion", "manual", "json-schema"] {
         let output = run(home.path(), &[command]);
         let stdout = text(&output.stdout);
+        let stderr = text(&output.stderr);
 
-        assert_eq!(output.status.code(), Some(1), "{command}: {stdout}");
-        assert!(stdout.contains("--dir"), "{command}: {stdout}");
-        assert!(!stdout.contains("Usage:"), "{command}: {stdout}");
-        assert!(output.stderr.is_empty(), "{}", text(&output.stderr));
+        assert_eq!(output.status.code(), Some(2), "{command}: {stderr}");
+        assert!(stdout.is_empty(), "{command}: {stdout}");
+        assert!(stderr.contains("--dir"), "{command}: {stderr}");
     }
 }

@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::NaiveDate;
 use clap::Parser;
 use jiff::{Timestamp, civil::Date, tz::TimeZone};
@@ -55,11 +55,11 @@ use crate::{
 /// stands. An item whose iCalendar does not parse prints no line but an
 /// `Error:` line at the end, and the command exits 3.
 ///
-/// JSON output: `{"events": [{"id", "uid", "recurrenceId", "summary",
-/// "description", "location", "start", "end", "allDay", "timeZone",
-/// "recurring", "status", "transparency", "busyStatus", "organizer":
-/// {"email", "name"}, "attendees": [{"email", "name", "partstat", "role",
-/// "rsvp", "cutype"}], "onlineMeetingUrl"}],
+/// JSON output: `{"events": [{"id", "calendarId", "etag", "uid",
+/// "recurrenceId", "summary", "description", "location", "start", "end",
+/// "allDay", "timeZone", "recurring", "status", "transparency",
+/// "busyStatus", "organizer": {"email", "name"}, "attendees": [{"email",
+/// "name", "partstat", "role", "rsvp", "cutype"}], "onlineMeetingUrl"}],
 /// "nextPage"}`, `nextPage` being the number of the page following this
 /// one as a string, which `--page-token` takes back, or `null` once the
 /// listing is complete, and `errors` names each item it could not read,
@@ -98,7 +98,7 @@ impl EventListCommand {
             Some(token) => Some(
                 token
                     .parse::<u32>()
-                    .with_context(|| format!("Invalid page token `{token}`"))?,
+                    .map_err(|_| error::page_token_invalid(token))?,
             ),
             None => self.page,
         };

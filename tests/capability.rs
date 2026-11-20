@@ -111,7 +111,7 @@ fn a_vdir_write_gated_on_a_version_is_refused() {
         "x",
         "1",
     ];
-    let message = refused(&run(&config, &args), "item.remove.if-match");
+    let message = refused(&run(&config, &args), "item.delete.if-match");
     assert!(message.contains("vdir backend"), "{message}");
     assert!(message.contains("--if-match"), "{message}");
 
@@ -159,7 +159,7 @@ fn a_refusal_names_the_backend_serving_it() {
         "x",
         "1",
     ];
-    let message = refused(&run(&config, &args), "item.remove.if-match");
+    let message = refused(&run(&config, &args), "item.delete.if-match");
     assert!(message.contains("vdir backend"), "{message}");
     assert!(message.contains("`--backend caldav`"), "{message}");
 
@@ -192,7 +192,7 @@ fn a_caldav_flag_it_does_not_serve_is_refused_before_connecting() {
         "Sync",
         "--online-meeting",
     ];
-    let message = refused(&run(&config, &args), "online-meeting");
+    let message = refused(&run(&config, &args), "event.add.online-meeting");
     assert!(message.contains("caldav backend"), "{message}");
 
     let args = [
@@ -205,7 +205,7 @@ fn a_caldav_flag_it_does_not_serve_is_refused_before_connecting() {
         "none",
         "1",
     ];
-    refused(&run(&config, &args), "scheduling.send-updates");
+    refused(&run(&config, &args), "event.update.send-updates");
 
     assert!(!marker.exists());
 }
@@ -249,7 +249,7 @@ fn a_gcal_online_meeting_is_refused_before_the_token_is_resolved() {
         "Sync",
         "--online-meeting",
     ];
-    let message = refused(&run(&config, &args), "online-meeting");
+    let message = refused(&run(&config, &args), "event.add.online-meeting");
     assert!(message.contains("gcal backend"), "{message}");
 
     assert!(!marker.exists());
@@ -269,7 +269,7 @@ fn a_graph_calendar_description_is_refused_before_the_token_is_resolved() {
     let config = write_config(dir.path(), &lines);
 
     let args = ["--json", "calendar", "create", "Work", "-d", "Mine"];
-    let message = refused(&run(&config, &args), "calendar.description");
+    let message = refused(&run(&config, &args), "calendar.update.description");
     assert!(message.contains("msgraph backend"), "{message}");
 
     assert!(!marker.exists());
@@ -310,22 +310,23 @@ fn account_capability_lists_what_the_backend_serves() {
     let expected = "\
 Account:  test
 
-calendar.list            vdir  full  -
-calendar.create          vdir  full  -
-calendar.create.id       vdir  full  -
-calendar.rename          vdir  full  -
-calendar.delete          vdir  full  -
-calendar.description     vdir  full  -
-calendar.color           vdir  full  -
-item.list                vdir  full  -
-item.read                vdir  full  -
-item.add                 vdir  full  -
-item.update              vdir  full  -
-item.remove              vdir  full  -
-item.update.if-match     vdir  none  the backend exposes no version to compare, so `--if-match` is refused
-item.remove.if-match     vdir  none  the backend exposes no version to compare, so `--if-match` is refused
-online-meeting           vdir  none  `--online-meeting` needs the pimdir backend, whose sync engine creates the meeting
-scheduling.send-updates  vdir  none  a vdir store notifies nobody; `--send-updates` needs the gcal backend
+calendar.list                vdir  full  -
+calendar.create              vdir  full  -
+calendar.create.id           vdir  full  -
+calendar.update              vdir  full  -
+calendar.delete              vdir  full  -
+calendar.update.description  vdir  full  -
+calendar.update.color        vdir  full  -
+item.list                    vdir  full  -
+item.read                    vdir  full  -
+event.search                 vdir  none  the query language is answered by a pimdir store's search index; `event read --uid` reads an event by its UID
+item.add                     vdir  full  -
+item.update                  vdir  full  -
+item.delete                  vdir  full  -
+item.update.if-match         vdir  none  the backend exposes no version to compare, so `--if-match` is refused
+item.delete.if-match         vdir  none  the backend exposes no version to compare, so `--if-match` is refused
+event.add.online-meeting     vdir  none  `--online-meeting` needs the pimdir backend, whose sync engine creates the meeting
+event.update.send-updates    vdir  none  a vdir store notifies nobody; `--send-updates` needs the gcal backend
 ";
     assert_eq!(stdout, expected);
 }
@@ -357,7 +358,7 @@ fn account_capability_names_the_backend_each_capability_resolves_to() {
     assert!(json.get("backends").is_none(), "{json}");
 
     let capabilities = json["capabilities"].as_array().unwrap();
-    assert_eq!(capabilities.len(), 16, "{json}");
+    assert_eq!(capabilities.len(), 17, "{json}");
 
     for row in capabilities {
         assert_eq!(row["backend"], "vdir", "{row}");
@@ -416,7 +417,7 @@ fn a_backend_the_account_lacks_resolves_none() {
     let out = run(&config, &["--backend", "pimdir", "account", "capability"]);
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(
-        stdout.contains("\ncalendar.list            -  none  "),
+        stdout.contains("\ncalendar.list                -  none  "),
         "{stdout}"
     );
 }
@@ -433,9 +434,9 @@ fn the_help_names_what_each_backend_serves() {
 
     let footer = "\
 Backends:
-  item.remove: full on vdir, caldav, jmap, gcal, msgraph; partial on pimdir
+  item.delete: full on vdir, caldav, jmap, gcal, msgraph; partial on pimdir
     pimdir: queued for the next sync, and refused when a source of the store does not support it
-  item.remove.if-match: none on vdir; full on pimdir, caldav, gcal; partial on jmap, msgraph
+  item.delete.if-match: none on vdir; full on pimdir, caldav, gcal; partial on jmap, msgraph
     vdir: the backend exposes no version to compare, so `--if-match` is refused
     jmap: compared with the hash of the event read just before the write, so a write landing in between is not caught
     msgraph: compared with the event's `changeKey` read just before the write, so a write landing in between is not caught

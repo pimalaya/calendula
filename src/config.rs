@@ -46,7 +46,14 @@ use pimalaya_config::secret::{Secret, SecretResolver};
     feature = "msgraph"
 ))]
 use pimalaya_config::toml::opt_shell_expanded_path;
-#[cfg(any(feature = "vdir", feature = "pimdir"))]
+#[cfg(any(
+    feature = "vdir",
+    feature = "pimdir",
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
 use pimalaya_config::toml::shell_expanded_path;
 #[cfg(any(feature = "caldav", feature = "jmap"))]
 use pimalaya_config::toml::shell_expanded_string;
@@ -59,7 +66,7 @@ use pimalaya_config::{command::CommandConfig, toml::TomlConfig};
 ))]
 use pimalaya_stream::{
     proxy::{Proxy, ProxyAuth},
-    tls::{Rustls, RustlsCrypto, Tls, TlsProvider, TlsServer},
+    tls::{Rustls, RustlsCrypto, Tls, TlsClient, TlsProvider, TlsServer},
 };
 #[cfg(any(
     feature = "caldav",
@@ -128,6 +135,7 @@ impl TomlConfig for Config {
         ))]
         let entry = entry.map(|(name, mut account)| {
             account.inherit_proxy();
+            account.inherit_tls();
             (name, account)
         });
 
@@ -162,6 +170,15 @@ pub struct AccountConfig {
     ))]
     #[serde(default)]
     pub proxy: Option<ProxyConfig>,
+    /// TLS every network backend of this account uses, each field its own
+    /// `tls` leaves unset taking the account's.
+    #[cfg(any(
+        feature = "caldav",
+        feature = "jmap",
+        feature = "gcal",
+        feature = "msgraph"
+    ))]
+    pub tls: Option<TlsConfig>,
     /// vdir backend: one local directory per calendar.
     #[cfg(feature = "vdir")]
     pub vdir: Option<VdirConfig>,
@@ -214,6 +231,16 @@ pub struct AccountConfig {
     #[serde(default)]
     #[allow(dead_code)]
     pub proxy: Option<IgnoredAny>,
+    /// The account TLS, loaded unread by a build with no network backend.
+    #[cfg(not(any(
+        feature = "caldav",
+        feature = "jmap",
+        feature = "gcal",
+        feature = "msgraph"
+    )))]
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub tls: Option<IgnoredAny>,
 }
 
 impl AccountConfig {
@@ -278,6 +305,35 @@ impl AccountConfig {
 
         for slot in slots.into_iter().flatten() {
             slot.get_or_insert_with(|| proxy.clone());
+        }
+    }
+
+    /// Hands the account TLS to every network backend, each field its
+    /// own `tls` leaves unset taking the account's.
+    #[cfg(any(
+        feature = "caldav",
+        feature = "jmap",
+        feature = "gcal",
+        feature = "msgraph"
+    ))]
+    fn inherit_tls(&mut self) {
+        let Some(tls) = &self.tls else {
+            return;
+        };
+
+        let slots = [
+            #[cfg(feature = "caldav")]
+            self.caldav.as_mut().map(|c| &mut c.tls),
+            #[cfg(feature = "jmap")]
+            self.jmap.as_mut().map(|c| &mut c.tls),
+            #[cfg(feature = "gcal")]
+            self.gcal.as_mut().map(|c| &mut c.tls),
+            #[cfg(feature = "msgraph")]
+            self.msgraph.as_mut().map(|c| &mut c.tls),
+        ];
+
+        for slot in slots.into_iter().flatten() {
+            slot.inherit(tls);
         }
     }
 }
@@ -735,6 +791,52 @@ pub struct TlsConfig {
     /// certificate under native-tls.
     #[serde(default, deserialize_with = "opt_shell_expanded_path")]
     pub cert: Option<PathBuf>,
+    /// A client certificate, presented when the server asks for one.
+    pub client: Option<TlsClientConfig>,
+}
+
+#[cfg(any(
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
+impl TlsConfig {
+    /// Takes from `account` each field this block leaves unset: the
+    /// provider, the rustls crypto, the trusted certificate and the
+    /// client certificate.
+    pub fn inherit(&mut self, account: &TlsConfig) {
+        if self.provider.is_none() {
+            self.provider.clone_from(&account.provider);
+        }
+        if self.rustls.crypto.is_none() {
+            self.rustls.crypto.clone_from(&account.rustls.crypto);
+        }
+        if self.cert.is_none() {
+            self.cert.clone_from(&account.cert);
+        }
+        if self.client.is_none() {
+            self.client.clone_from(&account.client);
+        }
+    }
+}
+
+/// Client certificate configuration, both in PEM format.
+#[cfg(any(
+    feature = "caldav",
+    feature = "jmap",
+    feature = "gcal",
+    feature = "msgraph"
+))]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct TlsClientConfig {
+    /// The certificate, optionally followed by its intermediates.
+    #[serde(deserialize_with = "shell_expanded_path")]
+    pub cert: PathBuf,
+    /// The private key, PKCS#8 under native-tls.
+    #[serde(deserialize_with = "shell_expanded_path")]
+    pub key: PathBuf,
 }
 
 /// Which TLS implementation carries the connection.
@@ -810,7 +912,10 @@ impl TlsConfig {
                 alpn,
             },
             server: self.cert.map(|cert| TlsServer { cert }),
-            client: None,
+            client: self.client.map(|client| TlsClient {
+                cert: client.cert,
+                key: client.key,
+            }),
         }
     }
 }
@@ -900,6 +1005,56 @@ mod tests {
 
         let config: TlsConfig = toml::from_str("").unwrap();
         assert_eq!(config.cert, None);
+    }
+
+    /// A client certificate comes with its key, both paths expanded, and
+    /// a certificate without its key is refused.
+    #[cfg(any(
+        feature = "caldav",
+        feature = "jmap",
+        feature = "gcal",
+        feature = "msgraph"
+    ))]
+    #[test]
+    fn a_client_certificate_needs_its_key() {
+        let config: TlsConfig =
+            toml::from_str(r#"client = { cert = "~/me.pem", key = "~/me.key.pem" }"#).unwrap();
+        let client = config.client.unwrap();
+        assert_eq!(client.cert, home().join("me.pem"));
+        assert_eq!(client.key, home().join("me.key.pem"));
+
+        assert!(toml::from_str::<TlsConfig>(r#"client.cert = "~/me.pem""#).is_err());
+    }
+
+    /// A backend's `tls` takes from the account's each field it leaves
+    /// unset, the client certificate as one.
+    #[cfg(all(feature = "caldav", feature = "gcal"))]
+    #[test]
+    fn an_account_tls_fills_each_field_a_backend_leaves_unset() {
+        use pimalaya_config::toml::TomlConfig;
+
+        let document = "[accounts.a]\n\
+                        tls.provider = \"native-tls\"\n\
+                        tls.cert = \"/ca.pem\"\n\
+                        tls.client = { cert = \"/me.pem\", key = \"/me.key\" }\n\
+                        caldav.server = \"example.org\"\n\
+                        caldav.auth = \"none\"\n\
+                        caldav.tls.cert = \"/dav.pem\"\n\
+                        gcal.auth.token.raw = \"token\"\n";
+        let mut config: Config = toml::from_str(document).unwrap();
+        let (_, account) = config.take_account(Some("a")).unwrap();
+
+        let caldav = account.caldav.unwrap().tls;
+        let gcal = account.gcal.unwrap().tls;
+
+        assert!(matches!(
+            caldav.provider,
+            Some(TlsProviderConfig::NativeTls)
+        ));
+        assert_eq!(caldav.cert, Some(PathBuf::from("/dav.pem")));
+        assert_eq!(caldav.client.unwrap().key, PathBuf::from("/me.key"));
+        assert!(matches!(gcal.provider, Some(TlsProviderConfig::NativeTls)));
+        assert_eq!(gcal.cert, Some(PathBuf::from("/ca.pem")));
     }
 
     /// Every spelling a CalDAV endpoint is written in round-trips: a

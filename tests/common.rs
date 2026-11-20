@@ -89,7 +89,7 @@ pub fn json_failure(out: &Output, refusal: &str) -> Value {
 /// for `refusal`.
 pub fn json_check_failure(out: &Output, backend: &str, refusal: &str) -> Value {
     let report = json(out, 3);
-    let backends = report["backends"].as_array().unwrap();
+    let backends = report["accounts"][0]["backends"].as_array().unwrap();
     assert_eq!(backends.len(), 1, "{report}");
 
     let check = &backends[0];
@@ -103,7 +103,7 @@ pub fn json_check_failure(out: &Output, backend: &str, refusal: &str) -> Value {
 /// Fails unless `report` is the `account check` output of one backend,
 /// `backend`, that answered.
 pub fn assert_check(report: &Value, backend: &str) {
-    let backends = report["backends"].as_array().unwrap();
+    let backends = report["accounts"][0]["backends"].as_array().unwrap();
     assert_eq!(backends.len(), 1, "{report}");
     assert_eq!(backends[0]["backend"], backend, "{report}");
     assert_eq!(backends[0]["ok"], true, "{report}");
