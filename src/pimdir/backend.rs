@@ -30,11 +30,11 @@ use io_pimdir::{
     capability::{
         CALENDAR_CANCEL, CALENDAR_CANCEL_OCCURRENCE, CALENDAR_COMPONENT_VTODO,
         CALENDAR_ONLINE_MEETING, CALENDAR_REPLY, CALENDAR_REPLY_OCCURRENCE, CALENDAR_SCHEDULING,
-        PimdirPartial, PimdirRefusal, PimdirSourceCapabilities, PimdirSupport,
+        PimdirRefusal, PimdirSourceCapabilities, PimdirSupport,
     },
     client::{
         PimdirDuplicate, PimdirError,
-        producer::PimdirProducer,
+        producer::{PimdirEnqueued, PimdirProducer},
         reader::{PimdirCollection, PimdirItem},
     },
     codec::{PimdirAction, PimdirActionHandle},
@@ -290,6 +290,10 @@ impl PimdirBackend {
     /// public `seq` until the store's owner applies it, so there is no
     /// store-assigned id to report yet. A link id the calendar holds live
     /// or has queued is refused by the store, nothing queued.
+    ///
+    /// The action states a `UID` key and no `hash:` one: the store derives
+    /// that one from the body it holds, a [`ItemOrigin::Foreign`] body's
+    /// `X-PIMDIR-` properties taken out, and reports it.
     pub fn create_item(
         &mut self,
         calendar_id: &str,
@@ -302,17 +306,22 @@ impl PimdirBackend {
             self.check_online_meeting(calendar_id, None, None, &contents)?;
         }
 
-        let link_id = derive(&contents).link_id;
+        let derived = derive(&contents).link_id;
+        let stated = (!derived.as_str().starts_with("hash:")).then_some(derived);
 
         let mut producer = self.client.producer()?;
-        enqueue_with_body(&mut producer, calendar_id, &contents, origin, |hash| {
+        let enqueued = enqueue_with_body(&mut producer, calendar_id, &contents, origin, |hash| {
             PimdirAction::Add {
-                link_id: Some(link_id.clone()),
+                link_id: stated,
                 flags: PimdirFlags::default(),
                 object: Some(hash),
                 supersedes: None,
             }
         })?;
+
+        let link_id = enqueued
+            .link_id
+            .ok_or_else(|| anyhow!("The pimdir store reported no key for the queued item"))?;
 
         Ok(link_id.0)
     }
@@ -1015,8 +1024,9 @@ fn body_pending(item_id: &str, calendar_id: &str) -> anyhow::Error {
 /// `add`, its duplicate check (pimdir STORAGE §15.6, §15.1): a write the
 /// store refuses leaves no body in the tree.
 ///
-/// Logs and answers the partial supports the gate passed the action
-/// with, read with the body in hand, those the body asks for included.
+/// Logs the partial supports the gate passed the action with, read with
+/// the body in hand, those the body asks for included, and answers the
+/// row's receipt.
 ///
 /// A [`ItemOrigin::Foreign`] body is queued without its `X-PIMDIR-`
 /// properties (pimdir STORAGE §18), a [`ItemOrigin::User`] one whole.
@@ -1026,7 +1036,7 @@ fn enqueue_with_body(
     body: &[u8],
     origin: ItemOrigin,
     action: impl FnOnce(PimdirHash) -> PimdirAction,
-) -> Result<Vec<PimdirPartial>> {
+) -> Result<PimdirEnqueued> {
     let enqueued = match origin {
         ItemOrigin::User => producer.enqueue_user_body(calendar_id, body, action),
         ItemOrigin::Foreign => producer.enqueue_with_body(calendar_id, body, action),
@@ -1036,7 +1046,7 @@ fn enqueue_with_body(
     for partial in &enqueued.partial {
         warn!("{partial}");
     }
-    Ok(enqueued.partial)
+    Ok(enqueued)
 }
 
 /// What a write the store refuses to stage reads as, naming the way out
@@ -2576,6 +2586,25 @@ mod tests {
         assert!(!String::from_utf8(read).unwrap().contains("X-PIMDIR-"));
     }
 
+    /// A foreign event with no `UID` carrying an `X-PIMDIR-` property is
+    /// queued under the `hash:` key of the bytes the store holds, its
+    /// instructions taken out, and that key is the id reported.
+    #[test]
+    fn a_uidless_foreign_event_is_keyed_by_its_stripped_body() {
+        let (_dir, mut backend, _) = store(&[ALONE]);
+        let uidless = MEETING.replace("UID:meet@example.org\r\n", "");
+        let stripped = uidless.replace("X-PIMDIR-ONLINE-MEETING:TRUE\r\n", "");
+
+        let id = backend
+            .create_item("cal", uidless.clone().into(), ItemOrigin::Foreign)
+            .unwrap();
+
+        assert!(id.starts_with("hash:"), "{id}");
+        assert_ne!(id, derive(uidless.as_bytes()).link_id.0);
+        assert_eq!(id, derive(stripped.as_bytes()).link_id.0);
+        assert_eq!(pending(&backend), 1);
+    }
+
     #[test]
     fn an_online_meeting_a_source_does_not_support_names_it() {
         let (dir, mut backend, _) = store(&[ALONE]);
@@ -2854,7 +2883,8 @@ mod tests {
                 supersedes: None,
             },
         )
-        .unwrap();
+        .unwrap()
+        .partial;
 
         let named: Vec<(&str, &str)> = partial
             .iter()
@@ -3189,7 +3219,7 @@ mod tests {
             open(&dir)
         };
         let earlier = versioned("storage-draft-12");
-        let newer = versioned("storage-draft-15");
+        let newer = versioned("storage-draft-16");
 
         assert_eq!(code_of(&uncreated), Some(ErrorCode::StoreUncreated));
         assert_eq!(code_of(&foreign), Some(ErrorCode::StoreForeign));

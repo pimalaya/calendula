@@ -81,8 +81,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Changed a pimdir refusal to print its context as the error and the store's reason in `sources`, as cardamum does, and an id no pimdir item can have to be refused as cardamum refuses one, naming the number it expected.
 - Changed `pimdir status` text to print the items of a calendar and the downloaded ones in two columns, and `vdir list` text to print one record per collection, as cardamum does.
 - Changed a bare `calendula --json` to fail `usage-invalid`, exit 2, through pimalaya-cli.
-- Changed the ical-rs dependency to 0.7.2.
-- Changed the io-pimdir dependency to 0.18.0.
+- Changed the ical-rs dependency to 0.7.3, and vcard-rs and mime-rs, through io-pimdir, to 0.6.1 and 0.2.1.
+- **BREAKING**: Changed the io-pimdir dependency to 0.19.0, pimdir storage-draft-15: a store or a sync state of draft-14 is refused and never migrated.
 - Changed the pimalaya-cli dependency to 0.7.0.
 - Changed the pimdir backend to read a collection declaring no kind as no calendar: it is no longer listed, and its account no longer counts toward the account read when `pimdir.account` is unset, as io-pimdir's `PimdirReader::accounts_of` rules for every application. **Breaking.**
 - Changed the refusal of a full URL off the API's origin by `gcal request` and `msgraph request` to carry the code `request-origin` (pimalaya-cli's `error::request_origin`), in the family's one message, as Himalaya and cardamum refuse it.
@@ -192,6 +192,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed a pimdir `item create` of a foreign event with no `UID` and an `X-PIMDIR-` property queueing it under the `hash:` key of the bytes before that property was dropped, a key naming a body the store never holds: the key is now the one io-pimdir derives from the queued body, the id reported (io-pimdir 0.19.0 refuses the former with `hash-key-mismatch`).
 - Fixed `pimdir queue cancel` to code a row the account's queue does not hold `row-not-found`, and one asked with no terminal and no `--yes` `confirmation-required`, where it failed uncoded.
 - Fixed `event list`, `item list` and `pimdir search` to code a page token they did not print `page-token-invalid`.
 - Fixed the composer refused inside a session to be coded `stdin-taken`, and a source neither a readable file nor iCalendar contents `item-invalid`.
