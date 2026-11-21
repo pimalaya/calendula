@@ -166,6 +166,9 @@ fn a_uid_is_read_by_event_read_and_a_search_takes_a_query() {
     let args = ["--json", "event", "read", "a", "--uid", "a@example.org"];
     assert_eq!(output(home.path(), &args).status.code(), Some(2));
 
+    if !cfg!(feature = "pimdir") {
+        return;
+    }
     let refused = output(home.path(), &["--json", "event", "search", "standup"]);
     let error: Value = serde_json::from_slice(&refused.stdout).unwrap();
     assert_eq!(refused.status.code(), Some(1), "{error}");
