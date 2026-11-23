@@ -30,9 +30,9 @@ use crate::{
 /// or fix what parked it. One the engine sent without learning its outcome
 /// is listed `unconfirmed` instead: it may have taken effect.
 ///
-/// A queued row the store cannot decode leaves its calendar's pending rows
-/// out and lists an item error naming the calendar, the command then
-/// exiting 3.
+/// A queued row the store cannot decode lists beside the others with why
+/// in its error, until the sync engine parks it, and as an item error
+/// naming its row and calendar, the command then exiting 3.
 ///
 /// JSON output: `{"actions": [<row>], "parked": [<row>], "errors": [{"id",
 /// "code", "error", "sources"}]}`, each row, pending or parked, `{"row",

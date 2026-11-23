@@ -16,7 +16,10 @@ use io_pimdir::{
         PimdirError, PimdirStore,
         producer::{PimdirActionStatus, PimdirPendingAction},
     },
-    codec::{PimdirAction, PimdirActionHandle, PimdirStoreIdentity, action_from_payload},
+    codec::{
+        PimdirAction, PimdirActionHandle, PimdirPayloadOutcome, PimdirStoreIdentity,
+        action_from_payload, payload_outcome,
+    },
     intent::{PimdirIntentItem, PimdirInvitation},
     object::PimdirHash,
     summary::{PimdirSummary, calendar::derive},
@@ -111,9 +114,10 @@ impl PimdirBackend {
     }
 
     /// The pending rows of every kind in `calendar`, or in every calendar
-    /// of the account, in append order, and an item error for each
-    /// calendar whose queue holds a row that does not decode, whose rows
-    /// are then left out.
+    /// of the account, in append order, and an item error coded
+    /// `action-malformed` for each row whose payload does not decode,
+    /// listed beside the others with its error until the store's owner
+    /// parks it (pimdir STORAGE §15.4).
     pub(crate) fn pending_rows(
         &self,
         calendar: Option<&str>,
@@ -134,7 +138,20 @@ impl PimdirBackend {
             };
 
             for queued in pending {
-                rows.push(self.pending_row(&identity, queued));
+                let row = self.pending_row(&identity, queued);
+
+                if let Some(error) = &row.error {
+                    let context = format!(
+                        "Decode pimdir queue row {} of calendar `{}`",
+                        row.row, row.collection
+                    );
+                    let err =
+                        Error::new(CodedError::new(ErrorCode::ActionMalformed, error.clone()))
+                            .context(context);
+                    errors.push(ItemError::new(Some(&row.row.to_string()), &err));
+                }
+
+                rows.push(row);
             }
         }
 
@@ -188,7 +205,7 @@ impl PimdirBackend {
             queued_at: queued.created_at,
             attempts: u64::try_from(queued.attempts).unwrap_or_default(),
             unconfirmed: false,
-            error: None,
+            error: malformed(&queued.action),
             summary: addressed.summary,
         }
     }
@@ -407,6 +424,23 @@ pub(crate) fn row_not_found(row: &PimdirActionHandle) -> Error {
     CodedError::new(ErrorCode::RowNotFound, message).into()
 }
 
+/// Why the payload of a pending row does not decode, `None` for one that
+/// does or that is unknown here (pimdir STORAGE §15.3): the reader lists
+/// a malformed row as an unknown action, which the owner parks at its
+/// next drain.
+fn malformed(action: &PimdirAction) -> Option<String> {
+    let PimdirAction::Unknown { kind, payload, .. } = action else {
+        return None;
+    };
+
+    match payload_outcome(kind, payload) {
+        PimdirPayloadOutcome::Malformed => action_from_payload(kind, payload)
+            .err()
+            .map(|err| err.to_string()),
+        PimdirPayloadOutcome::Valid | PimdirPayloadOutcome::Unknown => None,
+    }
+}
+
 /// The handle of the row `id` of the store `identity`, as `pimdir queue
 /// show` and `cancel` take it.
 pub(crate) fn handle(identity: &PimdirStoreIdentity, id: i64) -> String {
@@ -594,16 +628,21 @@ mod tests {
         assert_eq!(error::code(&err), Some(ErrorCode::CalendarNotFound));
     }
 
-    /// A pending row that does not decode is an item error naming its
-    /// calendar, coded `action-malformed`, the other calendars still
-    /// listed, rather than a failure of the whole listing.
+    /// A pending row that does not decode lists with its error beside the
+    /// rows that do, plus an item error coded `action-malformed` naming
+    /// its row and calendar, rather than a failure of the whole listing.
     #[test]
     fn an_undecodable_pending_row_is_an_item_error() {
-        let (dir, backend) = store();
+        let (dir, mut backend) = store();
+        let other = EVENT.replace("standup@", "other@");
+        backend
+            .create_item("cal", other.into_bytes(), ItemOrigin::User)
+            .unwrap();
         drop(backend);
 
         let db = rusqlite::Connection::open(dir.path().join("pimdir.db")).unwrap();
-        let sql = "UPDATE queue SET payload = replace(payload, '\"v\":1', '\"w\":1')";
+        let sql = "UPDATE queue SET payload = replace(payload, '\"v\":1', '\"w\":1') \
+                   WHERE id = (SELECT min(id) FROM queue)";
         assert_eq!(db.execute(sql, []).unwrap(), 1);
         drop(db);
 
@@ -613,9 +652,14 @@ mod tests {
         };
         let backend = PimdirBackend::new(config).unwrap();
         let (rows, errors) = backend.pending_rows(None).unwrap();
-        assert!(rows.is_empty(), "{rows:?}");
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert!(rows[0].error.is_some(), "{rows:?}");
+        assert_eq!(rows[1].error, None, "{rows:?}");
+        assert_eq!(rows[1].kind, "add", "{rows:?}");
+
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert_eq!(errors[0].code, Some(ErrorCode::ActionMalformed));
+        assert_eq!(errors[0].id.as_deref(), Some(&*rows[0].row.to_string()));
         assert!(errors[0].error.contains("`cal`"), "{errors:?}");
     }
 }

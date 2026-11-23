@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Added `client.cert` and `client.key` to every `<backend>.tls` table, a PEM client certificate and its PEM private key presented when the server asks for one, both required once `client` is given.
 - Added the account-level `tls` table, each network backend's `tls` taking from it, field by field, what it leaves unset (`client` as one), as Himalaya's.
 - Added `tls` to each backend row of `account check --json`, `{provider, crypto, cert, clientCert}` as configured, `null` for a local backend or a cleartext connection; the text appends `, TLS` and its parts set.
-- Added `errors` to `pimdir queue list --json`: an item error coded `action-malformed` for each calendar whose queue holds a row that does not decode, its pending rows then left out, the command exiting 3.
+- Added `errors` to `pimdir queue list --json`: an item error coded `action-malformed` for each pending row that does not decode, its id the row, the row itself listed among the others with why in its `error`, the command exiting 3.
 - Added `caldav rmcol <CALENDAR>`, deleting a calendar collection, the counterpart of `mkcalendar`, as cardamum's `carddav rmcol`.
 - Added `event read --uid <UID>`, reading the item carrying an iCalendar UID in place of its id; the MCP tool `event_read` takes `uid`.
 - Added `event search <QUERY>...`, searching the account's events in the pimdir query language, as cardamum's `card search`: a pimdir store's index answers it, every other backend refusing it `capability-missing` (`event.search`). It prints `{events, nextPage, complete, errors}`, and the MCP tool `event_search` takes `query`.
