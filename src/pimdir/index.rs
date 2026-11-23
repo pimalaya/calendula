@@ -851,6 +851,32 @@ mod tests {
         (dir, backend)
     }
 
+    /// `pimdir status` counts every item a listing walks, and those of
+    /// them with a local body, an event listed with its summary alone
+    /// counted and not downloaded.
+    #[test]
+    fn status_counts_what_a_listing_walks() {
+        let (_dir, mut backend) = indexed_store();
+        let status = backend.status().unwrap();
+
+        for calendar in &status.calendars {
+            let items = backend
+                .list_items(&calendar.id, Default::default())
+                .unwrap()
+                .items;
+            let local = items.iter().filter(|item| !item.contents.is_empty());
+            assert_eq!(calendar.total, items.len(), "{}", calendar.id);
+            assert_eq!(calendar.hydrated, local.count(), "{}", calendar.id);
+        }
+
+        let counts: Vec<_> = status
+            .calendars
+            .iter()
+            .map(|calendar| (calendar.id.as_str(), calendar.total, calendar.hydrated))
+            .collect();
+        assert_eq!(counts, [("cal", 5, 5), ("work", 2, 1)]);
+    }
+
     /// A hit whose body the store cannot read is an item error coded
     /// `item-unreadable`, the other hits listed, where the whole search
     /// failed.

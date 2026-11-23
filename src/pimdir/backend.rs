@@ -533,12 +533,7 @@ impl PimdirBackend {
                 refused_at: row.refused_at,
             }));
 
-            let (mut total, mut hydrated) = (0, 0);
-            self.scan(&collection.id, |item| {
-                total += 1;
-                hydrated += usize::from(item.object.is_some());
-                Ok(ControlFlow::Continue(()))
-            })?;
+            let (total, hydrated) = self.counted(&collection.id)?;
             let queued = self.client.reader.count_pending_creates(&collection.id)?;
 
             calendars.push(PimdirCalendarStatus {
@@ -660,6 +655,34 @@ impl PimdirBackend {
 
             if count < SCAN_BATCH {
                 return Ok(());
+            }
+        }
+    }
+
+    /// How many live items a collection holds, and how many of them have
+    /// a local body, walked as [`scan`](Self::scan) walks them but without
+    /// their summaries, which a count does not read.
+    fn counted(&self, calendar_id: &str) -> Result<(usize, usize)> {
+        let (mut total, mut hydrated) = (0, 0);
+        let mut cursor: Option<(String, i64)> = None;
+
+        loop {
+            let batch = self.client.reader.list_items_page_asc(
+                calendar_id,
+                cursor.as_ref().map(|(key, seq)| (key.as_str(), *seq)),
+                SCAN_BATCH,
+            )?;
+            let count = batch.len();
+
+            if let Some(last) = batch.last() {
+                cursor = Some((last.sort_key.clone(), last.seq));
+            }
+
+            total += count;
+            hydrated += batch.iter().filter(|item| item.object.is_some()).count();
+
+            if count < SCAN_BATCH {
+                return Ok((total, hydrated));
             }
         }
     }

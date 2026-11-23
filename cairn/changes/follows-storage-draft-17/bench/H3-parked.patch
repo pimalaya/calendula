@@ -1,0 +1,374 @@
+diff --git a/src/pimdir/backend.rs b/src/pimdir/backend.rs
+index 6456e89..b5fff9d 100644
+--- a/src/pimdir/backend.rs
++++ b/src/pimdir/backend.rs
+@@ -22,7 +22,7 @@
+ //! Ids are the store's public `seq`, stable across every collection an
+ //! item is filed in, never the internal link id.
+ 
+-use std::{ops::ControlFlow, path::PathBuf};
++use std::{collections::BTreeSet, ops::ControlFlow, path::PathBuf};
+ 
+ use anyhow::{Result, anyhow, bail};
+ use ical::component::IcalComponentKind;
+@@ -224,10 +224,14 @@ impl PimdirBackend {
+         // NOTE: a hint leaving items out would shift a window.
+         let uid = query.uid.filter(|_| query.take.is_none());
+         let filtered = query.kind.is_some() || query.range.is_some();
+-        let restaged = match query.kind.is_some() || uid.is_some() {
++        let restaged = match query.kind.is_some() || uid.is_some() || query.range.is_some() {
+             true => self.restaged(calendar_id)?,
+             false => Some(Vec::new()),
+         };
++        let candidates = match (query.range, &restaged) {
++            (Some(range), Some(_)) if uid.is_none() => self.window_candidates(calendar_id, range),
++            _ => None,
++        };
+ 
+         self.scan(calendar_id, |stored| {
+             if let Some(restaged) = &restaged
+@@ -236,6 +240,16 @@ impl PimdirBackend {
+                 return Ok(ControlFlow::Continue(()));
+             }
+ 
++            if let Some(candidates) = &candidates
++                && stored.object.is_some()
++                && !candidates.contains(&stored.seq)
++                && !restaged
++                    .as_ref()
++                    .is_some_and(|ids| ids.contains(&stored.seq))
++            {
++                return Ok(ControlFlow::Continue(()));
++            }
++
+             // NOTE: with no filter to answer, an item before the page
+             // needs no body to be counted.
+             if !filtered && page.skips() {
+@@ -694,6 +708,35 @@ impl PimdirBackend {
+         Ok(Some(restaged))
+     }
+ 
++    /// The public ids of the items of `calendar_id` the search index places
++    /// in `range`, or `None` when the listing must walk every body: a
++    /// window open on one end, an index that does not answer it
++    /// completely ([`PimdirClient::window_candidates`]), or a queue that
++    /// brings items the index has not seen (a pending `add`, or a `move`
++    /// or `copy` into the calendar), or does not decode.
++    fn window_candidates(
++        &self,
++        calendar_id: &str,
++        range: &CalendarTimeRange,
++    ) -> Option<BTreeSet<i64>> {
++        let (Some(start), Some(end)) = (range.start.as_deref(), range.end.as_deref()) else {
++            return None;
++        };
++
++        let reader = &self.client.reader;
++        let adds = reader
++            .pending_actions(calendar_id)
++            .ok()?
++            .iter()
++            .any(|pending| matches!(pending.action, PimdirAction::Add { .. }));
++        let arrivals = !reader.pending_arrivals(calendar_id).ok()?.is_empty();
++        if adds || arrivals {
++            return None;
++        }
++
++        self.client.window_candidates(calendar_id, start, end)
++    }
++
+     /// The stored item behind a public item id, or a clear miss.
+     ///
+     /// Anything non-numeric is the internal link id or a mistyped
+@@ -3920,6 +3963,185 @@ mod tests {
+         }
+     }
+ 
++    /// Refreshes the index of the store at `dir` around [`INDEX_NOW`],
++    /// floating times read in `zone`.
++    fn index_refresh(dir: &std::path::Path, zone: &str) {
++        io_pimdir::client::search::PimdirIndex::open(dir)
++            .unwrap()
++            .refresh(&io_pimdir::client::search::PimdirIndexRefreshOptions {
++                now: Some(INDEX_NOW),
++                floating_zone: zone.into(),
++                ..Default::default()
++            })
++            .unwrap();
++    }
++
++    /// 2026-11-06T00:00:00Z, the instant the index horizon is drawn
++    /// around.
++    const INDEX_NOW: i64 = 1_793_923_200;
++
++    /// The bounded windows an agenda or a ranged `event list` reads.
++    fn bounded_windows() -> Vec<CalendarTimeRange> {
++        let range = |start: &str, end: &str| CalendarTimeRange {
++            start: Some(start.into()),
++            end: Some(end.into()),
++        };
++
++        vec![
++            range("20260801T000000Z", "20260901T000000Z"),
++            range("20261012T000000Z", "20261019T000000Z"),
++            range("20261101T000000Z", "20261201T000000Z"),
++            range("20260101T000000Z", "20270101T000000Z"),
++        ]
++    }
++
++    /// The occurrences a windowed listing of `cal` answers over `range`,
++    /// as `event list` and `event agenda` project them, streamed and
++    /// from the whole read.
++    fn windowed_both(backend: &mut PimdirBackend, range: &CalendarTimeRange) -> [Vec<Event>; 2] {
++        let query = CalendarItemQuery {
++            range: Some(range),
++            kind: IcalFamily::Event.kind(),
++            ..Default::default()
++        };
++        let occurrences = |items: Vec<CalendarItem>| -> Vec<Event> {
++            items
++                .iter()
++                .flat_map(|item| Event::occurrences(item, Some(range)))
++                .collect()
++        };
++
++        let streamed = backend.list_items("cal", query).unwrap().items;
++        let whole = eager(backend, "cal", query).unwrap();
++        [occurrences(streamed), occurrences(whole)]
++    }
++
++    /// Floating, all-day and zoned events near the edges of
++    /// [`bounded_windows`], plus a weekly series, beside
++    /// [`mixed_calendar`].
++    fn edged_calendar() -> Vec<String> {
++        let mut bodies = mixed_calendar();
++        let edges = [
++            "DTSTART:20261011T230000\r\nDTEND:20261012T010000\r\n",
++            "DTSTART:20261018T233000\r\nDTEND:20261019T003000\r\n",
++            "DTSTART;VALUE=DATE:20261101\r\n",
++            "DTSTART;VALUE=DATE:20261130\r\nDTEND;VALUE=DATE:20261201\r\n",
++            "DTSTART;TZID=Pacific/Kiritimati:20261201T080000\r\n",
++            "DTSTART;TZID=Pacific/Pago_Pago:20261031T200000\r\n",
++            "DTSTART:20260731T220000\r\nRRULE:FREQ=WEEKLY;COUNT=10\r\n",
++        ];
++        for (index, lines) in edges.into_iter().enumerate() {
++            bodies.push(resource(&component(
++                "VEVENT",
++                &format!("UID:edge-{index}@example.org\r\nSUMMARY:Edge {index}\r\n{lines}"),
++            )));
++        }
++        bodies
++    }
++
++    /// A window the index answers completely takes its candidates from
++    /// it and lists what the walk lists, the index current, its floating
++    /// zone the same as the window's or another; one past its horizon,
++    /// or an index behind the store, walks every body.
++    #[test]
++    fn a_window_read_from_the_index_lists_what_the_walk_lists() {
++        for zone in ["UTC", "Pacific/Kiritimati", "Pacific/Pago_Pago"] {
++            let bodies = edged_calendar();
++            let bodies: Vec<&str> = bodies.iter().map(String::as_str).collect();
++            let (dir, mut backend, _) = store(&bodies);
++
++            for range in bounded_windows() {
++                assert!(backend.window_candidates("cal", &range).is_none());
++            }
++
++            index_refresh(dir.path(), zone);
++
++            for range in bounded_windows() {
++                let candidates = backend.window_candidates("cal", &range);
++                assert!(candidates.is_some(), "{zone} {range:?}");
++                let [streamed, whole] = windowed_both(&mut backend, &range);
++                assert!(!streamed.is_empty(), "{zone} {range:?}");
++                assert_eq!(streamed, whole, "{zone} {range:?}");
++            }
++
++            let past = CalendarTimeRange {
++                start: Some("20300101T000000Z".into()),
++                end: Some("20300201T000000Z".into()),
++            };
++            assert!(backend.window_candidates("cal", &past).is_none());
++            let [streamed, whole] = windowed_both(&mut backend, &past);
++            assert_eq!(streamed, whole, "{zone} past");
++
++            let late = resource(&component(
++                "VEVENT",
++                "UID:late@example.org\r\nSUMMARY:Late\r\nDTSTART:20261103T090000Z\r\n",
++            ));
++            backend
++                .create_item("cal", late.into_bytes(), ItemOrigin::User)
++                .unwrap();
++            let november = bounded_windows().remove(2);
++            assert!(backend.window_candidates("cal", &november).is_none());
++
++            let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
++                .unwrap()
++                .for_source("caldav");
++            owner.drain().unwrap();
++            drop(owner);
++
++            assert!(backend.window_candidates("cal", &november).is_none());
++            let [streamed, whole] = windowed_both(&mut backend, &november);
++            assert_eq!(streamed, whole, "{zone} behind");
++            let summaries: Vec<_> = streamed
++                .iter()
++                .filter_map(|e| e.summary.as_deref())
++                .collect();
++            assert!(summaries.contains(&"Late"), "{zone}: {summaries:?}");
++        }
++    }
++
++    /// Over 2,000 events of every shape the windows list from the index
++    /// what the walk lists, while reading far fewer bodies.
++    #[test]
++    fn a_window_over_a_seeded_calendar_lists_what_the_walk_lists() {
++        let mut bodies = Vec::new();
++        for index in 0..2_000u32 {
++            let day = 1 + index % 28;
++            let month = 1 + (index / 28) % 12;
++            let start = format!("2026{month:02}{day:02}");
++            let lines = match index % 6 {
++                0 => format!("DTSTART:{start}T090000Z\r\nDTEND:{start}T100000Z\r\n"),
++                1 => format!("DTSTART:{start}T090000\r\nDTEND:{start}T100000\r\n"),
++                2 => format!("DTSTART;VALUE=DATE:{start}\r\n"),
++                3 => format!(
++                    "DTSTART;TZID=Europe/Paris:{start}T090000\r\nRRULE:FREQ=WEEKLY;COUNT=8\r\n"
++                ),
++                4 => format!(
++                    "DTSTART:{start}T070000Z\r\nRRULE:FREQ=DAILY;UNTIL=2026{month:02}{day:02}T235959Z\r\n"
++                ),
++                _ => format!(
++                    "DTSTART;TZID=America/New_York:{start}T180000\r\nRRULE:FREQ=MONTHLY;COUNT=3\r\n\
++                     EXDATE;TZID=America/New_York:{start}T180000\r\n"
++                ),
++            };
++            bodies.push(resource(&component(
++                "VEVENT",
++                &format!("UID:seed-{index}@example.org\r\nSUMMARY:Seed {index}\r\n{lines}"),
++            )));
++        }
++        let bodies: Vec<&str> = bodies.iter().map(String::as_str).collect();
++        let (dir, mut backend, ids) = store(&bodies);
++        assert_eq!(ids.len(), 2_000);
++        index_refresh(dir.path(), "UTC");
++
++        for range in bounded_windows() {
++            let candidates = backend.window_candidates("cal", &range).unwrap();
++            assert!(candidates.len() < 2_000, "{range:?}");
++            let [streamed, whole] = windowed_both(&mut backend, &range);
++            assert!(!streamed.is_empty(), "{range:?}");
++            assert_eq!(streamed, whole, "{range:?}");
++        }
++    }
++
+     /// A pending update repoints the body while the summary still
+     /// describes the old one, so the summary rules nothing out for it:
+     /// an event turned to-do lists as a to-do, and a new `UID` is found.
+diff --git a/src/pimdir/index.rs b/src/pimdir/index.rs
+index 29cc473..023763a 100644
+--- a/src/pimdir/index.rs
++++ b/src/pimdir/index.rs
+@@ -3,7 +3,7 @@
+ //! The read-only query client of the store's search index (pimdir
+ //! SEARCH), behind `pimdir search` and `pimdir count`.
+ 
+-use std::fmt;
++use std::{collections::BTreeSet, fmt};
+ 
+ use anyhow::{Context, Result, bail};
+ use ariadne::{Config, Label, Report, ReportKind, Source};
+@@ -21,8 +21,8 @@ use io_pimdir::{
+     },
+     summary::{PimdirSummary, calendar::PimdirTime},
+ };
+-use jiff::tz::TimeZone;
+-use log::warn;
++use jiff::{SignedDuration, Timestamp, tz::TimeZone};
++use log::{debug, warn};
+ use pimalaya_cli::{error::CodedError, listing::Listing, sanitize};
+ use schemars::JsonSchema;
+ use serde::Serialize;
+@@ -136,6 +136,53 @@ impl PimdirClient {
+         })
+     }
+ 
++    /// The public ids of the items of `calendar` the index places in the
++    /// window `[start, end)` (`YYYYMMDDTHHMMSSZ` instants), widened by
++    /// [`WINDOW_MARGIN`] each way, or `None` unless the index answers that
++    /// window completely.
++    ///
++    /// Complete means what SEARCH §8.2 says of a `when:` query over the
++    /// widened window, plus no placement of any kind missing or
++    /// unparseable, whether or not the term reads it. The margin covers
++    /// the zone the index reads floating times and dates in, whichever it
++    /// is. The ids are a superset: the caller still answers each item
++    /// from its own body, and reads every item the index cannot place
++    /// (one with no local body, one a pending `update` repoints).
++    pub(crate) fn window_candidates(
++        &self,
++        calendar: &str,
++        start: &str,
++        end: &str,
++    ) -> Option<BTreeSet<i64>> {
++        let start = widened(start, -WINDOW_MARGIN)?;
++        let end = widened(end, WINDOW_MARGIN)?;
++        let index = PimdirIndex::open_query(&self.root).ok()?;
++
++        let query = PimdirQuery::parse(&format!("when:{start}..{end}")).ok()?;
++        let answer = index
++            .count(&self.scope(query, Some(calendar)), &search_clock())
++            .ok()?;
++        let coverage = &answer.coverage;
++        let unread = coverage
++            .local
++            .kinds
++            .values()
++            .any(|unread| unread.missing > 0 || unread.unparseable > 0);
++        if !coverage.is_complete() || unread {
++            debug!("scan calendar `{calendar}`: the index does not answer its window");
++            return None;
++        }
++
++        let found = index.occurrences_between(&start, &end).ok()?;
++        let seqs = found
++            .into_iter()
++            .filter(|occurrence| occurrence.collection == calendar)
++            .map(|occurrence| occurrence.seq)
++            .collect();
++
++        Some(seqs)
++    }
++
+     /// Opens the store's search index read-only.
+     fn index(&self) -> Result<PimdirIndex> {
+         PimdirIndex::open_query(&self.root).map_err(|err| {
+@@ -156,6 +203,27 @@ impl PimdirClient {
+     }
+ }
+ 
++/// How far a window read from the index is widened each way: two days,
++/// past any zone's offset from the one the index reads floating times in.
++const WINDOW_MARGIN: SignedDuration = SignedDuration::from_hours(48);
++
++/// A `YYYYMMDDTHHMMSSZ` instant moved by `by`, as RFC 3339 in UTC.
++fn widened(stamp: &str, by: SignedDuration) -> Option<String> {
++    let at = |range: std::ops::Range<usize>| stamp.get(range);
++    let rfc3339 = format!(
++        "{}-{}-{}T{}:{}:{}Z",
++        at(0..4)?,
++        at(4..6)?,
++        at(6..8)?,
++        at(9..11)?,
++        at(11..13)?,
++        at(13..15)?,
++    );
++    let instant: Timestamp = rfc3339.parse().ok()?;
++
++    Some(instant.checked_add(by).ok()?.to_string())
++}
++
+ /// The clock of a search: now, in the zone the tables read times in
+ /// (`TZ`, then the system's), UTC when that zone has no IANA name.
+ pub fn search_clock() -> PimdirSearchClock {
