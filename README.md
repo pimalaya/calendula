@@ -267,6 +267,8 @@ pimdir.root = "~/.local/state/neverest"
 #pimdir.account = "example"
 ```
 
+A store is read at one pimdir format, storage-draft-17 for this version, the one the sync engine of the same release writes: a store an earlier engine wrote is refused (`store-version`), never migrated. To start over, let the old sync engine push what is queued, check `calendula pimdir queue list` lists nothing, move the store's directory aside, then sync a new store with the new engine. A store moved aside with rows still queued keeps those writes unsent.
+
 Run `calendula pimdir status` to see which account you are reading, how much of each calendar is downloaded, how many creations are still queued and which writes the sync engine parked: an update or a delete whose event a sync changed since it was read, or left conflicted, is parked rather than applied. `calendula pimdir queue list` lists every creation, reply and cancellation still queued, by its queue row, and `calendula pimdir queue cancel <ROW>` retracts one before the next sync. An item that is listed but not downloaded reads as "body not fetched" until a sync hydrates it.
 
 Run `calendula pimdir search <query>` to search the account's events through the search index the sync engine keeps, in the [pimdir SEARCH](https://github.com/pimalaya/pimdir) query language: `budget location:lisbon`, `attendee:carol@example.org date:2026-11`, `organizer:alice@example.org category:work`. `calendula pimdir count <query>` counts the same. `--sort` takes `newest-first` (the default), `oldest-first`, `title` or `relevance`.

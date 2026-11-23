@@ -324,6 +324,14 @@ It SHALL read a body only to answer a kind or a window, or to return the item. B
 
 A summary SHALL NOT rule an item out by its dates: an override moves an occurrence anywhere and the summary describes the master alone. An item a pending `update` repoints SHALL NOT be ruled out by its summary, which describes the body it replaces.
 
+### Requirement: A queue row that does not decode fails no listing
+A pimdir listing (`event list`, `event agenda`, `event search`, `event read --uid`) SHALL NOT fail for a queue row whose payload does not decode, whichever collection holds it. The pending updates a listing reads SHALL be those of the account's calendars. When a calendar's queue does not decode, the listing SHALL read every hydrated item of that calendar from its body rather than rule items out by their summary, and SHALL log a warning naming the calendar. `pimdir queue list` keeps naming such a calendar in an `action-malformed` entry.
+
+#### Scenario: A malformed row in another calendar
+- GIVEN the calendars `a` and `b` of one account, and a queue row of `b` whose payload states no integer version
+- WHEN `calendula --json event list -k a` runs, then `-k b`
+- THEN both list their events and exit 0
+
 ### Requirement: pimdir shows a short public id
 The pimdir backend SHALL show and accept each item's public id (`items.seq`, a small store-assigned integer stable across every collection the item is filed in), not the internal `link_id`.
 
