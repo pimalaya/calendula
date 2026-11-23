@@ -8,6 +8,7 @@
 
 use std::{
     fs,
+    io::Write,
     path::Path,
     process::{Command, Output, Stdio},
 };
@@ -55,8 +56,18 @@ fn json(out: &Output, status: i32) -> Value {
 }
 
 /// A pimdir account over a store whose calendar `cal` holds three events
-/// naming the budget, synced and indexed.
+/// naming the budget, synced and indexed, their summaries in date order.
 fn account() -> TempDir {
+    account_of(&[
+        ("a", "20261110T090000Z"),
+        ("b", "20261111T090000Z"),
+        ("c", "20261112T090000Z"),
+    ])
+}
+
+/// A pimdir account over a store whose calendar `cal` holds an event
+/// `Budget <uid>` per `(uid, start)` of `starts`, synced and indexed.
+fn account_of(starts: &[(&str, &str)]) -> TempDir {
     let home = TempDir::new().unwrap();
     let root = home.path().join("store");
     let config = format!(
@@ -83,11 +94,6 @@ fn account() -> TempDir {
         ])
         .unwrap();
 
-    let starts = [
-        ("a", "20261110T090000Z"),
-        ("b", "20261111T090000Z"),
-        ("c", "20261112T090000Z"),
-    ];
     for (uid, start) in starts {
         json(
             &run(home.path(), &["--json", "event", "add", &event(uid, start)]),
@@ -96,7 +102,7 @@ fn account() -> TempDir {
     }
 
     let mut owner = PimdirStore::open(&root).unwrap().for_source("caldav");
-    assert_eq!(owner.drain().unwrap().applied, 3);
+    assert_eq!(owner.drain().unwrap().applied, starts.len());
     drop(owner);
 
     PimdirIndex::open(&root)
@@ -218,4 +224,132 @@ fn an_event_search_answers_the_query_as_event_rows() {
 
     let refused = json(&run(home, &["--json", "event", "search", "summary:"]), 1);
     assert_eq!(refused["code"], "query-refused", "{refused}");
+}
+
+/// The summaries `args` lists, in its order, from the `hits` of `pimdir
+/// search` or the `events` of `event search`.
+fn summaries(home: &Path, args: &[&str]) -> Vec<String> {
+    let out = json(&run(home, args), 0);
+    let rows = out.get("hits").or(out.get("events")).unwrap();
+    rows.as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["summary"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+/// `--sort` takes pimdir's order names, `newest-first` by default, and
+/// reads the former `date` and `name` as `newest-first` and `title`, on
+/// `event search` and `pimdir search` alike.
+#[test]
+fn a_search_sorts_by_the_pimdir_order_names() {
+    let home = account_of(&[
+        ("b", "20261110T090000Z"),
+        ("c", "20261111T090000Z"),
+        ("a", "20261112T090000Z"),
+    ]);
+    let home = home.path();
+
+    for command in ["event", "pimdir"] {
+        let sorted = |sort: Option<&str>| {
+            let mut args = vec!["--json", command, "search"];
+            if let Some(sort) = sort {
+                args.extend(["--sort", sort]);
+            }
+            args.push("budget");
+            summaries(home, &args)
+        };
+
+        let newest = sorted(None);
+        assert_eq!(newest, ["Budget a", "Budget c", "Budget b"], "{command}");
+        assert_eq!(sorted(Some("newest-first")), newest, "{command}");
+        assert_eq!(sorted(Some("date")), newest, "{command}");
+
+        let mut oldest = newest.clone();
+        oldest.reverse();
+        assert_eq!(sorted(Some("oldest-first")), oldest, "{command}");
+
+        let title = sorted(Some("title"));
+        assert_eq!(title, ["Budget a", "Budget b", "Budget c"], "{command}");
+        assert_eq!(sorted(Some("name")), title, "{command}");
+
+        assert_eq!(sorted(Some("relevance")).len(), 3, "{command}");
+
+        let help = run(home, &[command, "search", "--help"]);
+        let help = String::from_utf8(help.stdout).unwrap();
+        for value in ["newest-first", "oldest-first", "title", "relevance"] {
+            assert!(help.contains(value), "{command}: {help}");
+        }
+        assert!(!help.contains("sender"), "{command}: {help}");
+    }
+}
+
+/// The MCP tool `event_search` lists pimdir's order names as the values
+/// of its `sort`, and none of the former names.
+#[test]
+fn the_event_search_tool_lists_the_pimdir_order_names() {
+    let home = account();
+    let home = home.path();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_calendula"))
+        .arg("-c")
+        .arg(home.join("config.toml"))
+        .arg("mcp")
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", home)
+        .env_remove("XDG_CONFIG_DIRS")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let list = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
+    let mut stdin = child.stdin.take().unwrap();
+    writeln!(stdin, "{list}").unwrap();
+    drop(stdin);
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let response: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let tools = response["result"]["tools"].as_array().unwrap();
+    let search = tools.iter().find(|tool| tool["name"] == "event_search");
+    let search = search.unwrap_or_else(|| panic!("{response}"));
+    let sort = &search["inputSchema"]["properties"]["sort"];
+    let values = ["newest-first", "oldest-first", "title", "relevance"];
+    assert_eq!(sort["enum"], serde_json::json!(values), "{sort}");
+}
+
+/// A query holding a reserved form is refused `query-refused` naming
+/// `reserved-form`, while an instant and the new relative units are
+/// answered.
+#[test]
+fn a_reserved_form_is_refused_and_instants_are_answered() {
+    let home = account();
+    let home = home.path();
+
+    for query in ["~x", "/re/", "summary:{x}"] {
+        let refused = json(&run(home, &["--json", "event", "search", query]), 1);
+        assert_eq!(refused["code"], "query-refused", "{query}: {refused}");
+        let message = refused.to_string();
+        assert!(message.contains("reserved-form"), "{query}: {refused}");
+    }
+
+    let at = summaries(
+        home,
+        &["--json", "event", "search", "when:2026-11-11T09:00"],
+    );
+    assert_eq!(at, ["Budget b"]);
+
+    for query in [
+        "when:2026-11-07T10:00..",
+        "date:2h..",
+        "date:..30min",
+        "date:..1mo",
+    ] {
+        json(&run(home, &["--json", "event", "search", query]), 0);
+    }
 }

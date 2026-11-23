@@ -43,9 +43,16 @@ use crate::{
 /// a prefix), `field:value` terms (`summary:`, `location:`, `attendee:`,
 /// `organizer:`, `category:`, `date:2026-11-09`, `date:2026-01..2026-03`
 /// and the others), `and`, `or`, `not` or a leading `-` (its word after
-/// `--`), and parentheses. It is parsed before any backend is reached, so
-/// a query is refused the same way everywhere (`query-refused`). It reads
-/// every calendar of the account, or the one `-k` names.
+/// `--`), and parentheses. `date:` and `when:` also take an instant
+/// (`when:2026-11-23T10:00`) and amounts relative to now in `min`, `h`,
+/// `d`, `w`, `mo` and `y` (`date:2h..`). `label:work` and
+/// `property:<key>=<value>` read the labels and properties the store keeps
+/// on an item. A word or a value beginning with `~`, one of two characters
+/// or more beginning with `/`, and a value beginning with `{` are reserved
+/// (`reserved-form`): quote them to search them as text. It is parsed
+/// before any backend is reached, so a query is refused the same way
+/// everywhere (`query-refused`). It reads every calendar of the account,
+/// or the one `-k` names.
 ///
 /// A pimdir store's index answers it, as `pimdir search` does; every
 /// other backend refuses it (`capability-missing`, `event.search`). An

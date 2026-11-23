@@ -222,12 +222,14 @@ impl PimdirBackend {
         let uid = query.uid.filter(|_| query.take.is_none());
         let filtered = query.kind.is_some() || query.range.is_some();
         let restaged = match query.kind.is_some() || uid.is_some() {
-            true => self.restaged()?,
-            false => Vec::new(),
+            true => self.restaged(calendar_id)?,
+            false => Some(Vec::new()),
         };
 
         self.scan(calendar_id, |stored| {
-            if ruled_out(&stored, query.kind, uid, &restaged) {
+            if let Some(restaged) = &restaged
+                && ruled_out(&stored, query.kind, uid, restaged)
+            {
                 return Ok(ControlFlow::Continue(()));
             }
 
@@ -658,23 +660,34 @@ impl PimdirBackend {
         }
     }
 
-    /// The public ids of the items a pending `update` repoints, store
-    /// wide.
+    /// The public ids of the items a pending `update` of `calendar_id`
+    /// repoints, or `None` when that calendar's queue does not decode.
     ///
     /// The reader folds the new body in, while the summary beside the
     /// row is still the one the owner derived from the old body, so it
-    /// cannot rule such an item out.
-    fn restaged(&self) -> Result<Vec<i64>> {
-        Ok(self
-            .client
-            .reader
-            .list_pending_actions()?
+    /// cannot rule such an item out. A queue that does not decode hides
+    /// which items those are, so its calendar has none ruled out, with a
+    /// warning, rather than its listing failing: `pimdir queue list`
+    /// names the row.
+    fn restaged(&self, calendar_id: &str) -> Result<Option<Vec<i64>>> {
+        let pending = match self.client.reader.pending_actions(calendar_id) {
+            Ok(pending) => pending,
+            Err(err @ PimdirError::Action(_)) => {
+                warn!("Read every body of calendar `{calendar_id}`, its queue undecoded: {err}");
+                return Ok(None);
+            }
+            Err(err) => return Err(store_error(err, "Read the pimdir queue")),
+        };
+
+        let restaged = pending
             .into_iter()
             .filter_map(|pending| match pending.action {
                 PimdirAction::Update { seq, .. } => Some(seq),
                 _ => None,
             })
-            .collect())
+            .collect();
+
+        Ok(Some(restaged))
     }
 
     /// The stored item behind a public item id, or a clear miss.

@@ -204,6 +204,9 @@ fn initialize_tells_the_agent_how_to_use_the_tools() {
         "--allow-write",
         "--allow-send",
         "ATTENDEE",
+        "reserved-form",
+        "`mo`",
+        "label:",
     ] {
         assert!(instructions.contains(word), "{word}: {instructions}");
     }

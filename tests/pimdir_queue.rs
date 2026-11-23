@@ -15,8 +15,10 @@ use std::{
 
 use io_pimdir::{
     change::PimdirWriteOp,
-    client::PimdirStore,
+    client::{PimdirStore, producer::PimdirProducer},
+    codec::PimdirAction,
     collection::{PimdirCheckpoint, PimdirCollectionId, PimdirScope},
+    property::LABEL,
 };
 use serde_json::Value;
 use tempfile::TempDir;
@@ -142,6 +144,101 @@ fn the_queue_refusals_carry_their_codes() {
 
     let queue = json(home, &["pimdir", "queue", "list"], 0);
     assert_eq!(queue["actions"].as_array().unwrap().len(), 1, "{queue}");
+}
+
+/// A `set-property` row another producer queued lists among the pending
+/// rows, named by its kind and the item it labels.
+#[test]
+fn a_set_property_row_of_another_producer_lists() {
+    let home = account();
+    let home = home.path();
+
+    let queue = json(home, &["pimdir", "queue", "list"], 0);
+    let item = queue["actions"][0]["itemId"].as_str().unwrap().to_owned();
+
+    let mut producer = PimdirProducer::open(home.join("store"), "other").unwrap();
+    let action = PimdirAction::SetProperty {
+        seq: item.parse().unwrap(),
+        key: LABEL.into(),
+        add: vec!["work".into()],
+        remove: Vec::new(),
+    };
+    producer.enqueue("cal", &action, None).unwrap();
+    drop(producer);
+
+    let queue = json(home, &["pimdir", "queue", "list"], 0);
+    let actions = queue["actions"].as_array().unwrap();
+    assert_eq!(actions.len(), 2, "{queue}");
+    assert_eq!(actions[1]["kind"], "set-property", "{queue}");
+    assert_eq!(actions[1]["itemId"], item.as_str(), "{queue}");
+    assert_eq!(queue["errors"], Value::Array(Vec::new()), "{queue}");
+}
+
+/// A queue row of `b` whose payload states no integer version fails no
+/// listing, of `a` or of `b` itself: each lists, pages its agenda and
+/// reads by UID, exiting 0, while `queue list` names the row
+/// `action-malformed` and exits 3.
+#[test]
+fn a_malformed_queue_row_fails_no_listing() {
+    let home = TempDir::new().unwrap();
+    let root = home.path().join("store");
+    let config = format!(
+        "[accounts.perso]\ndefault = true\ncalendar.default = \"a\"\npimdir.root = {:?}\n",
+        root.display().to_string(),
+    );
+    fs::write(home.path().join("config.toml"), config).unwrap();
+    let home = home.path();
+
+    let store = PimdirStore::open(&root).unwrap();
+    let mut ops = Vec::new();
+    for calendar in ["a", "b"] {
+        store.ensure_collection(calendar, "text/calendar").unwrap();
+        ops.push(PimdirWriteOp::OpenRound {
+            collection: PimdirCollectionId(calendar.into()),
+            scope: PimdirScope::unbounded(),
+            band: false,
+        });
+        ops.push(PimdirWriteOp::CloseRound {
+            collection: PimdirCollectionId(calendar.into()),
+            coverage: PimdirScope::unbounded(),
+            checkpoint: Some(PimdirCheckpoint(b"0".to_vec())),
+        });
+    }
+    store.for_source("caldav").write(ops).unwrap();
+
+    for calendar in ["a", "b"] {
+        let body = EVENT.replace("standup@", &format!("{calendar}@"));
+        json(home, &["event", "add", "-k", calendar, &body], 0);
+    }
+    let mut owner = PimdirStore::open(&root).unwrap().for_source("caldav");
+    assert_eq!(owner.drain().unwrap().applied, 2);
+    drop(owner);
+
+    let queued = EVENT.replace("standup@", "queued@");
+    json(home, &["event", "add", "-k", "b", &queued], 0);
+    let db = rusqlite::Connection::open(root.join("pimdir.db")).unwrap();
+    let sql = "UPDATE queue SET payload = replace(payload, '\"v\":1', '\"w\":1')";
+    assert_eq!(db.execute(sql, []).unwrap(), 1);
+    drop(db);
+
+    for calendar in ["a", "b"] {
+        let events = json(home, &["event", "list", "-k", calendar], 0);
+        let events = events["events"].as_array().unwrap();
+        assert_eq!(events.len(), 1, "{calendar}: {events:?}");
+
+        let window = ["event", "list", "-k", calendar, "--from", "2026-11-01"];
+        let window = json(home, &[&window[..], &["--to", "2026-11-30"]].concat(), 0);
+        assert_eq!(window["events"].as_array().unwrap().len(), 1, "{window}");
+
+        json(home, &["event", "agenda", "-k", calendar, "11", "2026"], 0);
+
+        let uid = format!("{calendar}@example.org");
+        let read = json(home, &["event", "read", "-k", calendar, "--uid", &uid], 0);
+        assert_eq!(read["calendarId"], calendar, "{read}");
+    }
+
+    let queue = json(home, &["pimdir", "queue", "list"], 3);
+    assert_eq!(queue["errors"][0]["code"], "action-malformed", "{queue}");
 }
 
 /// A create naming a calendar the store holds fails as a duplicate,

@@ -49,7 +49,12 @@ which also lists each occurrence of a recurring event. An event's `id` \
 names it, in that calendar, for event_read, event_update and \
 event_delete; event_read takes the iCalendar UID an invitation carries \
 in `uid` instead. event_search takes a query in the pimdir search \
-language, which a pimdir store answers. item_list and item_read give the \
+language, which a pimdir store answers: words, `field:value` terms, \
+`date:` and `when:` taking days, instants (`when:2026-11-23T10:00`) and \
+amounts relative to now in `min`, `h`, `d`, `w`, `mo` and `y` \
+(`date:2h..`), `label:` and `property:<key>=<value>`; a word or value \
+beginning with `~` or `{`, or with `/` and longer than one character, is \
+refused as `reserved-form` unless quoted. item_list and item_read give the \
 raw iCalendar of any component. event_add and event_update take the \
 event as field arguments (`summary`, `start`, `end`, `location`) or as \
 iCalendar text in `ical`, never as a path. account_capability says \

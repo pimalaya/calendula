@@ -42,6 +42,16 @@ use crate::{
 ///
 /// `date:` matches occurrences, a series included. Days, `today` and
 /// `yesterday` are read in the local zone (`TZ`, then the system's).
+/// `date:` and `when:` also take an instant (`when:2026-11-23T10:00`, read
+/// in that zone when it states none) and amounts relative to now in `min`,
+/// `h`, `d`, `w`, `mo` and `y` (`date:2h..`). `label:work` and
+/// `property:<key>=<value>` read the labels and properties the store keeps
+/// on an item, never the index.
+///
+/// A word or a value beginning with `~`, one of two characters or more
+/// beginning with `/`, and a value beginning with `{` are reserved for
+/// later operators and refused `query-refused` (`reserved-form`): quote
+/// them to search them as text (`"~draft"`).
 ///
 /// The answer is the index as the sync engine last refreshed it: a queued
 /// write is not in it. Each hit prints on one line, as `event list` prints
