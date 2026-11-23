@@ -105,12 +105,27 @@ fn account_of(starts: &[(&str, &str)]) -> TempDir {
     assert_eq!(owner.drain().unwrap().applied, starts.len());
     drop(owner);
 
-    PimdirIndex::open(&root)
-        .unwrap()
-        .refresh(&PimdirIndexRefreshOptions::default())
-        .unwrap();
-
+    indexed(&root);
     home
+}
+
+/// Refreshes the index of the store at `root` until a pass folds it.
+///
+/// A pass that finds index.lock held does nothing and says so (`busy`),
+/// for its owner to run again: a child another test forks keeps a copy
+/// of the lock `PimdirIndex::open` just released until it executes.
+fn indexed(root: &Path) {
+    let mut index = PimdirIndex::open(root).unwrap();
+    for _ in 0..100 {
+        let report = index
+            .refresh(&PimdirIndexRefreshOptions::default())
+            .unwrap();
+        if !report.busy {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("index.lock of {} stayed held", root.display());
 }
 
 #[test]
