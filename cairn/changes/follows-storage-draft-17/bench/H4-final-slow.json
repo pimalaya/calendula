@@ -1,0 +1,256 @@
+{
+  "results": [
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-1 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event list --from 2026-11-01 --to 2026-11-30",
+      "mean": 1.2233625593333333,
+      "stddev": 0.0034464011494520627,
+      "median": 1.223922417,
+      "user": 1.1391463333333334,
+      "system": 0.08076366666666666,
+      "min": 1.219670505,
+      "max": 1.2264947560000001,
+      "times": [
+        1.223922417,
+        1.2264947560000001,
+        1.219670505
+      ],
+      "memory_usage_byte": [
+        28884992,
+        28884992,
+        29151232
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "1"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-1 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event agenda 11 2026",
+      "mean": 1.1865571393333334,
+      "stddev": 0.02309217196309227,
+      "median": 1.1889726010000001,
+      "user": 1.1128763333333334,
+      "system": 0.070454,
+      "min": 1.162352179,
+      "max": 1.208346638,
+      "times": [
+        1.1889726010000001,
+        1.162352179,
+        1.208346638
+      ],
+      "memory_usage_byte": [
+        29151232,
+        29151232,
+        29151232
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "1"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-1 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event agenda 2026",
+      "mean": 8.674931731666666,
+      "stddev": 0.029319128955650843,
+      "median": 8.681988534,
+      "user": 8.547004666666666,
+      "system": 0.10703633333333333,
+      "min": 8.642728211,
+      "max": 8.70007845,
+      "times": [
+        8.642728211,
+        8.70007845,
+        8.681988534
+      ],
+      "memory_usage_byte": [
+        157777920,
+        157777920,
+        157777920
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "1"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-2 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event list --from 2026-11-01 --to 2026-11-30",
+      "mean": 1.170217652,
+      "stddev": 0.02798698819251882,
+      "median": 1.178458014,
+      "user": 1.0955700000000002,
+      "system": 0.071121,
+      "min": 1.139035619,
+      "max": 1.193159323,
+      "times": [
+        1.193159323,
+        1.139035619,
+        1.178458014
+      ],
+      "memory_usage_byte": [
+        157777920,
+        157777920,
+        157777920
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "2"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-2 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event agenda 11 2026",
+      "mean": 1.5796314669999998,
+      "stddev": 0.6745331843163581,
+      "median": 1.193375274,
+      "user": 1.0951913333333334,
+      "system": 0.07673599999999998,
+      "min": 1.187012492,
+      "max": 2.358506635,
+      "times": [
+        2.358506635,
+        1.193375274,
+        1.187012492
+      ],
+      "memory_usage_byte": [
+        157777920,
+        157777920,
+        157777920
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "2"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-2 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event agenda 2026",
+      "mean": 9.270492371333333,
+      "stddev": 0.2944688550926782,
+      "median": 9.401777458,
+      "user": 9.116915666666667,
+      "system": 0.13194366666666665,
+      "min": 8.933215743,
+      "max": 9.476483913,
+      "times": [
+        8.933215743,
+        9.401777458,
+        9.476483913
+      ],
+      "memory_usage_byte": [
+        157777920,
+        157777920,
+        157777920
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "2"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-3 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event list --from 2026-11-01 --to 2026-11-30",
+      "mean": 1.2338305813333335,
+      "stddev": 0.03449491318180482,
+      "median": 1.237854678,
+      "user": 1.149544,
+      "system": 0.080757,
+      "min": 1.197500112,
+      "max": 1.266136954,
+      "times": [
+        1.197500112,
+        1.237854678,
+        1.266136954
+      ],
+      "memory_usage_byte": [
+        157777920,
+        157777920,
+        157777920
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "3"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-3 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event agenda 11 2026",
+      "mean": 1.264820661,
+      "stddev": 0.009986672173859679,
+      "median": 1.268416529,
+      "user": 1.1867876666666666,
+      "system": 0.07444666666666666,
+      "min": 1.253534001,
+      "max": 1.272511453,
+      "times": [
+        1.268416529,
+        1.272511453,
+        1.253534001
+      ],
+      "memory_usage_byte": [
+        157777920,
+        157777920,
+        157777920
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "3"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-3 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event agenda 2026",
+      "mean": 9.291037573333334,
+      "stddev": 0.213336109505231,
+      "median": 9.382634006,
+      "user": 9.145302333333333,
+      "system": 0.11698999999999998,
+      "min": 9.047199296,
+      "max": 9.443279418,
+      "times": [
+        9.443279418,
+        9.382634006,
+        9.047199296
+      ],
+      "memory_usage_byte": [
+        157777920,
+        157777920,
+        157777920
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "3"
+      }
+    }
+  ]
+}

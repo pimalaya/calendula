@@ -1,0 +1,616 @@
+{
+  "results": [
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-1 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event list -s 50",
+      "mean": 0.012107745,
+      "stddev": 0.0005641028684880981,
+      "median": 0.011873107,
+      "user": 0.0082354,
+      "system": 0.0036117999999999996,
+      "min": 0.011591568,
+      "max": 0.012989387000000002,
+      "times": [
+        0.012989387000000002,
+        0.012329998,
+        0.011873107,
+        0.011754665000000001,
+        0.011591568
+      ],
+      "memory_usage_byte": [
+        15024128,
+        15024128,
+        15024128,
+        15216640,
+        15216640
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "1"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-1 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml pimdir search when:2026-11",
+      "mean": 0.0242829108,
+      "stddev": 0.00008144979234289018,
+      "median": 0.024267185,
+      "user": 0.0161012,
+      "system": 0.0078518,
+      "min": 0.024221449000000003,
+      "max": 0.02442387,
+      "times": [
+        0.024233582,
+        0.02442387,
+        0.024268468,
+        0.024221449000000003,
+        0.024267185
+      ],
+      "memory_usage_byte": [
+        17694720,
+        17694720,
+        17694720,
+        17694720,
+        17694720
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "1"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-1 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event search budget",
+      "mean": 0.008274469400000001,
+      "stddev": 0.00007298478871518396,
+      "median": 0.008283684000000001,
+      "user": 0.0047004,
+      "system": 0.0033391999999999996,
+      "min": 0.008198976,
+      "max": 0.008359838000000001,
+      "times": [
+        0.008283684000000001,
+        0.008328379,
+        0.00820147,
+        0.008359838000000001,
+        0.008198976
+      ],
+      "memory_usage_byte": [
+        17694720,
+        17694720,
+        17694720,
+        17694720,
+        17694720
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "1"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-1 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event read 5",
+      "mean": 0.0029046788000000002,
+      "stddev": 0.00010772241843599691,
+      "median": 0.0028610830000000004,
+      "user": 0.0012878,
+      "system": 0.0014805999999999999,
+      "min": 0.0028107680000000004,
+      "max": 0.0030881700000000003,
+      "times": [
+        0.0030881700000000003,
+        0.002903713,
+        0.0028610830000000004,
+        0.00285966,
+        0.0028107680000000004
+      ],
+      "memory_usage_byte": [
+        17694720,
+        17694720,
+        17694720,
+        17694720,
+        17694720
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "1"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-1 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml item list -s 50",
+      "mean": 0.009346117800000001,
+      "stddev": 0.00020142564639017557,
+      "median": 0.009291371000000001,
+      "user": 0.006762399999999999,
+      "system": 0.0023618,
+      "min": 0.009148182000000001,
+      "max": 0.009634536,
+      "times": [
+        0.009634536,
+        0.009462953000000001,
+        0.009291371000000001,
+        0.009148182000000001,
+        0.009193547
+      ],
+      "memory_usage_byte": [
+        17694720,
+        17694720,
+        17694720,
+        17694720,
+        17694720
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "1"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-1 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml pimdir status",
+      "mean": 0.017032564400000002,
+      "stddev": 0.00007983041568412441,
+      "median": 0.017044006,
+      "user": 0.012998000000000001,
+      "system": 0.0037502,
+      "min": 0.01692928,
+      "max": 0.017121051,
+      "times": [
+        0.017044006,
+        0.017121051,
+        0.017092798000000003,
+        0.01692928,
+        0.016975687
+      ],
+      "memory_usage_byte": [
+        17694720,
+        17694720,
+        17694720,
+        17694720,
+        17694720
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "1"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-2 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event list -s 50",
+      "mean": 0.011665884000000001,
+      "stddev": 0.00023587969643761175,
+      "median": 0.011600094,
+      "user": 0.00781,
+      "system": 0.0036098,
+      "min": 0.011436446000000001,
+      "max": 0.012061182,
+      "times": [
+        0.012061182,
+        0.011569377,
+        0.011662321000000002,
+        0.011436446000000001,
+        0.011600094
+      ],
+      "memory_usage_byte": [
+        17694720,
+        17694720,
+        17694720,
+        17694720,
+        17694720
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "2"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-2 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml pimdir search when:2026-11",
+      "mean": 0.0239397654,
+      "stddev": 0.00015709511461945707,
+      "median": 0.023990725,
+      "user": 0.016016,
+      "system": 0.007614,
+      "min": 0.023708164,
+      "max": 0.024076647000000003,
+      "times": [
+        0.024068382000000003,
+        0.023990725,
+        0.023708164,
+        0.023854909,
+        0.024076647000000003
+      ],
+      "memory_usage_byte": [
+        17739776,
+        17739776,
+        17739776,
+        17739776,
+        17739776
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "2"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-2 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event search budget",
+      "mean": 0.0081316104,
+      "stddev": 0.0001293910029785688,
+      "median": 0.008150945,
+      "user": 0.005523599999999999,
+      "system": 0.0023789999999999996,
+      "min": 0.007955477,
+      "max": 0.008259449,
+      "times": [
+        0.008243068000000001,
+        0.008150945,
+        0.007955477,
+        0.008049113,
+        0.008259449
+      ],
+      "memory_usage_byte": [
+        17739776,
+        17739776,
+        17739776,
+        17739776,
+        17739776
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "2"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-2 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event read 5",
+      "mean": 0.003072094,
+      "stddev": 0.00010431149898501115,
+      "median": 0.0030752460000000002,
+      "user": 0.0017674,
+      "system": 0.0011546,
+      "min": 0.0029383390000000003,
+      "max": 0.003213145,
+      "times": [
+        0.003213145,
+        0.00312013,
+        0.0030752460000000002,
+        0.0030136100000000003,
+        0.0029383390000000003
+      ],
+      "memory_usage_byte": [
+        17739776,
+        17739776,
+        17739776,
+        17739776,
+        17739776
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "2"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-2 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml item list -s 50",
+      "mean": 0.0092028438,
+      "stddev": 0.0001854709156598416,
+      "median": 0.009256645,
+      "user": 0.0052824,
+      "system": 0.0036809999999999994,
+      "min": 0.008925993,
+      "max": 0.009392571,
+      "times": [
+        0.009256645,
+        0.009392571,
+        0.00911581,
+        0.0093232,
+        0.008925993
+      ],
+      "memory_usage_byte": [
+        17739776,
+        17739776,
+        17739776,
+        17739776,
+        17739776
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "2"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-2 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml pimdir status",
+      "mean": 0.0177252756,
+      "stddev": 0.0004089043879359827,
+      "median": 0.017675043,
+      "user": 0.0126968,
+      "system": 0.004727199999999999,
+      "min": 0.017410105000000002,
+      "max": 0.018410046000000003,
+      "times": [
+        0.017412218,
+        0.017718966000000003,
+        0.017410105000000002,
+        0.018410046000000003,
+        0.017675043
+      ],
+      "memory_usage_byte": [
+        17739776,
+        17739776,
+        17739776,
+        17739776,
+        17739776
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "2"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-3 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event list -s 50",
+      "mean": 0.012137869800000001,
+      "stddev": 0.0004497656921539258,
+      "median": 0.011991019,
+      "user": 0.0079076,
+      "system": 0.0039884,
+      "min": 0.011680304,
+      "max": 0.012664988,
+      "times": [
+        0.012664988,
+        0.012562125,
+        0.011991019,
+        0.011790913,
+        0.011680304
+      ],
+      "memory_usage_byte": [
+        17739776,
+        17739776,
+        17739776,
+        17739776,
+        17739776
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "3"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-3 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml pimdir search when:2026-11",
+      "mean": 0.02443555,
+      "stddev": 0.00014443132939739964,
+      "median": 0.024378314,
+      "user": 0.0148062,
+      "system": 0.0093102,
+      "min": 0.024282374000000002,
+      "max": 0.024653873000000003,
+      "times": [
+        0.024364488,
+        0.024282374000000002,
+        0.024378314,
+        0.024653873000000003,
+        0.024498701
+      ],
+      "memory_usage_byte": [
+        17739776,
+        17739776,
+        17739776,
+        17739776,
+        17739776
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "3"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-3 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event search budget",
+      "mean": 0.0081953684,
+      "stddev": 0.00007899358787458669,
+      "median": 0.00821207,
+      "user": 0.006584799999999999,
+      "system": 0.001387,
+      "min": 0.008076524,
+      "max": 0.008281681,
+      "times": [
+        0.008241896,
+        0.008076524,
+        0.008164671,
+        0.008281681,
+        0.00821207
+      ],
+      "memory_usage_byte": [
+        17739776,
+        17739776,
+        17739776,
+        17739776,
+        17739776
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "3"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-3 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml event read 5",
+      "mean": 0.0030190440000000007,
+      "stddev": 0.00008356938338590278,
+      "median": 0.0029685450000000004,
+      "user": 0.0023043999999999994,
+      "system": 0.0005646,
+      "min": 0.002947846,
+      "max": 0.0031378730000000002,
+      "times": [
+        0.0031378730000000002,
+        0.003076118,
+        0.0029685450000000004,
+        0.002947846,
+        0.002964838
+      ],
+      "memory_usage_byte": [
+        17739776,
+        17739776,
+        17739776,
+        17739776,
+        17739776
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "3"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-3 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml item list -s 50",
+      "mean": 0.0092446528,
+      "stddev": 0.00023898915118933736,
+      "median": 0.009220908,
+      "user": 0.0064488,
+      "system": 0.002545,
+      "min": 0.008883133000000001,
+      "max": 0.009499863,
+      "times": [
+        0.009418339000000001,
+        0.009220908,
+        0.009499863,
+        0.009201021,
+        0.008883133000000001
+      ],
+      "memory_usage_byte": [
+        17739776,
+        17739776,
+        17739776,
+        17739776,
+        17739776
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "3"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-final/calendula-3 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-final.toml pimdir status",
+      "mean": 0.0170509868,
+      "stddev": 0.00020122165941369353,
+      "median": 0.016973353,
+      "user": 0.0120164,
+      "system": 0.00477,
+      "min": 0.016862083,
+      "max": 0.017377483000000003,
+      "times": [
+        0.016944028,
+        0.017377483000000003,
+        0.017097987000000002,
+        0.016862083,
+        0.016973353
+      ],
+      "memory_usage_byte": [
+        17739776,
+        17739776,
+        17739776,
+        17739776,
+        17739776
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "3"
+      }
+    }
+  ]
+}

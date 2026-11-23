@@ -46,7 +46,7 @@ Cargo runs as `CARGO_TARGET_DIR=~/code/pimalaya/.lanes/calendula/target taskset 
 - [x] H1 `perf record` the month window and the year agenda at 10k (the release profile with debug symbols, on a copy); journal.md says where the time goes.
 - [x] H2 Parse each body once on the windowed path (`in_range` in src/pimdir/backend.rs:1314-1342, then the projection). Gate: `a_streamed_listing_lists_what_the_whole_read_listed` and the window tests pass, then measure.
 - [ ] H3 (parked, journal.md 18:40) D4: a windowed `list_items` takes its candidates from `PimdirIndex` (`occurrences_between`, or a `when:` instants query read with its coverage), adds the items changed since the index cursor, the bodiless ones (by their summary) and the restaged ones, and scans when the coverage is incomplete. Equivalence tests against the scan over `mixed_calendar()` and a 2k seed: index current, behind, past the horizon, floating zone differing.
-- [ ] H4 Final table (quiet window, measure lock). At 10k: a month window ≤ 0.5 s, a year agenda ≤ 3 s. At 100k: a month window ≤ 2 s. Every other command at most 5% slower than 0.3. Otherwise park H3 with its numbers.
+- [x] H4 Final table (quiet window, measure lock). At 10k: a month window ≤ 0.5 s, a year agenda ≤ 3 s. At 100k: a month window ≤ 2 s. Every other command at most 5% slower than 0.3. Otherwise park H3 with its numbers.
 
 ## I. Docs
 
