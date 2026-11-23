@@ -198,6 +198,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed a CalDAV `event update` or `item update` given a source and no `--if-match` failing `item-not-found` on iCloud, which answers 412 to `If-Match: *` over an item it holds: the 412 is followed by a read of the item, and the update sent again on the ETag it serves.
 - Fixed one pimdir queue row that does not decode, in any calendar of the store, failing every `event list`, `event agenda`, `event search` and `event read --uid` uncoded: a listing reads the pending updates of its own calendar, and one whose queue does not decode reads every body there rather than rule items out by their summaries, with a warning.
 - Fixed a pimdir `item create` of a foreign event with no `UID` and an `X-PIMDIR-` property queueing it under the `hash:` key of the bytes before that property was dropped, a key naming a body the store never holds: the key is now the one io-pimdir derives from the queued body, the id reported (io-pimdir 0.19.0 refuses the former with `hash-key-mismatch`).
 - Fixed `pimdir queue cancel` to code a row the account's queue does not hold `row-not-found`, and one asked with no terminal and no `--yes` `confirmation-required`, where it failed uncoded.

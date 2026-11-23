@@ -354,24 +354,57 @@ impl CaldavBackend {
         if_match: Option<&str>,
     ) -> Result<()> {
         let Some(if_match) = if_match else {
-            return match self
+            return self.update_existing(calendar_id, item_id, contents);
+        };
+
+        self.client
+            .update_item(calendar_id, item_id, contents, Some(if_match))
+            .map_err(update_error)?;
+        Ok(())
+    }
+
+    /// PUTs over an existing resource given no version: `If-Match: *`,
+    /// then, on a 412 to it (iCloud answers one whatever the resource),
+    /// gated on the ETag a read of the resource serves. An id the calendar
+    /// does not hold is refused as `item-not-found`, never created.
+    fn update_existing(
+        &mut self,
+        calendar_id: &str,
+        item_id: &str,
+        contents: Vec<u8>,
+    ) -> Result<()> {
+        let refused =
+            match self
                 .client
-                .update_item(calendar_id, item_id, contents, Some("*"))
+                .update_item(calendar_id, item_id, contents.clone(), Some("*"))
             {
-                Ok(_) => Ok(()),
+                Ok(_) => return Ok(()),
                 Err(
                     err @ WebdavClientStdError::Send(WebdavSendError::HttpStatus {
                         status: 412,
                         ..
                     }),
-                ) => Err(recoded(ErrorCode::ItemNotFound, err)
-                    .context(format!("Item `{item_id}` not found in `{calendar_id}`"))),
-                Err(err) => Err(update_error(err)),
+                ) => err,
+                Err(err) => return Err(update_error(err)),
             };
+
+        let etag = match self.client.read_item(calendar_id, item_id) {
+            Ok(body) => match body.etag {
+                Some(etag) => etag,
+                None => return Err(update_error(refused)),
+            },
+            Err(WebdavClientStdError::Send(WebdavSendError::HttpStatus {
+                status: 400 | 404 | 410,
+                ..
+            })) => {
+                return Err(recoded(ErrorCode::ItemNotFound, refused)
+                    .context(format!("Item `{item_id}` not found in `{calendar_id}`")));
+            }
+            Err(err) => return Err(item_refusal(err)),
         };
 
         self.client
-            .update_item(calendar_id, item_id, contents, Some(if_match))
+            .update_item(calendar_id, item_id, contents, Some(&etag))
             .map_err(update_error)?;
         Ok(())
     }
@@ -1092,18 +1125,45 @@ mod tests {
         assert_eq!(code(&err), Some(ErrorCode::PreconditionFailed), "{err:#}");
     }
 
-    /// CAL-2: an update given no version is gated on the item existing.
+    /// CAL-2: an update given no version is gated on the item existing,
+    /// the read its 412 leads to finding none.
     #[test]
     fn an_update_of_a_missing_item_creates_nothing() {
-        let (mut backend, written) = scripted(&[(412, "")]);
+        for read in [404, 410, 400] {
+            let (mut backend, written) = scripted(&[(412, ""), (read, "")]);
 
-        let err = backend
-            .update_item("cal", "nope.ics", EVENT.to_vec(), None)
-            .unwrap_err();
+            let err = backend
+                .update_item("cal", "nope.ics", EVENT.to_vec(), None)
+                .unwrap_err();
 
-        assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+            assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+            assert!(format!("{err:#}").contains("HTTP 412"), "{err:#}");
+            let written = String::from_utf8(written.lock().unwrap().clone()).unwrap();
+            assert!(written.contains("If-Match: *\r\n"), "{written}");
+            assert_eq!(written.matches("PUT ").count(), 1, "{written}");
+        }
+    }
+
+    /// iCloud answers 412 to `If-Match: *` over a resource it holds: the
+    /// update is sent again gated on the ETag a read of it serves.
+    #[test]
+    fn an_update_refused_on_any_version_is_sent_again_on_the_read_one() {
+        let read = "HTTP/1.1 200 OK\r\nContent-Type: text/calendar\r\n\
+                    ETag: \"e2\"\r\nContent-Length: 0\r\n\r\n";
+        let (mut stream, written) = stream(&[(412, "")], false);
+        stream.responses.push_back(read.as_bytes().to_vec());
+        stream
+            .responses
+            .push_back(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n".to_vec());
+
+        backend(stream)
+            .update_item("cal", "e1.ics", EVENT.to_vec(), None)
+            .unwrap();
+
         let written = String::from_utf8(written.lock().unwrap().clone()).unwrap();
         assert!(written.contains("If-Match: *\r\n"), "{written}");
+        assert!(written.contains("If-Match: \"e2\"\r\n"), "{written}");
+        assert_eq!(written.matches("PUT ").count(), 2, "{written}");
     }
 
     #[test]

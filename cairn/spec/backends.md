@@ -106,7 +106,7 @@ A listing the server answers with anything but one whole multistatus (an HTML pa
 
 A paged listing SHALL enumerate the calendar's references (a `calendar-query` asking `getetag` alone), cut its page over them, and fetch that page's bodies alone through one `calendar-multiget` (RFC 4791 §7.9); a listing taking every item SHALL keep the one `calendar-query` with `calendar-data`. A listing SHALL name, in its `errors`, each row the server answered without the item's data, or a `calendar-multiget` answered nothing for ("Each backend names the items it could not read"), on the page whose places hold it, such a row holding its place on that page, so no item shifts between pages; a listing the server truncated SHALL be named on the first page.
 
-`update_item` given no version SHALL send `If-Match: *` (RFC 9110 §13.1.1), so an id the calendar does not hold is refused, its 412 coded `item-not-found`, rather than created and reported as an update.
+`update_item` given no version SHALL send `If-Match: *` (RFC 9110 §13.1.1), so an id the calendar does not hold is refused rather than created and reported as an update. A 412 to it SHALL be followed by a read of the item: a read answered 400, 404 or 410 refuses the update `item-not-found`, the 412 its cause; a read serving an ETag SHALL send the PUT again gated on that ETag, iCloud answering 412 to `If-Match: *` over a resource it holds; a read serving none fails the update with the 412.
 
 A calendar's colour SHALL be written as Apple's `calendar-color` (`http://apple.com/ns/ical/`), by a create and an update alike, and read from it, the inf-it one when it is absent.
 
