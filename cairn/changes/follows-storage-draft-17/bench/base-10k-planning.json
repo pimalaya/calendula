@@ -1,0 +1,283 @@
+{
+  "results": [
+    {
+      "command": "/home/soywod/code/pimalaya/.pimdir-migration/calendula/bin/base -c /home/soywod/code/pimalaya/.pimdir-migration/calendula/conf/e10k-v19.toml event list -s 50",
+      "mean": 0.016331009200000003,
+      "stddev": 0.000245898504237419,
+      "median": 0.016310946,
+      "user": 0.0123104,
+      "system": 0.0037531999999999995,
+      "min": 0.016078641,
+      "max": 0.016736171,
+      "times": [
+        0.016215617,
+        0.016310946,
+        0.016736171,
+        0.016313671000000002,
+        0.016078641
+      ],
+      "memory_usage_byte": [
+        17276928,
+        17375232,
+        17375232,
+        17375232,
+        17375232
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.pimdir-migration/calendula/bin/base -c /home/soywod/code/pimalaya/.pimdir-migration/calendula/conf/e10k-v19.toml event list --from 2026-11-01 --to 2026-11-30",
+      "mean": 2.6129630878,
+      "stddev": 0.521460846428031,
+      "median": 2.843178288,
+      "user": 2.3766308,
+      "system": 0.08603340000000001,
+      "min": 1.876109722,
+      "max": 3.197123064,
+      "times": [
+        2.302645519,
+        3.197123064,
+        2.845758846,
+        1.876109722,
+        2.843178288
+      ],
+      "memory_usage_byte": [
+        25673728,
+        25673728,
+        25673728,
+        25673728,
+        25673728
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.pimdir-migration/calendula/bin/base -c /home/soywod/code/pimalaya/.pimdir-migration/calendula/conf/e10k-v19.toml event agenda 11 2026",
+      "mean": 2.4945946130000003,
+      "stddev": 0.43033059331758433,
+      "median": 2.655017725,
+      "user": 2.3271178,
+      "system": 0.0796722,
+      "min": 1.991376591,
+      "max": 3.006399417,
+      "times": [
+        2.105501915,
+        1.991376591,
+        3.006399417,
+        2.655017725,
+        2.714677417
+      ],
+      "memory_usage_byte": [
+        25673728,
+        25673728,
+        25673728,
+        25673728,
+        25673728
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.pimdir-migration/calendula/bin/base -c /home/soywod/code/pimalaya/.pimdir-migration/calendula/conf/e10k-v19.toml event agenda 2026",
+      "mean": 13.342356877400002,
+      "stddev": 0.03392759157765268,
+      "median": 13.35703604,
+      "user": 13.2324026,
+      "system": 0.0755892,
+      "min": 13.283525779,
+      "max": 13.364652075,
+      "times": [
+        13.363078499,
+        13.343491994,
+        13.364652075,
+        13.35703604,
+        13.283525779
+      ],
+      "memory_usage_byte": [
+        95322112,
+        95502336,
+        95502336,
+        95502336,
+        95502336
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.pimdir-migration/calendula/bin/base -c /home/soywod/code/pimalaya/.pimdir-migration/calendula/conf/e10k-v19.toml pimdir search when:2026-11",
+      "mean": 0.05941017120000001,
+      "stddev": 0.001639377111326798,
+      "median": 0.058825671,
+      "user": 0.048740599999999995,
+      "system": 0.010335599999999999,
+      "min": 0.058063895000000004,
+      "max": 0.06224404,
+      "times": [
+        0.058677975,
+        0.058063895000000004,
+        0.058825671,
+        0.059239275,
+        0.06224404
+      ],
+      "memory_usage_byte": [
+        95502336,
+        95502336,
+        95502336,
+        95502336,
+        95502336
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.pimdir-migration/calendula/bin/base -c /home/soywod/code/pimalaya/.pimdir-migration/calendula/conf/e10k-v19.toml event search budget",
+      "mean": 0.059486676599999996,
+      "stddev": 0.0013183092020701355,
+      "median": 0.059259594000000006,
+      "user": 0.054747599999999993,
+      "system": 0.004425999999999999,
+      "min": 0.057946696000000006,
+      "max": 0.061537998000000003,
+      "times": [
+        0.059718933,
+        0.059259594000000006,
+        0.058970162000000007,
+        0.057946696000000006,
+        0.061537998000000003
+      ],
+      "memory_usage_byte": [
+        95502336,
+        95502336,
+        95502336,
+        95502336,
+        95502336
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.pimdir-migration/calendula/bin/base -c /home/soywod/code/pimalaya/.pimdir-migration/calendula/conf/e10k-v19.toml event read 5",
+      "mean": 0.004226539,
+      "stddev": 0.00010672404316741362,
+      "median": 0.004190774,
+      "user": 0.0036116000000000004,
+      "system": 0.000548,
+      "min": 0.00415096,
+      "max": 0.004411908,
+      "times": [
+        0.004216612000000001,
+        0.004411908,
+        0.004190774,
+        0.004162441,
+        0.00415096
+      ],
+      "memory_usage_byte": [
+        95502336,
+        95502336,
+        95502336,
+        95502336,
+        95502336
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.pimdir-migration/calendula/bin/base -c /home/soywod/code/pimalaya/.pimdir-migration/calendula/conf/e10k-v19.toml item list -s 50",
+      "mean": 0.007750892200000001,
+      "stddev": 0.0003170020608311558,
+      "median": 0.007702007,
+      "user": 0.005166,
+      "system": 0.0024885999999999997,
+      "min": 0.007421252000000001,
+      "max": 0.008255172,
+      "times": [
+        0.008255172,
+        0.007568216000000001,
+        0.007421252000000001,
+        0.007702007,
+        0.007807814000000001
+      ],
+      "memory_usage_byte": [
+        95502336,
+        95502336,
+        95502336,
+        95502336,
+        95502336
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.pimdir-migration/calendula/bin/base -c /home/soywod/code/pimalaya/.pimdir-migration/calendula/conf/e10k-v19.toml pimdir status",
+      "mean": 0.064698505,
+      "stddev": 0.0006395712952759824,
+      "median": 0.06469572,
+      "user": 0.05797719999999999,
+      "system": 0.0063776,
+      "min": 0.064102088,
+      "max": 0.065739174,
+      "times": [
+        0.064254113,
+        0.06470143,
+        0.064102088,
+        0.065739174,
+        0.06469572
+      ],
+      "memory_usage_byte": [
+        95502336,
+        95502336,
+        95502336,
+        95502336,
+        95502336
+      ],
+      "exit_codes": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  ]
+}
