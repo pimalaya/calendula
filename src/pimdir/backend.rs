@@ -3219,7 +3219,7 @@ mod tests {
             open(&dir)
         };
         let earlier = versioned("storage-draft-12");
-        let newer = versioned("storage-draft-16");
+        let newer = versioned("storage-draft-18");
 
         assert_eq!(code_of(&uncreated), Some(ErrorCode::StoreUncreated));
         assert_eq!(code_of(&foreign), Some(ErrorCode::StoreForeign));

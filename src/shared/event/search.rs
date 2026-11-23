@@ -142,9 +142,13 @@ impl EventSearchCommand {
 pub enum EventSearchSort {
     /// Latest first, a series by its first occurrence.
     #[default]
-    Date,
+    #[value(alias = "date")]
+    NewestFirst,
+    /// Earliest first, a series by its first occurrence.
+    OldestFirst,
     /// By summary, A to Z.
-    Name,
+    #[value(alias = "name")]
+    Title,
     /// Best match of the query's words first.
     Relevance,
 }
@@ -233,8 +237,9 @@ impl fmt::Display for EventSearchOutput {
 /// coverage verdict.
 pub fn pimdir_page(backend: &PimdirBackend, search: &EventSearch) -> Result<EventSearchPage> {
     let sort = match search.sort {
-        EventSearchSort::Date => PimdirSearchSortArg::Date,
-        EventSearchSort::Name => PimdirSearchSortArg::Name,
+        EventSearchSort::NewestFirst => PimdirSearchSortArg::NewestFirst,
+        EventSearchSort::OldestFirst => PimdirSearchSortArg::OldestFirst,
+        EventSearchSort::Title => PimdirSearchSortArg::Title,
         EventSearchSort::Relevance => PimdirSearchSortArg::Relevance,
     };
     let size = page_limit(backend, search.page_size);

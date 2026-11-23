@@ -276,6 +276,7 @@ impl PimdirBackend {
                 }
             }
             PimdirAction::SetFlags { seq, .. }
+            | PimdirAction::SetProperty { seq, .. }
             | PimdirAction::Remove { seq, .. }
             | PimdirAction::Move { seq, .. }
             | PimdirAction::Copy { seq, .. } => stored(*seq),

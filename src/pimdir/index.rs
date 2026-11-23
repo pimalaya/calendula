@@ -744,6 +744,7 @@ mod tests {
                 object: None,
             }),
             origin: None,
+            server_object_id: None,
         }
     }
 
@@ -869,7 +870,7 @@ mod tests {
         conn.execute_batch("PRAGMA ignore_check_constraints = ON")
             .unwrap();
         let seq: i64 = offsite.id.parse().unwrap();
-        let sql = "UPDATE event_summary SET recurring = 'x' \
+        let sql = "UPDATE summary SET recurring = 'x' \
                    WHERE item = (SELECT id FROM items WHERE seq = ?1)";
         assert_eq!(conn.execute(sql, [seq]).unwrap(), 1);
         drop(conn);

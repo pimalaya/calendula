@@ -68,6 +68,19 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           extraPullNames: nix-community
       - uses: Swatinem/rust-cache@v2
+      - name: Check the pimdir build carries the calendar domain
+        # The tests' indexer dev-dependency turns calendar on in every test
+        # build, so only the normal graph shows what the binary carries.
+        run: |
+          set -e
+          tree=$(nix develop -c cargo tree --locked -e normal,features -i io-pimdir --no-default-features --features rustls-ring,pimdir)
+          for feature in calendar client search; do
+            grep -q "io-pimdir feature \"$feature\"" <<< "$tree" || { echo "io-pimdir lacks $feature"; exit 1; }
+          done
+          if grep -q 'io-pimdir feature "indexer"' <<< "$tree"; then
+            echo "the binary carries io-pimdir's indexer"
+            exit 1
+          fi
       - name: Run clippy and the tests over every feature set
         run: |
           set -e

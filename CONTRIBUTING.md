@@ -56,6 +56,13 @@ do
 done
 ```
 
+The tests build an index through a dev-dependency on io-pimdir's `indexer`, which turns its `calendar` domain on in every test build. The same job therefore checks that the binary itself carries `calendar`, `client` and `search`, and not `indexer` (without `calendar` a calendar hit carries no snippet):
+
+```sh
+nix develop --command cargo tree --locked -e normal,features -i io-pimdir \
+  --no-default-features --features rustls-ring,pimdir
+```
+
 ## Testing against a real provider
 
 tests/google.rs, tests/microsoft.rs and tests/fastmail.rs run the built binary against Google (Calendar API and CalDAV), Microsoft Graph and Fastmail CalDAV, each account taken from a provider section of config.sample.toml. Every test is ignored unless `--ignored` is given. CI never runs them on push: the `live` job of .github/workflows/tests.yml runs weekly (Mondays, 04:00 UTC) and by hand (`gh workflow run tests.yml`), and a release runs it by hand on the commit to tag.

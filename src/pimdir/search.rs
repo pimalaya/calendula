@@ -212,9 +212,13 @@ pub fn search_page(
 pub enum PimdirSearchSortArg {
     /// Latest first, a series by its first occurrence.
     #[default]
-    Date,
+    #[value(alias = "date")]
+    NewestFirst,
+    /// Earliest first, a series by its first occurrence.
+    OldestFirst,
     /// By summary, A to Z.
-    Name,
+    #[value(alias = "name")]
+    Title,
     /// Best match first.
     Relevance,
 }
@@ -222,8 +226,9 @@ pub enum PimdirSearchSortArg {
 impl From<PimdirSearchSortArg> for PimdirSearchSort {
     fn from(sort: PimdirSearchSortArg) -> Self {
         match sort {
-            PimdirSearchSortArg::Date => Self::Date,
-            PimdirSearchSortArg::Name => Self::Name,
+            PimdirSearchSortArg::NewestFirst => Self::NewestFirst,
+            PimdirSearchSortArg::OldestFirst => Self::OldestFirst,
+            PimdirSearchSortArg::Title => Self::Title,
             PimdirSearchSortArg::Relevance => Self::Relevance,
         }
     }
