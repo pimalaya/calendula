@@ -753,6 +753,7 @@ fn item_from(calendar_id: &str, event: &GcalEvent, exceptions: &[&GcalEvent]) ->
         etag: event.etag.clone(),
         contents: event.to_ical_series(exceptions).into_bytes(),
         stand_in: None,
+        windowed: None,
     }
 }
 

@@ -272,6 +272,7 @@ fn item_from(calendar_id: &str, item: VdirItem) -> CalendarItem {
         etag: None,
         contents: item.contents,
         stand_in: None,
+        windowed: None,
     }
 }
 

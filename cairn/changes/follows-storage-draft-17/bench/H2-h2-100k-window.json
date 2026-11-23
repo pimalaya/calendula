@@ -1,0 +1,79 @@
+{
+  "results": [
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-h2-100k/calendula-1 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-h2-100k.toml event list --from 2026-11-01 --to 2026-11-30",
+      "mean": 20.337979803499998,
+      "stddev": 11.778604970417797,
+      "median": 20.337979803499998,
+      "user": 10.878521,
+      "system": 1.7558145,
+      "min": 12.009248356,
+      "max": 28.666711251,
+      "times": [
+        28.666711251,
+        12.009248356
+      ],
+      "memory_usage_byte": [
+        152162304,
+        152285184
+      ],
+      "exit_codes": [
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "1"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-h2-100k/calendula-2 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-h2-100k.toml event list --from 2026-11-01 --to 2026-11-30",
+      "mean": 11.908917129,
+      "stddev": 0.04738113378545193,
+      "median": 11.908917129,
+      "user": 10.8091115,
+      "system": 1.0680195000000001,
+      "min": 11.875413608,
+      "max": 11.94242065,
+      "times": [
+        11.94242065,
+        11.875413608
+      ],
+      "memory_usage_byte": [
+        152285184,
+        152285184
+      ],
+      "exit_codes": [
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "2"
+      }
+    },
+    {
+      "command": "/home/soywod/code/pimalaya/.lanes/calendula/bin/run-h2-100k/calendula-3 -c /home/soywod/code/pimalaya/.lanes/calendula/conf/run-h2-100k.toml event list --from 2026-11-01 --to 2026-11-30",
+      "mean": 12.1348626835,
+      "stddev": 0.03929731723597964,
+      "median": 12.1348626835,
+      "user": 11.0238455,
+      "system": 1.0718269999999999,
+      "min": 12.107075284,
+      "max": 12.162650083,
+      "times": [
+        12.107075284,
+        12.162650083
+      ],
+      "memory_usage_byte": [
+        152285184,
+        152285184
+      ],
+      "exit_codes": [
+        0,
+        0
+      ],
+      "parameters": {
+        "c": "3"
+      }
+    }
+  ]
+}

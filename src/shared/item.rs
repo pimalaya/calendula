@@ -54,6 +54,20 @@ pub struct CalendarItem {
     /// from what the backend keeps beside it (a pimdir summary), never
     /// written back.
     pub stand_in: Option<Box<Event>>,
+    /// The occurrences a windowed listing already read off `contents`,
+    /// which [`Event::try_occurrences`] takes for that same window rather
+    /// than parsing the bytes again, never written back.
+    pub windowed: Option<Box<CalendarItemWindowed>>,
+}
+
+/// The occurrences of an item a windowed listing read, with the window
+/// they were read for.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CalendarItemWindowed {
+    /// The window the occurrences overlap.
+    pub range: CalendarTimeRange,
+    /// The occurrences, in start order, untagged.
+    pub events: Vec<Event>,
 }
 
 /// Who wrote the body a write sends, which decides whether its

@@ -53,6 +53,7 @@ pub fn to_item(calendar_id: &str, event: &JmapCalendarEvent) -> Result<CalendarI
             .context("Cannot read the JMAP event as JSCalendar")?
             .into_bytes(),
         stand_in: None,
+        windowed: None,
     })
 }
 

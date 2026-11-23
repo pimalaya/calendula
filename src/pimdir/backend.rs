@@ -63,9 +63,12 @@ use crate::{
     },
     shared::{
         calendar::{Calendar, CalendarDiff},
-        event::Event,
+        event::{Event, expand},
         ical::may_hold_kind,
-        item::{CalendarItem, CalendarItemList, CalendarItemQuery, CalendarTimeRange, ItemOrigin},
+        item::{
+            CalendarItem, CalendarItemList, CalendarItemQuery, CalendarItemWindowed,
+            CalendarTimeRange, ItemOrigin,
+        },
     },
 };
 
@@ -239,7 +242,7 @@ impl PimdirBackend {
                 return Ok(ControlFlow::Continue(()));
             }
 
-            let (item, error) = self.item_from(calendar_id, &stored);
+            let (mut item, error) = self.item_from(calendar_id, &stored);
 
             if let Some(kind) = query.kind
                 && !is_kind(&item, &stored, kind)
@@ -248,7 +251,7 @@ impl PimdirBackend {
             }
 
             if let Some(range) = query.range
-                && !in_range(&item, &stored, range)
+                && !in_range(&mut item, &stored, range)
             {
                 return Ok(ControlFlow::Continue(()));
             }
@@ -282,6 +285,7 @@ impl PimdirBackend {
             etag: stored.object.map(|hash| hash.0),
             contents,
             stand_in: None,
+            windowed: None,
         })
     }
 
@@ -749,6 +753,7 @@ impl PimdirBackend {
             etag,
             contents: contents.unwrap_or_default(),
             stand_in: None,
+            windowed: None,
         };
 
         if item.contents.is_empty()
@@ -1148,6 +1153,7 @@ fn check_occurrence(
         etag: None,
         contents: contents.to_vec(),
         stand_in: None,
+        windowed: None,
     };
 
     match Event::occurrence(&item, recurrence_id) {
@@ -1324,15 +1330,25 @@ fn is_kind(item: &CalendarItem, stored: &PimdirItem, kind: IcalComponentKind) ->
 /// One with no local body falls back to the start its summary carries,
 /// the whole point of a summary beside the pointer, and a series the
 /// summary says recurs passes from that start to its `UNTIL`.
-fn in_range(item: &CalendarItem, stored: &PimdirItem, range: &CalendarTimeRange) -> bool {
+///
+/// The bytes are parsed once: the occurrences they hold in `range` stay
+/// on the item ([`CalendarItem::windowed`]), so the listing projecting
+/// them reads them back rather than parsing the item again. Bytes that
+/// do not parse keep the item, for the listing to name.
+fn in_range(item: &mut CalendarItem, stored: &PimdirItem, range: &CalendarTimeRange) -> bool {
     if !item.contents.is_empty() {
-        // NOTE: bytes that do not parse are kept for the listing to name.
-        let Ok(events) = Event::try_project(item) else {
+        let Ok((inside, events)) = expand::windowed(item, range) else {
             return true;
         };
 
-        return events.iter().any(|event| range.contains(&event.wire_start))
-            || !Event::occurrences(item, Some(range)).is_empty();
+        if inside {
+            item.windowed = Some(Box::new(CalendarItemWindowed {
+                range: range.clone(),
+                events,
+            }));
+        }
+
+        return inside;
     }
 
     if let Some(PimdirSummary::Event(event)) = &stored.summary
@@ -1724,6 +1740,7 @@ mod tests {
             etag: None,
             contents: body(summary),
             stand_in: None,
+            windowed: None,
         };
 
         let woonies = item("1", "Pre demo woonies");
@@ -1769,17 +1786,17 @@ mod tests {
         let dateless = stored(PimdirSummary::Journal(PimdirJournalSummary::default()));
 
         assert!(in_range(
-            &undownloaded(),
+            &mut undownloaded(),
             &event("20260814T090000Z"),
             &range
         ));
         assert!(!in_range(
-            &undownloaded(),
+            &mut undownloaded(),
             &event("20260914T090000Z"),
             &range
         ));
-        assert!(in_range(&undownloaded(), &task("20260814"), &range));
-        assert!(!in_range(&undownloaded(), &dateless, &range));
+        assert!(in_range(&mut undownloaded(), &task("20260814"), &range));
+        assert!(!in_range(&mut undownloaded(), &dateless, &range));
     }
 
     #[test]
@@ -1803,6 +1820,7 @@ mod tests {
             etag: None,
             contents: Vec::new(),
             stand_in: None,
+            windowed: None,
         }
     }
 
@@ -2482,14 +2500,14 @@ mod tests {
             }))
         };
 
-        assert!(in_range(&undownloaded(), &series(None), &range));
+        assert!(in_range(&mut undownloaded(), &series(None), &range));
         assert!(in_range(
-            &undownloaded(),
+            &mut undownloaded(),
             &series(Some("20261005T000000Z")),
             &range
         ));
         assert!(!in_range(
-            &undownloaded(),
+            &mut undownloaded(),
             &series(Some("20250101T000000Z")),
             &range
         ));
@@ -3410,7 +3428,7 @@ mod tests {
 
         assert!(is_kind(&item, &stored, IcalComponentKind::VEvent));
         assert!(is_kind(&item, &stored, IcalComponentKind::VTodo));
-        assert!(in_range(&item, &stored, &CalendarTimeRange::default()));
+        assert!(in_range(&mut item, &stored, &CalendarTimeRange::default()));
     }
 
     /// Every file of the store's blob tree, a write's temporary one
@@ -3734,7 +3752,7 @@ mod tests {
 
         let mut items = Vec::new();
         for stored in &all {
-            let (item, error) = backend.item_from(calendar_id, stored);
+            let (mut item, error) = backend.item_from(calendar_id, stored);
             if let Some(error) = error {
                 bail!("{}", error.error);
             }
@@ -3743,7 +3761,7 @@ mod tests {
             }
             if query
                 .range
-                .is_some_and(|range| !in_range(&item, stored, range))
+                .is_some_and(|range| !in_range(&mut item, stored, range))
             {
                 continue;
             }

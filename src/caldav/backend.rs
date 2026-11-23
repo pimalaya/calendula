@@ -317,6 +317,7 @@ impl CaldavBackend {
             etag: body.etag,
             contents: body.data,
             stand_in: None,
+            windowed: None,
         })
     }
 
@@ -468,6 +469,7 @@ fn item_from(calendar_id: &str, entry: CaldavItemEntry) -> CalendarItem {
         etag: entry.etag,
         contents: entry.data,
         stand_in: None,
+        windowed: None,
     }
 }
 

@@ -188,10 +188,7 @@ impl Event {
 
     /// Projects the occurrences of `item`'s events overlapping `range`,
     /// recurring series expanded, in start order.
-    #[cfg_attr(
-        not(any(feature = "vdir", feature = "msgraph", feature = "pimdir")),
-        allow(dead_code)
-    )]
+    #[cfg_attr(not(any(feature = "vdir", feature = "msgraph")), allow(dead_code))]
     pub fn occurrences(item: &CalendarItem, range: Option<&CalendarTimeRange>) -> Vec<Self> {
         Self::try_occurrences(item, range).unwrap_or_default()
     }
@@ -204,6 +201,12 @@ impl Event {
     ) -> Result<Vec<Self>> {
         if item.contents.is_empty() {
             return Ok(stand_in(item));
+        }
+
+        if let Some(windowed) = &item.windowed
+            && Some(&windowed.range) == range
+        {
+            return Ok(tagged(item, windowed.events.clone()));
         }
 
         let events = expand::occurrences(item, range).map_err(|err| unparsed(item, err))?;
@@ -357,6 +360,7 @@ mod tests {
             etag: None,
             contents: contents.as_bytes().to_vec(),
             stand_in: None,
+            windowed: None,
         }
     }
 

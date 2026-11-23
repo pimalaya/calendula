@@ -578,6 +578,7 @@ fn item_from(calendar_id: &str, event: &MsgraphEvent, exceptions: &[MsgraphEvent
         etag: event.change_key.clone(),
         contents: event.to_ical_series(&exceptions).into_bytes(),
         stand_in: None,
+        windowed: None,
     }
 }
 

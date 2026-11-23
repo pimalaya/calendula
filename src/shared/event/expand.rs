@@ -76,20 +76,45 @@ pub fn project(item: &CalendarItem) -> Result<Vec<Event>, IcalParseError> {
     let ical = cst.decode();
     let context = Context::new(&ical);
 
-    let events = vevents(&ical)
+    Ok(projected(item, &ical, &context))
+}
+
+/// The VEVENTs of an already decoded item, as [`project`] reads them.
+fn projected<'a>(item: &CalendarItem, ical: &'a Ical<'a>, context: &Context<'a>) -> Vec<Event> {
+    vevents(ical)
         .map(|vevent| {
             let start = stamp(vevent, IcalPropKind::DtStart);
             let times = start
                 .as_ref()
-                .map(|start| context.times(start, start.civil, Span::of(&context, vevent, start)))
+                .map(|start| context.times(start, start.civil, Span::of(context, vevent, start)))
                 .unwrap_or_default();
             let recurrence_id = prop(vevent, IcalPropKind::RecurrenceId).and_then(date_text);
 
             context.event(&item.id, vevent, times, recurrence_id, is_recurring(vevent))
         })
-        .collect();
+        .collect()
+}
 
-    Ok(events)
+/// Whether an item falls inside `range`, and the occurrences it holds
+/// there, from one parse of its bytes: [`occurrences`]'s, the item
+/// falling inside when one of its VEVENTs starts there, as [`project`]
+/// spells the start, or when it holds an occurrence there.
+#[cfg(feature = "pimdir")]
+pub fn windowed(
+    item: &CalendarItem,
+    range: &CalendarTimeRange,
+) -> Result<(bool, Vec<Event>), IcalParseError> {
+    let cst = IcalCst::parse(&item.contents)?;
+    let ical = cst.decode();
+    let context = Context::new(&ical);
+
+    let events = expanded(item, &ical, &context, Some(range));
+    let inside = !events.is_empty()
+        || projected(item, &ical, &context)
+            .iter()
+            .any(|event| range.contains(&event.wire_start));
+
+    Ok((inside, events))
 }
 
 /// The calendar's `METHOD` uppercased (RFC 5546: `REQUEST`, `CANCEL`,
@@ -115,11 +140,23 @@ pub fn occurrences(
     let cst = IcalCst::parse(&item.contents)?;
     let ical = cst.decode();
     let context = Context::new(&ical);
+
+    Ok(expanded(item, &ical, &context, range))
+}
+
+/// The occurrences of an already decoded item, as [`occurrences`] reads
+/// them.
+fn expanded<'a>(
+    item: &CalendarItem,
+    ical: &'a Ical<'a>,
+    context: &Context<'a>,
+    range: Option<&CalendarTimeRange>,
+) -> Vec<Event> {
     let window = range.map(Window::of).unwrap_or_default();
 
     let mut events: Vec<(i64, Event)> = Vec::new();
 
-    for group in groups(&ical) {
+    for group in groups(ical) {
         for (_, event, at) in context.walk(&item.id, &group, window.floor(), window.bound()) {
             if window.overlaps(&event) {
                 events.push((at, event));
@@ -128,7 +165,7 @@ pub fn occurrences(
     }
 
     events.sort_by_key(|(at, _)| *at);
-    Ok(events.into_iter().map(|(_, event)| event).collect())
+    events.into_iter().map(|(_, event)| event).collect()
 }
 
 /// The one occurrence of an item addressed by `recurrence_id`, as an
@@ -1068,6 +1105,7 @@ mod tests {
             )
             .into_bytes(),
             stand_in: None,
+            windowed: None,
         }
     }
 

@@ -105,6 +105,7 @@ impl PimdirClient {
             etag: object.map(|hash| hash.0.clone()),
             contents,
             stand_in: None,
+            windowed: None,
         };
 
         // NOTE: an item dropped since the refresh has no row, only a title.
