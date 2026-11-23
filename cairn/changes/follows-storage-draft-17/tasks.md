@@ -54,7 +54,7 @@ Cargo runs as `CARGO_TARGET_DIR=~/code/pimalaya/.lanes/calendula/target taskset 
 
 ## J. Tests
 
-- [ ] J1 Cross-app (servers lock): neverest at the same pin syncs a local Radicale calendar (neverest tests/pasta.sh) into a fresh store and index; calendula lists, searches, `event update`s and `pimdir reply`s it; neverest drains and pushes; Radicale holds the edit. Record the run in journal.md.
+- [x] J1 (reads, copy writes; drain and push left, journal.md 20:00) Cross-app (servers lock): neverest at the same pin syncs a local Radicale calendar (neverest tests/pasta.sh) into a fresh store and index; calendula lists, searches, `event update`s and `pimdir reply`s it; neverest drains and pushes; Radicale holds the edit. Record the run in journal.md.
 - [ ] J2 The live suites (tests/google.rs, microsoft.rs, fastmail.rs), only with the owner's grant. They touch no pimdir path.
 
 ## K. Release
