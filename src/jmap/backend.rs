@@ -14,6 +14,10 @@
 //! the hash of the event read just before the write. Each read checks the
 //! event's `calendarIds`, so a read, an update or a delete acts only on an
 //! event the named calendar holds.
+//!
+//! A create or an update the server refuses for ical-rs's `iCalendar`
+//! member alone goes again once without it, with a warning naming what
+//! the member kept.
 
 use std::collections::BTreeMap;
 
@@ -339,14 +343,23 @@ impl JmapBackend {
         let mut event = project::to_event(&contents)?;
         event.calendar_ids = BTreeMap::from([(calendar_id.to_owned(), true)]);
 
-        let args = JmapCalendarEventSetArgs {
+        let args = |event| JmapCalendarEventSetArgs {
             create: Some(BTreeMap::from([(CREATE_ID.to_owned(), event)])),
             ..Default::default()
         };
-        let mut out = self.client.calendar_event_set(args)?;
+        let mut out = self.client.calendar_event_set(args(event.clone()))?;
 
         if let Some(err) = out.not_created.remove(CREATE_ID) {
-            return Err(set_error("JMAP CalendarEvent create rejected", &err));
+            if !project::names_hatches_only(err.properties()) {
+                return Err(set_error("JMAP CalendarEvent create rejected", &err));
+            }
+
+            warn_hatch(&project::strip_hatches(&mut event.event));
+            out = self.client.calendar_event_set(args(event))?;
+
+            if let Some(err) = out.not_created.remove(CREATE_ID) {
+                return Err(set_error("JMAP CalendarEvent create rejected", &err));
+            }
         }
 
         out.created
@@ -374,20 +387,34 @@ impl JmapBackend {
             return Err(changed(item_id));
         }
 
-        let patch = project::to_patch(&staged, &base);
+        let mut patch = project::to_patch(&staged, &base);
 
         if patch.0.is_empty() {
             return Ok(());
         }
 
-        let args = JmapCalendarEventSetArgs {
+        let args = |patch| JmapCalendarEventSetArgs {
             update: Some(BTreeMap::from([(item_id.to_owned(), patch)])),
             ..Default::default()
         };
-        let mut out = self.client.calendar_event_set(args)?;
+        let mut out = self.client.calendar_event_set(args(patch.clone()))?;
 
         if let Some(err) = out.not_updated.remove(item_id) {
-            return Err(item_refusal("update", calendar_id, item_id, &err));
+            if !project::names_hatches_only(err.properties()) {
+                return Err(item_refusal("update", calendar_id, item_id, &err));
+            }
+
+            warn_hatch(&project::strip_patch_hatches(&mut patch));
+
+            if patch.0.is_empty() {
+                return Ok(());
+            }
+
+            out = self.client.calendar_event_set(args(patch))?;
+
+            if let Some(err) = out.not_updated.remove(item_id) {
+                return Err(item_refusal("update", calendar_id, item_id, &err));
+            }
         }
 
         Ok(())
@@ -500,6 +527,21 @@ fn item_refusal(
         )),
         _ => refusal,
     }
+}
+
+/// Warns that the server refused the hatch and the write goes without it,
+/// naming what the hatch kept.
+fn warn_hatch(lost: &[String]) {
+    let lost = match lost {
+        [] => String::from("what JSCalendar does not hold"),
+        lost => lost.join(", "),
+    };
+
+    warn!(
+        "the JMAP server refused the `{}` member, writing the event without it: {lost} will \
+         not be kept",
+        project::HATCH
+    );
 }
 
 /// The refusal of a write whose `--if-match` names a version the event no
@@ -703,6 +745,68 @@ mod tests {
         assert_eq!(event["uid"], "u1");
         assert_eq!(event["title"], "Daily");
         assert!(event.get("id").is_none(), "{event}");
+    }
+
+    /// A write the server refuses for the `iCalendar` member alone goes
+    /// again once without it, nested hatches included; a refusal naming
+    /// another member, or a second one, is the write's failure.
+    #[test]
+    fn a_write_refused_for_the_hatch_goes_again_without_it() {
+        const SPELLED: &[u8] = b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//EN\r\n\
+            BEGIN:VEVENT\r\nUID:u1\r\nDTSTAMP:20261001T000000Z\r\n\
+            DTSTART:20261001T090000\r\nDTEND:20261001T093000\r\nSUMMARY:Daily\r\n\
+            X-FOO:bar\r\nATTENDEE;X-BAR=1:mailto:a@example.org\r\n\
+            END:VEVENT\r\nEND:VCALENDAR\r\n";
+
+        let refused = |slot: &str, id: &str, properties: Value| {
+            answer(
+                "CalendarEvent/set",
+                json!({"accountId": "a1", "oldState": "s1", "newState": "s1",
+                    slot: {id: {"type": "invalidProperties", "properties": properties}}}),
+            )
+        };
+        let hatch = json!(["iCalendar", "participants/1/iCalendar"]);
+        let holds_hatch = |value: &Value| value.to_string().contains("\"iCalendar\"");
+
+        let not_created = refused("notCreated", "c0", hatch.clone());
+        let (mut backend, requests) = scripted(&[&not_created, &set()]);
+        let id = backend.create_item("C1", SPELLED.to_vec()).unwrap();
+        assert_eq!(id, "E9");
+        let sent = calls(&requests);
+        assert_eq!(sent.len(), 2);
+        assert!(holds_hatch(&sent[0][1]["create"]["c0"]), "{}", sent[0][1]);
+        let event = &sent[1][1]["create"]["c0"];
+        assert!(!holds_hatch(event), "{event}");
+        assert_eq!(event["title"], "Daily");
+        assert_eq!(event["duration"], "PT30M");
+        assert_eq!(event["calendarIds"], json!({"C1": true}));
+
+        let not_updated = refused("notUpdated", "E1", hatch.clone());
+        let (mut backend, requests) = scripted(&[&get(), &not_updated, &set()]);
+        backend
+            .update_item("C1", "E1", SPELLED.to_vec(), None)
+            .unwrap();
+        let sent = calls(&requests);
+        assert_eq!(sent.len(), 3);
+        assert!(holds_hatch(&sent[1][1]["update"]["E1"]), "{}", sent[1][1]);
+        let patch = &sent[2][1]["update"]["E1"];
+        assert!(!holds_hatch(patch), "{patch}");
+        assert_eq!(patch["title"], "Daily");
+
+        let other = refused("notCreated", "c0", json!(["iCalendar", "title"]));
+        let (mut backend, requests) = scripted(&[&other, &set()]);
+        let err = backend.create_item("C1", SPELLED.to_vec()).unwrap_err();
+        assert_eq!(
+            crate::error::code(&err),
+            Some(ErrorCode::ItemInvalid),
+            "{err:#}"
+        );
+        assert_eq!(calls(&requests).len(), 1);
+
+        let (mut backend, requests) = scripted(&[&not_created, &not_created]);
+        let err = backend.create_item("C1", SPELLED.to_vec()).unwrap_err();
+        assert!(err.to_string().contains("(`iCalendar`"), "{err}");
+        assert_eq!(calls(&requests).len(), 2);
     }
 
     /// A zoned series' `until`, local to its zone on the server, reads as

@@ -23,6 +23,14 @@ The read conversion SHALL be io-jmap's `JmapCalendarEvent::to_ical`.
 - WHEN it is read as an item and its document converted back
 - THEN the document holds the master and the overriding VEVENT, none of the envelope, and the patch against the server copy is empty
 
+### Requirement: A JMAP write refused for the escape hatch goes without it
+A `CalendarEvent/set` create or update the server refuses `invalidProperties`, every property it names being an `iCalendar` member (ical-rs's escape hatch, draft-ietf-calext-jscalendar-icalendar 5.1.1) or a pointer through one, SHALL be sent again once with every `iCalendar` member removed, the event's own and any nested one (participants, locations, alerts, overrides), and SHALL log a warning naming what they kept: each property and component JSCalendar does not hold, by its iCalendar name, and the iCalendar form of each member converted from an unexpected property (the `DTEND` form of `duration`). An update whose patch holds nothing else then sends nothing. A refusal naming any other property, or a second refusal, SHALL fail the write as before. What the hatch kept is lost on such a server: the event reads back in JSCalendar's default spelling (a `DTEND` as `DURATION`).
+
+#### Scenario: Fastmail refuses the hatch
+- GIVEN a JMAP server refusing a create `invalidProperties` (`iCalendar`, `participants/1/iCalendar`)
+- WHEN an event whose `DTEND` and `X-` properties ride the hatch is added
+- THEN a second create without any `iCalendar` member is sent, its id reported, and a warning names `X-FOO` and the `DTEND` form of `duration`
+
 ### Requirement: gcal synthesizes the document of record
 The gcal backend SHALL synthesize the shared `CalendarItem.contents` from the Google event on read and re-project it on write.
 

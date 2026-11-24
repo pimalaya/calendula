@@ -9,6 +9,9 @@
 //! turns into overriding VEVENTs, so a series is one item. The JMAP
 //! envelope ([`ENVELOPE`]) is kept out of the document both ways.
 //!
+//! A server refusing the hatch member ([`HATCH`]) gets the write without
+//! it ([`strip_hatches`]), what it kept then lost.
+//!
 //! JMAP has no per-event entity tag, so the version [`to_item`] surfaces
 //! is the BLAKE3 digest of the event's JSON, the same from one build to
 //! the next, which `--if-match` is compared with before a write.
@@ -34,6 +37,11 @@ pub const ENVELOPE: [&str; 7] = [
     "utcEnd",
     "baseEventId",
 ];
+
+/// The member ical-rs keeps what JSCalendar cannot express in, on the
+/// event and on any object inside it (draft-ietf-calext-jscalendar-icalendar
+/// 5.1.1).
+pub const HATCH: &str = "iCalendar";
 
 /// Projects a CalendarEvent of `calendar_id` onto the shared item: its id
 /// verbatim, the hash of its JSON as the etag, its JSCalendar payload as
@@ -140,6 +148,87 @@ pub fn to_patch(staged: &JmapCalendarEvent, base: &JmapCalendarEvent) -> JmapCal
 pub fn etag(event: &JmapCalendarEvent) -> String {
     let json = serde_json::to_string(event).unwrap_or_default();
     blake3::hash(json.as_bytes()).to_hex().to_string()
+}
+
+/// Whether the members a refusal names are all hatches, the event's own
+/// or one inside it, so the write may go again without them.
+pub fn names_hatches_only(properties: &[String]) -> bool {
+    !properties.is_empty() && properties.iter().all(|property| is_hatch(property))
+}
+
+/// Removes every hatch from `members`, a member named [`HATCH`] or a
+/// patch pointer through one, at any depth, and returns what they kept,
+/// sorted: the properties and components JSCalendar does not hold, and
+/// the iCalendar form of each member converted from an unexpected one.
+pub fn strip_hatches(members: &mut Map<String, Value>) -> Vec<String> {
+    let mut lost = Vec::new();
+    strip_from(members, &mut lost);
+    lost.sort();
+    lost.dedup();
+    lost
+}
+
+/// [`strip_hatches`] over a `CalendarEvent/set` patch.
+pub fn strip_patch_hatches(patch: &mut JmapCalendarEventPatch) -> Vec<String> {
+    let mut members: Map<String, Value> = std::mem::take(&mut patch.0).into_iter().collect();
+    let lost = strip_hatches(&mut members);
+    patch.0 = members.into_iter().collect();
+    lost
+}
+
+/// Whether a member name or a patch pointer goes through a hatch.
+fn is_hatch(pointer: &str) -> bool {
+    pointer.split('/').any(|segment| segment == HATCH)
+}
+
+/// [`strip_hatches`] over one object, `lost` gathering what went.
+fn strip_from(members: &mut Map<String, Value>, lost: &mut Vec<String>) {
+    members.retain(|key, value| {
+        if !is_hatch(key) {
+            return true;
+        }
+
+        describe(value, lost);
+        false
+    });
+
+    for value in members.values_mut() {
+        match value {
+            Value::Object(members) => strip_from(members, lost),
+            Value::Array(values) => {
+                for value in values {
+                    if let Value::Object(members) = value {
+                        strip_from(members, lost);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// What a hatch kept, in iCalendar names.
+fn describe(hatch: &Value, lost: &mut Vec<String>) {
+    let name = |entry: &Value| entry.get(0).and_then(Value::as_str).map(str::to_uppercase);
+
+    for slot in ["properties", "components"] {
+        let entries = hatch.get(slot).and_then(Value::as_array);
+
+        for entry in entries.into_iter().flatten() {
+            if let Some(name) = name(entry) {
+                lost.push(format!("`{name}`"));
+            }
+        }
+    }
+
+    let converted = hatch.get("convertedProperties").and_then(Value::as_object);
+
+    for (member, record) in converted.into_iter().flatten() {
+        if let Some(name) = record.get("name").and_then(Value::as_str) {
+            let name = name.to_uppercase();
+            lost.push(format!("the `{name}` form of `{member}`"));
+        }
+    }
 }
 
 /// Removes the JMAP envelope from a JSCalendar payload.
@@ -286,6 +375,48 @@ mod tests {
         let mut moved = event.clone();
         moved.event.insert("title".into(), json!("Daily"));
         assert_ne!(etag(&event), etag(&moved));
+    }
+
+    /// Every hatch goes, the event's, a nested one and a patch pointer
+    /// through one, and what they kept is named in iCalendar terms; only
+    /// members naming hatches alone let a write go again.
+    #[test]
+    fn the_hatches_go_and_what_they_kept_is_named() {
+        let mut members = serde_json::from_value::<Map<String, Value>>(json!({
+            "title": "Daily",
+            "iCalendar": {"@type": "ICalComponent", "name": "vevent",
+                "convertedProperties": {"duration": {"@type": "ICalProperty", "name": "dtend"}},
+                "properties": [["x-foo", {}, "unknown", "bar"]],
+                "components": [["x-thing", [], []]]},
+            "participants": {"1": {"@type": "Participant", "iCalendar": {
+                "properties": [["x-bar", {}, "text", "1"]]}}},
+            "recurrenceOverrides/2026-10-08T09:00:00/iCalendar": null,
+        }))
+        .unwrap();
+
+        let lost = strip_hatches(&mut members);
+
+        assert_eq!(
+            lost,
+            [
+                "`X-BAR`",
+                "`X-FOO`",
+                "`X-THING`",
+                "the `DTEND` form of `duration`"
+            ]
+        );
+        assert_eq!(
+            Value::Object(members),
+            json!({"title": "Daily", "participants": {"1": {"@type": "Participant"}}})
+        );
+
+        let only = |names: &[&str]| {
+            let names: Vec<String> = names.iter().map(|name| name.to_string()).collect();
+            names_hatches_only(&names)
+        };
+        assert!(only(&["iCalendar", "participants/1/iCalendar"]));
+        assert!(!only(&["iCalendar", "title"]));
+        assert!(!only(&[]));
     }
 
     /// A zoned series with its VTIMEZONE and an override writes as one
