@@ -609,13 +609,14 @@ mod tests {
         json!({"methodResponses": [[name, args, "c0"]], "sessionState": "s"}).to_string()
     }
 
-    /// A `CalendarEvent/get` answering `E1` in calendar `C1`.
+    /// A `CalendarEvent/get` answering `E1` in calendar `C1`, as a
+    /// JSCalendar 2.0 server serves it, `version` included.
     fn get() -> String {
         answer(
             "CalendarEvent/get",
             json!({"accountId": "a1", "state": "s1", "notFound": [], "list": [{
                 "id": "E1", "calendarIds": {"C1": true}, "@type": "Event",
-                "uid": "u1", "title": "Standup", "start": "2026-10-01T09:00:00",
+                "version": "2.0", "uid": "u1", "title": "Standup", "start": "2026-10-01T09:00:00",
                 "duration": "PT30M", "updated": "2026-10-01T00:00:00Z",
             }]}),
         )

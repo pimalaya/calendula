@@ -245,7 +245,7 @@ mod tests {
     use super::*;
 
     /// A zoned weekly series with one occurrence moved, as a JMAP server
-    /// answers it, envelope included.
+    /// answers it, envelope and JSCalendar 2.0 `version` included.
     fn series() -> JmapCalendarEvent {
         serde_json::from_value(json!({
             "id": "E1",
@@ -255,6 +255,7 @@ mod tests {
             "utcStart": "2026-10-01T07:00:00Z",
             "utcEnd": "2026-10-01T07:30:00Z",
             "@type": "Event",
+            "version": "2.0",
             "uid": "standup",
             "title": "Standup",
             "start": "2026-10-01T09:00:00",

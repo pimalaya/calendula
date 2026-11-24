@@ -31,7 +31,7 @@ strip = "symbols"
 panic = "abort"
 
 [build-dependencies]
-pimalaya-cli = { version = "0.8.0", default-features = false, features = ["build"] }
+pimalaya-cli = { version = "0.8.1", default-features = false, features = ["build"] }
 
 [dev-dependencies]
 io-oauth = { version = "0.8", default-features = false, features = ["std", "jwt-bearer", "rustls-ring"] }
@@ -54,14 +54,14 @@ ical-rs = { version = "0.7.3", default-features = false, features = ["parser", "
 idna_adapter = { version = "=1.0.0", default-features = false }
 io-gcal = { version = "0.6.0", default-features = false, features = ["std"], optional = true }
 io-http = { version = "0.9", default-features = false, optional = true }
-io-jmap = { version = "0.11.0", default-features = false, features = ["std"], optional = true }
-io-msgraph = { version = "0.10.0", default-features = false, optional = true }
+io-jmap = { version = "0.11.1", default-features = false, features = ["std"], optional = true }
+io-msgraph = { version = "0.11.0", default-features = false, optional = true }
 io-pimdir = { version = "0.20.0", default-features = false, features = ["client"], optional = true }
 io-vdir = { version = "0.3", default-features = false, features = ["client"], optional = true }
-io-webdav = { version = "0.13.0", default-features = false, features = ["std"], optional = true }
+io-webdav = { version = "0.14.0", default-features = false, features = ["std"], optional = true }
 jiff = { version = "1", default-features = false, features = ["std", "tz-system", "tzdb-bundle-always"] }
 log = { version = "0.4", default-features = false }
-pimalaya-cli = { version = "0.8.0", default-features = false, features = ["mcp", "prompt", "repl", "terminal"] }
+pimalaya-cli = { version = "0.8.1", default-features = false, features = ["mcp", "prompt", "repl", "terminal"] }
 pimalaya-config = { version = "0.6.0", default-features = false, features = ["toml", "secret"] }
 pimalaya-stream = { version = "0.4.1", default-features = false, features = ["std"] }
 schemars = { version = "1", default-features = false, features = ["derive"] }
@@ -71,6 +71,3 @@ serde_json = { version = "1", default-features = false, features = ["std"] }
 simd-cpu = { version = "0.1", default-features = false, features = ["std"] }
 unicode-width = { version = "0.2", default-features = false }
 url = { version = "2.5", default-features = false }
-
-[patch.crates-io]
-io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "65a5026d9e8499ec7e24b401e9b689d3eebeea4e" }
