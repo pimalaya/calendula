@@ -12,6 +12,7 @@ The live test night of 2026-11-23 (workspace .lanes/live/report.md) ran every ca
 ## What
 
 1. **Fastmail JMAP refuses every event write**: "CalendarEvent create rejected: invalidProperties (`iCalendar`)". The `iCalendar` member is ical-rs's round-trip escape hatch (`jscalendar/export.rs:542`), which projection.md relies on; Stalwart takes it. Recommendation: on `invalidProperties` naming it, send the write again once without it and warn naming what the server will not keep. Ask Fastmail whether the member is accepted under another capability.
+2. **`vdir rename` onto an existing collection** (cardamum D5's bug, found in the fix round of 2026-11-24): a full target fails with the raw "Directory not empty (os error 39)", an empty one is replaced silently. Recommendation: refuse a new id the home holds, coded `calendar-duplicate`, as cardamum 35b7d15 does with `addressbook-duplicate`.
 
 ## Not tested, for the next live run
 

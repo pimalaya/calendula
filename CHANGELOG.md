@@ -198,6 +198,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed `vdir rename` onto a calendar the home holds already failing with the raw "Directory not empty (os error 39)", or replacing an empty directory: it is refused coded `calendar-duplicate`, ``Cannot rename calendar `<id>` to `<new-id>`: it exists already``, nothing moved.
 - Fixed a JMAP `event add`, `event update`, `item add` or `item update` refused `invalidProperties` naming the `iCalendar` member alone, as Fastmail refuses it: the write goes again once without every `iCalendar` member, nested ones included, with a warning naming what they kept (properties and components JSCalendar does not hold, the iCalendar form of a converted member), which the server will not keep.
 - Fixed a CalDAV `event update` or `item update` given a source and no `--if-match` failing `item-not-found` on iCloud, which answers 412 to `If-Match: *` over an item it holds: the 412 is followed by a read of the item, and the update sent again on the ETag it serves.
 - Fixed one pimdir queue row that does not decode, in any calendar of the store, failing every `event list`, `event agenda`, `event search` and `event read --uid` uncoded: a listing reads the pending updates of its own calendar, and one whose queue does not decode reads every body there rather than rule items out by their summaries, with a warning.

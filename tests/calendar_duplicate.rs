@@ -79,6 +79,38 @@ fn a_calendar_created_twice_is_a_duplicate() {
     assert_eq!(out.status.code(), Some(0));
 }
 
+/// A rename onto a calendar the home holds, a full one or an empty
+/// directory, is refused before anything moves.
+#[test]
+fn a_calendar_renamed_onto_another_is_a_duplicate() {
+    let dir = account();
+    let home = dir.path().join("home");
+    let perso = home.join("perso");
+    fs::create_dir_all(&perso).unwrap();
+    fs::write(perso.join("x.ics"), "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n").unwrap();
+    fs::create_dir_all(home.join("empty")).unwrap();
+
+    for target in ["perso", "empty"] {
+        let output = run(dir.path(), &["vdir", "rename", "work", target]);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(output.status.code(), Some(1), "{target}: {stdout}");
+
+        let json: Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(json["code"], "calendar-duplicate", "{json}");
+        assert_eq!(
+            json["error"],
+            format!("Cannot rename calendar `work` to `{target}`: it exists already"),
+            "{json}"
+        );
+
+        let name = fs::read_to_string(home.join("work").join("displayname")).unwrap();
+        assert_eq!(name, "Work");
+        assert!(home.join(target).is_dir(), "{target}");
+    }
+
+    assert!(perso.join("x.ics").exists());
+}
+
 /// CAR-1: `vdir item move` and `copy` onto an item of the same id fail
 /// coded `item-duplicate`, both items left as they were.
 #[test]

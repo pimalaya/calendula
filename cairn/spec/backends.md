@@ -38,7 +38,7 @@ A failure a server refused SHALL carry a code of the vocabulary Himalaya shares,
 | `rate-limited` | an HTTP 429, or a Google Calendar 403 naming a rate limit or a quota, or a JMAP SetError `rateLimit`; calendula retries nothing, so the first one met |
 | `item-not-found` | an item request answered 404 or 410 (CalDAV, Google Calendar), a CalDAV item read answered 400 (iCloud's answer to a name it does not take, without `.ics`), a Google event read cancelled (a deleted event's stub), 404 or 400 `ErrorInvalidIdMalformed` (Graph); a vdir item file or a pimdir item that does not exist; a JMAP event the server does not answer or whose `calendarIds` do not hold the calendar named, or a SetError `notFound` on an event |
 | `calendar-not-found` | a calendar named that does not exist (vdir, pimdir, JMAP: a listing checked against `Calendar/get`, a `Calendar/set` SetError `notFound`) |
-| `calendar-duplicate` | a CalDAV MKCALENDAR naming `DAV:resource-must-be-null`, or answered 405 or 412 over a calendar the listing holds; Graph's `ErrorFolderExists`; a vdir directory the home holds (see "A calendar created twice is a duplicate") |
+| `calendar-duplicate` | a CalDAV MKCALENDAR naming `DAV:resource-must-be-null`, or answered 405 or 412 over a calendar the listing holds; Graph's `ErrorFolderExists`; a vdir directory the home holds, for a create or the new id of a `vdir rename` (see "A calendar created twice is a duplicate") |
 | `item-invalid` | a CalDAV write answered 400 or 403 whose body names a precondition on the item's content (RFC 4791 §5.3.2.1: `supported-calendar-data`, `valid-calendar-data`, `valid-calendar-object-resource`, `supported-calendar-component`) or the iCalendar itself (`icalendar`, `vcalendar`, case ignored), the predicate calendula's hint reads, so the two never disagree; a Google event write (`events.insert`, `events.import`, `events.update`) answered 400, calendula building every parameter of that request; a JMAP event write refused `invalidProperties` |
 | `precondition-failed` | an HTTP 412 (CalDAV, Google Calendar, Graph), Graph's `--if-match` mismatch read before the write, a pimdir version that moved |
 | `item-duplicate` | a CalDAV create refused for `no-uid-conflict` (RFC 4791 §5.3.2) or answered 412 to its `If-None-Match: *`, its resource name being derived from the UID; a gcal create whose UID the calendar holds; a pimdir create naming a `UID` its calendar holds or has queued |
@@ -73,6 +73,13 @@ A backend SHALL report an item it could not read as an `errors` entry and SHALL 
 
 ### Requirement: A calendar created twice is a duplicate
 A `calendar create` naming a calendar that already exists SHALL fail coded `calendar-duplicate`, writing nothing, wherever the backend can tell (pimalaya-cli error.md, *A code names the domain's noun*): vdir, a directory of that name in the home, `vdir create` the same; CalDAV, a MKCALENDAR answered with a body naming `DAV:resource-must-be-null` (RFC 4791 §5.3.1.1), or answered 405 or 412 when a listing then holds the calendar, the server's answer in `sources`; Graph, `ErrorFolderExists`, Exchange keeping one calendar per name. Google Calendar mints the id and lets two calendars share a name, so it holds no duplicate to refuse; pimdir serves no calendar create. Every path SHALL word it ``Cannot create calendar `<calendar>`: it exists already``, `<calendar>` the id on vdir and CalDAV and the name on Graph, the server's answer, when one refused it, in `sources`.
+
+A `vdir rename` whose new id is one directory name the home holds already (any entry, a full directory or an empty one) SHALL fail coded `calendar-duplicate` before anything moves, ``Cannot rename calendar `<id>` to `<new-id>`: it exists already``.
+
+#### Scenario: A vdir calendar renamed onto another
+- GIVEN a vdir home holding the calendars `work`, named `Work`, and `perso`, holding an event, and an empty directory `empty`
+- WHEN `calendula --json vdir rename work perso` runs, then `calendula --json vdir rename work empty`
+- THEN each exits 1 coded `calendar-duplicate`, ``Cannot rename calendar `work` to `<new-id>`: it exists already``, and `work`, `perso` and `empty` are as they were
 
 #### Scenario: A vdir calendar created twice
 - GIVEN a vdir home holding the calendar `work`, named `Work`

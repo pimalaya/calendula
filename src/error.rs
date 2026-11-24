@@ -61,7 +61,8 @@ pub enum ErrorCode {
     CalendarNotFound,
     /// A create names a calendar that already exists: a vdir directory of
     /// that name, a CalDAV collection at that URL, a Graph calendar of that
-    /// name. Nothing was written.
+    /// name. Nothing was written. Also a `vdir rename` whose new id the
+    /// home holds, nothing moved.
     CalendarDuplicate,
     /// A command naming no calendar found no `calendar.default` either:
     /// the caller names one with `-k` or sets the key. Nothing was read.

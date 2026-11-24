@@ -4,6 +4,7 @@
 //! protocol-specific subcommands.
 
 use std::{
+    fs,
     ops::{Deref, DerefMut},
     path::{Component, Path, PathBuf},
 };
@@ -56,6 +57,21 @@ impl VdirClient {
 pub(crate) fn collection_dir(root: &VdirPath, id: &str) -> Option<VdirPath> {
     let path = root.join(id);
     (is_dir_name(id) && Path::new(path.as_str()).is_dir()).then_some(path)
+}
+
+/// Refuses to rename the calendar `id` to `new_id` when `root` holds
+/// `new_id` already, coded `calendar-duplicate`: the rename would fail on
+/// a full directory with the raw OS error, and replace an empty one. A
+/// `new_id` that is not one directory name is left to io-vdir.
+pub(crate) fn check_rename_target_absent(root: &VdirPath, id: &str, new_id: &str) -> Result<()> {
+    let target = root.join(new_id);
+
+    if is_dir_name(new_id) && fs::symlink_metadata(target.as_str()).is_ok() {
+        let message = format!("Cannot rename calendar `{id}` to `{new_id}`: it exists already");
+        return Err(CodedError::new(ErrorCode::CalendarDuplicate, message).into());
+    }
+
+    Ok(())
 }
 
 /// Refuses to `verb` the item `id` into `target`, named `target_name`, when
