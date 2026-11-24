@@ -199,6 +199,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed `caldav report sync` leaving out a member the server answered with an error status (a 403, a 5xx), so its listing, under `--fallback` a full snapshot to diff, read the member as removed: each is an `errors` entry, coded from its status as a CalDAV listing row is (a 403 `permission-denied`, `item-unreadable` when no status names a code), neither changed nor vanished, printed after the token, the command exiting 3 (io-webdav 0.14.0).
 - Fixed `vdir rename` onto a calendar the home holds already failing with the raw "Directory not empty (os error 39)", or replacing an empty directory: it is refused coded `calendar-duplicate`, ``Cannot rename calendar `<id>` to `<new-id>`: it exists already``, nothing moved.
 - Fixed a JMAP `event add`, `event update`, `item add` or `item update` refused `invalidProperties` naming the `iCalendar` member alone, as Fastmail refuses it: the write goes again once without every `iCalendar` member, nested ones included, with a warning naming what they kept (properties and components JSCalendar does not hold, the iCalendar form of a converted member), which the server will not keep.
 - Fixed a CalDAV `event update` or `item update` given a source and no `--if-match` failing `item-not-found` on iCloud, which answers 412 to `If-Match: *` over an item it holds: the 412 is followed by a read of the item, and the update sent again on the ETag it serves.

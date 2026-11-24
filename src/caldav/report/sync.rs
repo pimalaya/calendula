@@ -10,11 +10,14 @@ use clap::Parser;
 use io_webdav::rfc6578::sync_collection::{
     WebdavSyncChange, WebdavSyncCollectionOptions, WebdavSyncDelta,
 };
-use pimalaya_cli::{columns::Columns, printer::Printer, sanitize};
+use pimalaya_cli::{columns::Columns, error::ItemErrors, printer::Printer, sanitize};
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::caldav::client::CaldavClient;
+use crate::{
+    caldav::{backend::unreadable_row, client::CaldavClient},
+    error::{ItemError, partial_when},
+};
 
 /// Report the changes since a sync token (RFC 6578).
 ///
@@ -22,8 +25,11 @@ use crate::caldav::client::CaldavClient;
 /// token back to the next call. Only ETags are fetched, so pair with
 /// `report multiget` to pull the changed items.
 ///
+/// A member the server answered with an error is neither changed nor
+/// vanished: it is an `errors` entry, and the command exits 3.
+///
 /// JSON output: `{"changed": [{"href", "etag"}], "vanished": [...],
-/// "syncToken", "truncated"}`.
+/// "syncToken", "truncated", "errors"}`.
 #[derive(Debug, Parser)]
 pub struct CaldavReportSyncCommand {
     /// Identifier of the calendar to sync.
@@ -47,8 +53,10 @@ impl CaldavReportSyncCommand {
             fallback: self.fallback,
         };
         let delta = client.sync_items(&self.calendar_id, self.sync_token.as_deref(), opts)?;
+        let output = CaldavReportSyncOutput::new(delta);
 
-        printer.out(CaldavReportSyncOutput::new(delta))
+        printer.out(&output)?;
+        partial_when(&output.errors)
     }
 }
 
@@ -64,6 +72,9 @@ pub struct CaldavReportSyncOutput {
     pub sync_token: Option<String>,
     /// Whether the server cut the listing short (RFC 6578 section 3.6).
     pub truncated: bool,
+    /// The error of each member the server answered with an error status,
+    /// its state unknown, in the order met.
+    pub errors: Vec<ItemError>,
 }
 
 /// One created or updated resource: its href and ETag.
@@ -92,6 +103,7 @@ impl CaldavReportSyncOutput {
             vanished: delta.vanished,
             sync_token: delta.sync_token,
             truncated: delta.truncated,
+            errors: delta.unreadable.into_iter().map(unreadable_row).collect(),
         }
     }
 }
@@ -131,6 +143,124 @@ impl fmt::Display for CaldavReportSyncOutput {
                 "truncated: run sync again from this token to drain the rest"
             )?;
         }
-        Ok(())
+
+        let mut errors = ItemErrors::default();
+
+        for error in &self.errors {
+            errors.push(error);
+        }
+
+        errors.write_after(f)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fmt,
+        io::{Cursor, Read, Result as IoResult, Write},
+    };
+
+    use anyhow::Result;
+    use io_webdav::{client::WebdavClientStd, rfc4918::WebdavAuth};
+    use pimalaya_cli::{error::PartialOutcome, output::Bytes, printer::Printer};
+    use serde::Serialize;
+    use serde_json::{Value, json};
+    use url::Url;
+
+    use super::CaldavReportSyncCommand;
+    use crate::caldav::client::CaldavClient;
+
+    /// A server answering one canned HTTP response, whatever it is sent.
+    struct Canned(Cursor<Vec<u8>>);
+
+    impl Read for Canned {
+        fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+            self.0.read(buf)
+        }
+    }
+
+    impl Write for Canned {
+        fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> IoResult<()> {
+            Ok(())
+        }
+    }
+
+    /// A printer keeping what it was handed, as JSON.
+    #[derive(Default)]
+    struct Capture(Vec<Value>);
+
+    impl Printer for Capture {
+        fn out<T: fmt::Display + Serialize>(&mut self, data: T) -> Result<()> {
+            self.0.push(serde_json::to_value(data)?);
+            Ok(())
+        }
+
+        fn event<T: fmt::Display + Serialize>(&mut self, _event: T) -> Result<()> {
+            Ok(())
+        }
+
+        fn out_bytes(&mut self, _bytes: Bytes) -> Result<()> {
+            Ok(())
+        }
+
+        fn is_json(&self) -> bool {
+            true
+        }
+    }
+
+    /// A `sync-collection` answer: `e1.ics` changed, `e2.ics` refused 403,
+    /// `e3.ics` removed.
+    const DELTA: &str = r#"<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response><d:href>/calendars/me/cal/e1.ics</d:href><d:propstat><d:prop><d:getetag>"1"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+  <d:response><d:href>/calendars/me/cal/e2.ics</d:href><d:status>HTTP/1.1 403 Forbidden</d:status></d:response>
+  <d:response><d:href>/calendars/me/cal/e3.ics</d:href><d:status>HTTP/1.1 404 Not Found</d:status></d:response>
+  <d:sync-token>https://dav.example.org/sync/2</d:sync-token>
+</d:multistatus>"#;
+
+    /// A member the server answered with an error is neither changed nor
+    /// vanished: it is an `errors` entry coded from its status, and the
+    /// command exits 3, so a diff of the listing infers no removal.
+    #[test]
+    fn a_member_the_server_refused_is_an_error_and_exits_3() {
+        let response = format!(
+            "HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml\r\n\
+             Content-Length: {}\r\n\r\n{DELTA}",
+            DELTA.len()
+        );
+        let home = Url::parse("https://dav.example.org/calendars/me/").unwrap();
+        let stream = Canned(Cursor::new(response.into_bytes()));
+        let mut inner = WebdavClientStd::new(stream, WebdavAuth::None, home.clone());
+        inner.calendar_home_set = Some(home);
+
+        let command = CaldavReportSyncCommand {
+            calendar_id: String::from("cal"),
+            sync_token: None,
+            fallback: false,
+        };
+        let mut printer = Capture::default();
+        let err = command
+            .execute(&mut printer, CaldavClient::new(inner))
+            .unwrap_err();
+        assert!(err.downcast_ref::<PartialOutcome>().is_some(), "{err:#}");
+
+        let output = printer.0.remove(0);
+        assert_eq!(output["changed"][0]["href"], "/calendars/me/cal/e1.ics");
+        assert_eq!(output["vanished"], json!(["/calendars/me/cal/e3.ics"]));
+        assert_eq!(
+            output["errors"],
+            json!([{
+                "id": "e2.ics",
+                "code": "permission-denied",
+                "error": "The server refused the item with status 403",
+                "sources": [],
+            }]),
+            "{output}"
+        );
     }
 }
