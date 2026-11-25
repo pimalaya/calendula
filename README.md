@@ -1,9 +1,43 @@
-# 📅 Calendula [![crates.io](https://img.shields.io/crates/v/calendula.svg)](https://crates.io/crates/calendula) [![Matrix](https://img.shields.io/badge/chat-%23pimalaya-blue?style=flat&logo=matrix&logoColor=white)](https://matrix.to/#/#pimalaya:matrix.org) [![Mastodon](https://img.shields.io/badge/news-%40pimalaya-blue?style=flat&logo=mastodon&logoColor=white)](https://fosstodon.org/@pimalaya) [![Sponsor](https://img.shields.io/badge/sponsor-pink?style=flat&logo=github-sponsors&logoColor=white)](https://pimalaya.org/sponsor/)
+# 📅 Calendula [![Matrix](https://img.shields.io/badge/chat-%23pimalaya-blue?style=flat&logo=matrix&logoColor=white)](https://matrix.to/#/#pimalaya:matrix.org) [![Mastodon](https://img.shields.io/badge/news-%40pimalaya-blue?style=flat&logo=mastodon&logoColor=white)](https://fosstodon.org/@pimalaya) [![Sponsor](https://img.shields.io/badge/sponsor-pink?style=flat&logo=github-sponsors&logoColor=white)](https://pimalaya.org/sponsor/)
 
-CLI to manage calendars.
+CLI to manage calendars
 
-> [!CAUTION]
-> Calendula is `v0.x`: expect breaking changes between releases until it stabilises.
+```sh
+$ calendula event list --json
+```
+
+```json
+{
+  "events": [
+    {
+      "id": "lunch",
+      "calendarId": "personal",
+      "etag": null,
+      "uid": "lunch",
+      "recurrenceId": null,
+      "summary": "Lunch with Ada",
+      "description": null,
+      "location": "Café de Flore",
+      "start": "2026-11-20T11:30:00Z",
+      "end": "2026-11-20T12:30:00Z",
+      "allDay": false,
+      "timeZone": "UTC",
+      "zoneAssumed": false,
+      "recurring": false,
+      "sequence": 0,
+      "status": null,
+      "transparency": null,
+      "busyStatus": null,
+      "organizer": null,
+      "attendees": [],
+      "onlineMeetingUrl": null,
+      "alarms": []
+    }
+  ],
+  "nextPage": null,
+  "errors": []
+}
+```
 
 ## Table of contents
 
@@ -11,14 +45,13 @@ CLI to manage calendars.
 - [RFC coverage](#rfc-coverage)
 - [Installation](#installation)
 - [Configuration](#configuration)
-  - [Apple](#apple)
   - [Google](#google)
   - [Microsoft](#microsoft)
-  - [Proton](#proton)
   - [Fastmail](#fastmail)
   - [Posteo](#posteo)
-  - [Local calendars](#local-calendars)
+  - [iCloud](#icloud)
 - [Usage](#usage)
+- [Alternatives](#alternatives)
 - [AI policy](https://github.com/pimalaya/.github/blob/master/AI_POLICY.md)
 - [License](#license)
 - [Social](#social)
@@ -27,20 +60,14 @@ CLI to manage calendars.
 
 ## Features
 
-- **Unified API**: `calendar`, `event` and `item` serve the union of the backends, refusing what one does not serve.
-- **Remote backends**: CalDAV, JMAP for Calendars, the Google Calendar API, and Microsoft Graph for Outlook and Microsoft 365.
-- **Local stores**: a vdir home, or a pimdir store a sync engine fills, its writes queued and its index searched.
-- **Protocol-specific APIs**: `caldav` (the WebDAV methods), `msgraph`, `gcal`, `pimdir` and `vdir` each expose what only that backend has, down to a raw REPORT or request.
-- **Tested sample**: config.sample.toml holds a section per backend and provider, the first run printing how to copy it.
-- **REPL**: `calendula repl` runs commands over one account, the backend connecting once for the session.
-- **MCP server**: `calendula mcp` serves the unified API to an agent, read-only unless `--allow-write`.
-- **JSON output**: `--json` on every command, its schema given by `calendula json-schema`.
-- **Full client**: TLS via Rustls (`rustls-ring` default, `rustls-aws`) or Native TLS (`native-tls`).
-
-> [!TIP]
-> Each backend sits behind its own cargo feature (`caldav`, `jmap`, `gcal`, `msgraph`, `vdir`, `pimdir`), all enabled by default. Build with `--no-default-features` and pick the ones you need. One configuration serves every build: the block of a backend the build leaves out still loads, and a command reaching it fails with `backend-not-built`, naming the feature to rebuild with.
->
-> The default `vendored` feature builds SQLite, and OpenSSL under `native-tls`, from source; leave it out to link the system ones.
+- **Unified API** for calendars, events and raw iCalendar items, the same on every backend
+- **Protocol-specific APIs** exposing the full surface of CalDAV, Google Calendar, Microsoft Graph and vdir
+- **Local stores**: vdir and pimdir, the offline store [Neverest](https://github.com/pimalaya/neverest) syncs
+- **One query language** to search the events of the pimdir store
+- **Agenda**: a month or a year drawn as cal(1) does, the events of its days listed under it
+- **REPL** and **MCP server** running commands over a connection kept for the session
+- **JSON output** of every command, described by `calendula json-schema`
+- **TLS** via Rustls (`rustls-ring` default, `rustls-aws`) or Native TLS (`native-tls`), client certificates included
 
 ## RFC coverage
 
@@ -70,257 +97,226 @@ CLI to manage calendars.
 
 ## Installation
 
-### Pre-built binary
+<details>
+  <summary>Debian, Ubuntu</summary>
 
-As root:
+  Calendula is not in the official repositories yet, but the signed APT repository of [pkg.pimalaya.org](https://pkg.pimalaya.org) ships the latest release with its man pages and shell completions. Add the repository once:
 
-```sh
-curl -sSL https://raw.githubusercontent.com/pimalaya/calendula/master/install.sh | sudo sh
-```
+  ```sh
+  sudo install -d -m 0755 /etc/apt/keyrings
+  curl -fsSL https://pkg.pimalaya.org/pimalaya.asc | sudo tee /etc/apt/keyrings/pimalaya.asc >/dev/null
+  sudo tee /etc/apt/sources.list.d/pimalaya.sources >/dev/null <<EOF
+  Types: deb
+  URIs: https://pkg.pimalaya.org/apt
+  Suites: stable
+  Components: main
+  Signed-By: /etc/apt/keyrings/pimalaya.asc
+  EOF
+  sudo apt update
+  ```
 
-As a regular user:
+  Then install Calendula:
 
-```sh
-curl -sSL https://raw.githubusercontent.com/pimalaya/calendula/master/install.sh | PREFIX=~/.local sh
-```
+  ```sh
+  sudo apt install calendula
+  ```
+</details>
 
-These commands install the latest binary from the GitHub [releases](https://github.com/pimalaya/calendula/releases) section.
+<details>
+  <summary>Fedora, RHEL, Rocky Linux, AlmaLinux</summary>
 
-For a more up-to-date version than the latest release, check out the [releases](https://github.com/pimalaya/calendula/actions/workflows/releases.yml) GitHub workflow and look for the *Artifacts* section. These pre-built binaries are built from the `master` branch.
+  Calendula is not in the official repositories yet, but the signed DNF repository of [pkg.pimalaya.org](https://pkg.pimalaya.org) ships the latest release with its man pages and shell completions:
 
-> [!NOTE]
-> Such binaries are built with the default cargo features. If you need specific features, please use another installation method.
+  ```sh
+  sudo curl -fsSL -o /etc/yum.repos.d/pimalaya.repo https://pkg.pimalaya.org/pimalaya.repo
+  sudo dnf install calendula
+  ```
+</details>
 
-### Cargo
+<details>
+  <summary>Homebrew (macOS, Linux)</summary>
 
-```sh
-cargo install --locked --git https://github.com/pimalaya/calendula.git
-```
+  Calendula is not in homebrew-core yet, but the [pimalaya/tap](https://github.com/pimalaya/homebrew-tap) formula installs the latest release with its man pages and shell completions:
 
-With only the local backends, and no network code at all:
+  ```sh
+  brew install pimalaya/tap/calendula
+  ```
+</details>
 
-```sh
-cargo install --locked --git https://github.com/pimalaya/calendula.git \
-  --no-default-features \
-  --features vdir,pimdir,rustls-ring
-```
+<details>
+  <summary>Pre-built binary</summary>
 
-### Nix
+  For other systems, Calendula can be installed with the installer:
 
-If you have the [Flakes](https://nixos.wiki/wiki/Flakes) feature enabled:
+  *As root:*
 
-```sh
-nix profile install github:pimalaya/calendula
-```
+  ```sh
+  curl -sSL https://raw.githubusercontent.com/pimalaya/calendula/master/install.sh | sudo sh
+  ```
 
-Or run without installing:
+  *As a regular user:*
 
-```sh
-nix run github:pimalaya/calendula
-```
+  ```sh
+  curl -sSL https://raw.githubusercontent.com/pimalaya/calendula/master/install.sh | PREFIX=~/.local sh
+  ```
 
-### Sources
+  These commands install the latest [release](https://github.com/pimalaya/calendula/releases), built with the default cargo features. For a build of `master`, check out the [releases](https://github.com/pimalaya/calendula/actions/workflows/releases.yml) GitHub workflow and look for the *Artifacts* section.
+</details>
 
-```sh
-git clone https://github.com/pimalaya/calendula
-cd calendula
-nix run
-```
+<details>
+  <summary>Cargo</summary>
+
+  ```sh
+  cargo install --locked calendula
+  ```
+
+  For a build of `master`:
+
+  ```sh
+  cargo install --locked --git https://github.com/pimalaya/calendula.git
+  ```
+</details>
+
+<details>
+  <summary>Nix</summary>
+
+  ```sh
+  nix profile install github:pimalaya/calendula
+  ```
+</details>
+
+<details>
+  <summary>Sources</summary>
+
+  Requires [Rust](https://www.rust-lang.org/tools/install) 1.89 or later:
+
+  ```sh
+  git clone https://github.com/pimalaya/calendula
+  cd calendula
+  cargo build --release --locked
+  ```
+
+  The binary lands at target/release/calendula.
+</details>
 
 ## Configuration
 
-calendula reads a TOML configuration you write, and never writes one. [config.sample.toml](./config.sample.toml) holds one account: the options every account shares with their values, then one commented section per backend or provider, each a working account once uncommented: CalDAV, JMAP, Google Calendar, Google CalDAV, Microsoft Graph, Fastmail, vdir and pimdir. Releases and packages ship it as share/doc/calendula/config.sample.toml.
+A TOML configuration is loaded from every existing path among the following, each one deep-merged on top of the ones before:
 
-The OAuth 2.0 sections read their token from `ortie token show`: calendula runs no OAuth flow and refreshes no token, so [Ortie](https://github.com/pimalaya/ortie), whose sample has the matching Google and Microsoft Graph sections, or another broker printing a fresh token, does it.
+- `$XDG_CONFIG_HOME/calendula/config.toml`
+- `$HOME/.config/calendula/config.toml`
+- `$HOME/.calendularc`
 
-Run without a configuration at a terminal, calendula welcomes you with the commands copying the shipped sample in place, or downloading it when none ships, then the first command to run. Under `--json` or in a script, it fails naming the path it looked at and the sample.
+Override the path with `-c <PATH>`, repeated to merge several files.
 
-The `caldav` block reaches its server one way: `caldav.server`, a URL or a bare authority to walk from, or `caldav.home`, the calendar home set itself. calendula resolves no domain through DNS: name the CalDAV root your provider documents, as the sections below do.
+> [!TIP]
+> See [config.sample.toml](./config.sample.toml) for a complete configuration of one example account with commented fields; rename the account and uncomment what you need, or start from a provider below.
 
-It takes one authentication: `basic` with a `username` and a `password`, `bearer` with a `token`, or `caldav.auth = "none"` for a server asking for none. `jmap.server` names the JMAP session URL, or a bare server name whose `/.well-known/jmap` leads there, and `jmap.auth` takes `basic`, `bearer` or a whole `header`. `gcal.auth` and `msgraph.auth` take a `token`. A secret is given as `raw` or as `command`, a shell string or an argument list printing it.
-
-`calendar.default`, `event.list.page-size`, `item.list.page-size` and `item.composer` may also sit at the top level, before any table, as the fallback of every account not setting them: drop the sample's default lines from an account for the top level to apply.
-
-A configuration is loaded from every existing path among the following, each one deep-merged on top of the ones before, so $HOME/.calendularc overrides the others:
-
-- $XDG_CONFIG_HOME/calendula/config.toml
-- $HOME/.config/calendula/config.toml
-- $HOME/.calendularc
-
-At most one account may be marked `default = true` across them, the one a command takes without `-a`: several are refused, naming them, and so is an unknown `-a <NAME>`, naming the accounts the configuration holds. `default` is a name like any other: `-a default` takes the account named `default`, not the one marked default.
-
-Override those paths with `-c <PATH>`. Repeat it to merge several files, such as `-c public.toml -c private.toml`: the first one is the base and the next ones are deep-merged on top. Each `-c` takes one path, never split, and no environment variable is read: a path kept in a shell variable goes through the flag, as `-c "$CALENDULA_CONFIG"`.
-
-To add an account, add an `[accounts.<name>]` table to your configuration. `calendula account list` and `calendula account check` inspect and validate the accounts declared, and `calendula account capability` lists what it serves of the unified API, through the backend `--backend` resolves to.
-
-### Apple
-
-Apple exposes calendars via CalDAV, but you cannot use your regular password. You need to generate an [app-specific password](https://support.apple.com/en-us/HT204397) (required once two-factor authentication is on):
-
-```toml
-[accounts.example]
-caldav.server = "https://caldav.icloud.com/"
-# The home URL, skipping discovery, is usually of this shape:
-#caldav.home = "https://caldav.icloud.com/<id>/calendars/"
-
-caldav.auth.basic.username = "example@icloud.com"
-caldav.auth.basic.password.raw = "***"
-
-calendar.default = "home"
-```
+An account reads a vdir home, or the pimdir store Neverest syncs, with no server: point `vdir.root` or `pimdir.root` at it. Calendula never issues nor refreshes an OAuth 2.0 token, so Google and Microsoft accounts read theirs from [Ortie](https://github.com/pimalaya/ortie).
 
 ### Google
 
-Use the `gcal` backend, which speaks the [Calendar API v3](https://developers.google.com/workspace/calendar/api/v3/reference) directly. Both routes need [OAuth 2.0](https://developers.google.com/workspace/calendar/caldav/v2/guide), and an access token expires within the hour, so point the token at a broker such as [Ortie](https://github.com/pimalaya/ortie) rather than pasting one in.
+Use the Google Calendar API, richer than Google's CalDAV bridge, with a token from Ortie's Google account. The primary calendar is named after your address, `calendula calendar list` naming the others.
 
 ```toml
-[accounts.example]
-gcal.auth.token.command = ["ortie", "token", "show", "-a", "example"]
+[accounts.google]
 
-# Your email address for the primary calendar, or a
-# "...@group.calendar.google.com" value for a secondary one. Run
-# `calendula calendar list` to read them.
+gcal.auth.token.command = ["ortie", "token", "show", "-a", "google"]
 calendar.default = "example@gmail.com"
-```
-
-Google stores events as JSON and exposes no iCalendar representation of one, so calendula synthesizes the document you read and re-projects what you write.
-
-Properties with a well-defined iCalendar slot are authoritative in both directions, and provider-scoped ones surface as read-only `X-GOOGLE-*` properties.
-
-Google-only fields (the event colour, the guest permissions, working-location and out-of-office blocks) survive an update untouched, and everything else is stashed verbatim on the server so it round-trips instead of being dropped on the next write.
-
-Only events project: a VTODO or VJOURNAL is refused by name, since Google models neither.
-
-Google is also reachable over CalDAV, but only in a crippled form: bearer tokens are the sole authentication, `MKCALENDAR` is refused outright, and no `.well-known` path leads to the server, so `caldav.server` names the principal:
-
-```toml
-[accounts.example]
-caldav.server = "https://apidata.googleusercontent.com/caldav/v2/"
-caldav.auth.bearer.token.command = ["ortie", "token", "show", "-a", "example"]
-
-# The primary calendar; `calendula calendar list` names the others.
-calendar.default = "events"
 ```
 
 ### Microsoft
 
-Use the `msgraph` backend, which speaks the [Graph API](https://learn.microsoft.com/en-us/graph/api/resources/calendar): Microsoft offers no CalDAV for calendars. Graph takes an OAuth 2.0 token with the `Calendars.ReadWrite` scope, so point the token at a broker such as [Ortie](https://github.com/pimalaya/ortie).
+Microsoft serves calendars over Microsoft Graph alone, with a token from Ortie's Graph account.
 
 ```toml
-[accounts.example]
-msgraph.auth.token.command = ["ortie", "token", "show", "-a", "example"]
+[accounts.microsoft]
+
+msgraph.auth.token.command = ["ortie", "token", "show", "-a", "microsoft-graph"]
 ```
-
-### Proton
-
-Not supported: Proton exposes no calendar API, neither CalDAV nor through [Proton Bridge](https://proton.me/mail/bridge) (which proxies mail only). Calendars are reachable only from Proton's own web and mobile apps.
 
 ### Fastmail
 
-Standard CalDAV with the mailbox address and an [app password](https://www.fastmail.help/hc/en-us/articles/360058752854-App-passwords), Fastmail's CalDAV taking no bearer token:
+Standard CalDAV with an [app password](https://www.fastmail.help/hc/en-us/articles/360058752854), Fastmail's CalDAV taking no bearer token. `calendula calendar list` names the calendar ids `calendar.default` takes.
 
 ```toml
-[accounts.example]
+[accounts.fastmail]
+
 caldav.server = "https://caldav.fastmail.com/dav/"
 caldav.auth.basic.username = "example@fastmail.com"
 caldav.auth.basic.password.command = "pass show fastmail"
 ```
 
-Run `calendula calendar list` once connected to read the calendar ids (the first line of each record), then set `calendar.default` to the one you want.
-
 ### Posteo
 
-Standard CalDAV with the mailbox address and its password.
+Standard CalDAV with the account password.
 
 ```toml
 [accounts.posteo]
+
 caldav.server = "https://posteo.de:8443/"
-# The home URL, skipping discovery, is usually of this shape:
-#caldav.home = "https://posteo.de:8443/calendars/<username>/"
-
 caldav.auth.basic.username = "example@posteo.net"
-caldav.auth.basic.password.raw = "***"
-
+caldav.auth.basic.password.command = "pass show posteo"
 calendar.default = "default"
 ```
 
-### Local calendars
+### iCloud
 
-No server is involved, so nothing needs discovering. Point calendula at a directory and it works offline.
-
-A [vdir](https://vdirsyncer.pimutils.org/en/stable/vdir.html) home is one directory per calendar, holding one `.ics` file per item. This is what vdirsyncer writes, and what most local tools read:
+Use an [app-specific password](https://support.apple.com/en-us/HT204397), your account password being refused.
 
 ```toml
-[accounts.local]
-vdir.root = "~/.local/share/vdirsyncer/calendars"
-calendar.default = "personal"
+[accounts.icloud]
+
+caldav.server = "https://caldav.icloud.com/"
+caldav.auth.basic.username = "example@icloud.com"
+caldav.auth.basic.password.command = "pass show icloud"
+calendar.default = "home"
 ```
-
-A [pimdir](https://github.com/pimalaya/pimdir) store is the offline cache a sync engine fills: a SQLite index plus content-addressed bodies, shared with the other Pimalaya clients reading the same store.
-
-It is a cache, not a server, so calendars come from the sync and the collection verbs refuse here. Writes are staged for the next sync to push:
-
-```toml
-[accounts.cached]
-pimdir.root = "~/.local/state/neverest"
-# Usually left unset: a store synced by one account is read as that one.
-#pimdir.account = "example"
-```
-
-A store is read at one pimdir format, storage-draft-17 for this version, the one the sync engine of the same release writes: a store an earlier engine wrote is refused (`store-version`), never migrated. To start over, let the old sync engine push what is queued, check `calendula pimdir queue list` lists nothing, move the store's directory aside, then sync a new store with the new engine. A store moved aside with rows still queued keeps those writes unsent.
-
-Run `calendula pimdir status` to see which account you are reading, how much of each calendar is downloaded, how many creations are still queued and which writes the sync engine parked: an update or a delete whose event a sync changed since it was read, or left conflicted, is parked rather than applied. `calendula pimdir queue list` lists every creation, reply and cancellation still queued, by its queue row, and `calendula pimdir queue cancel <ROW>` retracts one before the next sync. An item that is listed but not downloaded reads as "body not fetched" until a sync hydrates it.
-
-Run `calendula pimdir search <query>` to search the account's events through the search index the sync engine keeps, in the [pimdir SEARCH](https://github.com/pimalaya/pimdir) query language: `budget location:lisbon`, `attendee:carol@example.org date:2026-11`, `organizer:alice@example.org category:work`. `calendula pimdir count <query>` counts the same. `--sort` takes `newest-first` (the default), `oldest-first`, `title` or `relevance`.
-
-`date:` and `when:` take days, ranges, instants (`when:2026-11-23T10:00`) and amounts relative to now in `min`, `h`, `d`, `w`, `mo` and `y` (`date:2h..`, `date:..1mo`). `label:work` and `property:<key>=<value>` read the labels and properties the store keeps on an event. A word or a value beginning with `~`, one of two characters or more beginning with `/`, and a value beginning with `{` are reserved for later operators and refused (`reserved-form`): quote them to search them as text (`"~draft"`).
-
-Days, `today` and `yesterday` are read in the local zone (`TZ`, then the system's); a line under the hits names the index's zone when a `date:` term reads its days in another than the sync engine read floating times and dates in. Another line says what the answer could not see (an index behind the store, events not downloaded, bodies the index could not read), and `--json` carries it as `coverage`. A write still queued shows once a sync indexed it.
 
 ## Usage
 
-Every command and flag is documented behind `--help`: `calendula --help` for the command tree, `calendula <command> --help` for a command's arguments, the backends serving it and the shape of its `--json` output. `calendula json-schema --dir ./schemas` writes the JSON Schema of every `--json` output.
+**Step 1**: once your first account is configured, check that every backend answers:
 
-A few real command lines:
+```sh
+calendula account check
+```
+
+**Step 2**: list the calendars:
 
 ```sh
 calendula calendar list
-calendula event list --calendar personal --from 2026-11-16 --to 2026-11-22
-calendula event agenda -3
-calendula event add --calendar personal --summary Lunch --start 2026-11-20T12:00 --duration PT1H
-calendula event update --calendar personal -i <EVENT-ID>
-calendula item read --calendar personal <ITEM-ID>
-calendula account capability
+```
+
+**Step 3**: draw the current month and its events:
+
+```sh
+calendula event agenda
+```
+
+Every command runs on the default account unless `-a` names another, and its `--help` details its flags, exit codes and JSON output. More use cases:
+
+```sh
+# List the events of one week
+calendula event list --from 2026-11-16 --to 2026-11-22
+
+# Add a one-hour event
+calendula event add --summary Lunch --start 2026-11-20T12:00 --duration PT1H
+
+# Edit an event in your editor
+calendula event update -i <EVENT-ID>
+
+# Search the events of a pimdir account
 calendula pimdir search budget date:2026-11
-calendula gcal free-busy --from 2026-11-16 --to 2026-11-20
-calendula gcal events quick-add "Lunch with Ada tomorrow at noon"
+
+# Serve the account to an AI agent, writes allowed
+calendula mcp --allow-write
 ```
 
-The exit status is `0` on success and `1` on a failure, printed on stdout as the failure object under `--json`, its `code` naming it when a caller can act on it. `2` is a command line calendula refuses (an unknown flag, a missing argument, a bad value): clap's message goes to stderr, or, with `--json`, the failure object coded `usage-invalid` to stdout. `3` means the command printed its result without fully succeeding: an `account check` with a failed backend, or a `calendar list`, `event list`, `event search`, `event agenda` or `item list` whose `errors` names an item it could not read.
+## Alternatives
 
-### REPL
-
-`calendula repl` runs the CLI's commands over one account, one per line until `exit` or EOF, the backend connecting once for the session; a program can spawn `calendula repl --json` and read one JSON value per line.
-
-```
-$ calendula repl
-calendula> calendar list
-calendula> event list --from 2026-11-16 --to 2026-11-22
-calendula> event agenda
-calendula> exit
-```
-
-### MCP
-
-`calendula mcp` serves the unified API as [Model Context Protocol](https://modelcontextprotocol.io) tools over stdio, answering the JSON of `--json`: reads only by default, the writes under `--allow-write`, and under `--allow-send` too the attendee arguments and any write or delete touching an item that names attendees.
-
-```json
-{
-  "mcpServers": {
-    "calendula": { "command": "calendula", "args": ["mcp", "--account", "work", "--allow-write"] }
-  }
-}
-```
+- [khal](https://github.com/pimutils/khal): a calendar CLI and TUI over a vdir, a sync tool such as vdirsyncer reaching the server
+- [gcalcli](https://github.com/insanum/gcalcli): a CLI for Google Calendar alone
+- [calcurse](https://calcurse.org/): a terminal calendar and todo list in its own file format, CalDAV through a helper script
 
 ## License
 

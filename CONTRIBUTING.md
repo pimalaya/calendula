@@ -1,13 +1,13 @@
 # Contributing guide
 
-Thank you for investing your time in contributing to calendula.
+Thank you for investing your time in contributing to Calendula.
 
 Whether you are a human or an AI agent, read these in order before touching the code:
 
 1. the [Pimalaya README](https://github.com/pimalaya) for what the project is and how its repositories stack;
 2. the [Pimalaya CONTRIBUTING](https://github.com/pimalaya/.github/blob/master/CONTRIBUTING.md) guide, which chains to the shared architecture and guidelines;
-3. the inline header documentation in [src/main.rs](./src/main.rs): it is the architecture document of this crate;
-4. the [cairn](./cairn) folder for the living specification, the in-flight proposals and the landed history.
+3. the inline header documentation, starting with src/main.rs: it is the architecture document of this crate;
+4. the cairn/ folder, which follows [Cairn](https://github.com/pimalaya/cairn): spec/ is current truth, changes/ holds in-flight proposals (landed ones move to changes/archive/), and log/ is the dated history; `sh cairn/verify.sh` checks the structure.
 
 Everything below documents only what differs from the Pimalaya standards.
 
@@ -73,12 +73,6 @@ The `anonymous` tests use a made-up credential and touch no account:
 nix develop --command cargo test --test google -- --ignored anonymous::
 ```
 
-The `credentialed` tests only read the Pimalaya test accounts (`account check`, `calendar list`, `event list`), minting their own token from `CALENDULA_GOOGLE_SERVICE_ACCOUNT_KEY` (or `CALENDULA_GOOGLE_SERVICE_ACCOUNT_KEY_FILE`) for Google, and from `CALENDULA_MICROSOFT_TENANT_ID`, `CALENDULA_MICROSOFT_CLIENT_ID` and `CALENDULA_MICROSOFT_CLIENT_SECRET` for Microsoft; a test missing one fails naming it. Google's CalDAV tests mint a token of the full `https://www.googleapis.com/auth/calendar` scope alone, its server refusing the narrower ones the Calendar API tests ask; Fastmail has no credentialed suite. Load a secret into the variable from your secret store, never paste it on the command line, and keep `RUST_LOG` at `debug` at most, trace logs carrying tokens.
+The `credentialed` tests only read the Pimalaya test accounts (`account check`, `calendar list`, `event list`). They mint their own token from `CALENDULA_GOOGLE_SERVICE_ACCOUNT_KEY` (or `CALENDULA_GOOGLE_SERVICE_ACCOUNT_KEY_FILE`) for Google, and from `CALENDULA_MICROSOFT_TENANT_ID`, `CALENDULA_MICROSOFT_CLIENT_ID` and `CALENDULA_MICROSOFT_CLIENT_SECRET` for Microsoft.
 
-## Unreleased dependencies
-
-`[patch.crates-io]` carries the crates whose needed changes ride unreleased upstream, the cairn change adding an entry saying what it waits on, Cargo.toml carrying no comment there. An entry is a temporary state, not a convention: drop it as its crate publishes, and do not add one for a change that is already released.
-
-## Cairn
-
-This repository follows [Cairn](https://github.com/pimalaya/cairn): a change that affects behaviour is not done until the specification is updated and a log entry is written, and a landed change moves to cairn/changes/archive/. See [AGENTS.md](./AGENTS.md) for the full stanza, and run `sh cairn/verify.sh` to check the structure.
+Google's CalDAV tests mint a token of the full `https://www.googleapis.com/auth/calendar` scope alone, its server refusing the narrower ones; Fastmail has no credentialed suite. Load a secret into the variable from your secret store, and keep `RUST_LOG` at `debug` at most, trace logs carrying tokens.
