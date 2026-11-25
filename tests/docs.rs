@@ -4,12 +4,13 @@
 //! section order (readme-008, readme-007), and its terminal block printing
 //! what it shows (readme-006).
 
-use std::{
-    fs,
-    process::{Command, Stdio},
-};
+use std::fs;
+#[cfg(feature = "vdir")]
+use std::process::{Command, Stdio};
 
+#[cfg(feature = "vdir")]
 use serde_json::Value;
+#[cfg(feature = "vdir")]
 use tempfile::TempDir;
 
 /// The README, read from the repository root.
