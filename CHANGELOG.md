@@ -6,9 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
-Calendula 1 is the first stable release, aligned on the other Pimalaya CLIs. It adds the JMAP backend, the `msgraph` namespace, the raw CalDAV methods, `event search`, the pimdir queue and scheduling commands, a REPL and an MCP server, and every `--json` failure carries a stable `code`. The configuration wizard, the tables and colours, and the `todo` and `journal` commands are gone. A 0.x configuration is not carried over: start over from config.sample.toml.
+## [1.0.0] - 2026-11-25
 
-A pimdir store an earlier neverest wrote is refused `store-version`, never migrated: let that neverest push its queue, move the store aside and sync a new one.
+Calendula 1 is the first stable release: a low-level CLI over a unified calendars API, the same commands on CalDAV, JMAP, Google Calendar, Microsoft Graph, vdir and pimdir, the protocol-specific ones beside them, plain text for a glance and `--json` for scripts, frontends and AI agents. The offline side is the pimdir store Neverest syncs, which Calendula reads and queues its writes into, and event editing is left to a composer such as tcal.
+
+The configuration wizard, the tables and colours, and the `todo` and `journal` commands are gone, and a 0.x configuration is not carried over: start over from config.sample.toml. A pimdir store an earlier neverest wrote is refused `store-version`, never migrated.
 
 ### Added
 
@@ -561,7 +563,8 @@ A pimdir store an earlier neverest wrote is refused `store-version`, never migra
 
 - Init repository
 
-[Unreleased]: https://github.com/pimalaya/calendula/compare/v0.2.0..HEAD
+[Unreleased]: https://github.com/pimalaya/calendula/compare/v1.0.0..HEAD
+[1.0.0]: https://github.com/pimalaya/calendula/compare/v0.2.0..v1.0.0
 [0.2.0]: https://github.com/pimalaya/calendula/compare/v0.1.0..v0.2.0
 [0.1.0]: https://github.com/pimalaya/calendula/compare/root..v0.1.0
 
