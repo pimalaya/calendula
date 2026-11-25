@@ -13,7 +13,7 @@ use serde::Serialize;
 
 use crate::{
     caldav::client::{CaldavClient, item_refusal},
-    shared::item::{ItemContents, read::printable},
+    shared::item::{ItemContents, printable},
 };
 
 /// GET an item: its raw iCalendar bytes plus the server ETag.

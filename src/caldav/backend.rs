@@ -305,7 +305,7 @@ impl CaldavBackend {
             .read_item(calendar_id, item_id)
             .map_err(|err| match err {
                 WebdavClientStdError::Send(WebdavSendError::HttpStatus { status: 400, .. }) => {
-                    recoded(ErrorCode::ItemNotFound, err)
+                    recoded(ErrorCode::EventNotFound, err)
                 }
                 err => item_refusal(err),
             })
@@ -345,7 +345,7 @@ impl CaldavBackend {
 
     /// PUTs over an existing resource, gated on `if_match`, else on
     /// `If-Match: *`, so an id the calendar does not hold is refused as
-    /// `item-not-found` rather than created.
+    /// `event-not-found` rather than created.
     pub fn update_item(
         &mut self,
         calendar_id: &str,
@@ -366,7 +366,7 @@ impl CaldavBackend {
     /// PUTs over an existing resource given no version: `If-Match: *`,
     /// then, on a 412 to it (iCloud answers one whatever the resource),
     /// gated on the ETag a read of the resource serves. An id the calendar
-    /// does not hold is refused as `item-not-found`, never created.
+    /// does not hold is refused as `event-not-found`, never created.
     fn update_existing(
         &mut self,
         calendar_id: &str,
@@ -397,7 +397,7 @@ impl CaldavBackend {
                 status: 400 | 404 | 410,
                 ..
             })) => {
-                return Err(recoded(ErrorCode::ItemNotFound, refused)
+                return Err(recoded(ErrorCode::EventNotFound, refused)
                     .context(format!("Item `{item_id}` not found in `{calendar_id}`")));
             }
             Err(err) => return Err(item_refusal(err)),
@@ -436,7 +436,7 @@ fn update_error(err: WebdavClientStdError) -> anyhow::Error {
 }
 
 /// A hint over the server's answer when it refuses the iCalendar written
-/// ([`rejects_item`]), coded `item-invalid` by the same predicate, so the
+/// ([`rejects_item`]), coded `event-invalid` by the same predicate, so the
 /// two never disagree; the answer handed back otherwise.
 ///
 /// The server's answer stays the cause, its typed error kept for the
@@ -467,9 +467,7 @@ fn comp_filter(query: &CalendarItemQuery<'_>) -> String {
     };
 
     // NOTE: RFC 4791 9.7.1 nests a time-range inside the component it
-    // narrows, so the window travels with the kind. The raw `item`
-    // family names no kind and carries no window either, which is why
-    // one never escapes without the other.
+    // narrows, so the window travels with the kind.
     let range = query
         .range
         .map(|range| range.to_caldav_filter())
@@ -508,7 +506,7 @@ fn item_from(calendar_id: &str, entry: CaldavItemEntry) -> CalendarItem {
 
 /// The entry of a listed item the server answered without its data: coded
 /// from the row's status or the status refusing its properties, a 403
-/// `permission-denied`, else `item-unreadable`; each refused property in its
+/// `permission-denied`, else `event-unreadable`; each refused property in its
 /// sources.
 pub(crate) fn unreadable_row(row: WebdavUnreadableEntry) -> ItemError {
     let code = row
@@ -516,7 +514,7 @@ pub(crate) fn unreadable_row(row: WebdavUnreadableEntry) -> ItemError {
         .into_iter()
         .chain(row.failures.iter().map(|failure| failure.status))
         .find_map(row_code)
-        .unwrap_or(ErrorCode::ItemUnreadable);
+        .unwrap_or(ErrorCode::EventUnreadable);
 
     let error = match row.status {
         Some(status) => format!("The server refused the item with status {status}"),
@@ -536,7 +534,7 @@ pub(crate) fn unreadable_row(row: WebdavUnreadableEntry) -> ItemError {
 fn unanswered(id: &str) -> ItemError {
     ItemError {
         id: Some(id.to_owned()),
-        code: Some(ErrorCode::ItemUnreadable),
+        code: Some(ErrorCode::EventUnreadable),
         error: String::from("The server sent nothing for the item"),
         sources: Vec::new(),
     }
@@ -1033,7 +1031,7 @@ mod tests {
                 need_privileges.as_str(),
                 Some(ErrorCode::PermissionDenied),
             ),
-            (403, data.as_str(), Some(ErrorCode::ItemInvalid)),
+            (403, data.as_str(), Some(ErrorCode::EventInvalid)),
             (507, "", Some(ErrorCode::QuotaExceeded)),
             (403, quota.as_str(), Some(ErrorCode::QuotaExceeded)),
             (429, "", Some(ErrorCode::RateLimited)),
@@ -1050,7 +1048,7 @@ mod tests {
     }
 
     /// An iCalendar the server refuses is a matter of the item, not of
-    /// rights: coded `item-invalid` under a hint, the server's answer its
+    /// rights: coded `event-invalid` under a hint, the server's answer its
     /// cause, whether the refusal names a precondition on the content (RFC
     /// 4791 §5.3.2.1) or the iCalendar in plain text, on a create as on an
     /// update. Another precondition carries no code.
@@ -1080,7 +1078,7 @@ mod tests {
                 }
                 .unwrap_err();
 
-                assert_eq!(code(&err), Some(ErrorCode::ItemInvalid), "{body}: {err:#}");
+                assert_eq!(code(&err), Some(ErrorCode::EventInvalid), "{body}: {err:#}");
                 assert!(
                     err.to_string()
                         .starts_with("The server rejected the iCalendar")
@@ -1088,7 +1086,7 @@ mod tests {
                 let cause = err.chain().nth(1).unwrap().to_string();
                 assert!(cause.contains(&status.to_string()), "{cause}");
                 let coded = code_of(&with_code(err, code));
-                assert_eq!(coded, Some(ErrorCode::ItemInvalid));
+                assert_eq!(coded, Some(ErrorCode::EventInvalid));
             }
         }
 
@@ -1136,7 +1134,7 @@ mod tests {
                 .update_item("cal", "nope.ics", EVENT.to_vec(), None)
                 .unwrap_err();
 
-            assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+            assert_eq!(code(&err), Some(ErrorCode::EventNotFound), "{err:#}");
             assert!(format!("{err:#}").contains("HTTP 412"), "{err:#}");
             let written = String::from_utf8(written.lock().unwrap().clone()).unwrap();
             assert!(written.contains("If-Match: *\r\n"), "{written}");
@@ -1172,14 +1170,14 @@ mod tests {
             let err = answering(status, "")
                 .get_item("cal", "nope.ics")
                 .unwrap_err();
-            assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+            assert_eq!(code(&err), Some(ErrorCode::EventNotFound), "{err:#}");
             assert!(format!("{err:#}").contains("HTTP"), "{err:#}");
         }
 
         let err = answering(404, "")
             .delete_item("cal", "nope.ics", None)
             .unwrap_err();
-        assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+        assert_eq!(code(&err), Some(ErrorCode::EventNotFound), "{err:#}");
     }
 
     /// iCloud answers 400, not 404, to a GET of a name without `.ics`:
@@ -1188,7 +1186,7 @@ mod tests {
     #[test]
     fn a_read_answered_400_is_not_found_and_a_write_is_not() {
         let err = answering(400, "").get_item("cal", "nope").unwrap_err();
-        assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+        assert_eq!(code(&err), Some(ErrorCode::EventNotFound), "{err:#}");
         assert!(!format!("{err:#}").contains("Read item"), "{err:#}");
         assert!(format!("{err:#}").contains("HTTP 400"), "{err:#}");
 
@@ -1288,7 +1286,7 @@ END:VCALENDAR&#13;
                 ),
                 (
                     Some("e4.ics"),
-                    Some(ErrorCode::ItemUnreadable),
+                    Some(ErrorCode::EventUnreadable),
                     "The server sent the item without its data",
                     vec![],
                 ),

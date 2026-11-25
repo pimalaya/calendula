@@ -21,7 +21,7 @@ use crate::{
     cli::{Command, resolve_account},
     error::ErrorCode,
     session::Session,
-    shared::{event::cli::EventCommand, item::cli::ItemCommand},
+    shared::event::cli::EventCommand,
 };
 
 /// Start a session running commands over one account.
@@ -67,9 +67,6 @@ fn composes(cmd: &Command) -> bool {
         Command::Event(EventCommand::Build(cmd)) => cmd.args.composer.interactive,
         Command::Event(EventCommand::Add(cmd)) => cmd.composer.interactive,
         Command::Event(EventCommand::Update(cmd)) => cmd.composer.interactive,
-        Command::Item(ItemCommand::Build(cmd)) => cmd.args.composer.interactive,
-        Command::Item(ItemCommand::Add(cmd)) => cmd.composer.interactive,
-        Command::Item(ItemCommand::Update(cmd)) => cmd.composer.interactive,
         _ => false,
     }
 }

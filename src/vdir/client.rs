@@ -140,7 +140,7 @@ pub fn build_vdir_client(
 }
 
 /// The code of a vdir failure in an error chain: an item id naming no file
-/// of the collection, or naming none it could, is `item-not-found`.
+/// of the collection, or naming none it could, is `event-not-found`.
 pub(crate) fn refusal_code(cause: &(dyn std::error::Error + 'static)) -> Option<ErrorCode> {
     let locate = match cause.downcast_ref::<VdirClientError>()? {
         VdirClientError::VdirItemLocate(err)
@@ -153,7 +153,7 @@ pub(crate) fn refusal_code(cause: &(dyn std::error::Error + 'static)) -> Option<
 
     match locate {
         VdirItemLocateError::NotFound(_) | VdirItemLocateError::InvalidId(_) => {
-            Some(ErrorCode::ItemNotFound)
+            Some(ErrorCode::EventNotFound)
         }
         _ => None,
     }

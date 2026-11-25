@@ -170,13 +170,11 @@ const SCHEDULING: [&str; 5] = [
     "send-updates",
 ];
 
-const READS: [&str; 6] = [
+const READS: [&str; 4] = [
     "account_capability",
     "calendar_list",
     "event_list",
     "event_read",
-    "item_list",
-    "item_read",
 ];
 
 #[test]
@@ -245,9 +243,6 @@ fn writes_are_listed_under_allow_write_without_scheduling() {
         "event_add",
         "event_update",
         "event_delete",
-        "item_add",
-        "item_update",
-        "item_delete",
     ]);
     let mut names = names(listed);
     names.sort_unstable();
@@ -269,7 +264,7 @@ fn writes_are_listed_under_allow_write_without_scheduling() {
         false
     );
 
-    for name in ["event_update", "event_delete", "item_delete"] {
+    for name in ["event_update", "event_delete"] {
         assert_eq!(tool(listed, name)["annotations"]["destructiveHint"], true);
     }
 
@@ -303,11 +298,6 @@ fn scheduling_is_listed_under_allow_send_as_well() {
 
     for name in ["event_add", "event_update", "event_delete"] {
         assert_eq!(tool(listed, name)["annotations"]["openWorldHint"], true);
-    }
-    // NOTE: an item write lists no argument inviting anyone, so its hint
-    // stays the one it carries without the gate.
-    for name in ["item_add", "item_update", "item_delete"] {
-        assert_eq!(tool(listed, name)["annotations"]["openWorldHint"], false);
     }
     for name in ["calendar_create", "calendar_delete", "event_list"] {
         assert_eq!(tool(listed, name)["annotations"]["openWorldHint"], false);
@@ -452,7 +442,7 @@ fn account_capability_answers_one_row_per_capability() {
     assert!(content.get("backends").is_none(), "{content}");
 
     let rows = content["capabilities"].as_array().unwrap();
-    let row = rows.iter().find(|row| row["name"] == "item.list").unwrap();
+    let row = rows.iter().find(|row| row["name"] == "event.list").unwrap();
     assert_eq!(row["backend"], "vdir", "{content}");
     assert_eq!(row["level"], "full", "{content}");
 }
@@ -477,7 +467,7 @@ fn a_listing_with_errors_answers_its_payload_as_a_tool_error() {
     let content = &result["structuredContent"];
     assert_eq!(content["events"].as_array().unwrap().len(), 2, "{result}");
     assert_eq!(content["errors"][0]["id"], "broken", "{result}");
-    assert_eq!(content["errors"][0]["code"], "item-unreadable", "{result}");
+    assert_eq!(content["errors"][0]["code"], "event-unreadable", "{result}");
 }
 
 #[test]
@@ -528,9 +518,9 @@ fn an_ical_source_is_taken_as_text_never_as_a_local_path() {
         home.path(),
         &["--allow-write"],
         &[
-            call(1, "item_add", json!({ "ical": secret })),
-            call(2, "item_add", json!({ "ical": "-" })),
-            call(3, "item_add", json!({ "ical": event("lunch", "") })),
+            call(1, "event_add", json!({ "ical": secret })),
+            call(2, "event_add", json!({ "ical": "-" })),
+            call(3, "event_add", json!({ "ical": event("lunch", "") })),
         ],
     );
 
@@ -552,7 +542,7 @@ fn an_ical_source_is_taken_as_text_never_as_a_local_path() {
     assert!(!contents.iter().any(|ics| ics.contains("secret")));
 }
 
-/// Without `--allow-send` no write reaches an item naming attendees, the
+/// Without `--allow-send` no write reaches an event naming attendees, the
 /// one handed over or the one stored; with it, the same calls land.
 #[test]
 fn a_write_naming_attendees_needs_allow_send() {
@@ -560,40 +550,38 @@ fn a_write_naming_attendees_needs_allow_send() {
     let invitation = event("invite", GUEST);
     let calls = [
         call(1, "event_add", json!({ "ical": invitation })),
-        call(2, "item_add", json!({ "ical": invitation })),
         call(
-            3,
+            2,
             "event_update",
             json!({ "event-id": "review", "summary": "Moved" }),
         ),
         call(
-            4,
-            "item_update",
-            json!({ "item-id": "review", "ical": event("review", "") }),
+            3,
+            "event_update",
+            json!({ "event-id": "review", "ical": event("review", "") }),
         ),
-        call(5, "event_delete", json!({ "event-id": "review" })),
-        call(6, "item_delete", json!({ "item-id": "review" })),
+        call(4, "event_delete", json!({ "event-id": "review" })),
         call(
-            7,
+            5,
             "event_add",
             json!({ "summary": "Lunch", "start": "2026-11-13T12:00" }),
         ),
-        call(8, "event_delete", json!({ "event-id": "standup" })),
+        call(6, "event_delete", json!({ "event-id": "standup" })),
     ];
 
     let before = fs::read_to_string(home.path().join("calendars/personal/review.ics")).unwrap();
     let responses = serve(home.path(), &["--allow-write"], &calls);
-    assert_eq!(responses.len(), 8, "{responses:#?}");
+    assert_eq!(responses.len(), 6, "{responses:#?}");
 
-    for response in &responses[..6] {
+    for response in &responses[..4] {
         assert_eq!(report(response)["code"], "sending-closed", "{response}");
         let error = refusal(response);
         assert!(error.contains("--allow-send"), "{error}");
         assert!(error.contains("ATTENDEE"), "{error}");
     }
 
-    assert_ne!(responses[6]["result"]["isError"], true, "{}", responses[6]);
-    assert_ne!(responses[7]["result"]["isError"], true, "{}", responses[7]);
+    assert_ne!(responses[4]["result"]["isError"], true, "{}", responses[4]);
+    assert_ne!(responses[5]["result"]["isError"], true, "{}", responses[5]);
 
     let after = fs::read_to_string(home.path().join("calendars/personal/review.ics")).unwrap();
     assert_eq!(after, before);
@@ -603,7 +591,7 @@ fn a_write_naming_attendees_needs_allow_send() {
     assert!(!kept.contains(&String::from("standup.ics")), "{kept:?}");
 
     let flags = ["--allow-write", "--allow-send"];
-    let responses = serve(home.path(), &flags, &[calls[0].clone(), calls[4].clone()]);
+    let responses = serve(home.path(), &flags, &[calls[0].clone(), calls[3].clone()]);
     assert_ne!(responses[0]["result"]["isError"], true, "{}", responses[0]);
     assert_ne!(responses[1]["result"]["isError"], true, "{}", responses[1]);
 

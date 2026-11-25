@@ -5,7 +5,7 @@
 //!
 //! It also holds the two halves of the strict reading calendula keeps for
 //! the bytes it wrote itself: [`check`], which weighs an item against the
-//! RFC 5545 contract, and [`blank_item`], which mints the identity a
+//! RFC 5545 contract, and [`blank_event`], which mints the identity a
 //! composer cannot invent.
 
 use std::{
@@ -30,29 +30,6 @@ use crate::{error::ErrorCode, mcp::paths_closed, shared::uuid::uuid_v4};
 
 /// `PRODID` a minted item is stamped with (RFC 5545 3.7.3).
 const PRODID: &str = "-//Pimalaya//calendula//EN";
-
-/// One of the two unified command families writing items, and the
-/// component kind it names.
-///
-/// The families are views over the same items, so a pipeline they share
-/// takes this rather than two copies of itself.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum IcalFamily {
-    /// The `event` family, over VEVENT.
-    Event,
-    /// The `item` family, over any kind, which is why it names none.
-    Item,
-}
-
-impl IcalFamily {
-    /// The component kind the family mints, `None` for `item`.
-    pub fn kind(&self) -> Option<IcalComponentKind> {
-        match self {
-            Self::Event => Some(IcalComponentKind::VEvent),
-            Self::Item => None,
-        }
-    }
-}
 
 /// Resolves an iCalendar source into raw bytes.
 ///
@@ -92,7 +69,7 @@ pub fn read_source(source: &str) -> Result<Vec<u8>> {
     }
 
     let message = format!("Source `{source}` is neither a readable file nor iCalendar contents");
-    Err(CodedError::new(ErrorCode::ItemInvalid, message).into())
+    Err(CodedError::new(ErrorCode::EventInvalid, message).into())
 }
 
 /// What is wrong with an item, empty when nothing is.
@@ -180,14 +157,14 @@ fn missing_dtstart(ical: &Ical<'_>) -> Vec<String> {
 /// Whether an item may carry a component of `kind`: it carries one, or
 /// its bytes do not parse.
 ///
-/// Only the two backends that narrow a listing after parsing it read
-/// this; CalDAV pushes the kind down and gcal models one kind only.
+/// The two backends that narrow a listing after parsing it read this,
+/// CalDAV pushing the kind down and gcal modelling one kind only, and so
+/// does every `event` command naming one resource by its id.
 ///
 /// The projections are keyed on a marker type, which a listing narrowing
 /// by a kind it only knows at runtime cannot use, so this reads the
 /// decoded component names instead. Bytes that do not parse may be of
 /// any kind, so a kind filter keeps them and the listing names them.
-#[cfg(any(feature = "vdir", feature = "pimdir"))]
 pub fn may_hold_kind(contents: &[u8], kind: IcalComponentKind) -> bool {
     let Ok(cst) = IcalCst::parse(contents) else {
         return true;
@@ -225,7 +202,7 @@ fn names_attendee(component: &IcalComponent<'_>) -> bool {
     named || component.components.iter().any(names_attendee)
 }
 
-/// Mints an item carrying nothing but its identity and what it owes.
+/// Mints an event carrying nothing but its identity and what it owes.
 ///
 /// This is what a create starts from when it is given no source, and it
 /// is an item rather than an empty file so that no composer is asked to
@@ -236,22 +213,11 @@ fn names_attendee(component: &IcalComponent<'_>) -> bool {
 /// would otherwise refuse the moment the composer handed it back. The
 /// value is a placeholder like the identity is, and an event with no time
 /// is not an event.
-///
-/// `item` names no component kind, so it mints nothing and says what
-/// does.
-pub fn blank_item(family: IcalFamily) -> Result<Vec<u8>> {
-    let Some(kind) = family.kind() else {
-        bail!(
-            "`item` names no component kind to mint; give an iCalendar, or \
-             compose an event with `calendula event`, a to-do with `unfog` \
-             or a journal entry with `journal`"
-        )
-    };
-
+pub fn blank_event() -> Result<Vec<u8>> {
     let now = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
 
     let component = IcalComponent {
-        name: IcalComponentName::Kind(kind),
+        name: IcalComponentName::Kind(IcalComponentKind::VEvent),
         props: vec![
             text_prop(IcalPropKind::Uid, uuid_v4()?),
             stamp_prop(IcalPropKind::DtStamp, &now),
@@ -307,11 +273,11 @@ mod tests {
 
     #[cfg(any(feature = "vdir", feature = "pimdir"))]
     use crate::shared::ical::may_hold_kind;
-    use crate::shared::ical::{IcalFamily, blank_item, check, invites, read_source};
+    use crate::shared::ical::{blank_event, check, invites, read_source};
 
     #[test]
     fn a_minted_item_passes_the_check_it_will_be_held_to() {
-        let item = blank_item(IcalFamily::Event).unwrap();
+        let item = blank_event().unwrap();
         let text = String::from_utf8(item.clone()).unwrap();
 
         assert!(text.contains("PRODID:"), "{text}");
@@ -320,15 +286,6 @@ mod tests {
         assert!(text.contains("DTSTAMP:"), "{text}");
         assert!(text.contains("DTSTART:"), "{text}");
         assert!(check(&item).is_empty(), "{:?}", check(&item));
-    }
-
-    #[test]
-    fn the_item_family_mints_nothing_and_names_the_ones_that_do() {
-        let err = blank_item(IcalFamily::Item).unwrap_err().to_string();
-
-        assert!(err.contains("`calendula event`"), "{err}");
-        assert!(err.contains("`unfog`"), "{err}");
-        assert!(err.contains("`journal`"), "{err}");
     }
 
     #[cfg(any(feature = "vdir", feature = "pimdir"))]
@@ -362,7 +319,7 @@ mod tests {
 
         assert_eq!(
             crate::error::code(&err),
-            Some(crate::error::ErrorCode::ItemInvalid)
+            Some(crate::error::ErrorCode::EventInvalid)
         );
         assert!(err.to_string().contains("neither a readable file"), "{err}");
     }

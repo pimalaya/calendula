@@ -119,11 +119,11 @@ pub(crate) fn refusal_code(cause: &(dyn std::error::Error + 'static)) -> Option<
 
 impl JmapSetError for JmapCalendarEventSetItemError {
     fn not_found(&self) -> ErrorCode {
-        ErrorCode::ItemNotFound
+        ErrorCode::EventNotFound
     }
 
     fn invalid(&self) -> Option<ErrorCode> {
-        Some(ErrorCode::ItemInvalid)
+        Some(ErrorCode::EventInvalid)
     }
 
     fn type_name(&self) -> &str {
@@ -228,7 +228,7 @@ mod tests {
             "JMAP CalendarEvent create rejected: invalidProperties (`recurrenceRules`, `x`): \
              unknown property"
         );
-        assert_eq!(crate::error::code(&err), Some(ErrorCode::ItemInvalid));
+        assert_eq!(crate::error::code(&err), Some(ErrorCode::EventInvalid));
 
         let code = |kind: &str| {
             let err: JmapCalendarEventSetItemError =
@@ -236,7 +236,7 @@ mod tests {
             crate::error::code(&set_error("x", &err))
         };
         assert_eq!(code("forbidden"), Some(ErrorCode::PermissionDenied));
-        assert_eq!(code("notFound"), Some(ErrorCode::ItemNotFound));
+        assert_eq!(code("notFound"), Some(ErrorCode::EventNotFound));
         assert_eq!(code("overQuota"), Some(ErrorCode::QuotaExceeded));
         assert_eq!(code("rateLimit"), Some(ErrorCode::RateLimited));
         assert_eq!(code("tooLarge"), None);

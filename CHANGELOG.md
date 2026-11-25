@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 Calendula 1 is the first stable release: a low-level CLI over a unified calendars API, the same commands on CalDAV, JMAP, Google Calendar, Microsoft Graph, vdir and pimdir, the protocol-specific ones beside them, plain text for a glance and `--json` for scripts, frontends and AI agents. The offline side is the pimdir store Neverest syncs, which Calendula reads and queues its writes into, and event editing is left to a composer such as tcal.
 
-The configuration wizard, the tables and colours, and the `todo` and `journal` commands are gone, and a 0.x configuration is not carried over: start over from config.sample.toml. A pimdir store an earlier neverest wrote is refused `store-version`, never migrated.
+The configuration wizard, the tables and colours, the raw `item` family and the `todo` and `journal` commands are gone, and a 0.x configuration is not carried over: start over from config.sample.toml. A pimdir store an earlier neverest wrote is refused `store-version`, never migrated.
 
 ### Added
 
@@ -65,9 +65,9 @@ The configuration wizard, the tables and colours, and the `todo` and `journal` c
 
 - Added `mcp`, a Model Context Protocol server over stdio exposing the unified API as tools.
 
-  It lists `account_capability`, `calendar_list`, `event_list`, `event_read`, `event_search`, `item_list` and `item_read`. `--allow-write` adds the calendar, event and item add, update and delete tools, and `--allow-send`, which needs it, the `attendee`, `add-attendee`, `remove-attendee`, `organizer` and `send-updates` arguments.
+  It lists `account_capability`, `calendar_list`, `event_list`, `event_read` and `event_search`. `--allow-write` adds the calendar and event add, update and delete tools, and `--allow-send`, which needs it, the `attendee`, `add-attendee`, `remove-attendee`, `organizer` and `send-updates` arguments.
 
-  Without `--allow-send`, a write or a delete touching an item that names an `ATTENDEE` is refused `sending-closed`. A tool the backend does not serve is not listed, and no tool reads a local path.
+  Without `--allow-send`, a write or a delete touching an event that names an `ATTENDEE` is refused `sending-closed`. A tool the backend does not serve is not listed, and no tool reads a local path.
 
 - Added `account capability`, listing what an account serves of the unified API without connecting, `{account, capabilities: [{name, backend, level, detail}]}` under `--json`.
 
@@ -82,7 +82,7 @@ The configuration wizard, the tables and colours, and the `todo` and `journal` c
 
   Usage and accounts: `usage-invalid`, `stdin-taken`, `capability-missing`, `backend-not-built`, `account-missing`, `account-default-missing`, `account-default-several`, `calendar-default-missing`, `request-origin`, `sending-closed`, `confirmation-required`, `page-token-invalid`, `row-not-found`.
 
-  Items and calendars: `item-not-found`, `calendar-not-found`, `item-duplicate`, `calendar-duplicate`, `item-invalid`, `item-unreadable`, `body-pending`, `precondition-failed`, `occurrence-unsupported`, `invitation-missing`. A missing item fails with one message whatever the backend.
+  Items and calendars: `event-not-found`, `calendar-not-found`, `item-duplicate`, `calendar-duplicate`, `event-invalid`, `event-unreadable`, `body-pending`, `precondition-failed`, `occurrence-unsupported`, `invitation-missing`. A missing event fails with one message whatever the backend.
 
   Server refusals: `permission-denied`, `quota-exceeded` and `rate-limited`, the first 429 met, calendula retrying nothing.
 
@@ -93,11 +93,11 @@ The configuration wizard, the tables and colours, and the `todo` and `journal` c
   Search index: `index-missing`, `index-outdated`, `index-version`, `index-zone-unknown`, `index-fts5-missing`, `query-refused`, `query-unanswerable`.
 
 - Added a schema for every command to `json-schema`, with `calendula-error` for the failure object and `calendula-item-error` for an `errors` entry.
-- Added `errors` to `calendar list`, `event list`, `event search`, `event agenda` and `item list`: one `{id, code, error, sources}` per calendar or item the listing could not read.
+- Added `errors` to `calendar list`, `event list`, `event search` and `event agenda`: one `{id, code, error, sources}` per calendar or event the listing could not read.
 
   `id` is `null` when the backend named none (a CalDAV listing the server truncated). The text prints one `Error:` line each, after the output.
 
-- Added `nextPage` to `event list --json` and `item list --json`, and `--page-token` taking it back, winning over `-p`.
+- Added `nextPage` to `event list --json`, and `--page-token` taking it back, winning over `-p`.
 - Added `calendarId`, `etag`, `uid`, `recurrenceId`, `location`, `allDay`, `timeZone`, `zoneAssumed`, `recurring`, `sequence`, `status`, `transparency`, `busyStatus`, `organizer`, `attendees`, `onlineMeetingUrl` and `alarms` to the event JSON.
 
   `onlineMeetingUrl` prefers a video `CONFERENCE`, then a web one, never a dial-in. `zoneAssumed` tells a `TZID` nothing defines, read in the local zone. On pimdir, `etag` is the store's hash of the body.
@@ -105,7 +105,7 @@ The configuration wizard, the tables and colours, and the `todo` and `journal` c
 - Added recurrence expansion to `event list --from/--to`: each occurrence overlapping the window lists on its own with its `recurrenceId`, overrides applied and excluded dates dropped.
 - Added `event read --recurrence-id`, projecting one occurrence.
 - Added `event read --uid <UID>`, reading the event carrying that iCalendar `UID`.
-- Added `--if-match` to `event delete` and `item delete`, mapped to each backend's version check; vdir refuses it `capability-missing`.
+- Added `--if-match` to `event delete`, mapped to each backend's version check; vdir refuses it `capability-missing`.
 - Added field flags to `event build`, `event add` and `event update`, stacked between the source and `-i`.
 
   The flags are `--uid`, `--summary`, `--description`, `--location`, `--url`, `--start`, `--end`, `--duration`, `--time-zone`, `--status`, `--transparency`, `--organizer`, `--attendee`, `--categories` and `--sequence`, plus `--method` on `event build`.
@@ -157,7 +157,6 @@ The configuration wizard, the tables and colours, and the `todo` and `journal` c
   A `pimdir.account` naming no account of the store fails `store-account-unknown`, and a collection declaring no kind is no calendar.
 
 - **BREAKING**: Changed a pimdir item whose body is gone from the store to read as not downloaded: listed with no bytes and `etag` `null`, its reads failing `body-pending`.
-- **BREAKING**: Changed a pimdir `item add` or `item update` given an iCalendar (a file, contents or stdin) to queue it without its `X-PIMDIR-` properties.
 - Changed the pimdir writes to be refused before they are queued when a source of the store does not support them, coded `unsupported`, naming the capability and the source.
 
   A to-do into a calendar taking none is refused so. A scheduled event refused for want of a source that notifies names the way through: `SCHEDULE-AGENT=NONE` on its `ORGANIZER` and `ATTENDEE`.
@@ -165,7 +164,7 @@ The configuration wizard, the tables and colours, and the `todo` and `journal` c
 - Changed a pimdir refusal to print its context as the error and the store's reason in `sources`.
 - **BREAKING**: Changed every write printing a confirmation to print a receipt under `--json`, where it printed `{"message": ...}`.
 
-  `calendar update|delete` and `event|item add|update|delete` print `{id, queued}`, `queued` telling a write waiting for a sync, and `calendar create` `{id, name, queued}`. The `caldav`, `vdir` and `gcal` writes print `{id}`, and `event|item build -o` `{path, size}`.
+  `calendar update|delete` and `event add|update|delete` print `{id, queued}`, `queued` telling a write waiting for a sync, and `calendar create` `{id, name, queued}`. The `caldav`, `vdir` and `gcal` writes print `{id}`, and `event build -o` `{path, size}`.
 
   On pimdir, the text says the write is queued for the next sync, and a queued create's `id` is the link id it staged. `build -o` prints `Saved <size> bytes to <path>`.
 
@@ -183,7 +182,7 @@ The configuration wizard, the tables and colours, and the `todo` and `journal` c
   The unified API is the union of what the backends serve; the message names the capability and the backend of the account serving it. `--if-match` on a vdir update, which was ignored, is refused so.
 
 - **BREAKING**: Changed `auto` to stop on a backend the build leaves out, failing `backend-not-built`, where it took the next backend configured.
-- **BREAKING**: Changed a listing to report an item it could not read or parse as an `errors` entry, coded `item-unreadable` when no other code applies, and list the others.
+- **BREAKING**: Changed a listing to report an item it could not read or parse as an `errors` entry, coded `event-unreadable` when no other code applies, and list the others.
 
   vdir and Graph failed the whole listing, and an event that does not parse was skipped without a word.
 
@@ -194,11 +193,11 @@ The configuration wizard, the tables and colours, and the `todo` and `journal` c
   `event agenda` writes no terminal escape, so it highlights neither today nor the days holding an event. `account list` prints one line per account with no header, `default` marking the default one.
 
 - **BREAKING**: Changed `event agenda --json` to `{events, errors}`, each event `{id, start, label}` in the text's order, where it mapped local start times to labels.
-- **BREAKING**: Changed `item list`, `item read` and `event read` to print an item as `{id, calendarId, etag, contents, encoding}`.
+- **BREAKING**: Changed `event read --json` to print the resource it read as `{id, calendarId, etag, contents, encoding}` beside its `events`.
 
-  `contents` is the iCalendar text, `encoding` `utf-8`, or the base64 of bytes that are not UTF-8, `encoding` `base64`, both `null` in `item list` for an item with no local bytes. `item list` printed `contents` as integers.
+  `contents` is the iCalendar text, `encoding` `utf-8`, or the base64 of bytes that are not UTF-8, `encoding` `base64`.
 
-- Changed `item build --json` to print `{contents, encoding}` and `event build --json` to add `encoding`, both handing over bytes that are not UTF-8 in base64, where they failed.
+- Changed `event build --json` to add `encoding`, handing over bytes that are not UTF-8 in base64, where it failed.
 - **BREAKING**: Changed an event's `summary`, `description` and `location` to print `null` when absent, where they printed `""`.
 - **BREAKING**: Changed an event's `start` and `end` under `--json` to RFC 3339 with their offset (`Z` for UTC), or `YYYY-MM-DD` for a whole day with an exclusive end, where they were spelled as in iCalendar.
 - **BREAKING**: Changed `gcal calendars`, `gcal acl list`, `gcal events instances`, `gcal settings`, `gcal colors` and `gcal free-busy` to print under `--json` what Google answered, every key kept.
@@ -208,10 +207,10 @@ The configuration wizard, the tables and colours, and the `todo` and `journal` c
 - Changed `gcal instances`, `gcal move` and `gcal quick-add` to `gcal events instances`, `gcal events move` and `gcal events quick-add`, the flat names staying hidden commands.
 - Changed `gcal free-busy` to require `--from` and `--to`.
 - Changed `gcal acl update` to read the scope and its value from the rule id, `--scope` and `--value` now optional, one disagreeing with the id refused `usage-invalid`.
-- Changed `event create` and `item create` to `event add` and `item add`, `create` staying a hidden alias.
-- **BREAKING**: Changed four JSON schema names after their commands' new names.
+- Changed `event create` to `event add`, `create` staying a hidden alias.
+- **BREAKING**: Changed three JSON schema names after their commands' new names.
 
-  `calendula-caldav-list` and `calendula-caldav-create` are `calendula-caldav-propfind` and `calendula-caldav-mkcalendar`; `calendula-event-create` and `calendula-item-create` are `calendula-event-add` and `calendula-item-add`.
+  `calendula-caldav-list` and `calendula-caldav-create` are `calendula-caldav-propfind` and `calendula-caldav-mkcalendar`; `calendula-event-create` is `calendula-event-add`.
 
 - Changed each `json-schema` schema to carry an `$id` naming the contract version.
 - Changed piped `--json` output to print one value per line.
@@ -224,16 +223,16 @@ The configuration wizard, the tables and colours, and the `todo` and `journal` c
 - **BREAKING**: Changed `-d` on `caldav mkcalendar` and `vdir create` to set the description, where it set the display name, now `-n`.
 - Changed `--color` to take `-C` on `calendar create`, `calendar update`, `caldav mkcalendar` and `vdir create`.
 - **BREAKING**: Changed `calendar create` and `vdir create` naming an existing calendar to fail `calendar-duplicate`, writing nothing, where vdir wrote over its marker files and exited 0.
-- **BREAKING**: Changed a Google `event add` or `item add` naming a `UID` the calendar holds to fail `item-duplicate`, where it overwrote that event.
+- **BREAKING**: Changed a Google `event add` naming a `UID` the calendar holds to fail `item-duplicate`, where it overwrote that event.
 
   A CalDAV create answered 412 fails `item-duplicate` too. Graph and vdir still take a second item of one `UID`.
 
-- **BREAKING**: Changed a vdir `item update` or `event update` naming an id the calendar does not hold to fail `item-not-found`, where it created the item.
+- **BREAKING**: Changed a vdir `event update` naming an id the calendar does not hold to fail `event-not-found`, where it created the item.
 - **BREAKING**: Changed a CalDAV calendar or item id to print percent-decoded when it encodes back to the served segment (`My Cal`, not `My%20Cal`); an id printed before still addresses its resource.
-- Changed a CalDAV item read answered 400 to fail `item-not-found`, as a 404 does.
+- Changed a CalDAV item read answered 400 to fail `event-not-found`, as a 404 does.
 - Changed `calendar update` on CalDAV to write the colour first in its own request, so a server ignoring it fails the update before anything else changes; `calendar create --color` warns when the colour was not kept.
 - **BREAKING**: Changed `--from` and `--to` to read local days (`TZ`, then the system's zone), where they read UTC days, in `event list`, `caldav report query`, `gcal free-busy` and `gcal events instances`.
-- Changed `-s 0` on `event list` and `item list` to list every item, where it listed none.
+- Changed `-s 0` on `event list` to list every event, where it listed none.
 - Changed the local date windows (vdir, msgraph, pimdir) to keep a recurring event whose occurrences fall in them, not only one starting there.
 - Changed `event agenda` to name months and weekdays in the time locale (`LC_ALL`, `LC_TIME`, then `LANG`), and to read a month argument in English or in that language.
 - Changed `event update` to set `DTSTAMP`, and `LAST-MODIFIED` when present, to the time of the write.
@@ -254,6 +253,7 @@ The configuration wizard, the tables and colours, and the `todo` and `journal` c
 - **BREAKING**: Changed account resolution to refuse several accounts marked `default = true`, where one was taken at random; an unknown `-a <NAME>` lists the accounts.
 - **BREAKING**: Changed `-a default` to take the account named `default`, not the one marked `default = true`.
 - **BREAKING**: Changed `vdir.home-dir` to `vdir.root`.
+- **BREAKING**: Changed `item.composer` to `event.composer`.
 - **BREAKING**: Changed a CalDAV `server` or `home` to take an ASCII host only, an internationalised one written in Punycode (`xn--...`), the refusal naming the host.
 - Changed `caldav.auth` to be optional: a block naming none sends no `Authorization` header, as `auth = "none"` does.
 - Changed config.sample.toml to Himalaya's shape: one commented key per line, alternatives in brackets, `proxy` and `tls` as flat keys written once, one section per backend (CalDAV, JMAP, Google Calendar, Microsoft Graph, vdir, pimdir), the provider sections moved to the README.
@@ -264,7 +264,11 @@ The configuration wizard, the tables and colours, and the `todo` and `journal` c
 
 ### Removed
 
-- **BREAKING**: Removed `-w/--max-width` from `calendar list`, `event list` and `item list`.
+- **BREAKING**: Removed the `item` family (`item list`, `read`, `create`, `update`, `delete` and `build`, alias `items`) and its `item.list.page-size` option.
+
+  `event` covers the events, and `caldav get`, `caldav put`, `caldav report query --component` and `vdir item` reach any component raw.
+
+- **BREAKING**: Removed `-w/--max-width` from `calendar list` and `event list`.
 - **BREAKING**: Removed the table and colour options: `table.preset`, `table.arrangement` and the `*-color` keys of the `*.list.table` tables, the `page-size` keys staying.
 - **BREAKING**: Removed the configuration wizard: the `configure` command (alias `wizard`), the `wizard` cargo feature and the `calendula-configure` schema.
 
@@ -272,7 +276,7 @@ The configuration wizard, the tables and colours, and the `todo` and `journal` c
 
 - **BREAKING**: Removed the `todo` and `journal` commands and their `todo.list` and `journal.list` options, to-dos moving to [unfog](https://github.com/pimalaya/unfog) and journal entries to [journal](https://github.com/pimalaya/journal).
 
-  `item` still reads and writes any component raw.
+  `caldav` and `vdir item` still read and write any component raw.
 
 - **BREAKING**: Removed `caldav.discover`, the RFC 6764 lookup of a bare domain: set `caldav.server` to the server's CalDAV root.
 
@@ -288,8 +292,8 @@ The configuration wizard, the tables and colours, and the `todo` and `journal` c
 - Fixed one pimdir queue row that does not decode failing every `event list` and `event agenda`: they read on, with a warning.
 - Fixed a windowed listing aborting on a not-downloaded pimdir event whose stored `DTSTART` holds a multi-byte character.
 - Fixed a windowed `event list -s` sorting inside each page of the backend's order: it pages its occurrences sorted across the window.
-- Fixed the Graph backend ignoring the calendar named on an item read, update or delete, so `event delete -k A <id of B>` deleted from B: it fails `item-not-found`.
-- Fixed `event update` and `item update -i` on Microsoft Graph failing `precondition-failed` right after a create, when Exchange restamped the event by itself.
+- Fixed the Graph backend ignoring the calendar named on an item read, update or delete, so `event delete -k A <id of B>` deleted from B: it fails `event-not-found`.
+- Fixed `event update` on Microsoft Graph failing `precondition-failed` right after a create, when Exchange restamped the event by itself.
 - Fixed a msgraph listing failing on a `numbered` recurring series ([#10](https://github.com/pimalaya/calendula/issues/10)).
 - Fixed msgraph listings dropping the cancelled occurrences of a series ([#11](https://github.com/pimalaya/calendula/issues/11)).
 - Fixed msgraph listings repeating an event Graph returned on both sides of a page boundary ([#12](https://github.com/pimalaya/calendula/issues/12)).
@@ -302,7 +306,7 @@ The configuration wizard, the tables and colours, and the `todo` and `journal` c
 - Fixed a Google series written in another zone than its calendar's drifting an hour across a daylight-saving change.
 - Fixed a Google or Outlook account refusing an event with neither `DTEND` nor `DURATION`: it ends at its start, or the next day after a date start (RFC 5545 3.6.1).
 - Fixed `event add --attendee` on a Google account mailing no invitation: an event the account organizes is inserted with `sendUpdates=all`, keeping its `UID` ([#20](https://github.com/pimalaya/calendula/issues/20)).
-- Fixed `event read` of a deleted Google event printing its cancelled stub: it fails `item-not-found`, and so does an update over it.
+- Fixed `event read` of a deleted Google event printing its cancelled stub: it fails `event-not-found`, and so does an update over it.
 - Fixed a Google calendar or event id holding `#`, `?` or `/` naming another resource, so a subscribed calendar such as `en.usa#holiday@group.v.calendar.google.com` lists.
 - Fixed a Google listing failing whole on a value calendula does not know: it prints it as the API spells it, and an update leaves it as the server has it.
 - Fixed an update of a Google event whose reminders are off turning the calendar's default reminders back on.
@@ -313,13 +317,13 @@ The configuration wizard, the tables and colours, and the `todo` and `journal` c
 - Fixed an Outlook event's alarm that Graph's reminder cannot hold coming back scattered across the event after a write.
 - Fixed an unset Outlook calendar colour printing `""`: it prints `null`.
 - Fixed a folded line Google or Graph does not model coming back damaged after a write.
-- Fixed a CalDAV `event update` or `item update` given a source creating an item under an id the calendar did not hold: it fails `item-not-found`.
+- Fixed a CalDAV `event update` given a source creating an item under an id the calendar did not hold: it fails `event-not-found`.
 - Fixed a CalDAV calendar or item id that is empty or holds an empty, `.` or `..` segment reaching the server, where `calendar delete ..` could delete the home set's parent: it fails before connecting.
 - Fixed a CalDAV calendar colour written as the inf-it `calendar-color`, which iCloud ignores: it is written and read as Apple's, the inf-it one still read.
 - Fixed `calendar update -d ""` keeping the description on CalDAV and Google while reporting success, and `-C ""` writing nothing on CalDAV.
 - Fixed a CalDAV to-do or journal entry named by a digest: a create names it after its `UID`, as an event.
 - Fixed a CalDAV item created from a `UID` holding `@` printing another id than the listings: the resource name is percent-encoded (`%40`).
-- Fixed a CalDAV item read through a listing losing its final CRLF, so it matches the body `item read` returns.
+- Fixed a CalDAV item read through a listing losing its final CRLF, so it matches the body `event read` returns.
 - Fixed a CalDAV weak entity tag losing its closing quote, in a listing and in `--if-match`.
 - Fixed a `caldav.server` with a scheme other than `http` or `https`, or one failing to parse, read as a bare host: it is refused.
 - Fixed a `caldav` block naming both `server` and `home` loading with `home` winning silently: it is refused.
@@ -340,8 +344,9 @@ The configuration wizard, the tables and colours, and the `todo` and `journal` c
 - Fixed a `TZID` with a leading slash (`/Europe/Paris`) read in the local zone rather than its own.
 - Fixed a `VTIMEZONE` stating no observance read as UTC: the time is read in the local zone, with `zoneAssumed`.
 - Fixed an `EXDATE` or a `RECURRENCE-ID` written in UTC on a zoned series missing its occurrence, the excluded one still listing and the override listing beside the one it replaced.
-- Fixed the `event delete` help naming the iCalendar `UID`: it takes the id `event list` shows, a `UID` failing `item-not-found` naming `event read --uid`.
-- Fixed `event read` and `item read` printing the stored iCalendar's control characters, which could drive the terminal: the text replaces them, `--json` keeping the stored text.
+- Fixed the `event delete` help naming the iCalendar `UID`: it takes the id `event list` shows, a `UID` failing `event-not-found` naming `event read --uid`.
+- Fixed `event read` printing the stored iCalendar's control characters, which could drive the terminal: the text replaces them, `--json` keeping the stored text.
+- Fixed `event update` and `event delete` overwriting or deleting a to-do or a journal entry named by its id: they fail `event-not-found`, as `event read` does, and `event add` and `event update` refuse a source holding no VEVENT `event-invalid`.
 - Fixed a credential command prompting for a password (`systemd-ask-password`) hanging the run: it reads the terminal.
 - Fixed a credential command run again each time a command reopened its backend: it runs once per account.
 - Fixed install.sh saving an HTTP error page as the archive: it stops on the error.

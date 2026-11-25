@@ -137,7 +137,7 @@ impl VdirBackend {
     /// Lists a collection's iCalendar items, dropping any vCards a
     /// mixed directory holds beside them.
     ///
-    /// A file that cannot be read is an `item-unreadable` entry, named on
+    /// A file that cannot be read is an `event-unreadable` entry, named on
     /// the first window alone since it holds no place in any; one removed
     /// since the directory was listed is left out.
     pub fn list_items(
@@ -201,7 +201,7 @@ impl VdirBackend {
     }
 
     /// Overwrites the bytes of an item the calendar holds, an id naming
-    /// none refused `item-not-found` as on every other backend, never
+    /// none refused `event-not-found` as on every other backend, never
     /// written.
     ///
     /// vdir carries no entity tag, so `if_match` cannot be honoured.
@@ -284,12 +284,12 @@ fn is_kind(item: &CalendarItem, kind: Option<IcalComponentKind>) -> bool {
 }
 
 /// The failure of an item read: a file located but not read is
-/// `item-unreadable`, its `io::Error` kept in the message.
+/// `event-unreadable`, its `io::Error` kept in the message.
 fn unreadable(err: VdirClientError) -> anyhow::Error {
     match err {
         VdirClientError::FileRead { .. }
         | VdirClientError::VdirItemGet(VdirItemGetError::Unreadable(_)) => {
-            recoded(ErrorCode::ItemUnreadable, err)
+            recoded(ErrorCode::EventUnreadable, err)
         }
         err => err.into(),
     }
@@ -322,11 +322,11 @@ mod tests {
         let (_home, mut backend) = backend();
 
         let err = backend.get_item("cal", "nope").unwrap_err();
-        assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+        assert_eq!(code(&err), Some(ErrorCode::EventNotFound), "{err:#}");
         assert!(!format!("{err:#}").contains("Read item"), "{err:#}");
 
         let err = backend.delete_item("cal", "nope", None).unwrap_err();
-        assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+        assert_eq!(code(&err), Some(ErrorCode::EventNotFound), "{err:#}");
 
         let patch = CalendarDiff {
             name: Some("Renamed".into()),
@@ -336,7 +336,7 @@ mod tests {
         assert_eq!(code_of(&err), Some(ErrorCode::CalendarNotFound), "{err:#}");
     }
 
-    /// An update naming no item of the calendar fails `item-not-found` and
+    /// An update naming no item of the calendar fails `event-not-found` and
     /// writes nothing, where it created the item; one naming an item
     /// overwrites it.
     #[test]
@@ -347,7 +347,7 @@ mod tests {
         let err = backend
             .update_item("cal", "nope", ical.clone(), None)
             .unwrap_err();
-        assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+        assert_eq!(code(&err), Some(ErrorCode::EventNotFound), "{err:#}");
         assert!(!home.path().join("cal").join("nope.ics").exists());
 
         backend.update_item("cal", "a", ical.clone(), None).unwrap();
@@ -371,6 +371,6 @@ mod tests {
         }
 
         let err = backend.get_item("cal", "a").unwrap_err();
-        assert_eq!(code_of(&err), Some(ErrorCode::ItemUnreadable), "{err:#}");
+        assert_eq!(code_of(&err), Some(ErrorCode::EventUnreadable), "{err:#}");
     }
 }

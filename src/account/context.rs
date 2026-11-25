@@ -24,14 +24,12 @@ const DEFAULT_LIST_PAGE_SIZE: u32 = 25;
 pub struct Account {
     /// Page size `event list` falls back to.
     pub events_list_page_size: Option<u32>,
-    /// Page size `item list` falls back to.
-    pub items_list_page_size: Option<u32>,
-    /// Fallback calendar id for `event` and `item` commands when their
+    /// Fallback calendar id for `event` commands when their
     /// `-k/--calendar` flag is omitted.
     pub calendar_default: Option<String>,
-    /// Command an item is edited through, spawned on the path of a
+    /// Command an event is edited through, spawned on the path of a
     /// temporary iCalendar file.
-    pub item_composer: Option<CommandConfig>,
+    pub event_composer: Option<CommandConfig>,
 }
 
 impl Account {
@@ -39,10 +37,8 @@ impl Account {
     pub fn merge(self, other: Self) -> Self {
         Self {
             events_list_page_size: other.events_list_page_size.or(self.events_list_page_size),
-            items_list_page_size: other.items_list_page_size.or(self.items_list_page_size),
-
             calendar_default: other.calendar_default.or(self.calendar_default),
-            item_composer: other.item_composer.or(self.item_composer),
+            event_composer: other.event_composer.or(self.event_composer),
         }
     }
 
@@ -51,32 +47,26 @@ impl Account {
         self.events_list_page_size.unwrap_or(DEFAULT_LIST_PAGE_SIZE)
     }
 
-    /// Page size `item list` uses when `-s/--page-size` is omitted.
-    pub fn items_list_page_size(&self) -> u32 {
-        self.items_list_page_size.unwrap_or(DEFAULT_LIST_PAGE_SIZE)
-    }
-
-    /// Resolves the calendar id an `event` or `item` command operates
-    /// on: the `-k/--calendar` flag wins; otherwise the
-    /// `calendar.default` config is used; otherwise the command fails coded
-    /// `calendar-default-missing`.
+    /// Resolves the calendar id an `event` command operates on: the
+    /// `-k/--calendar` flag wins; otherwise the `calendar.default` config is
+    /// used; otherwise the command fails coded `calendar-default-missing`.
     pub fn calendar_id(&self, flag: Option<String>) -> Result<String> {
         flag.or_else(|| self.calendar_default.clone())
             .ok_or_else(error::calendar_default_missing)
     }
 
-    /// Resolves the composer an item is edited through.
+    /// Resolves the composer an event is edited through.
     ///
-    /// The flag wins, taken as a shell line, then the `item.composer`
+    /// The flag wins, taken as a shell line, then the `event.composer`
     /// config, otherwise this bails naming both ways of setting one.
-    pub fn item_composer(&self, flag: Option<String>) -> Result<CommandConfig> {
+    pub fn event_composer(&self, flag: Option<String>) -> Result<CommandConfig> {
         if let Some(line) = flag {
             return Ok(CommandConfig::Shell(line));
         }
 
-        let Some(composer) = self.item_composer.clone() else {
+        let Some(composer) = self.event_composer.clone() else {
             bail!(
-                "No composer configured; set item.composer or pass --composer <COMMAND>, \
+                "No composer configured; set event.composer or pass --composer <COMMAND>, \
                  which is spawned on the path of the iCalendar to edit"
             )
         };
@@ -89,9 +79,8 @@ impl From<Config> for Account {
     fn from(config: Config) -> Self {
         Self {
             events_list_page_size: config.event.list.page_size,
-            items_list_page_size: config.item.list.page_size,
             calendar_default: config.calendar.default,
-            item_composer: config.item.composer,
+            event_composer: config.event.composer,
         }
     }
 }
@@ -100,9 +89,8 @@ impl From<AccountConfig> for Account {
     fn from(config: AccountConfig) -> Self {
         Self {
             events_list_page_size: config.event.list.page_size,
-            items_list_page_size: config.item.list.page_size,
             calendar_default: config.calendar.default,
-            item_composer: config.item.composer,
+            event_composer: config.event.composer,
         }
     }
 }

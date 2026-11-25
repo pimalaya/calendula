@@ -107,11 +107,11 @@ pub fn connect(config: &MsgraphConfig, resolver: &mut SecretResolver) -> Result<
         .context("Cannot connect to Microsoft Graph")
 }
 
-/// The failure of a request naming one event: `item-not-found` when Graph
+/// The failure of a request naming one event: `event-not-found` when Graph
 /// holds no such event ([`is_missing`]), its message kept.
 pub fn event_refusal(err: MsgraphClientStdError) -> anyhow::Error {
     match is_missing(&err) {
-        true => recoded(ErrorCode::ItemNotFound, err),
+        true => recoded(ErrorCode::EventNotFound, err),
         false => err.into(),
     }
 }
@@ -178,7 +178,7 @@ mod tests {
     }
 
     /// A command naming an event Graph does not hold carries
-    /// `item-not-found`, one naming a calendar `calendar-not-found`, as the
+    /// `event-not-found`, one naming a calendar `calendar-not-found`, as the
     /// unified commands code them, Graph's message kept; another refusal
     /// keeps its own code.
     #[test]
@@ -191,7 +191,7 @@ mod tests {
         let err = get
             .execute(printer, refusing(404, "ErrorItemNotFound"))
             .unwrap_err();
-        assert_eq!(error::code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+        assert_eq!(error::code(&err), Some(ErrorCode::EventNotFound), "{err:#}");
         assert!(format!("{err:#}").contains("Refused"), "{err:#}");
 
         let delete = |status, code| {
@@ -205,7 +205,7 @@ mod tests {
         };
         assert_eq!(
             delete(400, "ErrorInvalidIdMalformed"),
-            Some(ErrorCode::ItemNotFound)
+            Some(ErrorCode::EventNotFound)
         );
         assert_eq!(
             delete(403, "ErrorAccessDenied"),

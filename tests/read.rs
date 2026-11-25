@@ -78,47 +78,40 @@ fn a_read_prints_the_stored_body_defused() {
     let home = account();
 
     assert_eq!(run(home.path(), &["event", "read", "a"]), PRINTED);
-    assert_eq!(run(home.path(), &["item", "read", "a"]), PRINTED);
 }
 
 #[test]
 fn a_read_keeps_the_stored_bytes_in_json() {
     let home = account();
 
-    for family in ["event", "item"] {
-        let stdout = run(home.path(), &["--json", family, "read", "a"]);
-        let json: Value = serde_json::from_str(&stdout).unwrap();
-        assert_eq!(json["contents"], BODY, "{family}");
-    }
+    let stdout = run(home.path(), &["--json", "event", "read", "a"]);
+    let json: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["contents"], BODY);
 }
 
 /// An id the calendar does not hold fails a read, an update or a delete
-/// with a failure object coded `item-not-found`, its sentence Himalaya's
-/// for a missing message, the event commands saying how an event is
-/// named; an update given a source creates nothing, and the backend's own
-/// answer is the one source under the sentence.
+/// with a failure object coded `event-not-found`, its sentence Himalaya's
+/// for a missing message, saying how an event is named; an update given a
+/// source creates nothing, and the backend's own answer is the one source
+/// under the sentence.
 #[test]
 fn an_unknown_id_is_coded_not_found() {
     let home = account();
     let config = home.path().join("config.toml");
 
-    let item = "Item `nope` not found in calendar `personal`";
     let event = "Event `nope` not found in calendar `personal`; an event is named by \
                  the id `event list` shows, `event read --uid <UID>` reading it by its \
                  iCalendar UID";
 
-    let ical = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n";
-    let commands: &[(&[&str], &str)] = &[
-        (&["item", "read", "nope"], item),
-        (&["item", "update", "nope", ical], item),
-        (&["event", "update", "nope", ical], event),
-        (&["item", "delete", "nope"], item),
-        (&["event", "read", "nope"], event),
-        (&["event", "update", "nope", "--summary", "Bob"], event),
-        (&["event", "delete", "nope"], event),
+    let ical = BODY;
+    let commands: &[&[&str]] = &[
+        &["event", "update", "nope", ical],
+        &["event", "read", "nope"],
+        &["event", "update", "nope", "--summary", "Bob"],
+        &["event", "delete", "nope"],
     ];
 
-    for (args, error) in commands {
+    for args in commands {
         let output = Command::new(env!("CARGO_BIN_EXE_calendula"))
             .args(["-c", config.to_str().unwrap(), "--json"])
             .args(*args)
@@ -129,8 +122,8 @@ fn an_unknown_id_is_coded_not_found() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert_eq!(output.status.code(), Some(1), "{args:?}: {stdout}");
         let json: Value = serde_json::from_str(&stdout).unwrap();
-        assert_eq!(json["code"], "item-not-found", "{args:?}: {json}");
-        assert_eq!(json["error"], *error, "{args:?}: {json}");
+        assert_eq!(json["code"], "event-not-found", "{args:?}: {json}");
+        assert_eq!(json["error"], event, "{args:?}: {json}");
 
         let sources = json["sources"].as_array().unwrap();
         assert_eq!(sources.len(), 1, "{args:?}: {json}");
@@ -140,46 +133,32 @@ fn an_unknown_id_is_coded_not_found() {
     assert!(!written.exists(), "an update created the item");
 }
 
-/// A read always carries the item's bytes, as cardamum's card reads do: an
-/// empty file reads as the empty text, never `null`.
+/// A read prints the event's resource: its id, its calendar and its
+/// version beside its contents, as text, the version the one `event list`
+/// shows.
 #[test]
-fn an_empty_item_reads_as_the_empty_text() {
-    let home = account();
-    fs::write(home.path().join("personal").join("e.ics"), "").unwrap();
-
-    let stdout = run(home.path(), &["--json", "item", "read", "e"]);
-    let json: Value = serde_json::from_str(&stdout).unwrap();
-    assert_eq!(json["contents"], "", "{json}");
-    assert_eq!(json["encoding"], "utf-8", "{json}");
-}
-
-/// Both reads print the row `item list` prints: the item's id, its
-/// calendar and its version beside its contents, as text.
-#[test]
-fn a_read_prints_the_row_its_list_prints() {
+fn a_read_prints_the_resource_its_list_names() {
     let home = account();
 
-    let list = run(home.path(), &["--json", "item", "list"]);
+    let list = run(home.path(), &["--json", "event", "list"]);
     let list: Value = serde_json::from_str(&list).unwrap();
-    let row = &list["items"][0];
+    let row = &list["events"][0];
 
-    for family in ["event", "item"] {
-        let stdout = run(home.path(), &["--json", family, "read", "a"]);
-        let json: Value = serde_json::from_str(&stdout).unwrap();
+    let stdout = run(home.path(), &["--json", "event", "read", "a"]);
+    let json: Value = serde_json::from_str(&stdout).unwrap();
 
-        for key in ["id", "calendarId", "etag", "contents", "encoding"] {
-            assert_eq!(json[key], row[key], "{family} {key}: {json}");
-        }
-
-        assert_eq!(json["id"], "a", "{family}");
-        assert_eq!(json["calendarId"], "personal", "{family}");
-        assert_eq!(json["encoding"], "utf-8", "{family}");
+    for key in ["id", "calendarId", "etag"] {
+        assert_eq!(json[key], row[key], "{key}: {json}");
     }
+
+    assert_eq!(json["id"], "a");
+    assert_eq!(json["calendarId"], "personal");
+    assert_eq!(json["contents"], BODY);
+    assert_eq!(json["encoding"], "utf-8");
 }
 
 /// A body that is not valid UTF-8 prints as base64 under `--json`, never
-/// decoded lossily, in a listing and in both reads, and its text view
-/// replaces what does not decode.
+/// decoded lossily, and its text view replaces what does not decode.
 #[test]
 fn a_body_that_is_not_utf8_is_base64_in_json() {
     use base64_codec::codec::Base64Codec;
@@ -196,20 +175,13 @@ fn a_body_that_is_not_utf8_is_base64_in_json() {
     Base64Codec::default().encode_vec(body, &mut base64);
     let base64 = String::from_utf8(base64).unwrap();
 
-    let list = run(home.path(), &["--json", "item", "list"]);
-    let list: Value = serde_json::from_str(&list).unwrap();
-    assert_eq!(list["items"][0]["contents"], base64, "{list}");
-    assert_eq!(list["items"][0]["encoding"], "base64", "{list}");
+    let stdout = run(home.path(), &["--json", "event", "read", "a"]);
+    let json: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["contents"], base64);
+    assert_eq!(json["encoding"], "base64");
 
-    for family in ["event", "item"] {
-        let stdout = run(home.path(), &["--json", family, "read", "a"]);
-        let json: Value = serde_json::from_str(&stdout).unwrap();
-        assert_eq!(json["contents"], base64, "{family}");
-        assert_eq!(json["encoding"], "base64", "{family}");
-
-        let text = run(home.path(), &[family, "read", "a"]);
-        assert!(text.contains("SUMMARY:Caf\u{fffd}\n"), "{family}: {text}");
-    }
+    let text = run(home.path(), &["event", "read", "a"]);
+    assert!(text.contains("SUMMARY:Caf\u{fffd}\n"), "{text}");
 }
 
 /// An event carrying no `DESCRIPTION` nor `LOCATION` prints them `null`,

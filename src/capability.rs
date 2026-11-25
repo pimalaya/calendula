@@ -3,7 +3,7 @@
 //! What each backend serves of the unified API.
 //!
 //! A capability is named after the unified command it stands for,
-//! `<noun>.<verb>` (`item.delete`, `calendar.update`), or
+//! `<noun>.<verb>` (`event.delete`, `calendar.update`), or
 //! `<noun>.<verb>.<argument>` for a flag of that command a backend may
 //! not serve (`event.add.online-meeting`), never in the store's
 //! vocabulary. A backend declares a capability only when it gives the
@@ -42,22 +42,22 @@ pub enum Capability {
     CalendarDescription,
     /// Setting a calendar's colour.
     CalendarColor,
-    /// Listing a calendar's items.
-    ItemList,
-    /// Reading an item.
-    ItemRead,
+    /// Listing a calendar's events.
+    EventList,
+    /// Reading an event.
+    EventRead,
     /// Searching the events with the pimdir query language.
     EventSearch,
-    /// Adding an item to a calendar.
-    ItemAdd,
-    /// Replacing an item.
-    ItemUpdate,
-    /// Deleting an item.
-    ItemDelete,
-    /// Replacing an item only while it is at a given version.
-    ItemUpdateIfMatch,
-    /// Deleting an item only while it is at a given version.
-    ItemDeleteIfMatch,
+    /// Adding an event to a calendar.
+    EventAdd,
+    /// Replacing an event.
+    EventUpdate,
+    /// Deleting an event.
+    EventDelete,
+    /// Replacing an event only while it is at a given version.
+    EventUpdateIfMatch,
+    /// Deleting an event only while it is at a given version.
+    EventDeleteIfMatch,
     /// Asking for an online meeting with an event.
     OnlineMeeting,
     /// Choosing whom a write notifies (`--send-updates`).
@@ -74,14 +74,14 @@ impl Capability {
         C::CalendarDelete,
         C::CalendarDescription,
         C::CalendarColor,
-        C::ItemList,
-        C::ItemRead,
+        C::EventList,
+        C::EventRead,
         C::EventSearch,
-        C::ItemAdd,
-        C::ItemUpdate,
-        C::ItemDelete,
-        C::ItemUpdateIfMatch,
-        C::ItemDeleteIfMatch,
+        C::EventAdd,
+        C::EventUpdate,
+        C::EventDelete,
+        C::EventUpdateIfMatch,
+        C::EventDeleteIfMatch,
         C::OnlineMeeting,
         C::SchedulingSendUpdates,
     ];
@@ -97,14 +97,14 @@ impl Capability {
             Self::CalendarDelete => "calendar.delete",
             Self::CalendarDescription => "calendar.update.description",
             Self::CalendarColor => "calendar.update.color",
-            Self::ItemList => "item.list",
-            Self::ItemRead => "item.read",
+            Self::EventList => "event.list",
+            Self::EventRead => "event.read",
             Self::EventSearch => "event.search",
-            Self::ItemAdd => "item.add",
-            Self::ItemUpdate => "item.update",
-            Self::ItemDelete => "item.delete",
-            Self::ItemUpdateIfMatch => "item.update.if-match",
-            Self::ItemDeleteIfMatch => "item.delete.if-match",
+            Self::EventAdd => "event.add",
+            Self::EventUpdate => "event.update",
+            Self::EventDelete => "event.delete",
+            Self::EventUpdateIfMatch => "event.update.if-match",
+            Self::EventDeleteIfMatch => "event.delete.if-match",
             Self::OnlineMeeting => "event.add.online-meeting",
             Self::SchedulingSendUpdates => "event.update.send-updates",
         }
@@ -227,21 +227,21 @@ const LEAVES: &[(&str, &str, &[Capability])] = &[
         &[C::CalendarUpdate, C::CalendarDescription, C::CalendarColor],
     ),
     ("calendar", "delete", &[C::CalendarDelete]),
-    ("event", "agenda", &[C::ItemList]),
-    ("event", "list", &[C::ItemList]),
-    ("event", "read", &[C::ItemRead]),
+    ("event", "agenda", &[C::EventList]),
+    ("event", "list", &[C::EventList]),
+    ("event", "read", &[C::EventRead]),
     ("event", "search", &[C::EventSearch]),
     (
         "event",
         "add",
-        &[C::ItemAdd, C::OnlineMeeting, C::SchedulingSendUpdates],
+        &[C::EventAdd, C::OnlineMeeting, C::SchedulingSendUpdates],
     ),
     (
         "event",
         "update",
         &[
-            C::ItemUpdate,
-            C::ItemUpdateIfMatch,
+            C::EventUpdate,
+            C::EventUpdateIfMatch,
             C::OnlineMeeting,
             C::SchedulingSendUpdates,
         ],
@@ -250,16 +250,11 @@ const LEAVES: &[(&str, &str, &[Capability])] = &[
         "event",
         "delete",
         &[
-            C::ItemDelete,
-            C::ItemDeleteIfMatch,
+            C::EventDelete,
+            C::EventDeleteIfMatch,
             C::SchedulingSendUpdates,
         ],
     ),
-    ("item", "list", &[C::ItemList]),
-    ("item", "read", &[C::ItemRead]),
-    ("item", "add", &[C::ItemAdd]),
-    ("item", "update", &[C::ItemUpdate, C::ItemUpdateIfMatch]),
-    ("item", "delete", &[C::ItemDelete, C::ItemDeleteIfMatch]),
 ];
 
 /// Whether `backend` serves the leaf `group leaf` at all, its first
@@ -371,14 +366,14 @@ const VDIR: &[Row] = &[
     (C::CalendarDelete, Full),
     (C::CalendarDescription, Full),
     (C::CalendarColor, Full),
-    (C::ItemList, Full),
-    (C::ItemRead, Full),
+    (C::EventList, Full),
+    (C::EventRead, Full),
     (C::EventSearch, Not(NO_SEARCH)),
-    (C::ItemAdd, Full),
-    (C::ItemUpdate, Full),
-    (C::ItemDelete, Full),
-    (C::ItemUpdateIfMatch, Not(NO_VERSION)),
-    (C::ItemDeleteIfMatch, Not(NO_VERSION)),
+    (C::EventAdd, Full),
+    (C::EventUpdate, Full),
+    (C::EventDelete, Full),
+    (C::EventUpdateIfMatch, Not(NO_VERSION)),
+    (C::EventDeleteIfMatch, Not(NO_VERSION)),
     (C::OnlineMeeting, Not(NO_MEETING)),
     (
         C::SchedulingSendUpdates,
@@ -395,14 +390,14 @@ const PIMDIR: &[Row] = &[
     (C::CalendarDelete, Not(PIMDIR_CALENDAR)),
     (C::CalendarDescription, Not(PIMDIR_CALENDAR)),
     (C::CalendarColor, Not(PIMDIR_CALENDAR)),
-    (C::ItemList, Full),
-    (C::ItemRead, Full),
+    (C::EventList, Full),
+    (C::EventRead, Full),
     (C::EventSearch, Full),
-    (C::ItemAdd, Partial(PIMDIR_QUEUED)),
-    (C::ItemUpdate, Partial(PIMDIR_QUEUED)),
-    (C::ItemDelete, Partial(PIMDIR_QUEUED)),
-    (C::ItemUpdateIfMatch, Full),
-    (C::ItemDeleteIfMatch, Full),
+    (C::EventAdd, Partial(PIMDIR_QUEUED)),
+    (C::EventUpdate, Partial(PIMDIR_QUEUED)),
+    (C::EventDelete, Partial(PIMDIR_QUEUED)),
+    (C::EventUpdateIfMatch, Full),
+    (C::EventDeleteIfMatch, Full),
     (
         C::OnlineMeeting,
         Partial(
@@ -434,14 +429,14 @@ const CALDAV: &[Row] = &[
     ),
     (C::CalendarDescription, Full),
     (C::CalendarColor, Full),
-    (C::ItemList, Full),
-    (C::ItemRead, Full),
+    (C::EventList, Full),
+    (C::EventRead, Full),
     (C::EventSearch, Not(NO_SEARCH)),
-    (C::ItemAdd, Full),
-    (C::ItemUpdate, Full),
-    (C::ItemDelete, Full),
-    (C::ItemUpdateIfMatch, Full),
-    (C::ItemDeleteIfMatch, Full),
+    (C::EventAdd, Full),
+    (C::EventUpdate, Full),
+    (C::EventDelete, Full),
+    (C::EventUpdateIfMatch, Full),
+    (C::EventDeleteIfMatch, Full),
     (C::OnlineMeeting, Not(NO_MEETING)),
     (
         C::SchedulingSendUpdates,
@@ -475,14 +470,14 @@ const JMAP: &[Row] = &[
     ),
     (C::CalendarDescription, Full),
     (C::CalendarColor, Full),
-    (C::ItemList, Full),
-    (C::ItemRead, Full),
+    (C::EventList, Full),
+    (C::EventRead, Full),
     (C::EventSearch, Not(NO_SEARCH)),
-    (C::ItemAdd, Partial(JMAP_EVENT)),
-    (C::ItemUpdate, Partial(JMAP_EVENT)),
-    (C::ItemDelete, Full),
-    (C::ItemUpdateIfMatch, Partial(JMAP_HASH)),
-    (C::ItemDeleteIfMatch, Partial(JMAP_HASH)),
+    (C::EventAdd, Partial(JMAP_EVENT)),
+    (C::EventUpdate, Partial(JMAP_EVENT)),
+    (C::EventDelete, Full),
+    (C::EventUpdateIfMatch, Partial(JMAP_HASH)),
+    (C::EventDeleteIfMatch, Partial(JMAP_HASH)),
     (C::OnlineMeeting, Not(NO_MEETING)),
     (
         C::SchedulingSendUpdates,
@@ -508,14 +503,14 @@ const GCAL: &[Row] = &[
         C::CalendarColor,
         Partial("a Google calendar always carries a colour, so clearing it is refused"),
     ),
-    (C::ItemList, Full),
-    (C::ItemRead, Full),
+    (C::EventList, Full),
+    (C::EventRead, Full),
     (C::EventSearch, Not(NO_SEARCH)),
-    (C::ItemAdd, Partial(GCAL_SERIES)),
-    (C::ItemUpdate, Partial(GCAL_SERIES)),
-    (C::ItemDelete, Full),
-    (C::ItemUpdateIfMatch, Full),
-    (C::ItemDeleteIfMatch, Full),
+    (C::EventAdd, Partial(GCAL_SERIES)),
+    (C::EventUpdate, Partial(GCAL_SERIES)),
+    (C::EventDelete, Full),
+    (C::EventUpdateIfMatch, Full),
+    (C::EventDeleteIfMatch, Full),
     (C::OnlineMeeting, Not(NO_MEETING)),
     (
         C::SchedulingSendUpdates,
@@ -544,14 +539,14 @@ const MSGRAPH: &[Row] = &[
         C::CalendarColor,
         Not("a Graph calendar names its colour from a palette and takes no RGB one"),
     ),
-    (C::ItemList, Full),
-    (C::ItemRead, Full),
+    (C::EventList, Full),
+    (C::EventRead, Full),
     (C::EventSearch, Not(NO_SEARCH)),
-    (C::ItemAdd, Partial(MSGRAPH_SERIES)),
-    (C::ItemUpdate, Partial(MSGRAPH_SERIES)),
-    (C::ItemDelete, Full),
-    (C::ItemUpdateIfMatch, Partial(CHANGE_KEY)),
-    (C::ItemDeleteIfMatch, Partial(CHANGE_KEY)),
+    (C::EventAdd, Partial(MSGRAPH_SERIES)),
+    (C::EventUpdate, Partial(MSGRAPH_SERIES)),
+    (C::EventDelete, Full),
+    (C::EventUpdateIfMatch, Partial(CHANGE_KEY)),
+    (C::EventDeleteIfMatch, Partial(CHANGE_KEY)),
     (C::OnlineMeeting, Not(NO_MEETING)),
     (
         C::SchedulingSendUpdates,
@@ -582,13 +577,13 @@ mod tests {
 
     #[test]
     fn an_unserved_flag_is_refused_naming_the_backend_serving_it() {
-        let capabilities = [Capability::ItemDelete, Capability::ItemDeleteIfMatch];
+        let capabilities = [Capability::EventDelete, Capability::EventDeleteIfMatch];
 
         let err = require("vdir", &["vdir", "pimdir", "caldav"], &capabilities).unwrap_err();
         assert_eq!(code_of(&err), Some(ErrorCode::CapabilityMissing));
         let message = err.to_string();
         assert!(message.starts_with("The vdir backend"), "{message}");
-        assert!(message.contains("`item.delete.if-match`"), "{message}");
+        assert!(message.contains("`event.delete.if-match`"), "{message}");
         let named = "pimdir backend serves it (`--backend pimdir`)";
         assert!(message.ends_with(named), "{message}");
 

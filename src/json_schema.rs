@@ -29,7 +29,7 @@ use schemars::JsonSchema;
 use crate::shared::receipt::IdReceipt;
 use crate::{
     error::{ErrorCode, ItemError},
-    shared::{build::IcalBuildOutput, receipt::WriteReceipt},
+    shared::receipt::WriteReceipt,
 };
 
 /// Builds the command-to-schema registry consumed by `json-schema <DIR>`.
@@ -87,14 +87,6 @@ pub fn registry() -> JsonSchemaRegistry {
         "calendula-event-search",
         crate::shared::event::search::EventSearchOutput
     );
-    insert!(
-        "calendula-item-list",
-        crate::shared::item::list::ItemListOutput
-    );
-    insert!(
-        "calendula-item-read",
-        crate::shared::item::read::ItemReadOutput
-    );
 
     // NOTE: a build prints the item, or under `-o` the file written.
     insert!(
@@ -109,18 +101,6 @@ pub fn registry() -> JsonSchemaRegistry {
         "calendula-event-update",
         crate::shared::event::update::EventUpdateOutput
     );
-    insert!(
-        "calendula-item-build",
-        OneOf<IcalBuildOutput, SavedOutput>
-    );
-    insert!(
-        "calendula-item-add",
-        crate::shared::item::create::ItemCreateOutput
-    );
-    insert!(
-        "calendula-item-update",
-        crate::shared::item::update::ItemUpdateOutput
-    );
 
     insert!(
         "calendula-calendar-create",
@@ -131,7 +111,6 @@ pub fn registry() -> JsonSchemaRegistry {
         "calendula-calendar-update",
         "calendula-calendar-delete",
         "calendula-event-delete",
-        "calendula-item-delete",
     ] {
         insert!(key, WriteReceipt);
     }

@@ -3,10 +3,11 @@
 //! The VEVENT projection over the shared items, and the `event` command
 //! family built on it.
 //!
-//! A calendar collection mixes component kinds, so the `event` commands read
-//! the same items the `item` commands do and keep only the VEVENTs. [`Event`]
-//! is that projection: what a listing, an agenda or a script reads of an
-//! event, its times resolved to instants ([`expand`]).
+//! A calendar collection may mix component kinds, so the `event` commands
+//! keep only the VEVENTs, and never touch a resource holding none
+//! ([`ensure_event`]). [`Event`] is the projection: what a listing, an
+//! agenda or a script reads of an event, its times resolved to instants
+//! ([`expand`]).
 //!
 //! The bytes themselves are never rewritten, so a projection is read-only and
 //! lossy by design.
@@ -26,14 +27,18 @@ pub mod update;
 
 use anyhow::Result;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-use ical::tree::error::IcalParseError;
+use ical::{component::IcalComponentKind, tree::error::IcalParseError};
 use jiff::{Timestamp, tz::TimeZone};
+use pimalaya_cli::error::CodedError;
 use schemars::JsonSchema;
 use serde::{Serialize, Serializer};
 
 use crate::{
-    error::{self, ItemError},
-    shared::item::{CalendarItem, CalendarTimeRange},
+    error::{self, ErrorCode, ItemError, event_missing, event_not_found},
+    shared::{
+        ical::may_hold_kind,
+        item::{CalendarItem, CalendarTimeRange},
+    },
 };
 
 /// A VEVENT projected out of a [`CalendarItem`]'s iCalendar bytes, or one
@@ -214,7 +219,7 @@ impl Event {
     }
 
     /// The events `project` reads off each of `items`, an item whose bytes
-    /// do not parse printing no event but an `item-unreadable` entry pushed
+    /// do not parse printing no event but an `event-unreadable` entry pushed
     /// to `errors`. Returns the events and how many items they came from.
     pub fn read_all(
         items: &[CalendarItem],
@@ -270,6 +275,32 @@ impl Event {
         let date = NaiveDate::from_ymd_opt(at.year().into(), at.month() as u32, at.day() as u32)?;
         date.and_hms_opt(at.hour() as u32, at.minute() as u32, at.second() as u32)
     }
+}
+
+/// Fails `event-not-found` when `contents`, the resource `event_id` of
+/// `calendar_id`, hold no VEVENT, so a to-do or a journal entry sharing the
+/// calendar is never read, replaced or deleted through `event`. Bytes that
+/// do not parse pass, as a listing names them.
+pub fn ensure_event(contents: &[u8], event_id: &str, calendar_id: &str) -> anyhow::Result<()> {
+    if may_hold_kind(contents, IcalComponentKind::VEvent) {
+        return Ok(());
+    }
+
+    let err = event_not_found(format!("Resource `{event_id}` holds no VEVENT"));
+    Err(event_missing(err, event_id, calendar_id))
+}
+
+/// Refuses `event-invalid` an iCalendar source holding no VEVENT, so `event
+/// add` and `event update` never write a to-do or a journal entry. Bytes
+/// that do not parse pass, the backend judging them as written.
+pub fn ensure_event_source(contents: &[u8]) -> anyhow::Result<()> {
+    if may_hold_kind(contents, IcalComponentKind::VEvent) {
+        return Ok(());
+    }
+
+    let message = "Source holds no VEVENT; calendula writes events alone, a to-do \
+                   going to unfog and a journal entry to journal";
+    Err(CodedError::new(ErrorCode::EventInvalid, message.to_owned()).into())
 }
 
 /// The failure of an item whose bytes do not parse as iCalendar.

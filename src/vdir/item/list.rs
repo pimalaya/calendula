@@ -15,8 +15,9 @@ use crate::vdir::{client::VdirClient, item::input::kind_str};
 
 /// List every item in the given collection, of any kind.
 ///
-/// Unlike `item list`, this includes vCard items and surfaces each
-/// item's kind. JSON output: `{"items": [{"id", "kind", "size", "path"}]}`.
+/// Unlike `event list`, this includes every iCalendar component and vCard
+/// items, and surfaces each item's kind. JSON output: `{"items": [{"id",
+/// "kind", "size", "path"}]}`.
 #[derive(Debug, Parser)]
 pub struct VdirItemListCommand {
     /// Collection the items live in (final path segment under the root).

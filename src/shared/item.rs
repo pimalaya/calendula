@@ -1,7 +1,7 @@
 //! # Item
 //!
-//! The iCalendar object resource shared by every backend, and the `item`
-//! command family built on it.
+//! The iCalendar object resource shared by every backend, which the
+//! `event` family projects and the protocol commands print raw.
 //!
 //! [`CalendarItem`] is the raw view: an id, an optional entity tag, and the
 //! bytes verbatim. calendula never rewrites those bytes, so what a backend
@@ -12,23 +12,15 @@
 //! the server where the protocol defines such a filter and applied after
 //! parsing otherwise.
 
-pub mod build;
-pub mod cli;
-pub mod create;
-pub mod delete;
-pub mod list;
-pub mod read;
-pub mod update;
-
-use std::{borrow::Cow, str};
+use std::str;
 
 use anyhow::{Context, Result, bail};
 use base64_codec::codec::Base64Codec;
 use chrono::{Datelike, NaiveDate};
 use ical::component::IcalComponentKind;
 use jiff::tz::TimeZone;
-use schemars::{JsonSchema, Schema, SchemaGenerator};
-use serde::{Deserialize, Serialize, Serializer};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     error::ItemError,
@@ -37,9 +29,9 @@ use crate::{
 
 /// A calendar object resource: one iCalendar file.
 ///
-/// The contents mix component kinds (VEVENT, VTODO, VJOURNAL): the `event`
-/// family filters them, the `item` family does not. It prints as an
-/// [`ItemRow`], its bytes never decoded lossily.
+/// The contents may mix component kinds (VEVENT, VTODO, VJOURNAL): the
+/// `event` family keeps the VEVENT alone. A read prints it as an
+/// [`ItemReadRow`], its bytes never decoded lossily.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CalendarItem {
     /// Backend-specific identifier the other commands address it by.
@@ -70,96 +62,9 @@ pub struct CalendarItemWindowed {
     pub events: Vec<Event>,
 }
 
-/// Who wrote the body a write sends, which decides whether its
-/// `X-PIMDIR-` properties are an ask (pimdir STORAGE §18).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ItemOrigin {
-    /// Written by the user: through the `event` commands, or composed by
-    /// `item update -i` from the stored item. An `X-PIMDIR-ONLINE-MEETING`
-    /// it carries is their ask, queued whole.
-    User,
-    /// An iCalendar a raw `item` command was given (a file, raw contents
-    /// or stdin), which the user did not write as it stands: a pimdir
-    /// write removes its `X-PIMDIR-` properties first.
-    Foreign,
-}
-
-impl ItemOrigin {
-    /// The origin of a raw `item` write: [`Foreign`](Self::Foreign) for an
-    /// iCalendar `source` gave, [`User`](Self::User) for one composed from
-    /// the stored item.
-    pub fn of_source(source: Option<&str>) -> Self {
-        match source {
-            Some(_) => Self::Foreign,
-            None => Self::User,
-        }
-    }
-}
-
-impl Serialize for CalendarItem {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        ItemRow::from(self).serialize(serializer)
-    }
-}
-
-impl JsonSchema for CalendarItem {
-    fn schema_name() -> Cow<'static, str> {
-        ItemRow::schema_name()
-    }
-
-    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        ItemRow::json_schema(generator)
-    }
-}
-
-/// An item as `item list` lists it.
-///
-/// A listed item may carry no bytes, which only a listing shows: a read
-/// fails instead ([`ItemReadRow`]).
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[schemars(rename = "CalendarItem")]
-pub struct ItemRow {
-    /// Backend-specific identifier the other commands address it by.
-    pub id: String,
-    /// The calendar the item lives in.
-    pub calendar_id: String,
-    /// The entity tag of the version listed, which a write can be gated on
-    /// (`--if-match`), `null` when the backend versions no item.
-    pub etag: Option<String>,
-    /// The iCalendar text, or its base64 when `encoding` is `base64`;
-    /// `null` when the item carries no bytes, a pimdir item whose body is
-    /// not local yet or cannot be read.
-    pub contents: Option<String>,
-    /// How `contents` spells the bytes: `utf-8` for the text itself,
-    /// `base64` for bytes that are not valid UTF-8; `null` when the item
-    /// carries no bytes.
-    pub encoding: Option<ItemEncoding>,
-}
-
-impl From<&CalendarItem> for ItemRow {
-    fn from(item: &CalendarItem) -> Self {
-        let (contents, encoding) = match item.contents.is_empty() {
-            true => (None, None),
-            false => {
-                let contents = ItemContents::of(&item.contents);
-                (Some(contents.contents), Some(contents.encoding))
-            }
-        };
-
-        Self {
-            id: item.id.clone(),
-            calendar_id: item.calendar_id.clone(),
-            etag: item.etag.clone(),
-            contents,
-            encoding,
-        }
-    }
-}
-
-/// An item as `item read` and `event read` read it: the row `item list`
-/// prints, its bytes always there, the read of an item carrying none
-/// failing (`body-pending`).
+/// An item as `event read` reads it: its id, calendar and version beside
+/// its bytes, always there, the read of an item carrying none failing
+/// (`body-pending`).
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemReadRow {
@@ -231,6 +136,22 @@ fn base64(bytes: &[u8]) -> String {
 
     // NOTE: the base64 alphabet is ASCII, so this never falls back.
     String::from_utf8(encoded).unwrap_or_default()
+}
+
+/// Defuses an iCalendar for a terminal, keeping its tabs and line breaks,
+/// bytes that are not valid UTF-8 read as U+FFFD.
+pub fn printable(contents: &[u8]) -> String {
+    let contents = String::from_utf8_lossy(contents).replace("\r\n", "\n");
+
+    contents
+        .chars()
+        .map(|c| match c {
+            '\t' | '\n' => c,
+            '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' => char::REPLACEMENT_CHARACTER,
+            c if c.is_control() => char::REPLACEMENT_CHARACTER,
+            c => c,
+        })
+        .collect()
 }
 
 #[cfg(any(feature = "vdir", feature = "msgraph"))]
@@ -345,8 +266,8 @@ pub struct CalendarItemQuery<'a> {
         allow(dead_code)
     )]
     pub range: Option<&'a CalendarTimeRange>,
-    /// Component kind to keep, `None` keeping every kind, which is what
-    /// the raw `item` family asks for.
+    /// Component kind to keep, `None` keeping every kind: the `event`
+    /// commands keep VEVENT.
     #[cfg_attr(
         not(any(
             feature = "vdir",

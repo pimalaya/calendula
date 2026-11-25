@@ -60,7 +60,7 @@ $ calendula event list --json
 
 ## Features
 
-- **Unified API** for calendars, events and raw iCalendar items, the same on every backend
+- **Unified API** for calendars and events, the same on every backend
 - **Protocol-specific APIs** exposing the full surface of CalDAV, Google Calendar, Microsoft Graph and vdir
 - **Local stores**: vdir and pimdir, the offline store [Neverest](https://github.com/pimalaya/neverest) syncs
 - **One query language** to search the events of the pimdir store

@@ -71,14 +71,6 @@ fn every_write_receipt_says_whether_it_is_queued() {
     let updated = json(&run(home, &["--json", "event", "update", &id, &event]), 0);
     assert_eq!(updated, serde_json::json!({ "id": id, "queued": false }));
 
-    let item = EVENT.replace("standup@", "item@");
-    let created = json(&run(home, &["--json", "item", "add", &item]), 0);
-    assert_eq!(created["queued"], false, "{created}");
-    let id = created["id"].as_str().unwrap().to_owned();
-
-    let updated = json(&run(home, &["--json", "item", "update", &id, &item]), 0);
-    assert_eq!(updated, serde_json::json!({ "id": id, "queued": false }));
-
     let args = ["--json", "calendar", "create", "Work", "--id", "work"];
     let created = json(&run(home, &args), 0);
     let expected = serde_json::json!({ "id": "work", "name": "Work", "queued": false });
@@ -91,7 +83,7 @@ fn no_calendar_and_no_default_one_is_coded() {
 
     for args in [
         &["--json", "event", "list"][..],
-        &["--json", "item", "read", "a"],
+        &["--json", "event", "read", "a"],
         &["--json", "event", "add", EVENT],
     ] {
         let error = json(&run(home.path(), args), 1);
@@ -112,7 +104,7 @@ fn a_build_written_to_a_file_names_its_size() {
     let path = home.path().join("built.ics");
     let target = path.to_str().unwrap();
 
-    let out = run(home.path(), &["item", "build", "-o", target, EVENT]);
+    let out = run(home.path(), &["event", "build", "-o", target, EVENT]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
 
@@ -122,7 +114,7 @@ fn a_build_written_to_a_file_names_its_size() {
     let saved = json(
         &run(
             home.path(),
-            &["--json", "item", "build", "-o", target, EVENT],
+            &["--json", "event", "build", "-o", target, EVENT],
         ),
         0,
     );
@@ -190,36 +182,28 @@ fn the_calendar_commands_take_the_calendar_as_an_argument() {
     assert_eq!(error["code"], "usage-invalid", "{error}");
 }
 
-/// `item add` and `item build` given no source name the commands that
-/// mint an item rather than offering `-i`, which refuses it too.
+/// The `item` family is gone, its hidden alias with it: a command line
+/// naming it is refused as any unknown command, nothing written.
 #[test]
-fn an_item_given_no_source_names_who_mints_one() {
+fn the_item_family_is_refused_as_unknown() {
     let home = account("calendar.default = \"personal\"\n");
     let home = home.path();
 
-    for args in [&["--json", "item", "add"][..], &["--json", "item", "build"]] {
-        let error = json(&run(home, args), 1);
-        let message = error["error"].as_str().unwrap_or_default();
-
-        for way_out in ["`calendula event`", "`unfog`", "`journal`"] {
-            assert!(message.contains(way_out), "{args:?}: {message}");
-        }
-
-        assert!(!message.contains("-i"), "{args:?}: {message}");
+    for family in ["item", "items"] {
+        let error = json(&run(home, &["--json", family, "add", EVENT]), 2);
+        assert_eq!(error["code"], "usage-invalid", "{family}: {error}");
     }
+
+    assert_eq!(fs::read_dir(home.join("personal")).unwrap().count(), 0);
 }
 
-/// `create` stays a hidden alias of `event add` and `item add`.
+/// `create` stays a hidden alias of `event add`.
 #[test]
 fn create_still_adds() {
     let home = account("calendar.default = \"personal\"\n");
     let home = home.path();
 
     let created = json(&run(home, &["--json", "event", "create", EVENT]), 0);
-    assert_eq!(created["queued"], false, "{created}");
-
-    let item = EVENT.replace("standup@", "item@");
-    let created = json(&run(home, &["--json", "item", "create", &item]), 0);
     assert_eq!(created["queued"], false, "{created}");
 }
 

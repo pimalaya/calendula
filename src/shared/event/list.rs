@@ -8,8 +8,14 @@ use std::fmt;
 use anyhow::Result;
 use chrono::NaiveDate;
 use clap::Parser;
+use ical::component::IcalComponentKind;
 use jiff::{Timestamp, civil::Date, tz::TimeZone};
-use pimalaya_cli::{clap::args::PageTokenArg, listing::Listing, printer::Printer, sanitize};
+use pimalaya_cli::{
+    clap::args::PageTokenArg,
+    listing::{Listing, ListingPage},
+    printer::Printer,
+    sanitize,
+};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -20,16 +26,15 @@ use crate::{
         arg::CalendarIdArg,
         client::CalendarClient,
         event::Event,
-        ical::IcalFamily,
-        item::{CalendarItemQuery, CalendarTimeRange, list::listing_page},
+        item::{CalendarItemQuery, CalendarTimeRange},
     },
 };
 
 /// List the events of a calendar.
 ///
 /// Only VEVENT components are listed; the other kinds a calendar holds
-/// (VTODO, VJOURNAL) are dropped, so use `item list` for the unfiltered
-/// raw view.
+/// (VTODO, VJOURNAL) are skipped, reachable raw through the protocol
+/// commands (`caldav get`, `vdir item get`).
 ///
 /// Pass `--from` and `--to` (YYYY-MM-DD, both inclusive) to narrow the
 /// listing to a window: CalDAV runs it server-side, the local backends
@@ -92,7 +97,7 @@ pub struct EventListCommand {
 
 impl EventListCommand {
     pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
-        client.require(&[Capability::ItemList])?;
+        client.require(&[Capability::EventList])?;
 
         let page = match &self.page_token.token {
             Some(token) => Some(
@@ -119,7 +124,7 @@ impl EventListCommand {
 
         let query = CalendarItemQuery {
             range: range.as_ref(),
-            kind: IcalFamily::Event.kind(),
+            kind: Some(IcalComponentKind::VEvent),
             ..Default::default()
         };
         let (events, count, more, errors) = match &range {
@@ -163,6 +168,18 @@ impl EventListCommand {
 
         printer.out(&output)?;
         error::partial_when(&output.errors)
+    }
+}
+
+/// The page an event listing holds: the numbered `page` of `size` items,
+/// the whole listing when either is unset.
+pub(crate) fn listing_page(page: Option<u32>, size: Option<u32>) -> ListingPage {
+    match (page, size) {
+        (Some(page), Some(size)) => ListingPage::Numbered {
+            page: page.into(),
+            size: size.into(),
+        },
+        _ => ListingPage::All,
     }
 }
 
@@ -282,9 +299,9 @@ mod tests {
         shared::{
             event::{
                 Event,
-                list::{EVENT_NOUNS, EventListOutput, row_times},
+                list::{EVENT_NOUNS, EventListOutput, listing_page, row_times},
             },
-            item::{CalendarItem, list::listing_page},
+            item::CalendarItem,
         },
     };
 
@@ -406,8 +423,8 @@ Page:      1, event 1, the last
 
 standup.ics  2026-10-30 08:00  2026-10-30 08:30  Standup
 
-Error:  c           item-unreadable  Cannot parse item `c` as iCalendar
-Error:  broken\u{fffd}[2J  item-unreadable  Cannot parse item `broken\u{fffd}[2J` as iCalendar
+Error:  c           event-unreadable  Cannot parse item `c` as iCalendar
+Error:  broken\u{fffd}[2J  event-unreadable  Cannot parse item `broken\u{fffd}[2J` as iCalendar
 ";
         assert_eq!(output.to_string(), expected);
 
@@ -420,13 +437,13 @@ Account:   perso (vdir)
 Calendar:  personal
 Page:      1, empty
 
-Error:  c  item-unreadable  Cannot parse item `c` as iCalendar
+Error:  c  event-unreadable  Cannot parse item `c` as iCalendar
 ";
         assert_eq!(output.to_string(), expected);
 
         let json = serde_json::to_value(&output).unwrap();
         assert_eq!(json["errors"][0]["id"], "c");
-        assert_eq!(json["errors"][0]["code"], "item-unreadable");
+        assert_eq!(json["errors"][0]["code"], "event-unreadable");
         assert_eq!(json["errors"][0]["sources"].as_array().unwrap().len(), 1);
     }
 

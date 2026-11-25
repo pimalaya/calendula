@@ -195,25 +195,25 @@ pub(crate) fn refusal_code(cause: &(dyn std::error::Error + 'static)) -> Option<
 }
 
 /// The failure of a request naming one event: a 404 or a 410 is
-/// `item-not-found`, the event gone or never there.
+/// `event-not-found`, the event gone or never there.
 pub fn item_refusal(err: GcalClientStdError) -> anyhow::Error {
     match &err {
         GcalClientStdError::Send(send) if matches!(send.status(), Some(404 | 410)) => {
-            recoded(ErrorCode::ItemNotFound, err)
+            recoded(ErrorCode::EventNotFound, err)
         }
         _ => err.into(),
     }
 }
 
 /// The failure of an event write (`events.insert`, `events.import`,
-/// `events.update`) answered 400, coded `item-invalid`: calendula builds
+/// `events.update`) answered 400, coded `event-invalid`: calendula builds
 /// every parameter of that request, so a 400 refuses the event it sends,
 /// a field missing or a value Google does not take. The answer is handed
 /// back otherwise.
 pub fn invalid_event(err: GcalClientStdError) -> Result<anyhow::Error, GcalClientStdError> {
     match &err {
         GcalClientStdError::Send(send) if send.status() == Some(400) => {
-            Ok(recoded(ErrorCode::ItemInvalid, err))
+            Ok(recoded(ErrorCode::EventInvalid, err))
         }
         _ => Err(err),
     }

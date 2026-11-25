@@ -42,7 +42,7 @@ use pimalaya_config::secret::SecretResolver;
 
 use crate::{
     config::GcalConfig,
-    error::{ErrorCode, item_not_found},
+    error::{ErrorCode, event_not_found},
     gcal::{
         client::{connect, invalid_event, item_refusal},
         render::rfc3339,
@@ -251,7 +251,7 @@ impl GcalBackend {
         ))
     }
 
-    /// The event `item_id` of `calendar_id`, `item-not-found` when Google
+    /// The event `item_id` of `calendar_id`, `event-not-found` when Google
     /// holds none or a cancelled one: a deleted event stays as a cancelled
     /// stub its reads return and its listings leave out.
     fn event(&mut self, calendar_id: &str, item_id: &str) -> Result<GcalEvent> {
@@ -262,7 +262,7 @@ impl GcalBackend {
             .response;
 
         if event.status == Some(GcalEventStatus::Cancelled) {
-            return Err(item_not_found(format!(
+            return Err(event_not_found(format!(
                 "Google holds event `{item_id}` as cancelled, a deleted event"
             )));
         }
@@ -976,7 +976,7 @@ mod tests {
     }
 
     /// An event write answered 400 refuses the event sent, every parameter
-    /// being calendula's: `item-invalid`, on an import, an insert and an
+    /// being calendula's: `event-invalid`, on an import, an insert and an
     /// update alike; a calendar the write names that Google does not hold
     /// keeps no code, and a listing answered 400 neither.
     #[test]
@@ -999,18 +999,18 @@ mod tests {
         let err = answering(&[(200, empty), (400, &refused)])
             .create_item("primary", event("UID:e1@example.org\r\n"), None)
             .unwrap_err();
-        assert_eq!(code(&err), Some(ErrorCode::ItemInvalid), "{err:#}");
+        assert_eq!(code(&err), Some(ErrorCode::EventInvalid), "{err:#}");
         assert!(err.to_string().contains("time range is empty"), "{err}");
 
         let err = answering(&[(400, &refused)])
             .create_item("primary", event(""), None)
             .unwrap_err();
-        assert_eq!(code(&err), Some(ErrorCode::ItemInvalid), "{err:#}");
+        assert_eq!(code(&err), Some(ErrorCode::EventInvalid), "{err:#}");
 
         let err = answering(&[(200, current), (400, &refused)])
             .update_item("primary", "e1", event("UID:e1@example.org\r\n"), None, None)
             .unwrap_err();
-        assert_eq!(code(&err), Some(ErrorCode::ItemInvalid), "{err:#}");
+        assert_eq!(code(&err), Some(ErrorCode::EventInvalid), "{err:#}");
 
         let err = answering(&[(404, &missing)])
             .create_item("nope", event(""), None)
@@ -1274,7 +1274,7 @@ mod tests {
             let err = answering(&[(status, &body)])
                 .get_item("primary", "nope")
                 .unwrap_err();
-            assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+            assert_eq!(code(&err), Some(ErrorCode::EventNotFound), "{err:#}");
         }
 
         let body = refusal(404, "notFound", "Not Found");
@@ -1290,7 +1290,7 @@ mod tests {
 
         let stub = r#"{"id":"e1","status":"cancelled","iCalUID":"e1@example.org"}"#;
         let err = backend(&[stub]).get_item("primary", "e1").unwrap_err();
-        assert_eq!(code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+        assert_eq!(code(&err), Some(ErrorCode::EventNotFound), "{err:#}");
         assert!(!format!("{err:#}").contains("Read item"), "{err:#}");
     }
 

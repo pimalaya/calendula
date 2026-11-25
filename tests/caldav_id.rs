@@ -17,7 +17,7 @@ use std::{
 use serde_json::Value;
 use tempfile::TempDir;
 
-/// An event an `item add` or `item update` writes.
+/// An event an `event add` or `event update` writes from a source.
 const ICAL: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//x//y//EN\r\n\
                     BEGIN:VEVENT\r\nUID:e1\r\nDTSTAMP:20260101T000000Z\r\n\
                     DTSTART:20260814T090000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
@@ -96,11 +96,8 @@ fn a_calendar_id_out_of_the_home_is_not_found() {
             &["event", "add", "-k", id, "--summary", "Bob"],
             &["event", "update", "-k", id, "e1.ics", "--summary", "Bob"],
             &["event", "delete", "-k", id, "e1.ics"],
-            &["item", "list", "-k", id],
-            &["item", "read", "-k", id, "e1.ics"],
-            &["item", "add", "-k", id, ICAL],
-            &["item", "update", "-k", id, "e1.ics", ICAL],
-            &["item", "delete", "-k", id, "e1.ics"],
+            &["event", "add", "-k", id, ICAL],
+            &["event", "update", "-k", id, "e1.ics", ICAL],
             &["caldav", "delete", id, "e1.ics"],
             &["caldav", "rmcol", id],
         ];
@@ -118,22 +115,9 @@ fn a_calendar_id_out_of_the_home_is_not_found() {
 #[test]
 fn an_item_id_out_of_its_calendar_is_not_found() {
     let dir = account();
-    let code = Value::from("item-not-found");
+    let code = Value::from("event-not-found");
 
     for id in ["..", ".", "", "/", "a/../..", "%2E%2E", "a/"] {
-        let error = format!("Item `{id}` not found in calendar `cal`");
-
-        let commands: &[&[&str]] = &[
-            &["item", "read", "-k", "cal", id],
-            &["item", "update", "-k", "cal", id, ICAL],
-            &["item", "delete", "-k", "cal", id],
-        ];
-
-        for args in commands {
-            refused(dir.path(), args, code.clone(), &error);
-        }
-
-        // NOTE: an `event` command names the event in its own sentence.
         let error = format!(
             "Event `{id}` not found in calendar `cal`; an event is named by the id \
              `event list` shows, `event read --uid <UID>` reading it by its iCalendar UID"
@@ -142,6 +126,7 @@ fn an_item_id_out_of_its_calendar_is_not_found() {
         let commands: &[&[&str]] = &[
             &["event", "read", "-k", "cal", id],
             &["event", "update", "-k", "cal", id, "--summary", "Bob"],
+            &["event", "update", "-k", "cal", id, ICAL],
             &["event", "delete", "-k", "cal", id],
         ];
 
@@ -150,7 +135,7 @@ fn an_item_id_out_of_its_calendar_is_not_found() {
         }
     }
 
-    let out = run(dir.path(), &["item", "read", "-k", "cal", ".."]);
+    let out = run(dir.path(), &["event", "read", "-k", "cal", ".."]);
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(names_webdav_reason(&json), "{json}");
 }
@@ -171,7 +156,10 @@ fn a_new_calendar_id_out_of_the_home_is_refused() {
 fn a_clean_id_goes_on_to_open_the_account() {
     let dir = account();
 
-    let out = run(dir.path(), &["item", "read", "-k", "My Calendar", "e1.ics"]);
+    let out = run(
+        dir.path(),
+        &["event", "read", "-k", "My Calendar", "e1.ics"],
+    );
     assert_eq!(out.status.code(), Some(1));
     assert!(dir.path().join("spawned").exists());
 }

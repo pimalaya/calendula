@@ -1,10 +1,9 @@
 [accounts.example]
 default = true			# the account commands run on without -a
-#calendar.default = "personal"	# the calendar event and item use without -k
+#calendar.default = "personal"	# the calendar event commands use without -k
 
 #event.list.page-size = 25	# events per page without -s, --from or --to, 0 for one page [0]
-#item.list.page-size = 25	# items per page without -s, 0 for one page [0]
-#item.composer = "$EDITOR"	# the shell line -i edits an item in, its path appended, or an argv list (["tcal", "edit"])
+#event.composer = "$EDITOR"	# the shell line -i edits an event in, its path appended, or an argv list (["tcal", "edit"])
 
 #proxy.url = "socks5h://localhost:1080"	# a socks5, socks5h or http proxy for every network backend, all_proxy and https_proxy otherwise [http://localhost:3128]
 #proxy.username = "alice"		# its username

@@ -19,15 +19,15 @@ pub struct CalendarIdArg {
     pub id: Option<String>,
 }
 
-/// The composer a `build`, a `create` or an `update` refines an item in.
+/// The composer a `build`, an `add` or an `update` refines an event in.
 #[derive(Debug, Parser)]
 pub struct IcalComposerArgs {
-    /// Edit the item in the composer before writing it.
+    /// Edit the event in the composer before writing it.
     ///
-    /// Bails when neither `item.composer` nor `--composer` names one.
+    /// Bails when neither `event.composer` nor `--composer` names one.
     #[arg(short, long)]
     pub interactive: bool,
-    /// Command the item is edited in, overriding `item.composer`.
+    /// Command the event is edited in, overriding `event.composer`.
     ///
     /// A shell line, spawned on the path of a temporary iCalendar file it
     /// edits in place.

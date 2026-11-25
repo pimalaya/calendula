@@ -54,8 +54,8 @@ language, which a pimdir store answers: words, `field:value` terms, \
 amounts relative to now in `min`, `h`, `d`, `w`, `mo` and `y` \
 (`date:2h..`), `label:` and `property:<key>=<value>`; a word or value \
 beginning with `~` or `{`, or with `/` and longer than one character, is \
-refused as `reserved-form` unless quoted. item_list and item_read give the \
-raw iCalendar of any component. event_add and event_update take the \
+refused as `reserved-form` unless quoted. event_read gives the event's \
+iCalendar beside its fields. event_add and event_update take the \
 event as field arguments (`summary`, `start`, `end`, `location`) or as \
 iCalendar text in `ical`, never as a path. account_capability says \
 what this account's backend serves; a tool it cannot serve is not \
@@ -63,22 +63,22 @@ listed. The tools that change the calendars are listed only when the \
 server runs with --allow-write. Inviting people is sending: the \
 `attendee`, `organizer` and `send-updates` arguments are listed only \
 with --allow-send as well, and without it a write or a delete of an \
-item naming an attendee \
+event naming an attendee \
 (ATTENDEE), in the iCalendar given or in the one stored, is refused, \
 since the server or a sync may notify them. A failed call answers \
 isError with a calendula-error object, its `code` naming the failure \
-when it has one. calendar_list, event_list, event_search and item_list \
-return an `errors` list beside their result, one `{id, code, error, \
-sources}` entry per calendar or item they could not read (an item whose \
-iCalendar does not parse is `item-unreadable`); a call whose `errors` is \
+when it has one. calendar_list, event_list and event_search return an \
+`errors` list beside their result, one `{id, code, error, sources}` \
+entry per calendar or event they could not read (an event whose \
+iCalendar does not parse is `event-unreadable`); a call whose `errors` is \
 not empty answers isError with that result as its structured content.";
 
 /// The unified API leaves exposed as tools, with what each may do.
 ///
 /// A leaf missing here is not exposed, so a new command is listed only
-/// once it is classified. `event build` and `item build` (local formatters
-/// writing files) and `event agenda` (a grid drawn for people) are left
-/// out, and so are the protocol commands.
+/// once it is classified. `event build` (a local formatter writing files)
+/// and `event agenda` (a grid drawn for people) are left out, and so are
+/// the protocol commands.
 const TOOLS: &[McpTool] = &[
     McpTool::read("account", "capability"),
     McpTool::read("calendar", "list"),
@@ -91,11 +91,6 @@ const TOOLS: &[McpTool] = &[
     McpTool::schedule("event", "add", false),
     McpTool::schedule("event", "update", true),
     McpTool::schedule("event", "delete", true),
-    McpTool::read("item", "list"),
-    McpTool::read("item", "read"),
-    McpTool::schedule("item", "add", false),
-    McpTool::schedule("item", "update", true),
-    McpTool::schedule("item", "delete", true),
 ];
 
 /// The arguments inviting or notifying people, listed only under
@@ -115,7 +110,7 @@ const COMPOSER_ARGS: &[&str] = &["interactive", "composer"];
 /// Whether local file paths given as command input are read as such.
 static PATHS_CLOSED: AtomicBool = AtomicBool::new(false);
 
-/// Whether a write may touch an item naming attendees.
+/// Whether a write may touch an event naming attendees.
 static SENDING_CLOSED: AtomicBool = AtomicBool::new(false);
 
 /// Start an MCP server over stdio for one account.
@@ -127,18 +122,18 @@ static SENDING_CLOSED: AtomicBool = AtomicBool::new(false);
 /// never listed.
 #[derive(Debug, Parser)]
 pub struct McpCommand {
-    /// List the tools that change the calendars and the items too.
+    /// List the tools that change the calendars and the events too.
     ///
     /// Adds the calendar create, update and delete tools and the event
-    /// and item add, update and delete tools, without the arguments
-    /// inviting people.
+    /// add, update and delete tools, without the arguments inviting
+    /// people.
     #[arg(long)]
     pub allow_write: bool,
-    /// Let the writes reach the people an item invites.
+    /// Let the writes reach the people an event invites.
     ///
     /// Adds the `attendee`, `add-attendee`, `remove-attendee`,
     /// `organizer` and `send-updates` arguments, and lets a write or a
-    /// delete touch an item naming an attendee (`ATTENDEE`), whom the
+    /// delete touch an event naming an attendee (`ATTENDEE`), whom the
     /// server or a sync may notify. An agent reading an invitation can be
     /// told by it to cancel or move a meeting, so it is never on by
     /// default.
@@ -178,7 +173,7 @@ pub fn paths_closed() -> bool {
     PATHS_CLOSED.load(Ordering::Relaxed)
 }
 
-/// Whether a write must leave alone an item naming attendees, as it does
+/// Whether a write must leave alone an event naming attendees, as it does
 /// inside an MCP server without `--allow-send`.
 pub fn sending_closed() -> bool {
     SENDING_CLOSED.load(Ordering::Relaxed)
@@ -199,7 +194,7 @@ enum McpToolKind {
     Read,
     /// Changes a calendar, listed under `--allow-write`.
     Write,
-    /// Changes an item, whose attendees it may notify: listed under
+    /// Changes an event, whose attendees it may notify: listed under
     /// `--allow-write`, reaching them under `--allow-send` alone, open to
     /// the world when it lists an argument inviting or notifying people.
     Schedule,
@@ -278,7 +273,7 @@ impl McpToolSpec {
             let input_schema = grammar.input_schema();
 
             // NOTE: the hint follows the arguments listed, never the gate
-            // alone (pimalaya-cli's mcp spec): an item write lists the
+            // alone (pimalaya-cli's mcp spec): an event write lists the
             // same ones with or without `--allow-send`.
             let reaches_people = SEND_ARGS
                 .iter()
@@ -366,14 +361,14 @@ mod tests {
     use crate::{cli::Cli, mcp::*};
 
     /// The unified API leaves no tool exposes.
-    const EXCLUDED: &[(&str, &str)] = &[("event", "agenda"), ("event", "build"), ("item", "build")];
+    const EXCLUDED: &[(&str, &str)] = &[("event", "agenda"), ("event", "build")];
 
     #[test]
     fn every_unified_leaf_is_classified() {
         let mut cli = Cli::command();
         cli.build();
 
-        for group in ["calendar", "event", "item"] {
+        for group in ["calendar", "event"] {
             let group = cli.find_subcommand(group).unwrap();
 
             for leaf in group

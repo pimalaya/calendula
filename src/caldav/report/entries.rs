@@ -214,7 +214,7 @@ END:VCALENDAR&#13;
     }
 
     /// Each row a query answered without the item's data is an entry, as
-    /// `item list` codes it, the item read printing as an item row does.
+    /// `event list` codes it, the item read printing as an item row does.
     #[test]
     fn a_query_names_the_rows_it_could_not_read() {
         let body = multistatus(&[E1, E2_REFUSED]);
@@ -245,7 +245,7 @@ END:VCALENDAR&#13;
         assert_eq!(status, 3);
     }
 
-    /// An id the server does not hold is `item-not-found`.
+    /// An id the server does not hold is `event-not-found`.
     #[test]
     fn a_multiget_names_the_items_it_could_not_read() {
         let e9 = r#"
@@ -264,7 +264,7 @@ END:VCALENDAR&#13;
             entries(&json),
             [json!([
                 "e9.ics",
-                "item-not-found",
+                "event-not-found",
                 "The server holds no such item, status 404",
                 []
             ])]

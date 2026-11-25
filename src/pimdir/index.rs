@@ -610,7 +610,6 @@ mod tests {
                 PimdirCalendarZones, parse_query,
             },
         },
-        shared::item::ItemOrigin,
     };
 
     /// 2026-11-06T00:00:00Z, the instant the test index is refreshed at.
@@ -700,9 +699,7 @@ mod tests {
             ),
         ];
         for (calendar, item) in items {
-            backend
-                .create_item(calendar, item.into_bytes(), ItemOrigin::User)
-                .unwrap();
+            backend.create_item(calendar, item.into_bytes()).unwrap();
         }
 
         let mut owner = PimdirStore::open(dir.path()).unwrap().for_source("caldav");
@@ -832,7 +829,7 @@ mod tests {
         let mut backend = backend(dir.path(), None);
         for item in items {
             backend
-                .create_item("cal", item.clone().into_bytes(), ItemOrigin::User)
+                .create_item("cal", item.clone().into_bytes())
                 .unwrap();
         }
 
@@ -878,7 +875,7 @@ mod tests {
     }
 
     /// A hit whose body the store cannot read is an item error coded
-    /// `item-unreadable`, the other hits listed, where the whole search
+    /// `event-unreadable`, the other hits listed, where the whole search
     /// failed.
     #[test]
     fn a_hit_the_store_cannot_read_is_an_item_error() {
@@ -914,7 +911,7 @@ mod tests {
             panic!("{:?}", found.errors);
         };
         assert_eq!(error.id.as_deref(), Some(offsite.id.as_str()));
-        assert_eq!(error.code, Some(ErrorCode::ItemUnreadable));
+        assert_eq!(error.code, Some(ErrorCode::EventUnreadable));
         assert_eq!(error.error, format!("Read item `{}`", offsite.id));
     }
 
@@ -1203,9 +1200,7 @@ mod tests {
             "zeppelin",
             "DTSTART:20261201T100000Z\r\nSUMMARY:Zeppelin ride\r\n",
         );
-        backend
-            .create_item("cal", zeppelin.into_bytes(), ItemOrigin::User)
-            .unwrap();
+        backend.create_item("cal", zeppelin.into_bytes()).unwrap();
 
         let queued = page(&backend.client, "zeppelin", None);
         assert!(
@@ -1256,9 +1251,9 @@ mod tests {
                 "DTSTART:20261110T120000Z\r\nSUMMARY:Lunch\r\n",
             )
         };
-        work.create_item("work/cal", lunch("w").into_bytes(), ItemOrigin::User)
+        work.create_item("work/cal", lunch("w").into_bytes())
             .unwrap();
-        home.create_item("home/cal", lunch("h").into_bytes(), ItemOrigin::User)
+        home.create_item("home/cal", lunch("h").into_bytes())
             .unwrap();
         let mut owner = PimdirStore::open(dir.path()).unwrap().for_source("caldav");
         assert_eq!(owner.drain().unwrap().applied, 2);

@@ -113,23 +113,21 @@ c  2026-11-14 10:00  2026-11-14 11:00  -
 }
 
 /// `nextPage` is a token `--page-token` takes back as it is, the page
-/// number as a string, on both families.
+/// number as a string.
 #[test]
 fn a_listing_resumes_at_the_next_page_it_names() {
     let home = account();
     let json = |args: &[&str]| -> Value { serde_json::from_str(&run(home.path(), args)).unwrap() };
 
-    for (family, rows) in [("event", "events"), ("item", "items")] {
-        let first = json(&["--json", family, "list", "-s", "2"]);
-        assert_eq!(first[rows].as_array().unwrap().len(), 2, "{first}");
-        assert_eq!(first["nextPage"], "2", "{first}");
+    let first = json(&["--json", "event", "list", "-s", "2"]);
+    assert_eq!(first["events"].as_array().unwrap().len(), 2, "{first}");
+    assert_eq!(first["nextPage"], "2", "{first}");
 
-        let token = first["nextPage"].as_str().unwrap();
-        let next = json(&["--json", family, "list", "-s", "2", "--page-token", token]);
-        assert_eq!(next[rows].as_array().unwrap().len(), 1, "{next}");
-        assert_eq!(next[rows][0]["id"], "c", "{next}");
-        assert_eq!(next["nextPage"], Value::Null, "{next}");
-    }
+    let token = first["nextPage"].as_str().unwrap();
+    let next = json(&["--json", "event", "list", "-s", "2", "--page-token", token]);
+    assert_eq!(next["events"].as_array().unwrap().len(), 1, "{next}");
+    assert_eq!(next["events"][0]["id"], "c", "{next}");
+    assert_eq!(next["nextPage"], Value::Null, "{next}");
 }
 
 #[test]
@@ -145,7 +143,7 @@ fn a_page_token_that_is_no_page_number_is_refused() {
 }
 
 /// `event read --uid` reads the item carrying the UID, as a read by its
-/// id does; an unknown UID is `item-not-found`, and `event search` takes
+/// id does; an unknown UID is `event-not-found`, and `event search` takes
 /// a query, which only a pimdir store's index answers.
 #[test]
 fn a_uid_is_read_by_event_read_and_a_search_takes_a_query() {
@@ -161,7 +159,7 @@ fn a_uid_is_read_by_event_read_and_a_search_takes_a_query() {
     let missing = output(home.path(), &args);
     let error: Value = serde_json::from_slice(&missing.stdout).unwrap();
     assert_eq!(missing.status.code(), Some(1), "{error}");
-    assert_eq!(error["code"], "item-not-found", "{error}");
+    assert_eq!(error["code"], "event-not-found", "{error}");
 
     let args = ["--json", "event", "read", "a", "--uid", "a@example.org"];
     assert_eq!(output(home.path(), &args).status.code(), Some(2));
@@ -176,7 +174,7 @@ fn a_uid_is_read_by_event_read_and_a_search_takes_a_query() {
 }
 
 /// The event commands take the id a listing shows, never a UID: `event
-/// delete` given one refuses it `item-not-found`, naming `event read --uid`,
+/// delete` given one refuses it `event-not-found`, naming `event read --uid`,
 /// and deletes nothing.
 #[test]
 fn a_uid_is_no_event_id() {
@@ -185,7 +183,7 @@ fn a_uid_is_no_event_id() {
     let json: Value = serde_json::from_slice(&output.stdout).unwrap();
 
     assert_eq!(output.status.code(), Some(1), "{json}");
-    assert_eq!(json["code"], "item-not-found", "{json}");
+    assert_eq!(json["code"], "event-not-found", "{json}");
     let error = json["error"].as_str().unwrap();
     assert!(error.contains("`event read --uid <UID>`"), "{error}");
     assert!(home.path().join("personal").join("a.ics").is_file());
@@ -196,14 +194,21 @@ fn a_uid_is_no_event_id() {
 fn a_page_token_wins_over_a_page() {
     let home = account();
 
-    for (family, rows) in [("event", "events"), ("item", "items")] {
-        let args = ["--json", family, "list", "-s", "2", "-p", "1"];
-        let args = [&args[..], &["--page-token", "2"]].concat();
-        let json: Value = serde_json::from_str(&run(home.path(), &args)).unwrap();
+    let args = [
+        "--json",
+        "event",
+        "list",
+        "-s",
+        "2",
+        "-p",
+        "1",
+        "--page-token",
+        "2",
+    ];
+    let json: Value = serde_json::from_str(&run(home.path(), &args)).unwrap();
 
-        assert_eq!(json[rows].as_array().unwrap().len(), 1, "{json}");
-        assert_eq!(json[rows][0]["id"], "c", "{json}");
-    }
+    assert_eq!(json["events"].as_array().unwrap().len(), 1, "{json}");
+    assert_eq!(json["events"][0]["id"], "c", "{json}");
 }
 
 /// The account of [`account`], its calendar also holding `d`, which is no
@@ -238,7 +243,7 @@ fn unreadable_account() -> (TempDir, Option<String>) {
     (home, None)
 }
 
-/// An item that does not parse prints no event but an `item-unreadable`
+/// An item that does not parse prints no event but an `event-unreadable`
 /// entry, and so does a file that cannot be read; the other events list,
 /// the entries print last and the command exits 3.
 #[test]
@@ -260,7 +265,7 @@ fn an_unreadable_item_is_named_last_and_exits_3() {
     let errors = json["errors"].as_array().unwrap();
     let parsed = errors.last().unwrap();
     assert_eq!(parsed["id"], "d", "{json}");
-    assert_eq!(parsed["code"], "item-unreadable", "{json}");
+    assert_eq!(parsed["code"], "event-unreadable", "{json}");
     assert_eq!(
         parsed["error"], "Cannot parse item `d` as iCalendar",
         "{json}"
@@ -272,16 +277,16 @@ fn an_unreadable_item_is_named_last_and_exits_3() {
     if let Some(path) = &unread {
         assert_eq!(errors.len(), 2, "{json}");
         assert_eq!(errors[0]["id"], "e", "{json}");
-        assert_eq!(errors[0]["code"], "item-unreadable", "{json}");
+        assert_eq!(errors[0]["code"], "event-unreadable", "{json}");
         let error = format!("Cannot read item file {path}");
         assert_eq!(errors[0]["error"], error, "{json}");
         assert_eq!(errors[0]["sources"].as_array().unwrap().len(), 1, "{json}");
-        lines.push_str(&format!("Error:  e  item-unreadable  {error}\n"));
+        lines.push_str(&format!("Error:  e  event-unreadable  {error}\n"));
     } else {
         assert_eq!(errors.len(), 1, "{json}");
     }
 
-    lines.push_str("Error:  d  item-unreadable  Cannot parse item `d` as iCalendar\n");
+    lines.push_str("Error:  d  event-unreadable  Cannot parse item `d` as iCalendar\n");
 
     let output = self::output(home.path(), &["event", "list", "-s", "0"]);
     assert_eq!(output.status.code(), Some(3));
@@ -337,36 +342,6 @@ fn an_entry_prints_on_its_page() {
     assert_eq!(second["nextPage"], Value::Null, "{second}");
 }
 
-/// `item list` lists an item that does not parse as any item, and names a
-/// file it could not read.
-#[test]
-fn an_item_list_names_only_what_it_could_not_read() {
-    let (home, unread) = unreadable_account();
-
-    let output = output(home.path(), &["--json", "item", "list", "-s", "0"]);
-    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
-
-    let ids: Vec<&str> = json["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|item| item["id"].as_str().unwrap())
-        .collect();
-    assert_eq!(ids, ["a", "b", "c", "d"], "{json}");
-
-    match unread {
-        Some(_) => {
-            assert_eq!(output.status.code(), Some(3), "{json}");
-            assert_eq!(json["errors"][0]["id"], "e", "{json}");
-            assert_eq!(json["errors"].as_array().unwrap().len(), 1, "{json}");
-        }
-        None => {
-            assert_eq!(output.status.code(), Some(0), "{json}");
-            assert_eq!(json["errors"], Value::Array(Vec::new()), "{json}");
-        }
-    }
-}
-
 /// The agenda's JSON lists its events under `events`, each with its item
 /// id, its start as `event list --json` prints it and its label, beside
 /// the items it could not read under `errors`.
@@ -392,7 +367,7 @@ fn the_agenda_json_holds_its_events_and_its_errors() {
     assert_eq!(output.status.code(), Some(3), "{json}");
     let last = json["errors"].as_array().unwrap().last().unwrap().clone();
     assert_eq!(last["id"], "d", "{json}");
-    assert_eq!(last["code"], "item-unreadable", "{json}");
+    assert_eq!(last["code"], "event-unreadable", "{json}");
 }
 
 /// The agenda stamps a UTC event at its local time, as `event list` shows

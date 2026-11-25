@@ -49,7 +49,7 @@
 //! backend compiled into every build, each unified capability at `full`,
 //! `partial`, `server` or `none`, named after the unified command it stands
 //! for, `<noun>.<verb>`, or `<noun>.<verb>.<argument>` for a flag a backend
-//! may not serve (`item.add`, `item.delete.if-match`,
+//! may not serve (`event.add`, `event.delete.if-match`,
 //! `event.add.online-meeting`).
 //!
 //! A unified command requires the capabilities its verb and its flags
@@ -80,8 +80,8 @@
 //! ## Three command families
 //!
 //! The command tree ([`cli`]) is split into three groups, in this order. The
-//! unified API (`calendar`, `event`, `item`) is the portable surface, where
-//! an operation means the same whichever backend serves the account.
+//! unified API (`calendar`, `event`) is the portable surface, where an
+//! operation means the same whichever backend serves the account.
 //!
 //! The protocol-specific APIs (`caldav`, `msgraph`, `gcal`, `pimdir`,
 //! `vdir`) each expose what only one backend has, gated behind its own cargo
@@ -92,21 +92,21 @@
 //! its backends serve, run the sessions, and generate the shell integration
 //! and the schemas.
 //!
-//! ### Events against item
+//! ### Events alone
 //!
 //! calendula is the Pimalaya CLI for events: VTODO belongs to unfog and
 //! VJOURNAL to journal, one CLI per iCalendar domain. A calendar collection
-//! may still mix component kinds, so the unified API offers two kinds of view
-//! over the same resources. `item` is the raw, unfiltered one: it lists,
-//! reads, writes and deletes any iCalendar object by id, a to-do or a journal
-//! entry included, leaving the bytes untouched.
+//! may still mix component kinds, so `event` keeps VEVENT: a listing skips
+//! the other resources, and a read, an update or a delete naming one fails
+//! `event-not-found`, leaving it untouched. `event read` prints the
+//! resource's iCalendar beside the projected rows, as cardamum's `card
+//! read` prints the vCard.
 //!
-//! `event` is the projected one: it keeps VEVENT, renders summary and time
-//! columns and draws a cal(1)-style agenda.
-//!
-//! Both share the `-k/--calendar` selector and the same item API; only the
-//! rendering and the filter differ, so the projection adds no backend
-//! operation.
+//! The projection runs over [`shared::item::CalendarItem`], the calendar
+//! object resource every backend reads and writes, so it adds no backend
+//! operation. Raw access to another component stays protocol-specific:
+//! `caldav get`, `caldav put` and `caldav report query --component`, and
+//! `vdir item`.
 //!
 //! VFREEBUSY and VTIMEZONE get no family: the first is the answer to a query
 //! rather than a stored resource, and the second defines the zones the others
@@ -124,7 +124,7 @@
 //!
 //! That order prefers a local read to a network round-trip, and a
 //! protocol-standard server to a vendor API. It skips no backend for a
-//! capability it lacks: every unified verb exchanges calendar or item ids
+//! capability it lacks: every unified verb exchanges calendar or event ids
 //! the others take, so all of them run on one backend, and a refusal names
 //! the backend of the account serving what was asked. A named value pins
 //! the command and bails when the account carries no matching block, while
@@ -148,7 +148,7 @@
 //! The server lists a tool only when the account's backend serves its verb
 //! ([`capability::serves`]), the writes under `--allow-write` alone, and
 //! leaves what reaches people beyond the account behind `--allow-send` as
-//! well: the scheduling arguments, and any write or delete of an item
+//! well: the scheduling arguments, and any write or delete of an event
 //! naming an attendee, which the server or a sync may notify. That last
 //! guard runs in the unified client itself, on the contents written and on
 //! the stored copy, so it holds on every backend.
@@ -191,18 +191,18 @@
 //! A failure prints through pimalaya-cli's `ErrorReport` with the stable
 //! [`error::ErrorCode`] a caller acts on, `null` otherwise, and exits 1; a
 //! result whose outcome is not a full success, a failed `account check` or
-//! a listing whose `errors` names a calendar or an item it could not read,
+//! a listing whose `errors` names a calendar or an event it could not read,
 //! prints its result and exits 3. A command line the grammar refuses exits
 //! 2, its failure object coded `usage-invalid` under `--json`. Every write
-//! prints a receipt, the item it acted on and whether it waits for a sync.
+//! prints a receipt, the event it acted on and whether it waits for a sync.
 //!
 //! Text output is plain text, with no border, no colour and nothing sized
 //! to the terminal: a list of short rows prints as aligned columns, a wide
 //! one as records the way `git log` prints commits, and a record as aligned
 //! `Label: value` lines, every string a server or a file gave defused first.
-//! `event list` and `item list` print one line each under a header naming
-//! the account, the calendar and where the page stands, and a listing prints
-//! the items it could not read last, one `Error:` line each; their JSON
+//! `event list` prints one line each under a header naming the account,
+//! the calendar and where the page stands, and a listing prints the
+//! events it could not read last, one `Error:` line each; their JSON
 //! names the next page as `nextPage`, which `--page-token` takes back. A
 //! read prints the stored iCalendar defused of what could drive the
 //! terminal, its JSON keeping the bytes.

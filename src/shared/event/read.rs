@@ -8,6 +8,7 @@ use std::fmt;
 
 use anyhow::{Result, anyhow};
 use clap::Parser;
+use ical::component::IcalComponentKind;
 use log::warn;
 use pimalaya_cli::printer::Printer;
 use schemars::JsonSchema;
@@ -15,13 +16,12 @@ use serde::Serialize;
 
 use crate::{
     capability::Capability,
-    error::{event_missing, item_not_found},
+    error::{event_missing, event_not_found},
     shared::{
         arg::CalendarIdArg,
         client::CalendarClient,
-        event::Event,
-        ical::IcalFamily,
-        item::{CalendarItem, CalendarItemQuery, ItemReadRow, read::printable},
+        event::{Event, ensure_event},
+        item::{CalendarItem, CalendarItemQuery, ItemReadRow, printable},
     },
 };
 
@@ -40,11 +40,14 @@ use crate::{
 /// whose stored summary names each resource's `UID`, only the bodies that
 /// may carry it are read.
 ///
+/// An id naming a resource that holds no VEVENT (a to-do, a journal
+/// entry) fails `event-not-found`.
+///
 /// JSON output: `{"id", "calendarId", "etag", "contents", "encoding",
-/// "events": [...]}`, the row `item list` prints of the item holding the
-/// event (its raw iCalendar, its bytes kept, as text or as base64 when
+/// "events": [...]}`: the resource holding the event (its id, calendar,
+/// version and raw iCalendar, its bytes kept, as text or as base64 when
 /// they are not valid UTF-8), and its events shaped as `event list`
-/// prints them: every VEVENT the item carries, or the one occurrence
+/// prints them: every VEVENT the resource carries, or the one occurrence
 /// `--recurrence-id` names.
 #[derive(Debug, Parser)]
 pub struct EventReadCommand {
@@ -76,15 +79,17 @@ impl EventReadCommand {
 
         let item = match &self.uid {
             Some(uid) => {
-                client.require(&[Capability::ItemList])?;
+                client.require(&[Capability::EventList])?;
                 read_uid(client, &calendar_id, uid)?
             }
             None => {
                 let event_id = self.event_id.as_deref().unwrap_or_default();
-                client.require(&[Capability::ItemRead])?;
-                client
+                client.require(&[Capability::EventRead])?;
+                let item = client
                     .get_item(&calendar_id, event_id)
-                    .map_err(|err| event_missing(err, event_id, &calendar_id))?
+                    .map_err(|err| event_missing(err, event_id, &calendar_id))?;
+                ensure_event(&item.contents, event_id, &calendar_id)?;
+                item
             }
         };
 
@@ -107,12 +112,12 @@ impl EventReadCommand {
 }
 
 /// The item of `calendar_id` holding a VEVENT whose `UID` is `uid`,
-/// refused `item-not-found` when none does. A calendar holding several,
+/// refused `event-not-found` when none does. A calendar holding several,
 /// which one calendar object resource should not, reads the first listed
 /// and warns of the others.
 fn read_uid(client: &mut CalendarClient, calendar_id: &str, uid: &str) -> Result<CalendarItem> {
     let query = CalendarItemQuery {
-        kind: IcalFamily::Event.kind(),
+        kind: Some(IcalComponentKind::VEvent),
         uid: Some(uid),
         ..Default::default()
     };
@@ -125,7 +130,7 @@ fn read_uid(client: &mut CalendarClient, calendar_id: &str, uid: &str) -> Result
     let mut items = listed.items.into_iter().filter(carries);
 
     let Some(item) = items.next() else {
-        return Err(item_not_found(format!(
+        return Err(event_not_found(format!(
             "No event with UID `{uid}` found in calendar `{calendar_id}`"
         )));
     };
@@ -137,8 +142,8 @@ fn read_uid(client: &mut CalendarClient, calendar_id: &str, uid: &str) -> Result
     Ok(item)
 }
 
-/// The read event, as the calendar stores it: the row `item list` prints
-/// of its item, and its events.
+/// The read event, as the calendar stores it: its resource, and its
+/// events.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EventReadOutput {

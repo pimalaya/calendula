@@ -11,7 +11,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::{
-    shared::item::{ItemContents, read::printable},
+    shared::item::{ItemContents, printable},
     vdir::{client::VdirClient, item::input::kind_str},
 };
 

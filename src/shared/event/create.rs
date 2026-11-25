@@ -18,9 +18,8 @@ use crate::{
         arg::{CalendarIdArg, IcalComposerArgs, SendUpdatesArg},
         client::CalendarClient,
         composer::IcalComposer,
-        event::fields::EventFieldsArgs,
-        ical::{IcalFamily, blank_item, ensure_valid, read_source},
-        item::ItemOrigin,
+        event::{ensure_event_source, fields::EventFieldsArgs},
+        ical::{blank_event, ensure_valid, read_source},
     },
 };
 
@@ -70,7 +69,7 @@ impl EventCreateCommand {
         printer: &mut impl Printer,
         client: &mut CalendarClient,
     ) -> Result<()> {
-        let mut capabilities = vec![Capability::ItemAdd];
+        let mut capabilities = vec![Capability::EventAdd];
         if self.fields.online_meeting {
             capabilities.push(Capability::OnlineMeeting);
         }
@@ -89,8 +88,12 @@ impl EventCreateCommand {
         let calendar_id = client.account.calendar_id(self.calendar.id)?;
 
         let base = match &self.ical {
-            Some(source) => read_source(source)?,
-            None => blank_item(IcalFamily::Event)?,
+            Some(source) => {
+                let base = read_source(source)?;
+                ensure_event_source(&base)?;
+                base
+            }
+            None => blank_event()?,
         };
 
         let seed = self.fields.apply(&base)?;
@@ -103,12 +106,7 @@ impl EventCreateCommand {
                 ensure_valid(&seed)?;
             }
 
-            let id = client.create_item(
-                &calendar_id,
-                seed,
-                ItemOrigin::User,
-                self.send_updates.send_updates,
-            )?;
+            let id = client.create_item(&calendar_id, seed, self.send_updates.send_updates)?;
             return printer.out(EventCreateOutput::Created(EventCreatedOutput {
                 id,
                 queued: client.queues_writes(),
@@ -116,7 +114,7 @@ impl EventCreateCommand {
         }
 
         let composer = IcalComposer {
-            command: client.account.item_composer(self.composer.composer)?,
+            command: client.account.event_composer(self.composer.composer)?,
         };
 
         // NOTE: nothing has reached the network yet, the client opening
@@ -129,7 +127,6 @@ impl EventCreateCommand {
         let created = client.create_item(
             &calendar_id,
             draft.contents.clone(),
-            ItemOrigin::User,
             self.send_updates.send_updates,
         );
         let id = draft.finish(created)?;

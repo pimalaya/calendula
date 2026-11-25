@@ -24,7 +24,7 @@ use crate::{
 ///
 /// JSON output: `{"items": [{"id", "etag", "contents", "encoding"}],
 /// "truncated", "errors": [{"id", "code", "error", "sources"}]}`: the error
-/// of each item the server answered without its data, `item-not-found`
+/// of each item the server answered without its data, `event-not-found`
 /// for an id it does not hold, `[]` when none, the command then exiting 3.
 #[derive(Debug, Parser)]
 pub struct CaldavReportMultigetCommand {
@@ -53,13 +53,13 @@ impl CaldavReportMultigetCommand {
 }
 
 /// The entry of an item the multiget named and the server answered
-/// without its data: a row answered 404 or 410 is `item-not-found`, as an
+/// without its data: a row answered 404 or 410 is `event-not-found`, as an
 /// item request is, any other reads as a listing row.
 fn multiget_row(row: WebdavUnreadableEntry) -> ItemError {
     match row.status {
         Some(status @ (404 | 410)) => ItemError {
             id: Some(row.id),
-            code: Some(ErrorCode::ItemNotFound),
+            code: Some(ErrorCode::EventNotFound),
             error: format!("The server holds no such item, status {status}"),
             sources: row.failures.iter().map(ToString::to_string).collect(),
         },

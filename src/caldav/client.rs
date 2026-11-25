@@ -265,7 +265,7 @@ pub fn unauthenticated(err: anyhow::Error, auth: &CaldavAuthConfig) -> anyhow::E
 /// `quota-exceeded`; a 429 `rate-limited`; a 403 `permission-denied` when
 /// its body names `need-privileges` (RFC 3744 §7.1.1) or no precondition at
 /// all. A 400 or a 403 refusing the iCalendar written ([`rejects_item`]) is
-/// `item-invalid`; any other 403 names a precondition the written body
+/// `event-invalid`; any other 403 names a precondition the written body
 /// failed (RFC 4791 §5.3.2.1), no matter of rights. A 412 is
 /// `precondition-failed`; a `no-uid-conflict` `item-duplicate`.
 pub(crate) fn refusal_code(cause: &(dyn std::error::Error + 'static)) -> Option<ErrorCode> {
@@ -292,7 +292,7 @@ fn status_code(status: u16, body: &str) -> Option<ErrorCode> {
         507 => Some(ErrorCode::QuotaExceeded),
         429 => Some(ErrorCode::RateLimited),
         403 if body.contains("need-privileges") => Some(ErrorCode::PermissionDenied),
-        _ if rejects_item(status, body) => Some(ErrorCode::ItemInvalid),
+        _ if rejects_item(status, body) => Some(ErrorCode::EventInvalid),
         403 if !names_precondition(body) => Some(ErrorCode::PermissionDenied),
         412 => Some(ErrorCode::PreconditionFailed),
         _ => None,
@@ -326,12 +326,12 @@ fn names_precondition(body: &str) -> bool {
 }
 
 /// The failure of a request naming one item: a 404 or a 410 is
-/// `item-not-found`, the item gone or never there.
+/// `event-not-found`, the item gone or never there.
 pub fn item_refusal(err: WebdavClientStdError) -> anyhow::Error {
     match err {
         WebdavClientStdError::Send(WebdavSendError::HttpStatus {
             status: 404 | 410, ..
-        }) => recoded(ErrorCode::ItemNotFound, err),
+        }) => recoded(ErrorCode::EventNotFound, err),
         err => err.into(),
     }
 }
@@ -348,11 +348,11 @@ pub(crate) fn check_calendar_id(id: &str) -> Result<()> {
 }
 
 /// Refuses an item id no resource of a calendar can have, one io-webdav's
-/// `check_resource_id` refuses, before anything connects: `item-not-found`,
+/// `check_resource_id` refuses, before anything connects: `event-not-found`,
 /// io-webdav's reason in `sources`.
 pub(crate) fn check_item_id(id: &str) -> Result<()> {
     check_resource_id(id).map_err(|err| {
-        not_found(err, ErrorCode::ItemNotFound).context(format!("Item `{id}` not found"))
+        not_found(err, ErrorCode::EventNotFound).context(format!("Item `{id}` not found"))
     })
 }
 

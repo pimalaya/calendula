@@ -472,7 +472,6 @@ mod tests {
         config::PimdirConfig,
         error::{self, ErrorCode},
         pimdir::backend::PimdirBackend,
-        shared::item::ItemOrigin,
     };
 
     const EVENT: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//t//EN\r\n\
@@ -497,7 +496,7 @@ mod tests {
         };
         let mut backend = PimdirBackend::new(config).unwrap();
         backend
-            .create_item("cal", EVENT.as_bytes().to_vec(), ItemOrigin::User)
+            .create_item("cal", EVENT.as_bytes().to_vec())
             .unwrap();
 
         (dir, backend)
@@ -635,9 +634,7 @@ mod tests {
     fn an_undecodable_pending_row_is_an_item_error() {
         let (dir, mut backend) = store();
         let other = EVENT.replace("standup@", "other@");
-        backend
-            .create_item("cal", other.into_bytes(), ItemOrigin::User)
-            .unwrap();
+        backend.create_item("cal", other.into_bytes()).unwrap();
         drop(backend);
 
         let db = rusqlite::Connection::open(dir.path().join("pimdir.db")).unwrap();

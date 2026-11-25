@@ -55,7 +55,7 @@ calendula SHALL NOT write a configuration file: the user writes it, from the doc
 The top-level options SHALL be folded under the selected account, the account's own values overriding them field by field. A value set once at the top therefore applies everywhere it is not overridden.
 
 ### Requirement: Unknown fields
-Every block of the configuration, the top-level and account blocks included, SHALL set `deny_unknown_fields`, so a key calendula does not know fails the load naming it, a typo reported rather than ignored. The block of a backend the build leaves out SHALL load unread, so one file serves every build, and a command reaching it SHALL fail with `backend-not-built` (see "Backend selection order" in backends). The account `proxy` of a build with no network backend SHALL load unread too. A table or a key calendula no longer reads (`todo`, `journal`, `table`, the top-level `account`, `calendar.list`, `event.list.table`, `item.list.table`, `caldav.discover`, `vdir.home-dir`) SHALL fail the same way, with no sentence of its own.
+Every block of the configuration, the top-level and account blocks included, SHALL set `deny_unknown_fields`, so a key calendula does not know fails the load naming it, a typo reported rather than ignored. The block of a backend the build leaves out SHALL load unread, so one file serves every build, and a command reaching it SHALL fail with `backend-not-built` (see "Backend selection order" in backends). The account `proxy` of a build with no network backend SHALL load unread too. A table or a key calendula no longer reads (`todo`, `journal`, `table`, the top-level `account`, `calendar.list`, `event.list.table`, `event.list.table`, `caldav.discover`, `vdir.home-dir`) SHALL fail the same way, with no sentence of its own.
 
 #### Scenario: A typo in an account
 - GIVEN `[accounts.a]` holding `defualt = true`
@@ -68,7 +68,7 @@ Every block of the configuration, the top-level and account blocks included, SHA
 - THEN it loads, the `gcal` block unread, and a unified command on that account fails coded `backend-not-built`, naming `--features gcal`
 
 ### Requirement: No colour or table is configured
-The configuration SHALL hold no colour and no table shape. A `table` table (`table.preset`, `table.arrangement`), at the top level or under an account, a top-level `account` table (`account.list.table`), and the `calendar.list`, `event.list.table` and `item.list.table` tables holding the `*-color` keys, at the top level or under an account, SHALL fail the load as unknown fields. `event.list.page-size` and `item.list.page-size` stay.
+The configuration SHALL hold no colour and no table shape. A `table` table (`table.preset`, `table.arrangement`), at the top level or under an account, a top-level `account` table (`account.list.table`), and the `calendar.list`, `event.list.table` and `event.list.table` tables holding the `*-color` keys, at the top level or under an account, SHALL fail the load as unknown fields. `event.list.page-size` and `event.list.page-size` stay.
 
 #### Scenario: A colour key
 - GIVEN a configuration written for 0.2 with `event.list.table.id-color = "red"`
@@ -82,7 +82,7 @@ An account MAY carry several; which one a unified command uses is the backend ca
 
 An account MAY carry a `proxy`, and `caldav`, `jmap`, `gcal` and `msgraph` each one of their own ("A proxy is set per account and per backend").
 
-Every paged listing family SHALL additionally carry a block naming its default page size: `event.list` and `item.list`.
+Every paged listing family SHALL additionally carry a block naming its default page size: `event.list`.
 
 ### Requirement: TLS is set per account and per backend
 Every network backend block SHALL take a `tls` table spelled as pimalaya-config's toml.md writes it (*Every binary spells its TLS table alike*) and as Himalaya's: `provider` (`rustls` or `native-tls`), `rustls.crypto` (`aws` or `ring`), `cert` (a PEM certificate to trust) and `client` (`cert` and `key`, a PEM client certificate and its PEM private key, PKCS#8 under native-tls, both required once `client` is given), each optional, its paths shell-expanded. An account MAY carry a `tls` table of the same keys, which each network backend's `tls` SHALL take from, field by field, for what it leaves unset, `client` as one so a certificate is never paired with another table's key. A key the table does not read SHALL be refused by serde's `deny_unknown_fields` alone.
@@ -177,9 +177,9 @@ A backend whose protocol pins an HTTP version SHALL expose an `alpn` key, a list
 The runtime TLS profile SHALL be built through `TlsConfig::into_tls(alpn)`, never through a conversion assuming a list, so no caller can negotiate a protocol it did not name.
 
 ### Requirement: The composer is a command, not a library
-`item.composer` SHALL hold the command an item is edited through, at the top level and per account, as a shell line or an argv list. calendula SHALL spawn it rather than embed an editor: what edits an iCalendar is the user's choice, and a terminal editor, a graphical one and a purpose-built one are all one configuration line apart.
+`event.composer` SHALL hold the command an event is edited through, at the top level and per account, as a shell line or an argv list. calendula SHALL spawn it rather than embed an editor: what edits an iCalendar is the user's choice, and a terminal editor, a graphical one and a purpose-built one are all one configuration line apart.
 
-The key SHALL sit under `item` rather than under `event`: `event` and `item` are views over the same resources, and what is edited is an iCalendar object, which is what `item` names.
+`item.composer` and `item.list.page-size`, the keys of the removed `item` family, SHALL be refused by serde as any unknown key.
 
 ### Requirement: One sample configuration, with a section per backend
 The repository SHALL ship config.sample.toml holding one `[accounts.example]` table with dotted keys and no other table header, every line of code ending in one tab-aligned comment, every password or token command a failing `exit 127` placeholder, and no OAuth broker nor sync engine named. Every line SHALL be commented but `default = true`: a key with a default showing it, a key without one an example, the blocks of every backend (CalDAV, JMAP, Google Calendar, Microsoft Graph, vdir, pimdir) included, each headed by its name on one line, and no provider section, providers living in the README's recipes. The other values of a key that is neither a boolean nor free text SHALL end its comment in brackets (`[native-tls]`). A structural variant SHALL be one more commented line setting the same field (`password.raw` after `password.command`), and a paragraph setting keys under the same two-segment table as the paragraph above SHALL replace it (`caldav.auth.bearer` for `caldav.auth.basic`). No line SHALL be commented twice, and the TLS, proxy and ALPN keys SHALL be written once, as flat dotted keys, the per-backend ones under one Network heading. The test suite SHALL parse config.sample.toml through the loader `-c` uses as written, then once per rank with every line uncommented, each field set to its value of that rank (the lines setting it in their order, each followed by its bracketed values, the last when it has fewer), a replacing paragraph left out at rank 1 and in place of the one above from rank 2, resolving `example` as the default account carrying a block of every backend each time, so a configuration change breaking one fails the build.

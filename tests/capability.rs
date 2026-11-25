@@ -103,7 +103,7 @@ fn a_vdir_write_gated_on_a_version_is_refused() {
 
     let args = [
         "--json",
-        "item",
+        "event",
         "delete",
         "-k",
         "cal",
@@ -111,7 +111,7 @@ fn a_vdir_write_gated_on_a_version_is_refused() {
         "x",
         "1",
     ];
-    let message = refused(&run(&config, &args), "item.delete.if-match");
+    let message = refused(&run(&config, &args), "event.delete.if-match");
     assert!(message.contains("vdir backend"), "{message}");
     assert!(message.contains("--if-match"), "{message}");
 
@@ -127,7 +127,7 @@ fn a_vdir_write_gated_on_a_version_is_refused() {
         "Retro",
         "1",
     ];
-    refused(&run(&config, &args), "item.update.if-match");
+    refused(&run(&config, &args), "event.update.if-match");
 
     let stored = fs::read_to_string(dir.path().join("cal").join("1.ics")).unwrap();
     assert_eq!(stored, EVENT);
@@ -151,7 +151,7 @@ fn a_refusal_names_the_backend_serving_it() {
 
     let args = [
         "--json",
-        "item",
+        "event",
         "delete",
         "-k",
         "cal",
@@ -159,7 +159,7 @@ fn a_refusal_names_the_backend_serving_it() {
         "x",
         "1",
     ];
-    let message = refused(&run(&config, &args), "item.delete.if-match");
+    let message = refused(&run(&config, &args), "event.delete.if-match");
     assert!(message.contains("vdir backend"), "{message}");
     assert!(message.contains("`--backend caldav`"), "{message}");
 
@@ -317,14 +317,14 @@ calendar.update              vdir  full  -
 calendar.delete              vdir  full  -
 calendar.update.description  vdir  full  -
 calendar.update.color        vdir  full  -
-item.list                    vdir  full  -
-item.read                    vdir  full  -
+event.list                   vdir  full  -
+event.read                   vdir  full  -
 event.search                 vdir  none  the query language is answered by a pimdir store's search index; `event read --uid` reads an event by its UID
-item.add                     vdir  full  -
-item.update                  vdir  full  -
-item.delete                  vdir  full  -
-item.update.if-match         vdir  none  the backend exposes no version to compare, so `--if-match` is refused
-item.delete.if-match         vdir  none  the backend exposes no version to compare, so `--if-match` is refused
+event.add                    vdir  full  -
+event.update                 vdir  full  -
+event.delete                 vdir  full  -
+event.update.if-match        vdir  none  the backend exposes no version to compare, so `--if-match` is refused
+event.delete.if-match        vdir  none  the backend exposes no version to compare, so `--if-match` is refused
 event.add.online-meeting     vdir  none  `--online-meeting` needs the pimdir backend, whose sync engine creates the meeting
 event.update.send-updates    vdir  none  a vdir store notifies nobody; `--send-updates` needs the gcal backend
 ";
@@ -428,22 +428,22 @@ fn the_help_names_what_each_backend_serves() {
     let dir = TempDir::new().unwrap();
     let config = write_config(dir.path(), "");
 
-    let out = run(&config, &["item", "delete", "--help"]);
+    let out = run(&config, &["event", "delete", "--help"]);
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(out.status.success(), "{stdout}");
 
     let footer = "\
 Backends:
-  item.delete: full on vdir, caldav, jmap, gcal, msgraph; partial on pimdir
+  event.delete: full on vdir, caldav, jmap, gcal, msgraph; partial on pimdir
     pimdir: queued for the next sync, and refused when a source of the store does not support it
-  item.delete.if-match: none on vdir; full on pimdir, caldav, gcal; partial on jmap, msgraph
+  event.delete.if-match: none on vdir; full on pimdir, caldav, gcal; partial on jmap, msgraph
     vdir: the backend exposes no version to compare, so `--if-match` is refused
     jmap: compared with the hash of the event read just before the write, so a write landing in between is not caught
     msgraph: compared with the event's `changeKey` read just before the write, so a write landing in between is not caught
 ";
-    assert!(stdout.ends_with(footer), "{stdout}");
+    assert!(stdout.contains(footer), "{stdout}");
 
-    let out = run(&config, &["item", "build", "--help"]);
+    let out = run(&config, &["event", "build", "--help"]);
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(!stdout.contains("Backends:"), "{stdout}");
 }

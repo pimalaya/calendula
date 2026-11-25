@@ -248,7 +248,7 @@ mod credentialed {
         let args = ["--json", "event", "delete", "-k", &primary, uid];
         let out = calendula(&config, token(), &args);
         let error = json(&out, 1);
-        assert_eq!(error["code"], "item-not-found", "{error}");
+        assert_eq!(error["code"], "event-not-found", "{error}");
     }
 
     #[test]

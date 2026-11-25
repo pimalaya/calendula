@@ -53,9 +53,11 @@ pub enum ErrorCode {
     /// a session, which reads its commands there: the caller passes the
     /// input as text.
     StdinTaken,
-    /// The item a command names is not in the calendar: the failure of a
-    /// command reading or writing that one item, or an `errors` entry.
-    ItemNotFound,
+    /// The event a command names is not in the calendar, or holds no
+    /// VEVENT, as is the resource a protocol command names: the failure of
+    /// a command reading or writing that one resource, or an `errors`
+    /// entry.
+    EventNotFound,
     /// The calendar a command names does not exist: nothing was read or
     /// written.
     CalendarNotFound,
@@ -69,7 +71,7 @@ pub enum ErrorCode {
     CalendarDefaultMissing,
     /// The backend answered for an item calendula could not read: an
     /// `errors` entry, or the failure of a command reading that one item.
-    ItemUnreadable,
+    EventUnreadable,
     /// The source given is neither a readable file nor iCalendar contents,
     /// or the server refused the item written as no iCalendar it takes (a
     /// CalDAV `valid-calendar-data`, `supported-calendar-data`,
@@ -77,7 +79,7 @@ pub enum ErrorCode {
     /// precondition, a refusal naming the iCalendar, a 400 answering a
     /// Google or Graph event write, a JMAP `invalidProperties`): nothing
     /// was written, and the caller fixes the item rather than its rights.
-    ItemInvalid,
+    EventInvalid,
     /// The server refused the request to the account: an HTTP 403 that
     /// is no rate limit and, on CalDAV, names no precondition but
     /// `need-privileges` (RFC 3744 §7.1.1).
@@ -214,10 +216,10 @@ pub enum ErrorCode {
 pub type ItemError = pimalaya_cli::error::ItemError<ErrorCode>;
 
 /// The `errors` entry of the item `id` a listing could not read: coded by
-/// the refusal `err` carries, else `item-unreadable`.
+/// the refusal `err` carries, else `event-unreadable`.
 pub fn unreadable(id: Option<&str>, err: Error) -> ItemError {
     let mut entry = ItemError::new(id, &with_code(err, code));
-    entry.code.get_or_insert(ErrorCode::ItemUnreadable);
+    entry.code.get_or_insert(ErrorCode::EventUnreadable);
     entry
 }
 
@@ -230,27 +232,18 @@ pub fn partial_when(errors: &[ItemError]) -> Result<(), Error> {
     }
 }
 
-/// A refusal under `item-not-found`: the item a command names is not in
+/// A refusal under `event-not-found`: the event a command names is not in
 /// the calendar.
 #[cfg_attr(
     not(any(feature = "jmap", feature = "gcal", feature = "pimdir")),
     allow(dead_code)
 )]
-pub fn item_not_found(message: impl Into<String>) -> Error {
-    CodedError::new(ErrorCode::ItemNotFound, message.into()).into()
-}
-
-/// `err` read as the item `item_id` missing from `calendar_id`, when coded
-/// `item-not-found`: ``Item `<id>` not found in calendar `<calendar>` ``,
-/// as Himalaya words a missing message (see [`missing`]).
-pub fn item_missing(err: Error, item_id: &str, calendar_id: &str) -> Error {
-    missing(err, || {
-        format!("Item `{item_id}` not found in calendar `{calendar_id}`")
-    })
+pub fn event_not_found(message: impl Into<String>) -> Error {
+    CodedError::new(ErrorCode::EventNotFound, message.into()).into()
 }
 
 /// `err` read as the event `event_id` missing from `calendar_id`, when
-/// coded `item-not-found`: ``Event `<id>` not found in calendar
+/// coded `event-not-found`: ``Event `<id>` not found in calendar
 /// `<calendar>` ``, then how an event is named, a UID being no id (see
 /// [`missing`]).
 pub fn event_missing(err: Error, event_id: &str, calendar_id: &str) -> Error {
@@ -264,7 +257,7 @@ pub fn event_missing(err: Error, event_id: &str, calendar_id: &str) -> Error {
 }
 
 /// `err`, a read of the item `item_id` of `calendar_id` failing, under
-/// that read, unless coded `item-not-found`: the not-found sentence then
+/// that read, unless coded `event-not-found`: the not-found sentence then
 /// names it, the backend's answer its one source.
 #[cfg_attr(
     not(any(
@@ -279,7 +272,7 @@ pub fn event_missing(err: Error, event_id: &str, calendar_id: &str) -> Error {
 pub fn read_failed(err: impl Into<Error>, item_id: &str, calendar_id: &str) -> Error {
     let err = err.into();
 
-    if code(&err) == Some(ErrorCode::ItemNotFound) {
+    if code(&err) == Some(ErrorCode::EventNotFound) {
         return err;
     }
 
@@ -288,11 +281,11 @@ pub fn read_failed(err: impl Into<Error>, item_id: &str, calendar_id: &str) -> E
     ))
 }
 
-/// `err` under the not-found `sentence`, when coded `item-not-found`, one
+/// `err` under the not-found `sentence`, when coded `event-not-found`, one
 /// sentence whatever the backend: its code kept, the backend's own words
 /// under it as its sources. Any other failure is returned as it is.
 fn missing(err: Error, sentence: impl FnOnce() -> String) -> Error {
-    if code(&err) != Some(ErrorCode::ItemNotFound) {
+    if code(&err) != Some(ErrorCode::EventNotFound) {
         return err;
     }
 
@@ -309,12 +302,12 @@ fn missing(err: Error, sentence: impl FnOnce() -> String) -> Error {
 /// How the refusal of an id no item can have starts, as cardamum words it.
 const INVALID_ITEM_ID: &str = "Invalid item id";
 
-/// A refusal under `item-not-found` of `item_id`, which no item of the
+/// A refusal under `event-not-found` of `item_id`, which no item of the
 /// backend can have: it reads its own sentence, not the not-found one.
 #[cfg_attr(not(feature = "pimdir"), allow(dead_code))]
 pub fn invalid_item_id(item_id: &str, expected: &str) -> Error {
     let message = format!("{INVALID_ITEM_ID} `{item_id}` (expected {expected})");
-    CodedError::new(ErrorCode::ItemNotFound, message).into()
+    CodedError::new(ErrorCode::EventNotFound, message).into()
 }
 
 /// A refusal under `calendar-not-found`: the calendar a command names does

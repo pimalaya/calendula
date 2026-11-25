@@ -13,6 +13,7 @@ use crate::{
     shared::{
         arg::{CalendarIdArg, SendUpdatesArg},
         client::CalendarClient,
+        event::ensure_event,
         receipt::{Write, WriteReceipt},
     },
 };
@@ -51,9 +52,9 @@ pub struct EventDeleteCommand {
 
 impl EventDeleteCommand {
     pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
-        let mut capabilities = vec![Capability::ItemDelete];
+        let mut capabilities = vec![Capability::EventDelete];
         if self.if_match.is_some() {
-            capabilities.push(Capability::ItemDeleteIfMatch);
+            capabilities.push(Capability::EventDeleteIfMatch);
         }
         if self.send_updates.send_updates.is_some() {
             capabilities.push(Capability::SchedulingSendUpdates);
@@ -79,22 +80,22 @@ impl EventDeleteCommand {
     }
 }
 
-/// Fails unless `event_id` names an item of `calendar_id`.
+/// Fails unless `event_id` names an item of `calendar_id` holding a VEVENT.
 ///
 /// A read by id settles it in one call: an item whose body is not local is
-/// there all the same. A read answering `item-not-found` is a miss, never
-/// looked for as a `UID`, which `event read --uid` reads by; any other failure
-/// of the read (a refusal, a dropped connection) fails the command with
-/// its code.
-fn check(client: &mut CalendarClient, calendar_id: &str, event_id: &str) -> Result<()> {
+/// there all the same, its kind left to the summary it was listed by. A
+/// read answering `event-not-found` is a miss, never looked for as a `UID`,
+/// which `event read --uid` reads by; any other failure of the read (a
+/// refusal, a dropped connection) fails the command with its code.
+pub fn check(client: &mut CalendarClient, calendar_id: &str, event_id: &str) -> Result<()> {
     let err = match client.get_item(calendar_id, event_id) {
-        Ok(_) => return Ok(()),
+        Ok(item) => return ensure_event(&item.contents, event_id, calendar_id),
         Err(err) => err,
     };
 
     match error::code(&err) {
         Some(ErrorCode::BodyPending) => Ok(()),
-        Some(ErrorCode::ItemNotFound) => Err(event_missing(err, event_id, calendar_id)),
+        Some(ErrorCode::EventNotFound) => Err(event_missing(err, event_id, calendar_id)),
         _ => Err(err),
     }
 }
@@ -132,7 +133,7 @@ mod msgraph_tests {
         assert!(sent[0].starts_with("GET "), "{sent:?}");
     }
 
-    /// A lookup answered 404 is `item-not-found`, pointing at `event
+    /// A lookup answered 404 is `event-not-found`, pointing at `event
     /// search`, and lists nothing: a UID is no id.
     #[test]
     fn a_missing_id_is_not_found_and_lists_nothing() {
@@ -141,7 +142,7 @@ mod msgraph_tests {
         let mut client = CalendarClient::over_msgraph(backend);
 
         let err = check(&mut client, "cal", "abc@example.org").unwrap_err();
-        assert_eq!(error::code(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+        assert_eq!(error::code(&err), Some(ErrorCode::EventNotFound), "{err:#}");
         assert!(
             err.to_string().contains("`event read --uid <UID>`"),
             "{err}"

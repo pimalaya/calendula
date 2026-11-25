@@ -20,9 +20,11 @@ use crate::{
         arg::{CalendarIdArg, IcalComposerArgs, SendUpdatesArg},
         client::CalendarClient,
         composer::IcalComposer,
-        event::fields::{EventFieldsArgs, revise},
+        event::{
+            delete, ensure_event, ensure_event_source,
+            fields::{EventFieldsArgs, revise},
+        },
         ical::read_source,
-        item::ItemOrigin,
     },
 };
 
@@ -100,9 +102,9 @@ impl EventUpdateCommand {
         client: &mut CalendarClient,
         now: impl Fn() -> Timestamp,
     ) -> Result<()> {
-        let mut capabilities = vec![Capability::ItemUpdate];
+        let mut capabilities = vec![Capability::EventUpdate];
         if self.if_match.is_some() {
-            capabilities.push(Capability::ItemUpdateIfMatch);
+            capabilities.push(Capability::EventUpdateIfMatch);
         }
         if self.fields.online_meeting {
             capabilities.push(Capability::OnlineMeeting);
@@ -123,13 +125,20 @@ impl EventUpdateCommand {
 
         // NOTE: reading the stored bytes also gives the version they are
         // being changed from, so an edit that took a minute cannot
-        // silently overwrite a write that landed during it.
+        // silently overwrite a write that landed during it. A source
+        // replaces them, but only once the resource reads as an event.
         let (base, etag) = match &self.ical {
-            Some(source) => (read_source(source)?, None),
+            Some(source) => {
+                let base = read_source(source)?;
+                ensure_event_source(&base)?;
+                delete::check(client, &calendar_id, &self.event_id)?;
+                (base, None)
+            }
             None => {
                 let item = client
                     .get_item(&calendar_id, &self.event_id)
                     .map_err(missing)?;
+                ensure_event(&item.contents, &self.event_id, &calendar_id)?;
                 (item.contents, item.etag)
             }
         };
@@ -153,7 +162,6 @@ impl EventUpdateCommand {
                     contents,
                     if_match.as_deref(),
                     read,
-                    ItemOrigin::User,
                     send_updates,
                 )
                 .map_err(missing)?;
@@ -165,7 +173,7 @@ impl EventUpdateCommand {
         }
 
         let composer = IcalComposer {
-            command: client.account.item_composer(self.composer.composer)?,
+            command: client.account.event_composer(self.composer.composer)?,
         };
 
         // NOTE: reading the event is the one thing that has to happen
@@ -188,7 +196,6 @@ impl EventUpdateCommand {
                     contents,
                     if_match.as_deref(),
                     read,
-                    ItemOrigin::User,
                     send_updates,
                 )
                 .map_err(missing)
@@ -321,12 +328,7 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             std::fs::create_dir(dir.path().join("cal")).unwrap();
             let id = client(&dir)
-                .create_item(
-                    "cal",
-                    body.as_bytes().to_vec(),
-                    crate::shared::item::ItemOrigin::User,
-                    None,
-                )
+                .create_item("cal", body.as_bytes().to_vec(), None)
                 .unwrap();
             (dir, id)
         }
@@ -467,12 +469,7 @@ mod tests {
             crate::pimdir::client::sync_from(dir.path(), None, "cal");
 
             client(&dir)
-                .create_item(
-                    "cal",
-                    EVENT.as_bytes().to_vec(),
-                    crate::shared::item::ItemOrigin::User,
-                    None,
-                )
+                .create_item("cal", EVENT.as_bytes().to_vec(), None)
                 .unwrap();
 
             let mut owner = io_pimdir::client::PimdirStore::open(dir.path())

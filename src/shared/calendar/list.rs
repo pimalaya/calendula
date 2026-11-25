@@ -151,7 +151,7 @@ Account:  perso (vdir)
 
 personal  default  #ff0000  Personal\u{fffd}[2J
 
-Error:  old  item-unreadable  Cannot read the metadata of calendar `old`
+Error:  old  event-unreadable  Cannot read the metadata of calendar `old`
 ";
         assert_eq!(output.to_string(), expected);
     }

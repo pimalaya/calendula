@@ -229,7 +229,7 @@ impl MsgraphBackend {
             let (event, exceptions) = match self.reread(event, within) {
                 Ok(read) => read,
                 // NOTE: an event gone since the listing is left out.
-                Err(err) if code_of(&err) == Some(ErrorCode::ItemNotFound) => continue,
+                Err(err) if code_of(&err) == Some(ErrorCode::EventNotFound) => continue,
                 Err(err) => {
                     let err = err.context(format!("Cannot read event `{id}` again"));
                     errors.push(error::unreadable(Some(&id), err));
@@ -439,7 +439,7 @@ impl MsgraphBackend {
     }
 
     /// Refuses an event the calendar `calendar_id` does not hold, coded
-    /// `item-not-found`: Graph addresses an event by its id alone, so a
+    /// `event-not-found`: Graph addresses an event by its id alone, so a
     /// read, an update or a delete would reach it in any calendar.
     fn check_held(&mut self, calendar_id: &str, item_id: &str) -> Result<()> {
         let mut url = Url::parse(MSGRAPH_API_BASE)?;
@@ -462,7 +462,7 @@ impl MsgraphBackend {
             Err(err) => {
                 let err = event_refusal(err);
                 match code_of::<ErrorCode>(&err) {
-                    Some(ErrorCode::ItemNotFound) => Err(err.context(format!(
+                    Some(ErrorCode::EventNotFound) => Err(err.context(format!(
                         "Item `{item_id}` not found in calendar `{calendar_id}`"
                     ))),
                     _ => Err(err),
@@ -1078,7 +1078,7 @@ pub(crate) mod scripted {
                 .unwrap_err();
             assert_eq!(
                 crate::error::code(&err),
-                Some(ErrorCode::ItemNotFound),
+                Some(ErrorCode::EventNotFound),
                 "{err:#}"
             );
         }
@@ -1223,7 +1223,7 @@ pub(crate) mod scripted {
         let delete = backend.delete_item("cal", "E1", None).unwrap_err();
 
         for err in [read, delete] {
-            assert_eq!(code_of(&err), Some(ErrorCode::ItemNotFound), "{err:#}");
+            assert_eq!(code_of(&err), Some(ErrorCode::EventNotFound), "{err:#}");
             assert!(
                 err.to_string().contains("not found in calendar `cal`"),
                 "{err:#}"

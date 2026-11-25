@@ -307,7 +307,7 @@ impl JmapBackend {
     }
 
     /// The event `item_id`, its `properties` alone when given, failing
-    /// `item-not-found` unless the calendar `calendar_id` holds it per its
+    /// `event-not-found` unless the calendar `calendar_id` holds it per its
     /// `calendarIds`.
     fn held(
         &mut self,
@@ -323,7 +323,7 @@ impl JmapBackend {
         let out = self.client.calendar_event_get(opts)?;
 
         let missing = || {
-            error::item_not_found(format!(
+            error::event_not_found(format!(
                 "Item `{item_id}` not found in calendar `{calendar_id}`"
             ))
         };
@@ -522,7 +522,7 @@ fn item_refusal(
     let refusal = set_error(&format!("JMAP CalendarEvent {verb} rejected"), err);
 
     match err.code() {
-        Some(ErrorCode::ItemNotFound) => refusal.context(format!(
+        Some(ErrorCode::EventNotFound) => refusal.context(format!(
             "Item `{item_id}` not found in calendar `{calendar_id}`"
         )),
         _ => refusal,
@@ -679,7 +679,7 @@ mod tests {
     /// read prints it there, no write reaches it.
     #[test]
     fn an_event_of_another_calendar_is_not_found() {
-        let missing = Some(ErrorCode::ItemNotFound);
+        let missing = Some(ErrorCode::EventNotFound);
 
         let (mut backend, _) = scripted(&[&get()]);
         let err = backend.get_item("C2", "E1").unwrap_err();
@@ -799,7 +799,7 @@ mod tests {
         let err = backend.create_item("C1", SPELLED.to_vec()).unwrap_err();
         assert_eq!(
             crate::error::code(&err),
-            Some(ErrorCode::ItemInvalid),
+            Some(ErrorCode::EventInvalid),
             "{err:#}"
         );
         assert_eq!(calls(&requests).len(), 1);

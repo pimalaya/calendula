@@ -1,10 +1,8 @@
-//! # Item build
+//! # Event build
 //!
-//! The pipeline `event build` and `item build` run: an iCalendar source,
-//! set by the family's field flags, refined in the composer and printed,
-//! rather than written to a backend.
-
-use core::fmt;
+//! The pipeline `event build` runs: an iCalendar source, set by the field
+//! flags, refined in the composer and printed, rather than written to a
+//! backend.
 
 use std::{
     fs,
@@ -19,8 +17,6 @@ use pimalaya_cli::{
     printer::Printer,
 };
 use pimalaya_config::command::CommandConfig;
-use schemars::JsonSchema;
-use serde::Serialize;
 
 use crate::{
     account::context::Account,
@@ -29,14 +25,12 @@ use crate::{
         arg::IcalComposerArgs,
         composer::IcalComposer,
         event::build::EventBuildOutput,
-        ical::{IcalFamily, blank_item, ensure_valid, read_source},
+        ical::{blank_event, ensure_valid, read_source},
         item::{ItemContents, ItemEncoding},
     },
 };
 
-/// What a family sets on the item between its source and the composer.
-///
-/// Only `event` has field flags; `item` passes [`NoFields`].
+/// What a build sets on the event between its source and the composer.
 pub trait IcalFields {
     /// Whether nothing is set, the source then passing through.
     fn is_empty(&self) -> bool;
@@ -45,20 +39,7 @@ pub trait IcalFields {
     fn apply(&self, item: &[u8]) -> Result<Vec<u8>>;
 }
 
-/// The fields of a family taking no flag.
-pub struct NoFields;
-
-impl IcalFields for NoFields {
-    fn is_empty(&self) -> bool {
-        true
-    }
-
-    fn apply(&self, item: &[u8]) -> Result<Vec<u8>> {
-        Ok(item.to_vec())
-    }
-}
-
-/// What a `build` takes, whichever family it belongs to.
+/// What an `event build` takes beside its field flags.
 #[derive(Debug, Parser)]
 pub struct IcalBuildArgs {
     /// The composer the item is refined in before it is printed.
@@ -73,32 +54,19 @@ pub struct IcalBuildArgs {
     /// iCalendar to build on: a path to a file, raw iCalendar contents,
     /// or `-` for stdin.
     ///
-    /// Omit to mint one, which only a family naming a component kind can
-    /// do: `item` mints nothing.
+    /// Omit to mint one.
     #[arg(value_name = "ICAL")]
     pub ical: Option<String>,
 }
 
 impl IcalBuildArgs {
-    /// Builds the item and hands it over, reaching no backend.
+    /// Builds the event and hands it over, reaching no backend, `fields`
+    /// set on it between the source and the composer.
     pub fn execute(
         self,
         printer: &mut impl Printer,
         config_paths: &[PathBuf],
         account_name: Option<&str>,
-        family: IcalFamily,
-    ) -> Result<()> {
-        self.execute_with(printer, config_paths, account_name, family, &NoFields)
-    }
-
-    /// Builds the item as [`execute`](Self::execute) does, `fields` set on
-    /// it between the source and the composer.
-    pub fn execute_with(
-        self,
-        printer: &mut impl Printer,
-        config_paths: &[PathBuf],
-        account_name: Option<&str>,
-        family: IcalFamily,
         fields: &impl IcalFields,
     ) -> Result<()> {
         let Self {
@@ -107,17 +75,13 @@ impl IcalBuildArgs {
             ical,
         } = self;
 
-        if family == IcalFamily::Event
-            && ical.is_none()
-            && fields.is_empty()
-            && !composer.interactive
-        {
+        if ical.is_none() && fields.is_empty() && !composer.interactive {
             bail!("Nothing to build; give an iCalendar, a field flag, or -i to compose one");
         }
 
         let base = match &ical {
             Some(source) => read_source(source)?,
-            None => blank_item(family)?,
+            None => blank_event()?,
         };
 
         let seed = fields.apply(&base)?;
@@ -131,11 +95,11 @@ impl IcalBuildArgs {
                 ensure_valid(&seed)?;
             }
 
-            return emit(printer, output.as_deref(), family, &seed);
+            return emit(printer, output.as_deref(), &seed);
         }
 
         let composer = IcalComposer {
-            command: item_composer(config_paths, account_name, composer.composer)?,
+            command: event_composer(config_paths, account_name, composer.composer)?,
         };
 
         let Some(draft) = composer.edit(printer, &seed)? else {
@@ -145,24 +109,9 @@ impl IcalBuildArgs {
             return Ok(());
         };
 
-        let emitted = emit(printer, output.as_deref(), family, &draft.contents);
+        let emitted = emit(printer, output.as_deref(), &draft.contents);
 
         draft.finish(emitted)
-    }
-}
-
-/// The iCalendar the command built.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct IcalBuildOutput {
-    /// The raw iCalendar, as text or as base64.
-    #[serde(flatten)]
-    pub contents: ItemContents,
-}
-
-impl fmt::Display for IcalBuildOutput {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.contents.contents)
     }
 }
 
@@ -171,7 +120,7 @@ impl fmt::Display for IcalBuildOutput {
 /// A `--composer` line names it on its own, and only its absence sends
 /// the command looking for a configuration: building an item is otherwise
 /// something a machine holding none can do.
-fn item_composer(
+fn event_composer(
     config_paths: &[PathBuf],
     account_name: Option<&str>,
     flag: Option<String>,
@@ -183,7 +132,7 @@ fn item_composer(
     let (config, _, account_config) = resolve_account(config_paths, account_name)?;
     let account = Account::from(config).merge(Account::from(account_config));
 
-    account.item_composer(None)
+    account.event_composer(None)
 }
 
 /// Hands the item over: to the file `-o` names, or to the printer.
@@ -191,12 +140,7 @@ fn item_composer(
 /// An item that is not UTF-8 goes out as its bytes in text, which a pipe
 /// takes on as they are, and in base64 under `--json`, as cardamum's
 /// `card build` hands a vCard over.
-fn emit(
-    printer: &mut impl Printer,
-    output: Option<&Path>,
-    family: IcalFamily,
-    item: &[u8],
-) -> Result<()> {
+fn emit(printer: &mut impl Printer, output: Option<&Path>, item: &[u8]) -> Result<()> {
     let Some(path) = output else {
         let contents = ItemContents::of(item);
 
@@ -207,11 +151,7 @@ fn emit(
             });
         }
 
-        if family == IcalFamily::Event {
-            return printer.out(EventBuildOutput::of(item, contents));
-        }
-
-        return printer.out(IcalBuildOutput { contents });
+        return printer.out(EventBuildOutput::of(item, contents));
     };
 
     fs::write(path, item).with_context(|| format!("Cannot write iCalendar {path:?}"))?;
@@ -232,7 +172,6 @@ mod tests {
     use serde_json::json;
 
     use super::emit;
-    use crate::shared::ical::IcalFamily;
 
     /// A printer keeping the text it was handed, and the raw bytes.
     #[derive(Default)]
@@ -262,25 +201,23 @@ mod tests {
     /// UTF-8, which the text output prints as they are.
     #[test]
     fn a_built_item_names_its_encoding() {
-        for family in [IcalFamily::Item, IcalFamily::Event] {
-            let mut printer = CapturePrinter::default();
-            emit(&mut printer, None, family, TEXT).unwrap();
-            emit(&mut printer, None, family, LATIN1).unwrap();
+        let mut printer = CapturePrinter::default();
+        emit(&mut printer, None, TEXT).unwrap();
+        emit(&mut printer, None, LATIN1).unwrap();
 
-            let [text, latin1] = &printer.values[..] else {
-                panic!("{:?}", printer.values);
-            };
-            assert_eq!(text["contents"], json!(String::from_utf8_lossy(TEXT)));
-            assert_eq!(text["encoding"], "utf-8");
-            assert_eq!(
-                latin1["contents"],
-                "QkVHSU46VkNBTEVOREFSDQpYLU5PVEU6Q2Fm6Q0KRU5EOlZDQUxFTkRBUg0K"
-            );
-            assert_eq!(latin1["encoding"], "base64");
+        let [text, latin1] = &printer.values[..] else {
+            panic!("{:?}", printer.values);
+        };
+        assert_eq!(text["contents"], json!(String::from_utf8_lossy(TEXT)));
+        assert_eq!(text["encoding"], "utf-8");
+        assert_eq!(
+            latin1["contents"],
+            "QkVHSU46VkNBTEVOREFSDQpYLU5PVEU6Q2Fm6Q0KRU5EOlZDQUxFTkRBUg0K"
+        );
+        assert_eq!(latin1["encoding"], "base64");
 
-            let mut printer = TextPrinter::default();
-            emit(&mut printer, None, family, LATIN1).unwrap();
-            assert_eq!(printer.0, LATIN1);
-        }
+        let mut printer = TextPrinter::default();
+        emit(&mut printer, None, LATIN1).unwrap();
+        assert_eq!(printer.0, LATIN1);
     }
 }

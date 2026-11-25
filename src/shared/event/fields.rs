@@ -1449,7 +1449,7 @@ mod tests {
     use jiff::Timestamp;
 
     use super::{EventFieldsArgs, EventMethodArg, revise, set_method};
-    use crate::shared::ical::{IcalFamily, blank_item, ensure_valid};
+    use crate::shared::ical::{blank_event, ensure_valid};
 
     #[derive(Parser)]
     struct Wrap {
@@ -2523,7 +2523,7 @@ mod tests {
 
     #[test]
     fn an_event_minted_with_an_alarm_passes_the_check() {
-        let seed = blank_item(IcalFamily::Event).unwrap();
+        let seed = blank_event().unwrap();
         let out = fields(&["--alarm", "15m"]).apply(&seed).unwrap();
 
         ensure_valid(&out).unwrap();

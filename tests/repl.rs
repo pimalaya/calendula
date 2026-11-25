@@ -244,10 +244,10 @@ fn what_cannot_run_in_a_session_is_refused_and_the_session_goes_on() {
         "repl\n\
          mcp\n\
          event create -i\n\
-         item update -i --composer true standup\n\
+         event update -i --composer true standup\n\
          event build -i\n\
          event create -\n\
-         item update standup -\n\
+         event update standup -\n\
          event list\n",
     );
 

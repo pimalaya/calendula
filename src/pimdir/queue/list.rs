@@ -85,12 +85,12 @@ pub struct PimdirQueueRow {
     pub kind: String,
     /// The calendar the row is queued on.
     pub collection: String,
-    /// The link id of the item the row creates, the one `event add` or
-    /// `item add` reported, `null` when the row creates none.
+    /// The link id of the item the row creates, the one `event add`
+    /// reported, `null` when the row creates none.
     pub link_id: Option<String>,
     /// The id of the stored item the row addresses (an update, a removal,
-    /// a reply or a cancellation of a stored event), as `item list` prints
-    /// it, `null` when it addresses none, a creation among them.
+    /// a reply or a cancellation of a stored event), as `event list`
+    /// prints it, `null` when it addresses none, a creation among them.
     pub item_id: Option<String>,
     /// The process that staged the row.
     pub producer: String,

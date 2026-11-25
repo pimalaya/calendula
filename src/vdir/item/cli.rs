@@ -18,7 +18,7 @@ use crate::vdir::{
 
 /// Manage raw vdir items, the files inside a collection.
 ///
-/// Unlike the unified `item` API, these operate on the filesystem items
+/// Unlike the unified `event` API, these operate on the filesystem items
 /// byte for byte and of any kind, vCard or iCalendar, surfacing the
 /// on-disk id and kind.
 #[derive(Debug, Subcommand)]

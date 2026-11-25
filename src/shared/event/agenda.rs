@@ -21,6 +21,7 @@ use std::{
 use anyhow::{Result, anyhow, bail};
 use chrono::{Datelike, Local, Locale, Months, NaiveDate, NaiveDateTime};
 use clap::Parser;
+use ical::component::IcalComponentKind;
 use jiff::tz::TimeZone;
 use pimalaya_cli::{error::ItemErrors, printer::Printer, sanitize};
 use schemars::{JsonSchema, Schema, SchemaGenerator};
@@ -34,7 +35,6 @@ use crate::{
         arg::CalendarIdArg,
         client::CalendarClient,
         event::{Event, list::local_zone},
-        ical::IcalFamily,
         item::{CalendarItemQuery, CalendarTimeRange},
     },
 };
@@ -148,7 +148,7 @@ pub struct EventAgendaCommand {
 
 impl EventAgendaCommand {
     pub fn execute(self, printer: &mut impl Printer, client: &mut CalendarClient) -> Result<()> {
-        client.require(&[Capability::ItemList])?;
+        client.require(&[Capability::EventList])?;
 
         let now = Local::now();
 
@@ -302,7 +302,7 @@ impl EventAgendaCommand {
         };
         let query = CalendarItemQuery {
             range: range.as_ref(),
-            kind: IcalFamily::Event.kind(),
+            kind: Some(IcalComponentKind::VEvent),
             ..Default::default()
         };
         let listed = client.list_items(&calendar_id, None, None, query)?;
@@ -1324,13 +1324,13 @@ mod tests {
             agenda.to_string(),
             "Aug 14, 09:00: Stand-up\n\
              \n\
-             Error:  c  item-unreadable  Cannot parse item `c` as iCalendar\n"
+             Error:  c  event-unreadable  Cannot parse item `c` as iCalendar\n"
         );
 
         let json = serde_json::to_value(&agenda).unwrap();
         assert_eq!(json["events"][0]["label"], "Stand-up");
         assert_eq!(json["errors"][0]["id"], "c");
-        assert_eq!(json["errors"][0]["code"], "item-unreadable");
+        assert_eq!(json["errors"][0]["code"], "event-unreadable");
     }
 
     #[test]

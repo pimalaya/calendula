@@ -366,7 +366,7 @@ mod tests {
             coverage,
             errors: vec![ItemError {
                 id: Some("9".into()),
-                code: Some(ErrorCode::ItemUnreadable),
+                code: Some(ErrorCode::EventUnreadable),
                 error: "Read item `9`".into(),
                 sources: vec!["Invalid column type".into()],
             }],
@@ -390,7 +390,7 @@ Zones:       the index reads floating times and dates in UTC, this search reads 
 
 Next page: --page-token 2
 
-Error:  9  item-unreadable  Read item `9`
+Error:  9  event-unreadable  Read item `9`
 ";
         assert_eq!(output().to_string(), expected);
     }
@@ -405,7 +405,7 @@ Error:  9  item-unreadable  Read item `9`
         assert_eq!(keys, ["coverage", "errors", "hits", "nextPage"]);
         assert_eq!(json["nextPage"], "2");
         assert_eq!(json["errors"][0]["id"], "9");
-        assert_eq!(json["errors"][0]["code"], "item-unreadable");
+        assert_eq!(json["errors"][0]["code"], "event-unreadable");
         assert_eq!(json["hits"][0]["snippet"], "the\nbudget");
     }
 }

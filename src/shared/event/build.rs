@@ -16,7 +16,6 @@ use crate::shared::{
         Event, expand,
         fields::{EventFieldsArgs, EventMethodArg, set_method},
     },
-    ical::IcalFamily,
     item::{CalendarItem, ItemContents},
 };
 
@@ -72,13 +71,8 @@ impl EventBuildCommand {
             method: self.method,
         };
 
-        self.args.execute_with(
-            printer,
-            config_paths,
-            account_name,
-            IcalFamily::Event,
-            &fields,
-        )
+        self.args
+            .execute(printer, config_paths, account_name, &fields)
     }
 }
 

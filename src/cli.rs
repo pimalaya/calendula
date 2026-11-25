@@ -47,7 +47,7 @@ use crate::{
     mcp::McpCommand,
     repl::ReplCommand,
     session::Session,
-    shared::{calendar::cli::CalendarCommand, event::cli::EventCommand, item::cli::ItemCommand},
+    shared::{calendar::cli::CalendarCommand, event::cli::EventCommand},
 };
 
 /// The sample configuration as a raw file, for `curl` to fetch.
@@ -71,7 +71,7 @@ pub struct Cli {
     pub account: AccountFlag,
     /// Force a specific backend for cross-protocol commands.
     ///
-    /// Only the unified commands read it (`calendar`, `event`, `item`,
+    /// Only the unified commands read it (`calendar`, `event`,
     /// `account check`, `account capability`, and `repl` and `mcp` for
     /// their session), the protocol-specific ones always using their own
     /// backend. `auto`, the default, picks the first configured backend,
@@ -100,8 +100,6 @@ pub enum Command {
     Calendar(CalendarCommand),
     #[command(subcommand, alias = "events")]
     Event(EventCommand),
-    #[command(subcommand, alias = "items")]
-    Item(ItemCommand),
     #[cfg(feature = "caldav")]
     #[command(subcommand, mut_subcommands = protocol_exit)]
     Caldav(CaldavCommand),
@@ -184,7 +182,6 @@ impl Command {
         match self {
             Self::Calendar(cmd) => session.run_unified(printer, |p, client| cmd.execute(p, client)),
             Self::Event(cmd) => cmd.execute(printer, session),
-            Self::Item(cmd) => cmd.execute(printer, session),
 
             #[cfg(feature = "caldav")]
             Self::Caldav(cmd) => {
@@ -341,7 +338,6 @@ mod tests {
             &["calendar", "list"][..],
             &["event", "list"],
             &["event", "search", "1@example.org"],
-            &["item", "list"],
         ] {
             let args = [&["calendula"][..], list, &["-w", "80"]].concat();
             assert!(Cli::try_parse_from(args).is_err(), "{list:?}");

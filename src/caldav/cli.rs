@@ -26,7 +26,7 @@ use crate::caldav::{
 /// directly against the active account's endpoint, plus the discovery
 /// chain. Each command is named after its protocol counterpart and
 /// surfaces the native ids, ETags, CTags and sync tokens the unified
-/// `calendar`, `event` and `item` API hides.
+/// `calendar` and `event` API hides, and reaches any component kind.
 #[derive(Debug, Subcommand)]
 #[command(rename_all = "kebab-case")]
 pub enum CaldavCommand {

@@ -101,9 +101,6 @@ pub struct Config {
     /// `event` command options.
     #[serde(default)]
     pub event: EventConfig,
-    /// `item` command options.
-    #[serde(default)]
-    pub item: ItemConfig,
     /// One `[accounts.<name>]` block per account.
     pub accounts: HashMap<String, AccountConfig>,
 }
@@ -157,9 +154,6 @@ pub struct AccountConfig {
     /// `event` command options.
     #[serde(default)]
     pub event: EventConfig,
-    /// `item` command options.
-    #[serde(default)]
-    pub item: ItemConfig,
     /// Proxy every network backend of this account goes through, unless
     /// its own block names one.
     #[cfg(any(
@@ -342,8 +336,8 @@ impl AccountConfig {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CalendarConfig {
-    /// Calendar id used by `event` and `item` commands when their
-    /// `-k/--calendar` flag is omitted.
+    /// Calendar id used by `event` commands when their `-k/--calendar`
+    /// flag is omitted.
     pub default: Option<String>,
 }
 
@@ -351,6 +345,12 @@ pub struct CalendarConfig {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct EventConfig {
+    /// Command an event is edited through, spawned on the path of a
+    /// temporary iCalendar file it edits in place.
+    ///
+    /// A shell line or an argv list, the path appended as its last
+    /// argument: `composer = "tcal edit"` runs `tcal edit <PATH>`.
+    pub composer: Option<CommandConfig>,
     /// `event list` options.
     #[serde(default)]
     pub list: EventListConfig,
@@ -361,33 +361,6 @@ pub struct EventConfig {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct EventListConfig {
     /// Default `-s/--page-size` value for `event list`, 25 when unset.
-    pub page_size: Option<u32>,
-}
-
-/// Item-level options.
-///
-/// The composer lives here rather than under `event`: `event` and `item`
-/// are views over the same items, and what is edited is an iCalendar
-/// object, which is what `item` names.
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct ItemConfig {
-    /// Command an item is edited through, spawned on the path of a
-    /// temporary iCalendar file it edits in place.
-    ///
-    /// A shell line or an argv list, the path appended as its last
-    /// argument: `composer = "tcal edit"` runs `tcal edit <PATH>`.
-    pub composer: Option<CommandConfig>,
-    /// `item list` options.
-    #[serde(default)]
-    pub list: ItemListConfig,
-}
-
-/// `item list` options.
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct ItemListConfig {
-    /// Default `-s/--page-size` value for `item list`, 25 when unset.
     pub page_size: Option<u32>,
 }
 
