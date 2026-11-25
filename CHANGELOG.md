@@ -254,9 +254,7 @@ A pimdir store an earlier neverest wrote is refused `store-version`, never migra
 - **BREAKING**: Changed `vdir.home-dir` to `vdir.root`.
 - **BREAKING**: Changed a CalDAV `server` or `home` to take an ASCII host only, an internationalised one written in Punycode (`xn--...`), the refusal naming the host.
 - Changed `caldav.auth` to be optional: a block naming none sends no `Authorization` header, as `auth = "none"` does.
-- Changed config.sample.toml into one account of shared options, then one commented, working section per backend or provider (CalDAV, Google Calendar, Google CalDAV, Microsoft Graph, Fastmail, vdir, pimdir).
-
-  OAuth 2.0 tokens come from `ortie token show`, and the pimdir root names neverest's shared store, ~/.local/state/neverest.
+- Changed config.sample.toml to Himalaya's shape: one commented key per line, alternatives in brackets, `proxy` and `tls` as flat keys written once, one section per backend (CalDAV, JMAP, Google Calendar, Microsoft Graph, vdir, pimdir), the provider sections moved to the README.
 
 - Changed the clap help to plain, unwrapped text with the Pimalaya footer.
 - Changed the `-b/--backend` help to list `auto` and every backend, and an unknown `-b` to be refused listing the possible values.

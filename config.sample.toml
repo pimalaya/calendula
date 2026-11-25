@@ -1,101 +1,58 @@
 [accounts.example]
-default = true				# the account commands run on without -a
-#calendar.default = "personal"		# the calendar event and item use without -k
+default = true			# the account commands run on without -a
+#calendar.default = "personal"	# the calendar event and item use without -k
 
-event.list.page-size = 25		# events per page without -s, --from or --to
-#event.list.page-size = 0		# every event on one page
-item.list.page-size = 25		# items per page without -s
-#item.list.page-size = 0		# every item on one page
+#event.list.page-size = 25	# events per page without -s, --from or --to, 0 for one page [0]
+#item.list.page-size = 25	# items per page without -s, 0 for one page [0]
+#item.composer = "$EDITOR"	# the shell line -i edits an item in, its path appended, or an argv list (["tcal", "edit"])
 
-#item.composer = "$EDITOR"		# the shell line -i edits an item in, its path appended
-#item.composer = ["tcal", "edit"]	# a program and its arguments, the path appended
+#proxy.url = "socks5h://localhost:1080"	# a socks5, socks5h or http proxy for every network backend, all_proxy and https_proxy otherwise [http://localhost:3128]
+#proxy.username = "alice"		# its username
+#proxy.password.command = "exit 127"	# prints its password
 
-#proxy.url = "socks5h://localhost:1080"	# a SOCKS5 proxy for every network backend
-#proxy.url = "http://localhost:3128"	# an HTTP one, all_proxy and https_proxy otherwise
-
-#proxy = { url = "socks5h://localhost:1080", username = "alice", password.command = "exit 127" }	# with credentials
-
-#tls.provider = "rustls"			# the build's first otherwise, for every network backend
-#tls.rustls.crypto = "ring"			# the build's first otherwise
-#tls.cert = "/path/to/cert.pem"			# a PEM certificate to trust
-#tls.client = { cert = "/path/to/client.pem", key = "/path/to/client.key.pem" }	# a PEM client certificate and its PEM key (PKCS#8 under native-tls), for mutual TLS
+#tls.provider = "rustls"			# the build's first otherwise, for every network backend [native-tls]
+#tls.rustls.crypto = "ring"			# the build's first otherwise [aws]
+#tls.cert = "/path/to/cert.pem"			# a PEM certificate to trust, the server's leaf under rustls, a root under native-tls
+#tls.client.cert = "/path/to/client.pem"	# a PEM client certificate, for mutual TLS
+#tls.client.key = "/path/to/client.key.pem"	# its PEM private key, PKCS#8 under native-tls
 
 # CalDAV
-#
-#caldav.server = "https://caldav.example.org"		# the context root the principal walk starts from
-##caldav.server = "caldav.example.org:8443"		# a bare authority, over https
-##caldav.server = "https://example.org/dav/"		# a root under a path, as the provider documents it
-##caldav.home = "https://caldav.example.org/alice/"	# the calendar home set, over server, skipping discovery
-#caldav.auth.basic.username = "alice@example.org"	# HTTP Basic; or bearer.token, or auth = "none", as no auth at all
+#caldav.server = "https://caldav.example.org"	# the context root discovery starts from, a bare authority over https [caldav.example.org:8443, https://example.org/dav/]
+
+#caldav.home = "https://caldav.example.org/alice/"	# the calendar home set, in place of server, skipping discovery
+
+#caldav.auth.basic.username = "alice@example.org"	# HTTP Basic; no auth sends no credential, as auth = "none" does
 #caldav.auth.basic.password.command = "exit 127"	# prints the password
-##caldav.auth.basic.password.raw = "secret"		# the password itself
-#caldav.alpn = ["http/1.1"]				# the ALPN id rustls offers
-##caldav.alpn = []					# none
-##caldav.tls.provider = "rustls"			# rustls, the build's first TLS otherwise
-##caldav.tls.provider = "native-tls"			# the platform's TLS
-##caldav.tls.rustls.crypto = "ring"			# rustls on ring, the build's first otherwise
-##caldav.tls.rustls.crypto = "aws"			# rustls on aws-lc-rs
-##caldav.tls.cert = "/path/to/cert.pem"			# the tls keys, for CalDAV alone, field by field
-##caldav.tls.client = { cert = "/path/to/client.pem", key = "/path/to/client.key.pem" }	# a client certificate and its key
-##caldav.proxy.url = "socks5h://localhost:1080"		# the proxy keys, for CalDAV alone
+#caldav.auth.basic.password.raw = "secret"		# the password itself
+
+#caldav.auth.bearer.token.command = "exit 127"	# HTTP Bearer, prints a token such as an OAuth 2.0 one
+
+# Network, the same keys under jmap, gcal and msgraph
+#caldav.alpn = ["http/1.1"]			# the ALPN ids rustls offers, empty for none
+#caldav.tls.cert = "/path/to/cert.pem"		# the tls keys, for CalDAV alone, field by field
+#caldav.proxy.url = "socks5h://localhost:1080"	# the proxy keys, for CalDAV alone
 
 # JMAP
-#
-#jmap.server = "https://jmap.example.org/jmap/session"	# the session URL, fetched as is
-##jmap.server = "jmap.example.org"			# its /.well-known/jmap, over https
-##jmap.server = "https://api.fastmail.com/jmap/session"	# Fastmail's JMAP session
-#jmap.auth.basic.username = "alice@example.org"		# HTTP Basic; or bearer.token, or header
-#jmap.auth.basic.password.command = "exit 127"		# prints the password
-##jmap.auth.basic.password.raw = "secret"		# the password itself
-#jmap.alpn = ["http/1.1"]				# the ALPN id rustls offers
-##jmap.alpn = []					# none
-##jmap.tls.provider = "native-tls"			# as caldav.tls
-##jmap.tls.rustls.crypto = "aws"			# as caldav.tls.rustls
-##jmap.tls.cert = "/path/to/cert.pem"			# as caldav.tls
-##jmap.proxy.url = "socks5h://localhost:1080"		# the proxy keys, for JMAP alone
+#jmap.server = "https://jmap.example.org/jmap/session"	# the session URL, or a bare host read through its /.well-known/jmap [jmap.example.org]
+
+#jmap.auth.basic.username = "alice@example.org"	# HTTP Basic
+#jmap.auth.basic.password.command = "exit 127"	# prints the password
+#jmap.auth.basic.password.raw = "secret"	# the password itself
+
+#jmap.auth.bearer.token.command = "exit 127"	# prints a bearer token; jmap.auth.header.command sends a whole Authorization value
 
 # Google Calendar
-#
-#gcal.auth.token.command = ["ortie", "token", "show", "-a", "example"]	# an access token, from Ortie's Google section
-##gcal.auth.token.raw = "secret"					# the token itself, short-lived
-#
-#gcal.alpn = ["http/1.1"]		# the ALPN id rustls offers
-##gcal.alpn = []			# none
-##gcal.tls.provider = "native-tls"	# as caldav.tls
-##gcal.tls.rustls.crypto = "aws"	# as caldav.tls.rustls
-##gcal.tls.cert = "/path/to/cert.pem"	# as caldav.tls
-##gcal.proxy.url = "socks5h://localhost:1080"	# the proxy keys, for Google Calendar alone
-
-# Google CalDAV
-#
-#caldav.server = "https://apidata.googleusercontent.com/caldav/v2/"		# the principal, no .well-known leading there
-#caldav.auth.bearer.token.command = ["ortie", "token", "show", "-a", "example"]	# Ortie's Google token, no password taken
+#gcal.auth.token.command = "exit 127"	# prints an OAuth 2.0 access token
+#gcal.auth.token.raw = "secret"		# the token itself, short-lived
 
 # Microsoft Graph
-#
-#msgraph.auth.token.command = ["ortie", "token", "show", "-a", "example"]	# an access token, from Ortie's Graph section
-##msgraph.auth.token.raw = "secret"						# the token itself, short-lived
-#
-#msgraph.user-id = "me"				# the signed-in user's calendars
-##msgraph.user-id = "bob@example.org"		# another user's, by id or principal name
-#msgraph.alpn = ["http/1.1"]			# the ALPN id rustls offers
-##msgraph.alpn = []				# none
-##msgraph.tls.provider = "native-tls"		# as caldav.tls
-##msgraph.tls.rustls.crypto = "aws"		# as caldav.tls.rustls
-##msgraph.tls.cert = "/path/to/cert.pem"	# as caldav.tls
-##msgraph.proxy.url = "socks5h://localhost:1080"	# the proxy keys, for Graph alone
-
-# Fastmail
-#
-#caldav.server = "https://caldav.fastmail.com/dav/"	# Fastmail's CalDAV root
-#caldav.auth.basic.username = "alice@fastmail.com"	# the account's address
-#caldav.auth.basic.password.command = "exit 127"	# prints an app password, no bearer token taken
+#msgraph.user-id = "me"				# the signed-in user, another by id or principal name [bob@example.org]
+#msgraph.auth.token.command = "exit 127"	# prints an OAuth 2.0 access token
+#msgraph.auth.token.raw = "secret"		# the token itself, short-lived
 
 # vdir
-#
-#vdir.root = "~/.local/share/vdirsyncer/calendars"	# a directory per calendar, an .ics file per item
+#vdir.root = "~/Calendars"	# a directory per calendar, an .ics file per item
 
 # pimdir
-#
-#pimdir.root = "~/.local/state/neverest"	# the store neverest syncs, on Linux
-##pimdir.account = "example"			# the account to read, for a store holding several
+#pimdir.root = "/path/to/store"	# the pimdir store a sync engine fills
+#pimdir.account = "example"	# the account to read, for a store holding several

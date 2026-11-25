@@ -65,7 +65,7 @@ nix develop --command cargo tree --locked -e normal,features -i io-pimdir \
 
 ## Testing against a real provider
 
-tests/google.rs, tests/microsoft.rs and tests/fastmail.rs run the built binary against Google (Calendar API and CalDAV), Microsoft Graph and Fastmail CalDAV, each account taken from a provider section of config.sample.toml. Every test is ignored unless `--ignored` is given. CI never runs them on push: the `live` job of .github/workflows/tests.yml runs weekly (Mondays, 04:00 UTC) and by hand (`gh workflow run tests.yml`), and a release runs it by hand on the commit to tag.
+tests/google.rs, tests/microsoft.rs and tests/fastmail.rs run the built binary against Google (Calendar API and CalDAV), Microsoft Graph and Fastmail CalDAV, each account taken from a backend section of config.sample.toml with the provider's server and auth set over it. Every test is ignored unless `--ignored` is given. CI never runs them on push: the `live` job of .github/workflows/tests.yml runs weekly (Mondays, 04:00 UTC) and by hand (`gh workflow run tests.yml`), and a release runs it by hand on the commit to tag.
 
 The `anonymous` tests use a made-up credential and touch no account:
 

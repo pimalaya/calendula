@@ -168,7 +168,7 @@
 //! folded under the selected account.
 //!
 //! calendula never writes a configuration: a person writes it from
-//! config.sample.toml, one section per backend and provider, which the test
+//! config.sample.toml, one section per backend, which the test
 //! suite parses variant by variant and the packages ship in
 //! share/doc/calendula. A person running calendula without one meets the
 //! welcome ([`cli::welcome`], pimalaya-cli's in calendula's words), which

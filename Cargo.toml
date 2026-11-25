@@ -36,7 +36,6 @@ pimalaya-cli = { version = "0.8.1", default-features = false, features = ["build
 [dev-dependencies]
 io-oauth = { version = "0.8", default-features = false, features = ["std", "jwt-bearer", "rustls-ring"] }
 io-pimdir = { version = "0.20.4", default-features = false, features = ["client", "indexer"] }
-pimalaya-config = { version = "0.6.0", default-features = false, features = ["sample"] }
 rusqlite = { version = "0.43", default-features = false, features = ["bundled"] }
 tempfile = { version = "3", default-features = false }
 toml = { version = "1.1", default-features = false, features = ["parse", "serde"] }

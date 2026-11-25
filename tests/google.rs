@@ -13,7 +13,7 @@
 //! `calendar` scope alone.
 //!
 //! Both accounts are sections of config.sample.toml: Google Calendar, and
-//! Google CalDAV on its principal.
+//! CalDAV pointed at Google's principal with a bearer token.
 //!
 //! Run with `cargo test --test google -- --ignored`. A failure never shows
 //! a token: the binary reads it from its environment only.
@@ -33,11 +33,14 @@ fn write_gcal_account(dir: &Path) -> PathBuf {
     write_config(dir, "google", &sample_section("Google Calendar", &token))
 }
 
-/// Writes the sample's Google CalDAV account, its bearer token read
-/// through [`TOKEN_COMMAND`].
+/// Writes the sample's CalDAV account on Google's principal, no
+/// .well-known leading there, its bearer token read through
+/// [`TOKEN_COMMAND`].
 fn write_caldav_account(dir: &Path) -> PathBuf {
-    let token = [("caldav.auth.bearer.token.command", TOKEN_COMMAND)];
-    write_config(dir, "google", &sample_section("Google CalDAV", &token))
+    let server = r#""https://apidata.googleusercontent.com/caldav/v2/""#;
+    let section = sample_section("CalDAV", &[("caldav.server", server)]);
+    let token = format!("caldav.auth.bearer.token.command = {TOKEN_COMMAND}\n");
+    write_config(dir, "google", &format!("{section}{token}"))
 }
 
 mod anonymous {
