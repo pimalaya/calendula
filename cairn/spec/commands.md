@@ -344,7 +344,7 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 | `unsupported` | a source of the pimdir store does not support the write (an online meeting, a scheduled event, a to-do among them); nothing was queued |
 | `no-performer` | no source of the pimdir store can perform the intent (`pimdir reply`, `pimdir cancel`), or a write (`event add`, `update`, `delete`) to a calendar no source syncs; nothing was queued |
 | `ambiguous-performer` | several sources of the pimdir store can perform the intent and none is chosen; nothing was queued |
-| `index-missing` | the pimdir store has no search index yet: its sync engine builds it |
+| `source-empty` | a pimdir store handle was bound to a source of an empty id, which no row may hold; nothing was written. Relayed as Himalaya relays it: no calendula path binds a source today || `index-missing` | the pimdir store has no search index yet: its sync engine builds it |
 | `index-outdated` | the pimdir search index was built otherwise or from another store: its sync engine rebuilds it |
 | `index-version` | the pimdir search index is of another version or shape: its sync engine rebuilds an earlier version's (any draft's), and leaves any other |
 | `index-zone-unknown` | the pimdir search index reads floating times, or the search reads days, in a zone the time zone database does not know |

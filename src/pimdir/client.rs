@@ -171,6 +171,7 @@ const PIMDIR_CODES: &[(&str, ErrorCode)] = &[
     ("store-in-flight", ErrorCode::StoreInFlight),
     ("store-exposed", ErrorCode::StoreExposed),
     ("store-reset", ErrorCode::StoreReset),
+    ("source-empty", ErrorCode::SourceEmpty),
     ("lock-replaced", ErrorCode::LockReplaced),
     ("item-duplicate", ErrorCode::ItemDuplicate),
     ("flag-invalid", ErrorCode::FlagInvalid),
@@ -206,10 +207,10 @@ impl ErrorCode {
 /// Only the failures a caller acts on get one, the ones Himalaya relays
 /// (`PIMDIR_CODES`): a store state, a sync or a producer holding it, a
 /// write a source or the store refuses before anything is queued, an
-/// intent no source or several can perform, a search index state, and a
-/// search query refused or unanswered; an SQL, I/O or JSON failure gets
-/// none. The message is io-pimdir's, but for a store of another format
-/// version, worded by [`version_message`].
+/// intent no source or several can perform, an empty source id, a search
+/// index state, and a search query refused or unanswered; an SQL, I/O or
+/// JSON failure gets none. The message is io-pimdir's, but for a store of
+/// another format version, worded by [`version_message`].
 pub(crate) fn store_error(err: PimdirError, context: impl fmt::Display) -> anyhow::Error {
     let context = context.to_string();
     let message = match &err {
@@ -346,6 +347,7 @@ mod tests {
                 capability: "calendar.reply".into(),
                 candidates: vec!["caldav".into(), "gcal".into()],
             },
+            PimdirError::SourceEmpty,
             PimdirError::Unread {
                 collection: "cal".into(),
                 handle: "h".into(),

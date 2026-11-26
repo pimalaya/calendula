@@ -156,6 +156,9 @@ pub enum ErrorCode {
     /// The pimdir store is not the one that answered a queue row's handle,
     /// a copy restored since: nothing was done with the row.
     StoreReset,
+    /// The pimdir store was bound to an empty source id, which no row may
+    /// hold: nothing was done.
+    SourceEmpty,
     /// The lock file of the pimdir store was removed or replaced under a
     /// write: nothing was queued, and the caller retries.
     LockReplaced,

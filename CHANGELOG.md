@@ -88,7 +88,7 @@ The configuration wizard, the tables and colours, the raw `item` family and the 
 
   pimdir store: `store-uncreated`, `store-version`, `store-foreign`, `store-corrupt`, `store-not-current`, `store-hash-algo`, `sync-version`, `store-account-ambiguous`, `store-account-unknown`, `lock-replaced`.
 
-  pimdir writes: `store-busy`, `store-owned`, `store-staging`, `store-in-flight`, `store-exposed`, `store-reset`, `flag-invalid`, `action-malformed`, `conflict-unread`, `unsupported`, `no-performer`, `ambiguous-performer`.
+  pimdir writes: `store-busy`, `store-owned`, `store-staging`, `store-in-flight`, `store-exposed`, `store-reset`, `flag-invalid`, `action-malformed`, `conflict-unread`, `unsupported`, `no-performer`, `ambiguous-performer`, `source-empty`.
 
   Search index: `index-missing`, `index-outdated`, `index-version`, `index-zone-unknown`, `index-fts5-missing`, `query-refused`, `query-unanswerable`.
 
