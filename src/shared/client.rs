@@ -1007,7 +1007,8 @@ mod caldav_tests {
 
     use crate::{backend::Backend, config::Config, shared::client::CalendarClient};
 
-    /// A backend opened twice, the first open failing past its credential,
+    /// A backend opened twice, the first open failing past its credential
+    /// (a block naming both routes, refused before anything connects),
     /// resolves that credential once: a reopened backend runs no secret
     /// command again.
     #[test]
@@ -1016,9 +1017,9 @@ mod caldav_tests {
         let runs = dir.path().join("runs");
         let command = format!("echo run >> '{}'; echo secret", runs.display());
 
-        // NOTE: port 1 on the loopback refuses the connection at once.
         let toml = format!(
-            "[accounts.a]\ncaldav.home = \"http://127.0.0.1:1/\"\n\
+            "[accounts.a]\ncaldav.home = \"http://dav.example.org/a/\"\n\
+             caldav.server = \"http://dav.example.org/\"\n\
              caldav.auth.basic.username = \"a\"\n\
              caldav.auth.basic.password.command = {command:?}\n"
         );

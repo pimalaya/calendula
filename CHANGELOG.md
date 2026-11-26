@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the unit tests binding or connecting a loopback socket, which failed in a build sandbox without network, such as the Nix one on macOS: the CalDAV account check runs over a scripted stream, and the proxy tests moved to the integration suite.
+
 ## [1.0.0] - 2026-11-26
 
 Calendula 1 is the first stable release: a low-level CLI over a unified calendars API, the same commands on CalDAV, JMAP, Google Calendar, Microsoft Graph, vdir and pimdir, the protocol-specific ones beside them, plain text for a glance and `--json` for scripts, frontends and AI agents. The offline side is the pimdir store Neverest syncs, which Calendula reads and queues its writes into, and event editing is left to a composer such as tcal.

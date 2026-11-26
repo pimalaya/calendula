@@ -77,6 +77,17 @@ impl DerefMut for CaldavClient {
 /// and skips discovery, `server` names the context root the principal
 /// walk starts from.
 pub fn connect(config: &CaldavConfig, resolver: &mut SecretResolver) -> Result<WebdavClientStd> {
+    let mut client = open(config, resolver)?;
+    discover(&mut client, config)?;
+    Ok(client)
+}
+
+/// Opens a CalDAV client on the route `config` names, resolving the
+/// credential through `resolver`, its discovery left to [`discover`].
+pub(crate) fn open(
+    config: &CaldavConfig,
+    resolver: &mut SecretResolver,
+) -> Result<WebdavClientStd> {
     let auth = build_auth(&config.auth, resolver)?;
     let tls = build_tls(config);
     let proxy = ProxyConfig::resolve(config.proxy.clone(), resolver)?;
@@ -87,9 +98,7 @@ pub fn connect(config: &CaldavConfig, resolver: &mut SecretResolver) -> Result<W
 
     if let Some(home) = &config.home {
         let opts = WebdavClientStdConnectOptions { tls, proxy };
-        let mut client = WebdavClientStd::connect(home, auth, opts)?;
-        client.calendar_home_set = Some(home.clone());
-        return Ok(client);
+        return Ok(WebdavClientStd::connect(home, auth, opts)?);
     }
 
     let server = config
@@ -106,10 +115,21 @@ pub fn connect(config: &CaldavConfig, resolver: &mut SecretResolver) -> Result<W
     };
 
     let opts = WebdavClientStdConnectOptions { tls, proxy };
-    let mut client = WebdavClientStd::connect(&server, auth, opts)?;
-    client.calendar_home_set()?;
+    Ok(WebdavClientStd::connect(&server, auth, opts)?)
+}
 
-    Ok(client)
+/// Fills the discovery cache of `client`, opened on the route `config`
+/// names: a `home` pins the home-set, a `server` resolves it through the
+/// principal walk.
+pub(crate) fn discover(client: &mut WebdavClientStd, config: &CaldavConfig) -> Result<()> {
+    match &config.home {
+        Some(home) => client.calendar_home_set = Some(home.clone()),
+        None => {
+            client.calendar_home_set()?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Probes `.well-known/caldav` (RFC 6764 §5) on a bare-origin `server`
@@ -209,7 +229,10 @@ fn build_tls(config: &CaldavConfig) -> Tls {
 ///
 /// A secret backed by a command is run here, at first use, unless
 /// `resolver` already holds what that same command answered.
-fn build_auth(config: &CaldavAuthConfig, resolver: &mut SecretResolver) -> Result<WebdavAuth> {
+pub(crate) fn build_auth(
+    config: &CaldavAuthConfig,
+    resolver: &mut SecretResolver,
+) -> Result<WebdavAuth> {
     Ok(match config {
         CaldavAuthConfig::None => WebdavAuth::None,
         CaldavAuthConfig::Basic { username, password } => WebdavAuth::Basic(HttpAuthBasic {

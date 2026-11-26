@@ -226,12 +226,23 @@ fn check_pimdir(config: crate::config::PimdirConfig) -> Result<()> {
 /// A 401 to a block with no `auth` says the block configures none.
 #[cfg(feature = "caldav")]
 fn check_caldav(config: crate::config::CaldavConfig, resolver: &mut SecretResolver) -> Result<()> {
+    let client = crate::caldav::client::open(&config, resolver)?;
+    check_caldav_client(client, &config)
+}
+
+/// The check of `client`, opened on the route `config` names: discovery,
+/// then a PROPFIND Depth 0 on a pinned `home`.
+#[cfg(feature = "caldav")]
+fn check_caldav_client(
+    mut client: io_webdav::client::WebdavClientStd,
+    config: &crate::config::CaldavConfig,
+) -> Result<()> {
     use io_webdav::rfc4918::{RESOURCETYPE, WebdavMultistatus, propfind::WebdavPropfind};
 
-    use crate::caldav::client::{connect, unauthenticated};
+    use crate::caldav::client::{discover, unauthenticated};
 
     let mut check = || -> Result<()> {
-        let mut client = connect(&config, resolver)?;
+        discover(&mut client, config)?;
 
         let Some(home) = &config.home else {
             return Ok(());
@@ -495,19 +506,20 @@ mod msgraph_tests {
 
 #[cfg(all(test, feature = "caldav"))]
 mod caldav_tests {
-    use std::{
-        io::{BufRead, BufReader, Read, Write},
-        net::TcpListener,
-        sync::mpsc::{self, Receiver},
-        thread,
-    };
+    use std::io::ErrorKind;
 
+    use io_webdav::client::{WebdavClientStd, WebdavStream};
     use pimalaya_config::secret::SecretResolver;
 
     use crate::{
-        account::check::{BackendCheck, caldav_tls, check_caldav, checked},
+        account::check::{BackendCheck, caldav_tls, check_caldav_client, checked},
+        caldav::client::{build_auth, parse_server},
         config::CaldavConfig,
+        script::{self, Requests, Script},
     };
+
+    /// The origin of the scripted server.
+    const ORIGIN: &str = "http://dav.example.org";
 
     /// The multistatus of a home answering its PROPFIND.
     const HOME: &str = "<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\">\
@@ -516,80 +528,66 @@ mod caldav_tests {
         <d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>\
         </d:multistatus>";
 
-    /// A local server answering every request with `status` and `body`, and
-    /// the head of each request it read.
-    fn answering(status: &'static str, body: &'static str) -> (String, Receiver<String>) {
-        serving(status, body, false)
+    /// The `server` route to the scripted server.
+    fn server() -> String {
+        format!("server = \"{ORIGIN}/\"")
     }
 
-    /// A local server closing its first connection once it read the
-    /// request, unanswered, then answering as [`answering`] does.
-    fn closing_first(status: &'static str, body: &'static str) -> (String, Receiver<String>) {
-        serving(status, body, true)
+    /// The `home` route to the scripted server.
+    fn home() -> String {
+        format!("home = \"{ORIGIN}/calendars/alice/\"")
     }
 
-    /// A local server answering every request with `status` and `body`, the
-    /// one of the first connection too unless `close_first` is set, and the
-    /// head of each request it read.
-    fn serving(
-        status: &'static str,
-        body: &'static str,
-        close_first: bool,
-    ) -> (String, Receiver<String>) {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let origin = format!("http://{}", listener.local_addr().unwrap());
-        let (sender, heads) = mpsc::channel();
-
-        thread::spawn(move || {
-            for (n, stream) in listener.incoming().enumerate() {
-                let mut stream = BufReader::new(stream.unwrap());
-                let mut head = String::new();
-                let mut len = 0;
-
-                loop {
-                    let mut line = String::new();
-                    if stream.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
-                        break;
-                    }
-
-                    let lower = line.to_ascii_lowercase();
-                    if let Some(value) = lower.strip_prefix("content-length:") {
-                        len = value.trim().parse().unwrap();
-                    }
-
-                    head.push_str(&line);
-                }
-
-                let response = format!(
-                    "HTTP/1.1 {status}\r\nContent-Type: application/xml\r\n\
-                     Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-
-                stream.read_exact(&mut vec![0; len]).unwrap();
-
-                if close_first && n == 0 {
-                    sender.send(head).unwrap();
-                    continue;
-                }
-
-                stream.get_mut().write_all(response.as_bytes()).unwrap();
-                sender.send(head).unwrap();
-            }
-        });
-
-        (origin, heads)
+    /// A response of `status` carrying `body`.
+    fn answer(status: u16, body: &str) -> Vec<u8> {
+        script::response(status, "application/xml", body)
     }
 
-    /// The row of a check over `route`, a made-up password presented.
-    fn check(route: String) -> BackendCheck {
+    /// The block of `route` presenting a made-up password.
+    fn credentialed(route: &str) -> CaldavConfig {
         let document = format!(
             "{route}\nauth.basic.username = \"alice\"\n\
              auth.basic.password.raw = \"made-up\""
         );
-        let config: CaldavConfig = toml::from_str(&document).unwrap();
+        toml::from_str(&document).unwrap()
+    }
 
-        checked("caldav", check_caldav(config, &mut SecretResolver::new()))
+    /// The block of `route` configuring no `auth`.
+    fn anonymous(route: &str) -> CaldavConfig {
+        toml::from_str(route).unwrap()
+    }
+
+    /// The client the check opens on the route `config` names, over
+    /// `script` rather than a connection.
+    fn client(config: &CaldavConfig, script: Script) -> WebdavClientStd {
+        let auth = build_auth(&config.auth, &mut SecretResolver::new()).unwrap();
+        let base = match (&config.home, &config.server) {
+            (Some(home), _) => home.clone(),
+            (None, Some(server)) => parse_server(server).unwrap(),
+            (None, None) => panic!("the block names no route"),
+        };
+
+        WebdavClientStd::new(script, auth, base)
+    }
+
+    /// The row of a check of `config`, its server answering `responses`
+    /// in turn, and the requests it received.
+    fn check(config: &CaldavConfig, responses: Vec<Vec<u8>>) -> (BackendCheck, Requests) {
+        let (script, requests) = Script::new(responses);
+        let result = check_caldav_client(client(config, script), config);
+        (checked("caldav", result), requests)
+    }
+
+    /// The head of each request of `requests`, its last line ended.
+    fn heads(requests: &Requests) -> Vec<String> {
+        let requests = requests.lock().unwrap();
+        let head = |request: &Vec<u8>| {
+            let request = String::from_utf8_lossy(request);
+            let head = request.split("\r\n\r\n").next().unwrap_or_default();
+            format!("{head}\r\n")
+        };
+
+        requests.iter().map(head).collect()
     }
 
     /// A row names the TLS its block configures over an `https` URL, and
@@ -625,26 +623,30 @@ mod caldav_tests {
     }
 
     /// A credential the server refuses fails a pinned `home` as it fails
-    /// discovery, with the same code and error, on one PROPFIND Depth 0.
+    /// discovery, with the same code and error, on one PROPFIND Depth 0
+    /// presenting it.
     #[test]
     fn a_refused_credential_fails_the_home_route_as_the_server_route() {
-        let (origin, heads) = answering("401 Unauthorized", "Unauthorized");
+        let refusal = || vec![answer(401, "Unauthorized")];
 
-        let server = check(format!("server = \"{origin}/\""));
+        let (server, requests) = check(&credentialed(&server()), refusal());
         assert!(!server.ok, "{server:?}");
-        assert!(heads.recv().unwrap().starts_with("PROPFIND / "));
+        let discovery = heads(&requests);
+        assert!(discovery[0].starts_with("PROPFIND / "), "{discovery:?}");
 
-        let home = check(format!("home = \"{origin}/calendars/alice/\""));
+        let (home, requests) = check(&credentialed(&home()), refusal());
         assert!(!home.ok, "{home:?}");
         assert_eq!(home.code, server.code, "{home:?}");
         assert_eq!(home.error, server.error, "{home:?}");
         assert!(home.error.unwrap().contains("HTTP 401"));
 
-        let head = heads.recv().unwrap();
-        let depth = head.to_ascii_lowercase().contains("\r\ndepth: 0\r\n");
+        let heads = heads(&requests);
+        assert_eq!(heads.len(), 1, "{heads:?}");
+        let head = &heads[0];
+        let lower = head.to_ascii_lowercase();
         assert!(head.starts_with("PROPFIND /calendars/alice/ "), "{head}");
-        assert!(depth, "{head}");
-        assert!(heads.try_recv().is_err());
+        assert!(lower.contains("\r\ndepth: 0\r\n"), "{head}");
+        assert!(lower.contains("\r\nauthorization: basic "), "{head}");
     }
 
     /// A 401 to a block with no `auth` says the account configures none,
@@ -652,16 +654,10 @@ mod caldav_tests {
     /// credential refused says nothing of the kind.
     #[test]
     fn a_401_without_auth_names_the_missing_auth() {
-        let (origin, _heads) = answering("401 Unauthorized", "Unauthorized");
-        let anonymous = |route: String| {
-            let config: CaldavConfig = toml::from_str(&route).unwrap();
-            checked("caldav", check_caldav(config, &mut SecretResolver::new()))
-        };
+        let refusal = || vec![answer(401, "Unauthorized")];
 
-        for row in [
-            anonymous(format!("server = \"{origin}/\"")),
-            anonymous(format!("home = \"{origin}/calendars/alice/\"")),
-        ] {
+        for route in [server(), home()] {
+            let (row, _) = check(&anonymous(&route), refusal());
             assert!(!row.ok, "{row:?}");
             assert_eq!(row.code, None, "{row:?}");
             let error = row.error.unwrap_or_default();
@@ -672,35 +668,50 @@ mod caldav_tests {
             );
         }
 
-        let refused = check(format!("server = \"{origin}/\""));
+        let (refused, _) = check(&credentialed(&server()), refusal());
         assert!(!refused.error.unwrap().contains("no `auth`"));
     }
 
     /// A home answering its PROPFIND passes the check.
     #[test]
     fn a_home_answering_its_propfind_passes() {
-        let (origin, heads) = answering("207 Multi-Status", HOME);
-
-        let home = check(format!("home = \"{origin}/calendars/alice/\""));
+        let (home, requests) = check(&credentialed(&home()), vec![answer(207, HOME)]);
         assert!(home.ok, "{home:?}");
 
-        let head = heads.recv().unwrap();
-        assert!(head.starts_with("PROPFIND /calendars/alice/ "), "{head}");
+        let heads = heads(&requests);
+        assert_eq!(heads.len(), 1, "{heads:?}");
+        assert!(
+            heads[0].starts_with("PROPFIND /calendars/alice/ "),
+            "{heads:?}"
+        );
     }
 
     /// A server closing the connection the check opened before answering
-    /// gets the PROPFIND again on a fresh one, as every io-webdav request
-    /// does, and the check passes.
+    /// gets the PROPFIND again on a fresh one, the check running it as
+    /// every io-webdav request runs, and the check passes.
     #[test]
     fn a_home_propfind_is_sent_again_on_a_fresh_connection() {
-        let (origin, heads) = closing_first("207 Multi-Status", HOME);
+        let config = credentialed(&home());
+        let (closed, first) = Script::new(Vec::new());
+        let (fresh, second) = Script::new(vec![answer(207, HOME)]);
 
-        let home = check(format!("home = \"{origin}/calendars/alice/\""));
+        let mut client = client(&config, closed);
+        let mut fresh = Some(fresh);
+        client.set_reconnect(Box::new(move || {
+            let stream = fresh.take().ok_or(ErrorKind::NotConnected)?;
+            Ok(Box::new(stream) as Box<dyn WebdavStream>)
+        }));
+
+        let home = checked("caldav", check_caldav_client(client, &config));
         assert!(home.ok, "{home:?}");
 
-        for _ in 0..2 {
-            let head = heads.recv().unwrap();
-            assert!(head.starts_with("PROPFIND /calendars/alice/ "), "{head}");
+        for requests in [first, second] {
+            let heads = heads(&requests);
+            assert_eq!(heads.len(), 1, "{heads:?}");
+            assert!(
+                heads[0].starts_with("PROPFIND /calendars/alice/ "),
+                "{heads:?}"
+            );
         }
     }
 }
