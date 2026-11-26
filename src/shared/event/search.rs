@@ -8,7 +8,7 @@ use std::fmt;
 
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
-use io_pimdir::{client::search::PimdirSearchCursor, search::query::PimdirQuery};
+use io_pimdir::search::{plan::PimdirSearchCursor, query::PimdirQuery};
 use jiff::tz::TimeZone;
 use pimalaya_cli::{
     clap::args::PageTokenArg,

@@ -319,7 +319,7 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 | `invitation-missing` | `pimdir reply` names an event naming no `ORGANIZER` to answer or no `ATTENDEE` to answer as, or `pimdir cancel` one naming no `ATTENDEE` to notify; nothing was queued |
 | `item-duplicate` | a create names a `UID` its calendar holds: a CalDAV `no-uid-conflict` or 412, a gcal calendar holding it, a pimdir calendar holding or queuing it |
 | `store-uncreated` | the pimdir store has no schema yet: its sync engine creates it |
-| `store-version` | the pimdir store is of another format version than calendula's: an earlier sync engine's is drained by it then set aside, a later one's needs calendula upgraded |
+| `store-version` | the pimdir store is of a format version calendula does not open: an earlier sync engine's (any draft's) is drained by it then set aside, a later one whose floors are above calendula's needs calendula upgraded |
 | `store-foreign` | the pimdir database is not a pimdir store: another program wrote it |
 | `store-corrupt` | the pimdir store's two version stamps disagree, or its schema is not the canonical one |
 | `store-not-current` | the pimdir store holds no schema yet and the verb creates none: its sync engine creates it |
@@ -346,7 +346,7 @@ A failure a caller is expected to act on SHALL carry a stable code, printed unde
 | `ambiguous-performer` | several sources of the pimdir store can perform the intent and none is chosen; nothing was queued |
 | `index-missing` | the pimdir store has no search index yet: its sync engine builds it |
 | `index-outdated` | the pimdir search index was built otherwise or from another store: its sync engine rebuilds it |
-| `index-version` | the pimdir search index is of another draft or shape: its sync engine rebuilds an earlier draft's, and leaves any other |
+| `index-version` | the pimdir search index is of another version or shape: its sync engine rebuilds an earlier version's (any draft's), and leaves any other |
 | `index-zone-unknown` | the pimdir search index reads floating times, or the search reads days, in a zone the time zone database does not know |
 | `index-fts5-missing` | the SQLite calendula links lacks FTS5 or is older than 3.43 |
 | `query-refused` | the pimdir search query is malformed or names an unknown field or value |
@@ -788,4 +788,4 @@ When the coverage of `pimdir search` or `pimdir count` reports a differing zone 
 - THEN the plain output names no zone and the coverage reports `zoneDiffers` false
 
 ### Requirement: A pimdir index or query failure is coded
-A store with no search index SHALL fail both commands with the code `index-missing`, an index another version built with `index-outdated`, one of another draft or shape with `index-version`, one reading floating times, or a search reading days, in a zone the time zone database does not know with `index-zone-unknown`, and a SQLite lacking FTS5 with `index-fts5-missing`, each saying the store's sync engine builds or rebuilds the index and none advising to delete anything. A query the language refuses SHALL fail with `query-refused`: in plain output the SEARCH §8.4 fault drawn over the query, under `--json` the §8.4 code, span and expectations in `error`. An accepted query the index cannot answer SHALL fail with `query-unanswerable`.
+A store with no search index SHALL fail both commands with the code `index-missing`, an index another version built with `index-outdated`, one of another version or shape with `index-version`, one reading floating times, or a search reading days, in a zone the time zone database does not know with `index-zone-unknown`, and a SQLite lacking FTS5 with `index-fts5-missing`, each saying the store's sync engine builds or rebuilds the index and none advising to delete anything. A query the language refuses SHALL fail with `query-refused`: in plain output the SEARCH §8.4 fault drawn over the query, under `--json` the §8.4 code, span and expectations in `error`. An accepted query the index cannot answer SHALL fail with `query-unanswerable`.

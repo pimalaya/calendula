@@ -7,8 +7,11 @@ use std::fmt;
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use io_pimdir::{
-    client::search::{PimdirSearchCursor, PimdirSearchOptions, PimdirSearchSort},
-    search::query::PimdirQuery,
+    client::search::PimdirSearchOptions,
+    search::{
+        plan::{PimdirSearchCursor, PimdirSearchSort},
+        query::PimdirQuery,
+    },
 };
 use jiff::tz::TimeZone;
 use pimalaya_cli::{

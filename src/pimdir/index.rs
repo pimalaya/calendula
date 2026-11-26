@@ -11,12 +11,13 @@ use io_pimdir::{
     client::{
         reader::PimdirItem,
         search::{
-            PimdirIndex, PimdirSearchClock, PimdirSearchCursor, PimdirSearchHit,
-            PimdirSearchMatched, PimdirSearchOptions,
+            PimdirIndex, PimdirSearchClock, PimdirSearchHit, PimdirSearchMatched,
+            PimdirSearchOptions,
         },
     },
     search::{
         coverage::{PimdirSearchCoverage, PimdirSearchTemporal, PimdirSearchUnread},
+        plan::PimdirSearchCursor,
         query::{PimdirQuery, PimdirQueryError, PimdirQueryErrorCode, PimdirQueryKind},
     },
     summary::{PimdirSummary, calendar::PimdirTime},
@@ -702,7 +703,10 @@ mod tests {
             backend.create_item(calendar, item.into_bytes()).unwrap();
         }
 
-        let mut owner = PimdirStore::open(dir.path()).unwrap().for_source("caldav");
+        let mut owner = PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source("caldav")
+            .unwrap();
         assert_eq!(owner.drain().unwrap().applied, 6);
         owner
             .write(vec![PimdirWriteOp::UpsertPlacement(bodiless("work"))])
@@ -833,7 +837,10 @@ mod tests {
                 .unwrap();
         }
 
-        let mut owner = PimdirStore::open(dir.path()).unwrap().for_source("caldav");
+        let mut owner = PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source("caldav")
+            .unwrap();
         owner.drain().unwrap();
         drop(owner);
         PimdirIndex::open(dir.path())
@@ -1209,7 +1216,10 @@ mod tests {
         );
         assert_eq!(queued.coverage.behind, 0);
 
-        let mut owner = PimdirStore::open(dir.path()).unwrap().for_source("caldav");
+        let mut owner = PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source("caldav")
+            .unwrap();
         assert_eq!(owner.drain().unwrap().applied, 1);
         drop(owner);
         let drained = page(&backend.client, "zeppelin", None);
@@ -1255,7 +1265,10 @@ mod tests {
             .unwrap();
         home.create_item("home/cal", lunch("h").into_bytes())
             .unwrap();
-        let mut owner = PimdirStore::open(dir.path()).unwrap().for_source("caldav");
+        let mut owner = PimdirStore::open(dir.path())
+            .unwrap()
+            .for_source("caldav")
+            .unwrap();
         assert_eq!(owner.drain().unwrap().applied, 2);
         drop(owner);
         refresh(dir.path());
@@ -1357,19 +1370,14 @@ mod tests {
         std::fs::copy(other.path().join("index.db"), &index).unwrap();
         assert_coded(ErrorCode::IndexOutdated);
 
-        // NOTE: the version is spelled once, overwritten in place.
         refresh(dir.path());
-        let ours = io_pimdir::sql::search::FORMAT_VERSION.as_bytes();
-        let mut db = std::fs::read(&index).unwrap();
-        let at: Vec<usize> = db
-            .windows(ours.len())
-            .enumerate()
-            .filter(|(_, window)| *window == ours)
-            .map(|(at, _)| at)
-            .collect();
-        assert_eq!(at.len(), 1, "the version is spelled once");
-        db[at[0]..at[0] + ours.len()].copy_from_slice(b"search-draft-08");
-        std::fs::write(&index, db).unwrap();
+        let db = rusqlite::Connection::open(&index).unwrap();
+        db.execute_batch(
+            "PRAGMA ignore_check_constraints = ON;
+             UPDATE index_meta SET format_version = 'search-draft-08';",
+        )
+        .unwrap();
+        drop(db);
         let err = assert_coded(ErrorCode::IndexVersion);
         assert!(err.contains("search-draft-08"), "{err}");
 

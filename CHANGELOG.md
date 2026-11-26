@@ -148,9 +148,11 @@ The configuration wizard, the tables and colours, the raw `item` family and the 
 
 ### Changed
 
-- **BREAKING**: Changed the pimdir backend to the current pimdir drafts, refusing an earlier store `store-version` and an earlier search index `index-version`, never migrated.
+- **BREAKING**: Changed the pimdir backend to pimdir storage-v1, sync-v1 and search-v1 (io-pimdir 1.0.0), refusing a store an earlier release wrote `store-version` and an earlier search index `index-version`, never migrated.
 
   The sync engine rebuilds the index.
+
+- Changed the pimdir backend to open a store of a later version while its read and produce floors allow, refusing it `store-version` only above them.
 
 - **BREAKING**: Changed the pimdir backend to read one account of the store: with `pimdir.account` unset, the one account holding calendars, several being refused `store-account-ambiguous`.
 

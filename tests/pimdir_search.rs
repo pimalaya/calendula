@@ -80,6 +80,7 @@ fn account_of(starts: &[(&str, &str)]) -> TempDir {
     store.ensure_collection("cal", "text/calendar").unwrap();
     store
         .for_source("caldav")
+        .unwrap()
         .write(vec![
             PimdirWriteOp::OpenRound {
                 collection: PimdirCollectionId("cal".into()),
@@ -101,7 +102,10 @@ fn account_of(starts: &[(&str, &str)]) -> TempDir {
         );
     }
 
-    let mut owner = PimdirStore::open(&root).unwrap().for_source("caldav");
+    let mut owner = PimdirStore::open(&root)
+        .unwrap()
+        .for_source("caldav")
+        .unwrap();
     assert_eq!(owner.drain().unwrap().applied, starts.len());
     drop(owner);
 

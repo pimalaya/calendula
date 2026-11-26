@@ -35,7 +35,7 @@ pimalaya-cli = { version = "0.8.1", default-features = false, features = ["build
 
 [dev-dependencies]
 io-oauth = { version = "0.8", default-features = false, features = ["std", "jwt-bearer", "rustls-ring"] }
-io-pimdir = { version = "0.20.4", default-features = false, features = ["client", "indexer"] }
+io-pimdir = { version = "1.0.0", default-features = false, features = ["client", "indexer"] }
 rusqlite = { version = "0.43", default-features = false, features = ["bundled"] }
 tempfile = { version = "3", default-features = false }
 toml = { version = "1.1", default-features = false, features = ["parse", "serde"] }
@@ -55,7 +55,7 @@ io-gcal = { version = "0.6.0", default-features = false, features = ["std"], opt
 io-http = { version = "0.9", default-features = false, optional = true }
 io-jmap = { version = "0.11.1", default-features = false, features = ["std"], optional = true }
 io-msgraph = { version = "0.11.1", default-features = false, optional = true }
-io-pimdir = { version = "0.20.4", default-features = false, features = ["client"], optional = true }
+io-pimdir = { version = "1.0.0", default-features = false, features = ["client"], optional = true }
 io-vdir = { version = "0.3", default-features = false, features = ["client"], optional = true }
 io-webdav = { version = "0.14.0", default-features = false, features = ["std"], optional = true }
 jiff = { version = "1", default-features = false, features = ["std", "tz-system", "tzdb-bundle-always"] }

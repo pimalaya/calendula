@@ -1680,7 +1680,8 @@ mod tests {
         }
         let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
             .unwrap()
-            .for_source("caldav");
+            .for_source("caldav")
+            .unwrap();
         assert_eq!(owner.drain().unwrap().parked, 2);
         drop(owner);
 
@@ -1885,7 +1886,8 @@ mod tests {
 
         let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
             .unwrap()
-            .for_source("caldav");
+            .for_source("caldav")
+            .unwrap();
         owner.drain().unwrap();
         drop(owner);
 
@@ -2085,7 +2087,8 @@ mod tests {
         let (dir, mut backend, ids) = store(&[INVITATION]);
         let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
             .unwrap()
-            .for_source("google");
+            .for_source("google")
+            .unwrap();
         owner
             .write(vec![PimdirWriteOp::SetCheckpoint {
                 collection: PimdirCollectionId("cal".into()),
@@ -2266,7 +2269,8 @@ mod tests {
 
         let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
             .unwrap()
-            .for_source("caldav");
+            .for_source("caldav")
+            .unwrap();
         let declaration: Vec<_> = io_pimdir::capability::CALENDAR
             .iter()
             .map(|name| io_pimdir::capability::PimdirCapability {
@@ -2293,7 +2297,8 @@ mod tests {
 
         let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
             .unwrap()
-            .for_source("caldav");
+            .for_source("caldav")
+            .unwrap();
         let declaration: Vec<_> = io_pimdir::capability::CALENDAR
             .iter()
             .map(|name| io_pimdir::capability::PimdirCapability {
@@ -2326,7 +2331,8 @@ mod tests {
     fn declare(dir: &tempfile::TempDir, lacking: &[&str]) {
         let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
             .unwrap()
-            .for_source("caldav");
+            .for_source("caldav")
+            .unwrap();
         let declaration: Vec<_> = io_pimdir::capability::CALENDAR
             .iter()
             .map(|name| io_pimdir::capability::PimdirCapability {
@@ -2514,7 +2520,8 @@ mod tests {
     fn declare_meeting(dir: &tempfile::TempDir, support: io_pimdir::capability::PimdirSupport) {
         let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
             .unwrap()
-            .for_source("caldav");
+            .for_source("caldav")
+            .unwrap();
         let declaration: Vec<_> = io_pimdir::capability::CALENDAR
             .iter()
             .map(|name| io_pimdir::capability::PimdirCapability {
@@ -2605,7 +2612,8 @@ mod tests {
 
         let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
             .unwrap()
-            .for_source("caldav");
+            .for_source("caldav")
+            .unwrap();
         owner.drain().unwrap();
         drop(owner);
         declare_meeting(&dir, PimdirSupport::None);
@@ -2638,7 +2646,8 @@ mod tests {
         // nothing for.
         let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
             .unwrap()
-            .for_source("gcal");
+            .for_source("gcal")
+            .unwrap();
         owner
             .service(PimdirYield::WantsWrite(vec![
                 PimdirWriteOp::SetCheckpoint {
@@ -2688,7 +2697,8 @@ mod tests {
 
         let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
             .unwrap()
-            .for_source("caldav");
+            .for_source("caldav")
+            .unwrap();
         let mut declaration: Vec<_> = CALENDAR
             .iter()
             .map(|name| PimdirCapability {
@@ -2766,7 +2776,8 @@ mod tests {
             let (dir, mut backend, _) = store(&[ALONE]);
             let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
                 .unwrap()
-                .for_source("caldav");
+                .for_source("caldav")
+                .unwrap();
             let mut declaration: Vec<_> = CALENDAR
                 .iter()
                 .map(|name| PimdirCapability {
@@ -2799,7 +2810,8 @@ mod tests {
         let (dir, backend, _) = store(&[ALONE]);
         let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
             .unwrap()
-            .for_source("caldav");
+            .for_source("caldav")
+            .unwrap();
         let declaration: Vec<_> = CALENDAR
             .iter()
             .map(|name| PimdirCapability {
@@ -3035,7 +3047,8 @@ mod tests {
 
         let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
             .unwrap()
-            .for_source("caldav");
+            .for_source("caldav")
+            .unwrap();
         let collection = PimdirCollectionId("cal".into());
         let mut placement = owner
             .load_hub("cal")
@@ -3085,10 +3098,10 @@ mod tests {
     }
 
     /// A store its sync engine has not created, a database declaring
-    /// tables at `user_version` 0, another program's, and a store of
-    /// another format version, an earlier or a newer engine's, are refused
-    /// with io-pimdir's code and a message saying what to run or upgrade,
-    /// never to delete the store.
+    /// tables at `user_version` 0, another program's, a draft's store and
+    /// a later one whose floors are above storage-v1 are refused with
+    /// io-pimdir's code and a message saying what to run or upgrade, never
+    /// to delete the store; a later store whose floors allow opens.
     #[test]
     fn a_store_calendula_cannot_open_carries_its_code() {
         use std::{
@@ -3129,28 +3142,29 @@ mod tests {
         };
         let foreign = stamped(0);
 
-        // NOTE: `store_meta.format_version` is the one place the database
-        // spells its version, so a version of the same length is written
-        // over it in place, the page staying well-formed.
-        let versioned = |version: &str| {
+        let altered = |sql: &str| {
             let dir = created();
-            let path = dir.path().join("pimdir.db");
-            let ours = io_pimdir::sql::FORMAT_VERSION.as_bytes();
-            assert_eq!(version.len(), ours.len());
-            let mut db = std::fs::read(&path).unwrap();
-            let at: Vec<usize> = db
-                .windows(ours.len())
-                .enumerate()
-                .filter(|(_, window)| *window == ours)
-                .map(|(at, _)| at)
-                .collect();
-            assert_eq!(at.len(), 1, "the version is spelled once");
-            db[at[0]..at[0] + ours.len()].copy_from_slice(version.as_bytes());
-            std::fs::write(&path, db).unwrap();
-            open(&dir)
+            let db = rusqlite::Connection::open(dir.path().join("pimdir.db")).unwrap();
+            db.execute_batch("PRAGMA ignore_check_constraints = ON;")
+                .unwrap();
+            db.execute_batch(sql).unwrap();
+            drop(db);
+            dir
         };
-        let earlier = versioned("storage-draft-12");
-        let newer = versioned("storage-draft-18");
+        let earlier = open(&altered(
+            "UPDATE store_meta SET format_version = 'storage-draft-17'",
+        ));
+        let later = "UPDATE store_meta SET format_version = 'storage-v2', version = 2;
+             PRAGMA user_version = 2;";
+        let readable = altered(later);
+        PimdirBackend::new(PimdirConfig {
+            root: readable.path().to_path_buf(),
+            account: None,
+        })
+        .unwrap();
+        let newer = open(&altered(&format!(
+            "{later} UPDATE store_meta SET read_version = 2, produce_version = 2;"
+        )));
 
         assert_eq!(code_of(&uncreated), Some(ErrorCode::StoreUncreated));
         assert_eq!(code_of(&foreign), Some(ErrorCode::StoreForeign));
@@ -3499,7 +3513,8 @@ mod tests {
 
         let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
             .unwrap()
-            .for_source("caldav");
+            .for_source("caldav")
+            .unwrap();
         owner.drain().unwrap();
         owner.collect_garbage().unwrap();
         drop(owner);

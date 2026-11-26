@@ -283,6 +283,7 @@ pub(crate) fn sync_from(root: &std::path::Path, account: Option<&str>, collectio
     }
     store
         .for_source("caldav")
+        .unwrap()
         .write(vec![
             PimdirWriteOp::OpenRound {
                 collection: PimdirCollectionId(collection.into()),

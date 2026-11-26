@@ -114,10 +114,10 @@ pub enum ErrorCode {
     ItemDuplicate,
     /// The pimdir store has no schema yet: its sync engine creates it.
     StoreUncreated,
-    /// The pimdir store is of another format version than this
-    /// calendula's, never migrated: an earlier sync engine's store is
-    /// drained by that engine then set aside, a later one's needs a later
-    /// calendula.
+    /// The pimdir store is of a format version this calendula does not
+    /// open, never migrated: an earlier sync engine's store, any draft's,
+    /// is drained by that engine then set aside, a later one whose floors
+    /// are above this calendula's needs a later calendula.
     StoreVersion,
     /// The pimdir database is not a pimdir store, another program having
     /// written it: the caller points calendula at the store its sync
@@ -183,8 +183,9 @@ pub enum ErrorCode {
     /// The pimdir search index was built otherwise or from another store:
     /// its sync engine rebuilds it.
     IndexOutdated,
-    /// The pimdir search index is of another draft or shape: its sync
-    /// engine rebuilds one of an earlier draft, and leaves any other.
+    /// The pimdir search index is of another version or shape: its sync
+    /// engine rebuilds one of an earlier version, any draft's, and leaves
+    /// any other.
     IndexVersion,
     /// The zone the pimdir search index reads floating times in, or the one
     /// a search reads days in, is not one of the IANA time zone database.

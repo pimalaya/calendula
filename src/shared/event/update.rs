@@ -474,7 +474,8 @@ mod tests {
 
             let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
                 .unwrap()
-                .for_source("caldav");
+                .for_source("caldav")
+                .unwrap();
             owner.drain().unwrap();
             drop(owner);
 
@@ -502,7 +503,8 @@ mod tests {
         fn declare(dir: &tempfile::TempDir, support: PimdirSupport) {
             let mut owner = io_pimdir::client::PimdirStore::open(dir.path())
                 .unwrap()
-                .for_source("caldav");
+                .for_source("caldav")
+                .unwrap();
             let declaration: Vec<_> = CALENDAR
                 .iter()
                 .map(|name| PimdirCapability {

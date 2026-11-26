@@ -67,6 +67,7 @@ fn account() -> TempDir {
     store.ensure_collection("cal", "text/calendar").unwrap();
     store
         .for_source("caldav")
+        .unwrap()
         .write(vec![
             PimdirWriteOp::OpenRound {
                 collection: PimdirCollectionId("cal".into()),
@@ -82,7 +83,10 @@ fn account() -> TempDir {
         .unwrap();
 
     json(home.path(), &["event", "add", EVENT], 0);
-    let mut owner = PimdirStore::open(&root).unwrap().for_source("caldav");
+    let mut owner = PimdirStore::open(&root)
+        .unwrap()
+        .for_source("caldav")
+        .unwrap();
     assert_eq!(owner.drain().unwrap().applied, 1);
     drop(owner);
 
@@ -204,13 +208,16 @@ fn a_malformed_queue_row_fails_no_listing() {
             checkpoint: Some(PimdirCheckpoint(b"0".to_vec())),
         });
     }
-    store.for_source("caldav").write(ops).unwrap();
+    store.for_source("caldav").unwrap().write(ops).unwrap();
 
     for calendar in ["a", "b"] {
         let body = EVENT.replace("standup@", &format!("{calendar}@"));
         json(home, &["event", "add", "-k", calendar, &body], 0);
     }
-    let mut owner = PimdirStore::open(&root).unwrap().for_source("caldav");
+    let mut owner = PimdirStore::open(&root)
+        .unwrap()
+        .for_source("caldav")
+        .unwrap();
     assert_eq!(owner.drain().unwrap().applied, 2);
     drop(owner);
 
