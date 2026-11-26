@@ -45,7 +45,7 @@ Cargo runs as `CARGO_TARGET_DIR=~/code/pimalaya/.lanes/calendula/target taskset 
 
 - [x] H1 `perf record` the month window and the year agenda at 10k (the release profile with debug symbols, on a copy); journal.md says where the time goes.
 - [x] H2 Parse each body once on the windowed path (`in_range` in src/pimdir/backend.rs:1314-1342, then the projection). Gate: `a_streamed_listing_lists_what_the_whole_read_listed` and the window tests pass, then measure.
-- [ ] H3 (parked, journal.md 18:40) D4: a windowed `list_items` takes its candidates from `PimdirIndex` (`occurrences_between`, or a `when:` instants query read with its coverage), adds the items changed since the index cursor, the bodiless ones (by their summary) and the restaged ones, and scans when the coverage is incomplete. Equivalence tests against the scan over `mixed_calendar()` and a 2k seed: index current, behind, past the horizon, floating zone differing.
+- [ ] H3 (parked, journal.md 18:40; moved on 2026-11-26 to cairn/changes/window-from-the-index) D4: a windowed `list_items` takes its candidates from `PimdirIndex` (`occurrences_between`, or a `when:` instants query read with its coverage), adds the items changed since the index cursor, the bodiless ones (by their summary) and the restaged ones, and scans when the coverage is incomplete. Equivalence tests against the scan over `mixed_calendar()` and a 2k seed: index current, behind, past the horizon, floating zone differing.
 - [x] H4 Final table (quiet window, measure lock). At 10k: a month window ≤ 0.5 s, a year agenda ≤ 3 s. At 100k: a month window ≤ 2 s. Every other command at most 5% slower than 0.3. Otherwise park H3 with its numbers.
 
 ## I. Docs
@@ -55,12 +55,12 @@ Cargo runs as `CARGO_TARGET_DIR=~/code/pimalaya/.lanes/calendula/target taskset 
 ## J. Tests
 
 - [x] J1 (reads, copy writes; drain and push left, journal.md 20:00) Cross-app (servers lock): neverest at the same pin syncs a local Radicale calendar (neverest tests/pasta.sh) into a fresh store and index; calendula lists, searches, `event update`s and `pimdir reply`s it; neverest drains and pushes; Radicale holds the edit. Record the run in journal.md.
-- [ ] J2 The live suites (tests/google.rs, microsoft.rs, fastmail.rs), only with the owner's grant. They touch no pimdir path.
+- [x] J2 The live suites (tests/google.rs, microsoft.rs, fastmail.rs), only with the owner's grant. They touch no pimdir path. Run on the live nights: google 12/12 and microsoft 6/6 on 2026-11-24, google 12/12, microsoft 6/6 and fastmail 2/2 on 2026-11-25 (.lanes/live/report-2.md, report-3.md).
 
 ## K. Release
 
-- [ ] K1 Wait until io-pimdir is released (expected 0.20.0, by its tag workflow) and neverest, himalaya, cardamum and carillon are on that same revision: no CLI is released before all five are. Then swap the pin for `io-pimdir = "0.20.0"`, drop `[patch.crates-io]` and run the matrix. calendula's version and tag are the owner's.
+- [x] K1 Wait until io-pimdir is released (expected 0.20.0, by its tag workflow) and neverest, himalaya, cardamum and carillon are on that same revision: no CLI is released before all five are. Then swap the pin for `io-pimdir = "0.20.0"`, drop `[patch.crates-io]` and run the matrix. calendula's version and tag are the owner's. Superseded by io-pimdir 1.0.0: Cargo.toml names `version = "1.0.0"` from crates.io with no `[patch.crates-io]` (8e4eb3d, log 2026-11-26-io-pimdir-1-0), as neverest, himalaya, cardamum and carillon do; the v1.0.0 tag stays the owner's.
 
 ## L. Report
 
-- [ ] L1 report.md: what landed, the tables, what is parked.
+- [x] L1 report.md: what landed, the tables, what is parked.

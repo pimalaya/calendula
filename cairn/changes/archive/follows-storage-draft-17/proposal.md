@@ -1,11 +1,13 @@
 ---
 cairn: change
 id: follows-storage-draft-17
-status: active
+status: landed
 created: 2026-11-23
 ---
 
 # calendula follows storage-draft-17
+
+> Landed on 2026-11-23 (log 2026-11-23-follows-storage-draft-17); its 0.20.0 release step was superseded by io-pimdir 1.0.0 (log 2026-11-26-io-pimdir-1-0), and the parked H3 continues in window-from-the-index.
 
 ## Why
 

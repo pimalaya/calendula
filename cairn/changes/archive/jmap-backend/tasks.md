@@ -7,7 +7,7 @@ change: jmap-backend
 
 ## 0. Verify
 
-- [ ] Find a server advertising `urn:ietf:params:jmap:calendars` and note its draft revision; it is the manual-test target. Not done: the 2026-11-18 run touched no network.
+- [x] Find a server advertising `urn:ietf:params:jmap:calendars` and note its draft revision; it is the manual-test target. Not done: the 2026-11-18 run touched no network. Done on the live night of 2026-11-23: the local Stalwart and Fastmail both advertise it (.lanes/live/journal.md 23:40); their draft revision was not noted, io-jmap following draft-ietf-jmap-calendars-27.
 - [x] Settle the `after`/`before` date form against that revision; fix io-jmap's doc if it is UTC. Settled from io-jmap 0.10 alone (draft-ietf-jmap-calendars-27, src/calendars.rs): its filter docs say local date-time, read in the query's `timeZone`, default `Etc/UTC`, so the backend sends the UTC instant without its `Z`. Still to confirm against the server of the manual test.
 - [x] Export a zoned recurring VEVENT with a custom `VTIMEZONE` and one override through `to_jscalendar`: confirm one Group entry, overrides in `recurrenceOverrides`, the zone on the entry. Whatever lands on the Group is a gap to fix in ical-rs first. One entry and the override fold as expected; the `VTIMEZONE` lands in the Group's `iCalendar` hatch (2.0 retires `timeZones`), lost with the Group. Gap left to ical-rs/io-jmap; calendula refuses a zone the time-zone database does not know meanwhile.
 
@@ -29,6 +29,6 @@ change: jmap-backend
 
 ## 3. Land
 
-- [x] Fold the delta into backends.md, projection.md and config.md; log entry; status `landed`. Folded and logged; status left `active` while the upstream tasks and the manual test are open.
+- [x] Fold the delta into backends.md, projection.md and config.md; log entry; status `landed`. Folded and logged; status left `active` while the upstream tasks and the manual test are open. Set `landed` and archived on 2026-11-26.
 - [x] README backend list, CHANGELOG `Added`.
-- [ ] Manual test against the server from 0: calendar CRUD, a recurring event with an override round-tripped through `event update -i`, a range listing, a refused `todo create`. Not done: needs a live account.
+- [x] Manual test against the server from 0: calendar CRUD, a recurring event with an override round-tripped through `event update -i`, a range listing, a refused `todo create`. Not done: needs a live account. Done live: on stalwart-jmap 2026-11-23 (scenario OK; on fastmail-jmap `calendar list`, `event list` and `event agenda`, the range listing, OK) and 2026-11-25 (calendar create, event add, a series with an exception read back with its RRULE and RECURRENCE-ID, update, delete, calendar delete; .lanes/live/journal-3.md 23:04), on fastmail-jmap 2026-11-24 once the `iCalendar` and `version` refusals were fixed (the-live-night-findings C1, C1b). The series was updated from a file, not through `-i`, which needs a terminal; `todo create` is gone since 1.0.0.

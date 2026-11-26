@@ -1,11 +1,13 @@
 ---
 cairn: change
 id: jmap-backend
-status: active
+status: landed
 created: 2026-10-01
 ---
 
 # A JMAP backend
+
+> Landed on 2026-11-18 (log 2026-11-18-jmap-backend); the manual test ran on the live nights of 2026-11-23 to 2026-11-25, and the `todo` refusal it asked for is moot since 1.0.0 removed the `todo` commands.
 
 ## Why
 
